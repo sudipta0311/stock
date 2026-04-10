@@ -90,7 +90,8 @@ Add your runtime secrets in the app's `Settings -> Secrets` panel using [.stream
 ### Current deployment reference
 
 - Active deployment branch: `codex/streamlit-cloud-ready`
-- Latest deployment commit at the time of writing: `ee48bbc`
+- Latest Streamlit deployment branch commit: `2d2abc5`
+- Latest `main` branch commit at the time of writing: `b6324be`
 - App URL: `https://sudipta0311-stock-streamlit-app-codexstreamlit-cloud-rea-ltl7mo.streamlit.app/`
 
 ### Redeploy checklist
@@ -98,14 +99,16 @@ Add your runtime secrets in the app's `Settings -> Secrets` panel using [.stream
 1. In Streamlit Cloud, confirm the app is pointing to branch `codex/streamlit-cloud-ready`.
 2. Use `Reboot app` or `Redeploy latest commit` after pushing updates.
 3. Re-check the app secrets after any delete/recreate cycle.
-4. If portfolio monitoring looks empty after a PDF upload, re-run `Run Ingestion` after parsing the statement, then run `Run Monitoring`.
+4. If portfolio monitoring looks empty after a PDF upload, re-upload the statement, let auto-ingestion complete, then run monitoring from the `Monitoring` tab.
+5. The Monitoring tab now includes a visible LLM selector and shows the LLM used in the latest monitoring results.
 
 ## Portal Flow
 
 1. Click `Seed Demo Portfolio` for a ready-made walkthrough.
-2. Or upload/import holdings in the `Portfolio Ingestion` tab.
-3. Run `Generate Buy Recommendations` in the Buy Studio tab.
-4. Open the `Monitoring` tab to review your direct holdings scope, manage the watchlist, then click `Run Monitoring`.
+2. Or go to `Upload Portfolio` and upload/import holdings.
+3. For PDFs, enter the password and let auto-ingestion complete.
+4. Open `Buy Ideas` to generate recommendations.
+5. Open `Monitoring` to review direct holdings, choose the monitoring LLM, and run monitoring.
 
 ## Supported Inputs
 
@@ -120,7 +123,8 @@ The ingestion tab supports:
 
 - The app is built around a local demo provider to keep it runnable without network access.
 - Replacing the demo provider with live data adapters is straightforward because the agent layer already consumes provider methods rather than hardcoding APIs.
-- The **Buy Studio tab** has a **Model Platform selector**: choose Anthropic Claude, OpenAI GPT, or **Compare Both** to run both providers side-by-side and view their recommendations in two columns.
+- The **Buy Ideas** tab has a **Model Platform selector**: choose Anthropic Claude, OpenAI GPT, or **Compare Both** to run both providers side-by-side and view their recommendations in two columns.
+- The **Monitoring** tab has its own LLM selector and the latest monitoring results show which LLM generated the run.
 - Both providers follow the same fast/reasoning tier split. Anthropic adds system-prompt caching on high-volume calls.
 - All LLM calls fall back gracefully to deterministic text when the relevant API key is absent or a call fails.
 - **Monitoring scope** is limited to direct equities from the ingested statement and any manually added watchlist stocks. MF/ETF look-through holdings are excluded from monitoring because they are managed by fund managers.

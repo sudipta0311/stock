@@ -623,11 +623,11 @@ with info_cols[2]:
     _watch_count = len(portfolio.get("watchlist", []))
     render_info_tile("Monitoring Scope", f"{_direct_count} direct + {_watch_count} watchlist")
 
-tabs = st.tabs(["Home", "Upload Portfolio", "Buy Ideas", "Monitoring", "Signals", "Diagnostics"])
+tabs = st.tabs(["Overview", "Portfolio", "Buy Ideas", "Monitoring", "Signals"])
 
 with tabs[0]:
     st.markdown('<span class="section-chip">Quick Snapshot</span>', unsafe_allow_html=True)
-    st.info("Start with `Upload Portfolio`. PDF uploads will parse and ingest automatically.")
+    st.info("Start with **Portfolio** tab to upload your statement or seed demo data. Then go to **Buy Ideas** and **Monitoring**.")
     top_cols = st.columns([1.15, 0.85])
     with top_cols[0]:
         st.subheader("Portfolio Exposure")
@@ -635,7 +635,7 @@ with tabs[0]:
         if len(exposure_frame):
             st.dataframe(exposure_frame, use_container_width=True, hide_index=True)
         else:
-            render_empty_panel("No normalized exposure yet. Seed demo data or ingest a statement to populate this view.")
+            render_empty_panel("No normalized exposure yet. Seed demo data or upload a statement to populate this view.")
     with top_cols[1]:
         st.subheader("Sector Gaps")
         gap_frame = _df(portfolio["identified_gaps"], ["sector", "underweight_pct", "conviction", "score", "reason"])
@@ -644,17 +644,26 @@ with tabs[0]:
         else:
             render_empty_panel("Gap analysis will appear after portfolio ingestion and signal refresh.")
 
-    st.markdown('<span class="section-chip">Latest Buy Ideas</span>', unsafe_allow_html=True)
-    st.subheader("Latest Recommendation Run")
-    if recommendations:
-        for item in recommendations:
-            render_recommendation_card(item)
-    else:
-        render_empty_panel("No recommendation run yet. Move to Buy Studio after ingesting a portfolio.")
+    with st.expander("Diagnostics", expanded=False):
+        st.caption("Portal QA — confirms the app is receiving valid data from each pipeline stage.")
+        checks = build_render_checks(snapshot)
+        qa_cols = st.columns(2)
+        for idx, check in enumerate(checks):
+            with qa_cols[idx % 2]:
+                render_check_card(check["title"], check["passed"], check["detail"])
+        st.markdown("#### Data Shape")
+        preview = {
+            "portfolio_rows": len(portfolio["normalized_exposure"]),
+            "gap_rows": len(portfolio["identified_gaps"]),
+            "recommendation_rows": len(recommendations),
+            "monitoring_rows": len(monitoring_actions),
+            "signal_rows": {key: len(value) for key, value in signals.items()},
+        }
+        st.json(preview)
 
 with tabs[1]:
     st.markdown('<span class="section-chip">Upload And Ingest</span>', unsafe_allow_html=True)
-    st.subheader("Upload Your Portfolio")
+    st.subheader("Portfolio")
     st.caption("Upload JSON, CSV, or an encrypted NSDL / CAS PDF. PDF uploads start ingestion automatically after parsing.")
 
     pdf_password = st.text_input(
@@ -763,20 +772,16 @@ with tabs[2]:
         )
     with mp_col2:
         if provider_choice in ("Anthropic Claude", "Compare Both"):
-            render_provider_model_box(
-                "Anthropic Claude",
-                llm_status["anthropic_fast_model"],
-                llm_status["anthropic_reasoning_model"],
-                llm_status["anthropic_enabled"],
-                "anthropic",
+            _a_status = "Configured" if llm_status["anthropic_enabled"] else "API key missing — add ANTHROPIC_API_KEY to secrets"
+            st.caption(
+                f"**Anthropic Claude** — Fast: `{llm_status['anthropic_fast_model']}` · "
+                f"Reasoning: `{llm_status['anthropic_reasoning_model']}` · {_a_status}"
             )
         if provider_choice in ("OpenAI GPT", "Compare Both"):
-            render_provider_model_box(
-                "OpenAI GPT",
-                llm_status["openai_fast_model"],
-                llm_status["openai_reasoning_model"],
-                llm_status["openai_enabled"],
-                "openai",
+            _o_status = "Configured" if llm_status["openai_enabled"] else "API key missing — add OPENAI_API_KEY to secrets"
+            st.caption(
+                f"**OpenAI GPT** — Fast: `{llm_status['openai_fast_model']}` · "
+                f"Reasoning: `{llm_status['openai_reasoning_model']}` · {_o_status}"
             )
 
     with st.form("buy-form"):
@@ -866,20 +871,16 @@ with tabs[3]:
     st.session_state["monitoring_llm_provider"] = "anthropic" if mon_choice == "Anthropic Claude" else "openai"
 
     if st.session_state["monitoring_llm_provider"] == "anthropic":
-        render_provider_model_box(
-            "Monitoring uses Anthropic Claude",
-            llm_status["anthropic_fast_model"],
-            llm_status["anthropic_reasoning_model"],
-            llm_status["anthropic_enabled"],
-            "anthropic",
+        _m_status = "Configured" if llm_status["anthropic_enabled"] else "API key missing — add ANTHROPIC_API_KEY"
+        st.caption(
+            f"**Anthropic Claude** — Fast: `{llm_status['anthropic_fast_model']}` · "
+            f"Reasoning: `{llm_status['anthropic_reasoning_model']}` · {_m_status}"
         )
     else:
-        render_provider_model_box(
-            "Monitoring uses OpenAI GPT",
-            llm_status["openai_fast_model"],
-            llm_status["openai_reasoning_model"],
-            llm_status["openai_enabled"],
-            "openai",
+        _m_status = "Configured" if llm_status["openai_enabled"] else "API key missing — add OPENAI_API_KEY"
+        st.caption(
+            f"**OpenAI GPT** — Fast: `{llm_status['openai_fast_model']}` · "
+            f"Reasoning: `{llm_status['openai_reasoning_model']}` · {_m_status}"
         )
 
     if st.button("Run Monitoring For Current Portfolio", use_container_width=True, key="monitoring_tab_run_btn"):
@@ -1035,49 +1036,3 @@ with tabs[4]:
     else:
         render_empty_panel("No signals available yet. Refresh signals or seed demo data.")
 
-with tabs[5]:
-    st.markdown('<span class="section-chip">Render Diagnostics</span>', unsafe_allow_html=True)
-    st.subheader("Portal QA")
-    st.caption("This section helps confirm that the portal is receiving valid data and rendering its major blocks correctly.")
-
-    checks = build_render_checks(snapshot)
-    qa_cols = st.columns(2)
-    for idx, check in enumerate(checks):
-        with qa_cols[idx % 2]:
-            render_check_card(check["title"], check["passed"], check["detail"])
-
-    st.markdown("#### Visual Smoke Test")
-    smoke_cols = st.columns(3)
-    with smoke_cols[0]:
-        render_metric("Smoke Metric", "12", "Metric cards render with theme styling")
-    with smoke_cols[1]:
-        render_info_tile("Smoke Tile", "Info tiles, spacing, and typography")
-    with smoke_cols[2]:
-        render_check_card("Card Styling", True, "QA cards, pills, badges, and visual hierarchy should all render cleanly.")
-
-    st.markdown("#### Data Shape Preview")
-    preview = {
-        "portfolio_rows": len(portfolio["normalized_exposure"]),
-        "gap_rows": len(portfolio["identified_gaps"]),
-        "recommendation_rows": len(recommendations),
-        "monitoring_rows": len(monitoring_actions),
-        "signal_rows": {key: len(value) for key, value in signals.items()},
-    }
-    st.json(preview)
-
-    st.markdown("#### Recommendation Card Preview")
-    preview_item = recommendations[0] if recommendations else {
-        "company_name": "Preview Stock",
-        "symbol": "PRV",
-        "sector": "Preview Sector",
-        "action": "ACCUMULATE",
-        "confidence_band": "GREEN",
-        "rationale": "This preview card confirms card layout, typography, pills, and longer copy rendering.",
-        "payload": {
-            "overlap_pct": 0.8,
-            "allocation_pct": 12,
-            "net_of_tax_return_projection": 17.4,
-            "why_for_portfolio": "Used to verify recommendation-card rendering even when the live feed is empty.",
-        },
-    }
-    render_recommendation_card(preview_item, provider="openai" if llm_status["openai_enabled"] else "")
