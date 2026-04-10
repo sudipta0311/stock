@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import html as _html
 import io
 import json
@@ -250,6 +251,71 @@ def get_engine() -> PlatformEngine:
     return PlatformEngine()
 
 
+def push_notice(message: str, level: str = "info") -> None:
+    st.session_state["portal_notice"] = {"message": message, "level": level}
+
+
+def render_pending_notice() -> None:
+    notice = st.session_state.pop("portal_notice", None)
+    if not notice:
+        return
+    message = notice["message"]
+    level = notice["level"]
+    icon = {"success": "✅", "warning": "⚠️", "error": "❌", "info": "ℹ️"}.get(level, "ℹ️")
+    if hasattr(st, "toast"):
+        st.toast(message, icon=icon)
+    if level == "success":
+        st.success(message)
+    elif level == "warning":
+        st.warning(message)
+    elif level == "error":
+        st.error(message)
+    else:
+        st.info(message)
+
+
+def build_upload_signature(uploaded_file, pdf_password: str) -> str:
+    raw = uploaded_file.getvalue()
+    digest = hashlib.sha256(raw + pdf_password.encode("utf-8")).hexdigest()
+    return f"{uploaded_file.name}:{digest}"
+
+
+def run_ingestion_workflow(engine: PlatformEngine, payload: dict[str, Any], *, source_label: str) -> dict[str, Any]:
+    if hasattr(st, "toast"):
+        st.toast("Ingestion in progress...", icon="⏳")
+    with st.status(f"Ingestion in progress for {source_label}...", expanded=True) as status:
+        status.write("Reading holdings and refreshing portfolio context.")
+        result = engine.ingest_portfolio(payload)
+        status.write(f"Built {len(result['normalized_exposure'])} normalized positions.")
+        status.update(label="Ingestion complete", state="complete", expanded=False)
+    return result
+
+
+def run_buy_workflow(
+    engine: PlatformEngine,
+    buy_request: dict[str, Any],
+    *,
+    provider_choice: str,
+) -> dict[str, Any] | None:
+    if provider_choice == "Compare Both":
+        if hasattr(st, "toast"):
+            st.toast("Recommendation comparison in progress...", icon="⏳")
+        with st.status("Generating recommendations from both providers...", expanded=True) as status:
+            comp = engine.run_buy_analysis_comparison(buy_request)
+            status.write("Anthropic and OpenAI runs completed.")
+            status.update(label="Recommendations ready", state="complete", expanded=False)
+        return comp
+
+    llm_provider = "anthropic" if provider_choice == "Anthropic Claude" else "openai"
+    if hasattr(st, "toast"):
+        st.toast("Recommendation run in progress...", icon="⏳")
+    with st.status(f"Generating recommendations with {provider_choice}...", expanded=True) as status:
+        engine.run_buy_analysis(buy_request, llm_provider=llm_provider)
+        status.write("Recommendation cards are ready to review.")
+        status.update(label="Recommendations ready", state="complete", expanded=False)
+    return None
+
+
 def _df(rows: list[dict[str, Any]], columns: list[str]) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame(columns=columns)
@@ -454,6 +520,7 @@ def build_render_checks(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 engine = get_engine()
+render_pending_notice()
 snapshot = engine.get_dashboard_snapshot()
 portfolio = snapshot["portfolio"]
 signals = snapshot["signals"]
@@ -478,15 +545,16 @@ llm_display = " + ".join(llm_providers_on) if llm_providers_on else "Fallback"
 st.markdown(
     f"""
     <div class="hero-shell">
-        <h1 class="hero-title">Multi-Agent Stock Recommendation Platform</h1>
+        <h1 class="hero-title">Your Portfolio Assistant</h1>
         <p class="hero-copy">
-            LangGraph orchestration for signal intelligence, portfolio look-through, personalized buy ideas,
-            AMC-aware ingestion, and monitoring guardrails in a mobile-friendly Streamlit portal.
+            Upload your statement, let the app ingest it automatically, then review simple buy ideas
+            and direct-stock monitoring without digging through technical screens.
         </p>
         <div class="hero-badges">
-            <span class="hero-badge">Signal Intelligence</span>
-            <span class="hero-badge">Portfolio-First Buy Flow</span>
-            <span class="hero-badge">Encrypted PDF Ingestion</span>
+            <span class="hero-badge">1. Upload PDF</span>
+            <span class="hero-badge">2. Auto Ingest</span>
+            <span class="hero-badge">3. Review Buy Ideas</span>
+            <span class="hero-badge">4. Monitor Direct Stocks</span>
             <span class="hero-badge">LLM: {_html.escape(llm_display)}</span>
         </div>
     </div>
@@ -499,7 +567,7 @@ with top_bar[0]:
     if st.button("Seed Demo Portfolio", use_container_width=True):
         try:
             engine.seed_demo_data()
-            st.success("Demo portfolio, signals, and exposures seeded.")
+            push_notice("Sample portfolio loaded successfully.", "success")
             st.rerun()
         except ModuleNotFoundError as exc:
             st.error(f"Dependency missing: {exc}. Install project dependencies first.")
@@ -507,7 +575,7 @@ with top_bar[1]:
     if st.button("Refresh Signals", use_container_width=True):
         try:
             engine.run_signal_refresh(trigger="manual")
-            st.success("Signal pipeline refreshed.")
+            push_notice("Signals refreshed.", "success")
             st.rerun()
         except Exception as exc:
             st.error(str(exc))
@@ -515,8 +583,13 @@ with top_bar[2]:
     if st.button("Run Monitoring", use_container_width=True):
         try:
             provider_for_mon = st.session_state.get("global_llm_provider", "anthropic")
-            engine.run_monitoring(llm_provider=provider_for_mon)
-            st.success("Monitoring workflow completed.")
+            if hasattr(st, "toast"):
+                st.toast("Monitoring in progress...", icon="⏳")
+            with st.status("Monitoring your direct holdings...", expanded=True) as status:
+                engine.run_monitoring(llm_provider=provider_for_mon)
+                status.write("Monitoring actions are ready.")
+                status.update(label="Monitoring complete", state="complete", expanded=False)
+            push_notice("Monitoring complete.", "success")
             st.rerun()
         except Exception as exc:
             st.error(str(exc))
@@ -541,10 +614,11 @@ with info_cols[2]:
     _watch_count = len(portfolio.get("watchlist", []))
     render_info_tile("Monitoring Scope", f"{_direct_count} direct + {_watch_count} watchlist")
 
-tabs = st.tabs(["Overview", "Portfolio Ingestion", "Buy Studio", "Monitoring", "Signals", "Portal QA"])
+tabs = st.tabs(["Home", "Upload Portfolio", "Buy Ideas", "Monitoring", "Signals", "Diagnostics"])
 
 with tabs[0]:
-    st.markdown('<span class="section-chip">Portfolio Snapshot</span>', unsafe_allow_html=True)
+    st.markdown('<span class="section-chip">Quick Snapshot</span>', unsafe_allow_html=True)
+    st.info("Start with `Upload Portfolio`. PDF uploads will parse and ingest automatically.")
     top_cols = st.columns([1.15, 0.85])
     with top_cols[0]:
         st.subheader("Portfolio Exposure")
@@ -561,8 +635,8 @@ with tabs[0]:
         else:
             render_empty_panel("Gap analysis will appear after portfolio ingestion and signal refresh.")
 
-    st.markdown('<span class="section-chip">Recommendation Feed</span>', unsafe_allow_html=True)
-    st.subheader("Latest Recommendations")
+    st.markdown('<span class="section-chip">Latest Buy Ideas</span>', unsafe_allow_html=True)
+    st.subheader("Latest Recommendation Run")
     if recommendations:
         for item in recommendations:
             render_recommendation_card(item)
@@ -570,13 +644,9 @@ with tabs[0]:
         render_empty_panel("No recommendation run yet. Move to Buy Studio after ingesting a portfolio.")
 
 with tabs[1]:
-    st.markdown('<span class="section-chip">Encrypted PDF + Manual Input</span>', unsafe_allow_html=True)
-    st.subheader("Portfolio-First Ingestion")
-    helper_cols = st.columns([1, 1])
-    with helper_cols[0]:
-        st.caption("Upload JSON, CSV, or an encrypted NSDL / CAS PDF. For PDFs, provide the password first.")
-    with helper_cols[1]:
-        st.caption("After parsing, you can still fine-tune values manually before running ingestion.")
+    st.markdown('<span class="section-chip">Upload And Ingest</span>', unsafe_allow_html=True)
+    st.subheader("Upload Your Portfolio")
+    st.caption("Upload JSON, CSV, or an encrypted NSDL / CAS PDF. PDF uploads start ingestion automatically after parsing.")
 
     pdf_password = st.text_input(
         "PDF password",
@@ -585,6 +655,23 @@ with tabs[1]:
     )
     uploaded = st.file_uploader("Upload portfolio file", type=["json", "csv", "pdf"])
     uploaded_payload = parse_upload(uploaded, pdf_password, engine)
+
+    if uploaded and uploaded_payload and Path(uploaded.name).suffix.lower() == ".pdf":
+        upload_signature = build_upload_signature(uploaded, pdf_password)
+        if st.session_state.get("auto_ingested_pdf_signature") != upload_signature:
+            try:
+                result = run_ingestion_workflow(engine, uploaded_payload, source_label=uploaded.name)
+                st.session_state["auto_ingested_pdf_signature"] = upload_signature
+                push_notice(
+                    f"Ingestion complete. {len(result['normalized_exposure'])} normalized positions are ready.",
+                    "success",
+                )
+                st.rerun()
+            except Exception as exc:
+                st.error(f"PDF ingestion failed: {exc}")
+                push_notice(f"PDF ingestion failed: {exc}", "error")
+        else:
+            st.caption("This PDF is already ingested. You can upload a new file or edit the portfolio manually below.")
 
     existing_prefs = portfolio["user_preferences"]
     default_payload = uploaded_payload or {
@@ -596,59 +683,59 @@ with tabs[1]:
         "direct_equities": [row["payload"] for row in portfolio["raw_holdings"] if row["holding_type"] == "direct_equity"],
     }
 
-    with st.form("portfolio-form"):
-        thesis = st.text_area("Macro thesis override", value=default_payload.get("macro_thesis", ""), height=90)
-        a, b = st.columns(2)
-        with a:
-            surplus = st.number_input("Investable surplus", min_value=0.0, value=float(default_payload.get("investable_surplus", 0.0)))
-        with b:
-            corpus = st.number_input("Direct equity corpus", min_value=0.0, value=float(default_payload.get("direct_equity_corpus", 0.0)))
+    with st.expander("Edit portfolio manually", expanded=not bool(uploaded and Path(uploaded.name).suffix.lower() == ".pdf")):
+        with st.form("portfolio-form"):
+            thesis = st.text_area("Macro thesis override", value=default_payload.get("macro_thesis", ""), height=90)
+            a, b = st.columns(2)
+            with a:
+                surplus = st.number_input("Investable surplus", min_value=0.0, value=float(default_payload.get("investable_surplus", 0.0)))
+            with b:
+                corpus = st.number_input("Direct equity corpus", min_value=0.0, value=float(default_payload.get("direct_equity_corpus", 0.0)))
 
-        st.caption("Mutual funds")
-        mf_df = st.data_editor(
-            _df(default_payload.get("mutual_funds", []), ["instrument_name", "market_value"]),
-            num_rows="dynamic",
-            use_container_width=True,
-            key="mf_editor",
-        )
-        st.caption("ETFs")
-        etf_df = st.data_editor(
-            _df(default_payload.get("etfs", []), ["instrument_name", "market_value"]),
-            num_rows="dynamic",
-            use_container_width=True,
-            key="etf_editor",
-        )
-        st.caption("Direct equities")
-        direct_df = st.data_editor(
-            _df(default_payload.get("direct_equities", []), ["instrument_name", "symbol", "quantity", "market_value"]),
-            num_rows="dynamic",
-            use_container_width=True,
-            key="direct_editor",
-        )
-        submitted = st.form_submit_button("Run Ingestion", use_container_width=True)
-        if submitted:
-            ingest_payload = {
-                "macro_thesis": thesis,
-                "investable_surplus": surplus,
-                "direct_equity_corpus": corpus,
-                "mutual_funds": mf_df.fillna("").to_dict("records"),
-                "etfs": etf_df.fillna("").to_dict("records"),
-                "direct_equities": direct_df.fillna("").to_dict("records"),
-            }
-            try:
-                engine.run_signal_refresh(trigger="pre-ingestion", macro_thesis=thesis)
-                result = engine.ingest_portfolio(ingest_payload)
-                st.success(
-                    f"Ingestion completed with {len(result['normalized_exposure'])} normalized positions. "
-                    "Previous buy and monitoring results were cleared so you only see fresh output for this portfolio."
-                )
-                st.rerun()
-            except Exception as exc:
-                st.error(str(exc))
+            st.caption("Mutual funds")
+            mf_df = st.data_editor(
+                _df(default_payload.get("mutual_funds", []), ["instrument_name", "market_value"]),
+                num_rows="dynamic",
+                use_container_width=True,
+                key="mf_editor",
+            )
+            st.caption("ETFs")
+            etf_df = st.data_editor(
+                _df(default_payload.get("etfs", []), ["instrument_name", "market_value"]),
+                num_rows="dynamic",
+                use_container_width=True,
+                key="etf_editor",
+            )
+            st.caption("Direct equities")
+            direct_df = st.data_editor(
+                _df(default_payload.get("direct_equities", []), ["instrument_name", "symbol", "quantity", "market_value"]),
+                num_rows="dynamic",
+                use_container_width=True,
+                key="direct_editor",
+            )
+            submitted = st.form_submit_button("Save And Ingest Portfolio", use_container_width=True)
+            if submitted:
+                ingest_payload = {
+                    "macro_thesis": thesis,
+                    "investable_surplus": surplus,
+                    "direct_equity_corpus": corpus,
+                    "mutual_funds": mf_df.fillna("").to_dict("records"),
+                    "etfs": etf_df.fillna("").to_dict("records"),
+                    "direct_equities": direct_df.fillna("").to_dict("records"),
+                }
+                try:
+                    result = run_ingestion_workflow(engine, ingest_payload, source_label="manual portfolio")
+                    push_notice(
+                        f"Ingestion complete. {len(result['normalized_exposure'])} normalized positions are ready.",
+                        "success",
+                    )
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
 
 with tabs[2]:
-    st.markdown('<span class="section-chip">Provider-Aware Buy Workflow</span>', unsafe_allow_html=True)
-    st.subheader("Buy Studio")
+    st.markdown('<span class="section-chip">Buy Ideas</span>', unsafe_allow_html=True)
+    st.subheader("Generate Recommendations")
 
     st.markdown("#### LLM Provider")
     mp_col1, mp_col2 = st.columns([1.4, 2.3])
@@ -695,9 +782,9 @@ with tabs[2]:
             top_n = st.slider("Top N", 1, 4, 3)
 
         btn_label = {
-            "Anthropic Claude": "Generate with Anthropic Claude",
-            "OpenAI GPT": "Generate with OpenAI GPT",
-            "Compare Both": "Generate & Compare Both Providers",
+            "Anthropic Claude": "Generate Buy Ideas",
+            "OpenAI GPT": "Generate Buy Ideas",
+            "Compare Both": "Compare Both Providers",
         }[provider_choice]
         run_buy = st.form_submit_button(btn_label, use_container_width=True)
 
@@ -709,17 +796,13 @@ with tabs[2]:
                 "top_n": top_n,
             }
             try:
+                comp = run_buy_workflow(engine, buy_request, provider_choice=provider_choice)
                 if provider_choice == "Compare Both":
-                    with st.spinner("Running both providers for side-by-side output..."):
-                        comp = engine.run_buy_analysis_comparison(buy_request)
                     st.session_state["comparison_result"] = comp
-                    st.success("Comparison run completed.")
+                    push_notice("Recommendation comparison complete.", "success")
                 else:
-                    llm_provider = "anthropic" if provider_choice == "Anthropic Claude" else "openai"
-                    with st.spinner(f"Running buy analysis with {provider_choice}..."):
-                        engine.run_buy_analysis(buy_request, llm_provider=llm_provider)
                     st.session_state.pop("comparison_result", None)
-                    st.success(f"Buy workflow completed using {provider_choice}.")
+                    push_notice("Recommendation run complete.", "success")
                 st.rerun()
             except Exception as exc:
                 st.error(str(exc))
