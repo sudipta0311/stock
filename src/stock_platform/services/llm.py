@@ -23,7 +23,7 @@ class PlatformLLM:
                Anthropic Messages API — ~90% input token saving on high-volume
                loops such as monitoring (50+ calls/session).
 
-    openai     gpt-4.1-mini (fast) + gpt-4.1 (reasoning)
+    openai     gpt-5.4-mini (fast) + gpt-5.4 (reasoning)
                Same tier split; prompt caching is handled server-side by
                OpenAI automatically (no explicit flag required).
 
@@ -164,7 +164,7 @@ class PlatformLLM:
         return (response.choices[0].message.content or "").strip()
 
     # ── FAST TIER ────────────────────────────────────────────────────────────
-    # Anthropic: Haiku 4.5 (cached)   OpenAI: gpt-4.1-mini
+    # Anthropic: Haiku 4.5 (cached)   OpenAI: gpt-5.4-mini
 
     def buy_rationale(self, item: dict[str, Any], portfolio_context: dict[str, Any]) -> str | None:
         """
@@ -223,7 +223,7 @@ class PlatformLLM:
         )
 
     # ── REASONING TIER ───────────────────────────────────────────────────────
-    # Anthropic: Sonnet 4.6   OpenAI: gpt-4.1
+    # Anthropic: Sonnet 4.6   OpenAI: gpt-5.4
 
     def industry_reasoning(
         self,

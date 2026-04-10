@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+import tomllib
 
 from dotenv import load_dotenv
 
@@ -10,6 +11,13 @@ from dotenv import load_dotenv
 def load_app_env(root_dir: Path | None = None) -> None:
     env_root = root_dir or Path(__file__).resolve().parents[2]
     load_dotenv(env_root / ".env", override=False)
+    secrets_path = env_root / ".streamlit" / "secrets.toml"
+    if secrets_path.exists():
+        with secrets_path.open("rb") as handle:
+            secrets = tomllib.load(handle)
+        for key, value in secrets.items():
+            if isinstance(value, (str, int, float, bool)):
+                os.environ.setdefault(key, str(value))
 
 
 @dataclass(frozen=True)
@@ -35,16 +43,16 @@ class AppConfig:
     )
 
     # ── OpenAI GPT ─────────────────────────────────────────────────────────
-    # Fast tier      : gpt-4.1-mini  — lightweight rationale generation (low cost).
-    # Reasoning tier : gpt-4.1       — flagship GPT-4.1, complex multi-factor analysis.
-    #                  Override with OPENAI_REASONING_MODEL=o4-mini for chain-of-thought
+    # Fast tier      : gpt-5.4-mini  - lower-latency rationale generation.
+    # Reasoning tier : gpt-5.4       - latest flagship model for complex analysis.
+    #                  Override with OPENAI_REASONING_MODEL if you want a different tier.
     #                  reasoning tasks (qualitative_analysis, thesis_review).
     openai_api_key: str = field(default_factory=lambda: os.getenv("OPENAI_API_KEY", ""))
     openai_fast_model: str = field(
-        default_factory=lambda: os.getenv("OPENAI_FAST_MODEL", "gpt-4.1-mini")
+        default_factory=lambda: os.getenv("OPENAI_FAST_MODEL", "gpt-5.4-mini")
     )
     openai_reasoning_model: str = field(
-        default_factory=lambda: os.getenv("OPENAI_REASONING_MODEL", "gpt-4.1")
+        default_factory=lambda: os.getenv("OPENAI_REASONING_MODEL", "gpt-5.4")
     )
 
     mf_api_base_url: str = field(default_factory=lambda: os.getenv("MF_API_BASE_URL", "https://mfdata.in/api/v1"))
