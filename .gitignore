@@ -12,6 +12,8 @@ venv/
 *.db-journal
 *.log
 =0.40.0
-data/
+/data/
+!/src/stock_platform/data/
+!/src/stock_platform/data/**
 *.egg-info/
 .streamlit/secrets.toml
