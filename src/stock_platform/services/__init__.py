@@ -1,9 +1,7 @@
-"""Service entry points."""
+"""Service package.
 
-from .amc_adapters import OfficialAMCResolver
-from .engine import PlatformEngine
-from .llm import PlatformLLM
-from .mf_lookup import MutualFundHoldingsClient
-from .pdf_parser import NSDLCASParser
+Keep package imports lightweight so the Streamlit app can start without
+eagerly importing optional provider dependencies.
+"""
 
-__all__ = ["OfficialAMCResolver", "PlatformEngine", "PlatformLLM", "MutualFundHoldingsClient", "NSDLCASParser"]
+__all__: list[str] = []
