@@ -23,7 +23,7 @@ from stock_platform.services.engine import PlatformEngine
 st.set_page_config(
     page_title="Stock Intelligence Platform",
     page_icon="📈",
-    layout="wide",
+    layout="centered",
     initial_sidebar_state="collapsed",
 )
 
@@ -56,11 +56,11 @@ st.markdown(
         color: var(--text);
     }
     .block-container {
-        max-width: 1280px;
+        max-width: 900px;
         padding-top: 1rem;
         padding-bottom: 2rem;
-        padding-left: 1rem;
-        padding-right: 1rem;
+        padding-left: 1.2rem;
+        padding-right: 1.2rem;
     }
     div[data-testid="stTabs"] button {
         border-radius: 999px;
@@ -68,7 +68,7 @@ st.markdown(
     }
     div[data-testid="stDataFrame"] {
         border-radius: var(--radius-md);
-        overflow: hidden;
+        overflow-x: auto;
         border: 1px solid var(--line);
         box-shadow: var(--shadow-soft);
         background: var(--panel-strong);
@@ -103,15 +103,14 @@ st.markdown(
     }
     .hero-title {
         margin: 0 0 0.35rem 0;
-        font-size: clamp(1.7rem, 4vw, 2.8rem);
-        line-height: 1.03;
+        font-size: clamp(1.5rem, 5vw, 2.4rem);
+        line-height: 1.05;
         letter-spacing: -0.03em;
     }
     .hero-copy {
         margin: 0;
         color: rgba(255,255,255,0.84);
-        max-width: 900px;
-        font-size: 0.98rem;
+        font-size: 0.95rem;
     }
     .hero-badges {
         display: flex;
@@ -227,18 +226,63 @@ st.markdown(
         padding: 1.1rem;
         color: var(--muted);
     }
-    @media (max-width: 768px) {
+    /* ── Mobile responsive ──────────────────────────────────────────────────── */
+    @media (max-width: 640px) {
+        /* Stack all Streamlit column blocks vertically */
+        div[data-testid="stHorizontalBlock"] {
+            flex-wrap: wrap !important;
+            gap: 0.5rem !important;
+        }
+        div[data-testid="column"] {
+            width: 100% !important;
+            min-width: 100% !important;
+            flex: 1 1 100% !important;
+        }
+        /* Tighten page padding */
         .block-container {
-            padding-left: 0.8rem;
-            padding-right: 0.8rem;
+            padding-left: 0.5rem !important;
+            padding-right: 0.5rem !important;
+            padding-top: 0.5rem !important;
         }
+        /* Hero banner */
         .hero-shell {
-            border-radius: 20px;
-            padding: 1rem;
+            padding: 0.9rem;
+            border-radius: 16px;
+            margin-bottom: 0.6rem;
         }
-        .metric-value {
-            font-size: 1.45rem;
+        .hero-title { font-size: 1.35rem; }
+        .hero-copy { font-size: 0.85rem; }
+        .hero-badges { gap: 0.28rem; margin-top: 0.55rem; }
+        .hero-badge { font-size: 0.68rem; padding: 0.2rem 0.45rem; }
+        /* Metric and info cards */
+        .metric-card, .glass-card { padding: 0.75rem; }
+        .metric-value { font-size: 1.3rem; }
+        .metric-label { font-size: 0.75rem; }
+        .info-tile { padding: 0.65rem 0.8rem; }
+        /* Tab bar — allow horizontal scroll */
+        div[data-testid="stTabs"] {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
         }
+        div[data-testid="stTabs"] button {
+            padding: 0.3rem 0.55rem !important;
+            font-size: 0.78rem !important;
+            white-space: nowrap;
+        }
+        /* Ensure data tables scroll horizontally */
+        div[data-testid="stDataFrame"] {
+            overflow-x: auto !important;
+            -webkit-overflow-scrolling: touch;
+        }
+        /* Forms */
+        div[data-testid="stForm"] {
+            padding: 0.75rem 0.7rem 0.5rem !important;
+        }
+        /* Cards and panels */
+        .qa-card, .rec-card, .model-box {
+            padding: 0.7rem 0.75rem;
+        }
+        .empty-panel { padding: 0.85rem; }
     }
     </style>
     """,
@@ -755,43 +799,40 @@ with tabs[2]:
     st.markdown('<span class="section-chip">Buy Ideas</span>', unsafe_allow_html=True)
     st.subheader("Generate Recommendations")
 
-    st.markdown("#### LLM Provider")
-    mp_col1, mp_col2 = st.columns([1.4, 2.3])
-    with mp_col1:
-        provider_choice = st.radio(
-            "Select LLM provider for recommendations",
-            options=["Anthropic Claude", "OpenAI GPT", "Compare Both"],
-            index=0,
-            label_visibility="collapsed",
-            key="provider_radio",
+    provider_choice = st.radio(
+        "LLM provider",
+        options=["Anthropic Claude", "OpenAI GPT", "Compare Both"],
+        index=0,
+        horizontal=True,
+        key="provider_radio",
+    )
+    st.session_state["global_llm_provider"] = (
+        "anthropic" if provider_choice == "Anthropic Claude" else
+        "openai" if provider_choice == "OpenAI GPT" else
+        "anthropic"
+    )
+    if provider_choice in ("Anthropic Claude", "Compare Both"):
+        _a_status = "Configured" if llm_status["anthropic_enabled"] else "API key missing — add ANTHROPIC_API_KEY to secrets"
+        st.caption(
+            f"**Anthropic Claude** — Fast: `{llm_status['anthropic_fast_model']}` · "
+            f"Reasoning: `{llm_status['anthropic_reasoning_model']}` · {_a_status}"
         )
-        st.session_state["global_llm_provider"] = (
-            "anthropic" if provider_choice == "Anthropic Claude" else
-            "openai" if provider_choice == "OpenAI GPT" else
-            "anthropic"
+    if provider_choice in ("OpenAI GPT", "Compare Both"):
+        _o_status = "Configured" if llm_status["openai_enabled"] else "API key missing — add OPENAI_API_KEY to secrets"
+        st.caption(
+            f"**OpenAI GPT** — Fast: `{llm_status['openai_fast_model']}` · "
+            f"Reasoning: `{llm_status['openai_reasoning_model']}` · {_o_status}"
         )
-    with mp_col2:
-        if provider_choice in ("Anthropic Claude", "Compare Both"):
-            _a_status = "Configured" if llm_status["anthropic_enabled"] else "API key missing — add ANTHROPIC_API_KEY to secrets"
-            st.caption(
-                f"**Anthropic Claude** — Fast: `{llm_status['anthropic_fast_model']}` · "
-                f"Reasoning: `{llm_status['anthropic_reasoning_model']}` · {_a_status}"
-            )
-        if provider_choice in ("OpenAI GPT", "Compare Both"):
-            _o_status = "Configured" if llm_status["openai_enabled"] else "API key missing — add OPENAI_API_KEY to secrets"
-            st.caption(
-                f"**OpenAI GPT** — Fast: `{llm_status['openai_fast_model']}` · "
-                f"Reasoning: `{llm_status['openai_reasoning_model']}` · {_o_status}"
-            )
 
     with st.form("buy-form"):
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2 = st.columns(2)
         with c1:
             index_name = st.selectbox("Index", ["NIFTY50", "NIFTYNEXT50"])
         with c2:
-            horizon_months = st.slider("Horizon (months)", 6, 36, 18)
-        with c3:
             risk_profile = st.selectbox("Risk", ["Balanced", "Moderate", "Aggressive"])
+        c3, c4 = st.columns(2)
+        with c3:
+            horizon_months = st.slider("Horizon (months)", 6, 36, 18)
         with c4:
             top_n = st.slider("Top N", 1, 4, 3)
 
@@ -973,14 +1014,16 @@ with tabs[3]:
 
     with st.expander("Add stock to watchlist", expanded=not bool(watchlist)):
         with st.form("watchlist-add-form"):
-            wl_c1, wl_c2, wl_c3 = st.columns(3)
+            wl_c1, wl_c2 = st.columns(2)
             with wl_c1:
                 wl_symbol = st.text_input("Symbol (e.g. INFY)")
             with wl_c2:
                 wl_name = st.text_input("Company name")
+            wl_c3, wl_c4 = st.columns(2)
             with wl_c3:
                 wl_sector = st.text_input("Sector (optional)")
-            wl_note = st.text_input("Note (optional)")
+            with wl_c4:
+                wl_note = st.text_input("Note (optional)")
             if st.form_submit_button("Add to Watchlist", use_container_width=True):
                 sym_clean = wl_symbol.strip().upper()
                 name_clean = wl_name.strip()
