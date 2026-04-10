@@ -355,55 +355,51 @@ def render_provider_model_box(label: str, fast_model: str, reasoning_model: str,
 
 def render_recommendation_card(item: dict[str, Any], provider: str = "") -> None:
     payload = item.get("payload", {})
-    company = _html.escape(str(item.get("company_name", "")))
-    symbol = _html.escape(str(item.get("symbol", "")))
-    sector = _html.escape(str(item.get("sector", "")))
-    action = _html.escape(str(item.get("action", "")))
-    rationale = _html.escape(str(item.get("rationale", "")))
-    confidence_band = _html.escape(str(item.get("confidence_band", "")))
-    why_for_portfolio = _html.escape(str(payload.get("why_for_portfolio", "")))
-    validation_reasoning = _html.escape(str(payload.get("validation_reasoning", "")))
+    company = str(item.get("company_name", ""))
+    symbol = str(item.get("symbol", ""))
+    sector = str(item.get("sector", ""))
+    action = str(item.get("action", ""))
+    rationale = str(item.get("rationale", ""))
+    confidence_band = str(item.get("confidence_band", ""))
+    why_for_portfolio = str(payload.get("why_for_portfolio", ""))
+    validation_reasoning = str(payload.get("validation_reasoning", ""))
     overlap = payload.get("overlap_pct", 0)
     allocation = payload.get("allocation_pct", 0)
     net_return = payload.get("net_of_tax_return_projection", 0)
 
-    provider_badge = ""
-    border_class = ""
+    provider_label = ""
     if provider == "anthropic":
-        provider_badge = '<span class="provider-badge provider-badge-anthropic">Anthropic Claude</span>'
-        border_class = "rec-card-anthropic"
+        provider_label = "Anthropic Claude"
     elif provider == "openai":
-        provider_badge = '<span class="provider-badge provider-badge-openai">OpenAI GPT</span>'
-        border_class = "rec-card-openai"
+        provider_label = "OpenAI GPT"
 
-    validation_html = (
-        f'<p class="mini-note" style="margin-top:0.55rem;">{validation_reasoning}</p>'
-        if validation_reasoning
-        else ""
-    )
+    with st.container(border=True):
+        head_col, action_col = st.columns([4, 1])
+        with head_col:
+            if provider_label:
+                st.caption(provider_label)
+            st.markdown(f"#### {company} ({symbol})")
+            if sector:
+                st.caption(sector)
+        with action_col:
+            st.markdown(f"**{action}**")
 
-    st.markdown(
-        f"""
-        <div class="rec-card {border_class}">
-            <div style="display:flex;justify-content:space-between;gap:0.8rem;align-items:flex-start;flex-wrap:wrap;">
-                <div>
-                    {provider_badge}
-                    <h4 style="margin:0;color:#122c24;">{company} ({symbol})</h4>
-                    <div style="color:#627267;margin-top:0.22rem;">{sector}</div>
-                </div>
-                <div class="pill">{action}</div>
-            </div>
-            <p style="margin:0.8rem 0 0.65rem 0;color:#122c24;">{rationale}</p>
-            <div class="pill">Overlap {overlap}%</div>
-            <div class="pill">Allocation {allocation}%</div>
-            <div class="pill">Confidence {confidence_band}</div>
-            <div class="pill">Net Return {net_return}%</div>
-            <p style="margin:0.8rem 0 0 0;color:#627267;">{why_for_portfolio}</p>
-            {validation_html}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+        if rationale:
+            st.write(rationale)
+
+        summary_bits = [
+            f"Overlap {overlap}%",
+            f"Allocation {allocation}%",
+            f"Confidence {confidence_band}",
+            f"Net Return {net_return}%",
+        ]
+        st.caption(" | ".join(summary_bits))
+
+        if why_for_portfolio:
+            st.write(why_for_portfolio)
+
+        if validation_reasoning:
+            st.caption(validation_reasoning)
 
 
 def render_check_card(title: str, passed: bool, detail: str) -> None:
