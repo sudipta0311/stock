@@ -1,0 +1,754 @@
+@startuml
+title EA View - Multi-Agent Stock Recommendation & Monitoring Platform (v5.1 - Portfolio-First Buy Flow)
+
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam roundcorner 12
+skinparam dpi 150
+
+skinparam sequence {
+    ArrowColor #1F4E79
+    LifeLineBorderColor #1F4E79
+    LifeLineBackgroundColor #F8FBFD
+    ParticipantBorderColor #1F4E79
+    ParticipantBackgroundColor #F8FBFD
+    ParticipantFontColor #1F4E79
+    ActorBorderColor #1F4E79
+    ActorBackgroundColor #F8FBFD
+    GroupBorderColor #7F8C8D
+    GroupBackgroundColor #F7F9FA
+    BoxBorderColor #1F4E79
+    BoxBackgroundColor #FAFCFE
+}
+
+actor User
+participant "Portal / Streamlit UI" as UI
+participant "Multi-Agent Orchestrator\n(LangGraph)" as ORCH
+
+box "Platform Data Sources"
+collections "Market / Index Data" as MKT
+collections "Financial Data APIs\n(Screener.in / NSE / yfinance)" as FIN
+collections "Internet / News /\nReal-Time Signals" as NET
+collections "Fund Holdings Data Provider\n(AMFI / Morningstar)" as FUNDAPI
+collections "CAMS PDF / Manual MF Input" as MFINPUT
+collections "Manual ETF / Direct Input" as ETFINPUT
+collections "Geopolitical Signal Sources\n(MEA / PIB / RBI / NSDL / RSS)" as GEOAPI
+database "SQLite Portfolio DB" as DB
+participant "Monthly Refresh Scheduler\n[Cron / Trigger]" as REFRESH
+end box
+
+box "SIGNAL INTELLIGENCE LAYER - NEW"
+participant "Geopolitical & Macro\nSignal Agent\n[LLM + Structured Sources]" as GEO
+participant "Policy & Regulatory\nSignal Agent\n[Deterministic + LLM]" as POL
+participant "FII / DII Flow\nSentiment Agent\n[Deterministic]" as FLOW
+participant "Contrarian Sentiment\nDetector Agent\n[LLM + Rules]" as CONTRA
+participant "Signal Aggregator Agent\n[Deterministic + Rules]" as SIGAGG
+end box
+
+box "PORTFOLIO INGESTION LAYER"
+participant "MF Holdings Parser Agent\n[LLM + PDF Parser]" as MFP
+participant "ETF Holdings Fetcher Agent\n[Deterministic]" as ETFA
+participant "Portfolio Exposure\nNormalization Agent\n[Deterministic + Ticker Map]" as NORM
+participant "Overlap Analysis Agent\n[Deterministic + Rules]" as OVL
+participant "Gap Identification Agent\n[LLM + Rules]" as GAP
+end box
+
+box "NEW BUY FLOW - Agent Layer"
+participant "Index Member Agent\n[Deterministic]" as IDX
+participant "Industry Recommendation Agent\n[LLM + Signal Aware]" as IND
+participant "Stock Candidate Agent\n[Deterministic]" as CAND
+participant "Quant Model Agent\n[Quality Moat Scoring]" as QBUY
+participant "Risk Filter Agent\n[Deterministic + Multi-Source]" as RFILT
+participant "Top-N Selection Agent\n[Deterministic]" as TOPN
+participant "Qualitative Validation Agent\n[LLM + Tool Use]" as VALID
+participant "Portfolio Differentiation Agent\n[Deterministic Rules + LLM]" as DIFF
+participant "Entry Timing & Execution\nReadiness Agent\n[LLM + Contrarian Check]" as TIMING
+participant "Position Sizing Agent\n[Deterministic + Rules]" as SIZING
+participant "Tax & Cost Impact Agent\n[Deterministic - NEW]" as TAX
+participant "Data Freshness &\nConfidence Agent\n[Deterministic + Rules]" as CONF
+participant "Final Buy Recommendation Agent\n[LLM]" as BUY
+end box
+
+box "MONITORING FLOW - Agent Layer"
+participant "Signal Refresh Agent\n[Deterministic - NEW]" as SIGREF
+participant "Industry Monitoring Agent\n[LLM + Signal Aware]" as PIND
+participant "Individual Stock Monitoring Agent\n[LLM + Tool Use]" as PSTK
+participant "Portfolio Quant Model Agent\n[Quant / Deterministic]" as QMON
+participant "Thesis Review Agent\n[LLM + Hard Rules]" as PREV
+participant "Drawdown & Risk\nAlert Agent\n[Deterministic - NEW]" as DRAW
+participant "Decision Agent\n[LLM + Policy Rules]" as DEC
+participant "Behavioural Guard Agent\n[Deterministic Rules - NEW]" as BGUARD
+end box
+
+== FLOW 0 : SIGNAL INTELLIGENCE PIPELINE [NEW] ==
+
+group 1. Geopolitical & Macro Signal Collection
+REFRESH -> ORCH : Weekly signal refresh trigger
+ORCH -> GEO : Collect and score geopolitical signals
+GEO -> GEOAPI : Fetch MEA press releases\n(India foreign policy developments)
+GEOAPI --> GEO : Official India diplomatic signals
+GEO -> NET : Fetch curated geopolitical news\n(India-Pakistan / US-China / Middle East /\nRussia-Ukraine / India-EU FTA)
+NET --> GEO : Geopolitical developments
+GEO -> DB : Read user_macro_thesis override
+DB --> GEO : User thesis (highest priority)
+note right of GEO
+  Geopolitical Signal Taxonomy:
+  STRONGLY_POSITIVE / POSITIVE /
+  NEUTRAL / NEGATIVE / STRONGLY_NEGATIVE
+
+  Sectors mapped per signal:
+  India-Pak tension escalation:
+    Defence PSU     → STRONGLY_POSITIVE
+    Aviation        → NEGATIVE
+    Tourism         → NEGATIVE
+  US-China decoupling:
+    Electronics Mfg → POSITIVE
+    IT Services     → NEUTRAL
+  Oil price spike (Middle East):
+    Macro India     → NEGATIVE
+    OMCs            → NEGATIVE
+    Renewables      → POSITIVE
+  China slowdown:
+    FII India inflow→ POSITIVE
+    Commodity inputs→ POSITIVE
+  India-EU FTA progress:
+    Pharma exports  → POSITIVE
+    Textiles        → POSITIVE
+  Russia-Ukraine resolution:
+    Commodity costs → POSITIVE (input deflation)
+end note
+GEO --> ORCH : Structured geopolitical sector tags
+ORCH -> DB : Store geo_signals table\n(signal_type | sector | score | source | as_of_date)
+DB --> ORCH : Stored
+end
+
+group 2. Policy & Regulatory Signal Collection
+ORCH -> POL : Collect India policy and regulatory signals
+POL -> GEOAPI : Fetch RBI MPC minutes / decisions
+GEOAPI --> POL : Rate trajectory signals
+POL -> GEOAPI : Fetch PIB / Budget / PLI scheme updates
+GEOAPI --> POL : Fiscal and policy signals
+POL -> NET : Fetch SEBI regulatory announcements
+NET --> POL : Regulatory change signals
+note right of POL
+  Policy Signal Types:
+  RBI rate cut cycle  → Banking / NBFC POSITIVE
+  PLI expansion       → Target sector POSITIVE
+  Budget capex boost  → Infra / Defence POSITIVE
+  SEBI tightening     → Broking NEGATIVE
+  State election win  → Consumption POSITIVE
+  GST rate change     → Sector-specific impact
+end note
+POL --> ORCH : Structured policy sector tags
+ORCH -> DB : Store policy_signals table
+DB --> ORCH : Stored
+end
+
+group 3. FII / DII Flow Sentiment
+ORCH -> FLOW : Analyze FII / DII flow patterns
+FLOW -> GEOAPI : Fetch NSDL daily FII/DII flow data
+GEOAPI --> FLOW : Net buy / sell by FII and DII (30-day)
+note right of FLOW
+  Flow Signal Rules [Deterministic]:
+  FII selling + DII buying → ACCUMULATION signal
+    (Smart money divergence — contrarian positive)
+  FII buying heavily → CAUTION
+    (Late cycle — momentum may be exhausted)
+  Both selling → RISK OFF signal
+  DII selling + FII buying → MIXED signal
+  Sustained FII outflow > 3 months → macro headwind
+end note
+FLOW --> ORCH : Flow sentiment score + divergence signal
+ORCH -> DB : Store flow_signals table
+DB --> ORCH : Stored
+end
+
+group 4. Contrarian Sentiment Detection
+ORCH -> CONTRA : Detect contrarian opportunity signals
+CONTRA -> NET : Scan sector / stock sentiment in media
+NET --> CONTRA : Sentiment data across sectors
+CONTRA -> FIN : Fetch 52-week high/low data per sector
+FIN --> CONTRA : Price range context
+note right of CONTRA
+  Contrarian Signal Rules:
+  Sector down > 20% from 52w high AND
+  fundamentals intact → BUY ZONE
+  Media narrative "sector is doomed" AND
+  no structural change → CONTRARIAN POSITIVE
+  Excessive analyst upgrades on sector → CAUTION
+  Retail investor euphoria signals → TRIM ZONE
+  India negative in Western media AND
+  domestic data contradicts → OFTEN BUY SIGNAL
+end note
+CONTRA --> ORCH : Contrarian opportunity map\nby sector with confidence score
+ORCH -> DB : Store contrarian_signals table
+DB --> ORCH : Stored
+end
+
+group 5. Signal Aggregation
+ORCH -> SIGAGG : Aggregate all signals into unified view
+SIGAGG -> DB : Load geo / policy / flow / contrarian signals
+DB --> SIGAGG : All signal tables
+note right of SIGAGG
+  Aggregation Priority Order:
+  1. User macro thesis override (absolute highest)
+  2. Geopolitical structural signals (long lag, high alpha)
+  3. Policy / regulatory signals (medium lag)
+  4. FII/DII flow signals (short lag)
+  5. Contrarian sentiment (entry timing)
+
+  Output: unified sector conviction scores
+  STRONG_BUY / BUY / NEUTRAL / AVOID / STRONG_AVOID
+end note
+SIGAGG --> ORCH : Unified sector conviction map\n(sector | conviction | primary_signal_source |\nconfidence | horizon)
+ORCH -> DB : Store unified_signals table
+DB --> ORCH : Stored
+end
+
+== FLOW 1 : PORTFOLIO INGESTION ==
+
+group 6. User Portfolio Input
+User -> UI : Upload CAMS PDF / enter MF holdings
+User -> UI : Enter ETF + direct equity holdings
+User -> UI : Optional: Enter manual macro thesis override
+UI -> ORCH : Trigger ingestion with context
+ORCH -> DB : Store user_macro_thesis
+DB --> ORCH : Stored
+end
+
+group 7. MF and ETF Ingestion
+ORCH -> MFP : Parse MF holdings
+MFP -> MFINPUT : Read CAMS PDF / manual input
+MFINPUT --> MFP : Fund names / values / scheme codes
+MFP -> FUNDAPI : Fetch top-10 holdings per fund
+FUNDAPI --> MFP : Fund -> stock -> weight (AMFI monthly)
+MFP --> ORCH : Parsed MF stock exposure
+
+ORCH -> ETFA : Decompose ETF holdings
+ETFA -> ETFINPUT : Read ETF input
+ETFINPUT --> ETFA : ETF names / units
+ETFA -> FUNDAPI : Fetch ETF constituents
+FUNDAPI --> ETFA : ETF -> stock -> weight
+ETFA --> ORCH : Parsed ETF exposure
+end
+
+group 8. Normalization and Overlap Analysis
+ORCH -> NORM : Normalize all instrument exposure
+note right of NORM
+  Normalization Rules:
+  1. Map names to NSE symbols
+     "HDFC Bank Ltd" = "HDFCBANK"
+  2. Deduplicate across MF/ETF/direct
+  3. Aggregate weights per stock
+  4. Standardize sector classification
+  5. Handle name variants
+end note
+NORM -> DB : Read direct equity holdings
+DB --> NORM : Existing stocks
+NORM --> ORCH : Normalized exposure map
+ORCH -> DB : Store normalized_exposure table
+DB --> ORCH : Stored
+
+ORCH -> OVL : Compute overlap scores
+OVL -> DB : Load normalized exposure
+DB --> OVL : Exposure map
+note right of OVL
+  Overlap Thresholds [Hard Rules]:
+  > 3%  → HARD EXCLUDE
+  1-3%  → FLAG for LLM override
+  0.5-1%→ YELLOW
+  < 0.5%→ GREEN — genuine addition
+end note
+OVL --> ORCH : Overlap scores per stock
+ORCH -> DB : Store overlap_scores
+DB --> ORCH : Stored
+
+ORCH -> GAP : Identify sector gaps
+GAP -> DB : Read exposure + unified_signals
+DB --> GAP : Portfolio map + signal conviction
+GAP --> ORCH : Gap sectors ranked by:\n1. Portfolio underweight AND\n2. Signal conviction score
+ORCH -> DB : Store identified_gaps
+DB --> ORCH : Stored
+end
+
+group 9. Monthly Data Refresh
+REFRESH -> ORCH : Monthly cron trigger
+ORCH -> MFP : Re-fetch AMFI holdings
+MFP -> FUNDAPI : Latest monthly data
+FUNDAPI --> MFP : Updated holdings
+MFP --> ORCH : Refreshed MF exposure
+ORCH -> ETFA : Re-fetch ETF constituents
+ETFA -> FUNDAPI : Latest ETF data
+FUNDAPI --> ETFA : Updated ETF holdings
+ETFA --> ORCH : Refreshed ETF exposure
+ORCH -> NORM : Re-normalize
+NORM --> ORCH : Updated exposure
+ORCH -> OVL : Recompute overlap
+OVL --> ORCH : Updated overlap scores
+ORCH -> DB : Update all portfolio tables
+DB --> ORCH : Refreshed
+end
+
+== FLOW 2 : NEW BUY RECOMMENDATION ==
+
+group 10. User Buy Request + MANDATORY Portfolio Context Load [FIXED]
+User -> UI : Select index / horizon / risk / top N
+UI -> ORCH : Start new-buy analysis
+
+note over ORCH
+  MANDATORY GATE — Cannot proceed without portfolio context.
+  New Buy recommendations are ALWAYS personalised
+  to existing holdings. Generic recommendations
+  without portfolio context are blocked.
+end note
+
+ORCH -> DB : Check portfolio_last_updated timestamp
+DB --> ORCH : Portfolio freshness status
+
+alt Portfolio exists and is fresh (< 35 days old)
+    ORCH -> DB : Load FULL portfolio context:\n- normalized_exposure (all MF + ETF + direct stocks)\n- overlap_scores (per stock)\n- identified_gaps (sector gaps)\n- unified_signals (geo + policy + flow)\n- user_macro_thesis\n- direct_equity holdings\n- sector concentration summary
+    DB --> ORCH : Complete portfolio intelligence bundle
+    ORCH -> UI : Show portfolio summary to user:\n"Analysing against your ₹X portfolio\n(Y MFs, Z direct stocks, last updated DD/MM/YY)"
+    UI --> User : Portfolio context confirmed — proceeding
+else Portfolio missing or stale
+    ORCH -> UI : Block buy flow — portfolio update required
+    UI --> User : "Your portfolio data is missing or older\nthan 35 days. Please upload latest CAMS\nstatement before new buy analysis."
+    User -> UI : Upload fresh CAMS PDF
+    UI -> ORCH : Trigger Flow 1 Portfolio Ingestion first
+    note over ORCH
+      Re-run complete ingestion pipeline:
+      MFP → AMFI fetch → NORM → OVL → GAP
+      before resuming buy flow
+    end note
+    ORCH -> DB : Store refreshed portfolio data
+    DB --> ORCH : Portfolio updated
+    ORCH -> DB : Reload full portfolio context
+    DB --> ORCH : Fresh portfolio intelligence bundle
+end
+
+ORCH -> DB : Load unified_signals
+DB --> ORCH : Current geo + policy + flow signals
+end
+
+group 11. Universe Discovery
+ORCH -> IDX : Fetch index members
+IDX -> MKT : Get constituents
+MKT --> IDX : Index members
+IDX --> ORCH : Universe list
+end
+
+group 12. Signal-Aware Industry Recommendation — Portfolio Gap Weighted [FIXED]
+ORCH -> IND : Identify preferred industries
+IND -> DB : Load unified sector conviction scores
+DB --> IND : Geo + policy + flow signal map
+IND -> DB : Load identified_gaps — sectors underweight in portfolio
+DB --> IND : Gap sectors ranked by portfolio underweight %
+IND -> DB : Load sector_concentration — sectors already overweight
+DB --> IND : Sectors to avoid due to existing exposure
+IND -> NET : Validate with current market signals
+NET --> IND : Latest sector confirmation signals
+note right of IND
+  Industry Selection Logic [Portfolio-First]:
+  Score = (Signal Conviction × 0.4) +
+          (Portfolio Gap Weight × 0.35) +
+          (Current Market Signal × 0.25)
+
+  Hard exclusions before scoring:
+  - Sectors where portfolio already > 25% → SKIP
+    (already covered by MF + direct holdings)
+  - Sectors flagged STRONG_AVOID → SKIP
+
+  Example for your portfolio:
+  Private Banking already 6% via MFs → SKIP
+  Defence at 0% + geo tailwind → PRIORITISE
+  CDMO at 0% + structural thesis → PRIORITISE
+
+  Output includes explicit reason why each
+  sector was selected or excluded
+end note
+IND --> ORCH : Ranked industries with composite score\n+ reason: gap / signal / exclusion
+end
+
+group 13. Portfolio-Aware Candidate Generation [FIXED]
+ORCH -> CAND : Filter universe by preferred industries
+CAND -> DB : Load existing direct equity holdings
+DB --> CAND : Stocks already held directly
+CAND -> DB : Load MF top holdings (normalized_exposure)
+DB --> CAND : All stocks already owned via MFs
+note right of CAND
+  Candidate Pre-filter [Hard Rules]:
+  Remove any stock where:
+  1. Already held directly (avoid doubling up)
+  2. Overlap score > 3% across MF holdings
+  3. Sector already at hard concentration limit
+
+  This ensures every candidate that reaches
+  quant scoring is GENUINELY NEW exposure
+  not already in portfolio via any instrument
+end note
+CAND -> FIN : Get fundamentals / price data\nfor pre-filtered candidates only
+FIN --> CAND : Raw candidate data
+CAND --> ORCH : Pre-filtered candidate stock set\n(guaranteed new exposure only)
+end
+
+group 14. Quality Moat Quant Scoring
+ORCH -> QBUY : Score on quality moat factors
+note right of QBUY
+  Quality Moat Weights:
+  ROCE > 18% sustained 5yr      → 25%
+  Free Cash Flow positive 4/5yr → 25%
+  Revenue growth consistency    → 20%
+  Promoter holding stable/rising→ 15%
+  Debt / Equity < 0.5           → 15%
+
+  Bonus adjustments:
+  +5% if geopolitical tailwind confirmed
+  +5% if FII/DII accumulation detected
+  -10% if governance flag raised
+end note
+QBUY -> FIN : Fetch 5yr financials / ratios
+FIN --> QBUY : Factor data
+QBUY --> ORCH : Quality-moat scored universe
+end
+
+group 15. Multi-Source Risk Filtering
+ORCH -> RFILT : Apply hard risk filters
+RFILT -> DB : Read overlap + concentration
+DB --> RFILT : Portfolio context
+RFILT -> FIN : Check liquidity + volatility
+FIN --> RFILT : Volume / beta / std deviation
+RFILT -> NET : Check governance flags
+NET --> RFILT : Promoter pledging / SEBI alerts
+note right of RFILT
+  Hard Exclusion Rules:
+  Avg daily vol < ₹5Cr      → illiquid
+  Beta > 2.0                → excessive volatility
+  Promoter pledge > 50%     → governance risk
+  SEBI action in last 12m   → exclude
+  Sector concentration > 30%→ exclude
+  Geo signal = STRONG_AVOID → exclude
+end note
+RFILT --> ORCH : Risk-filtered candidates
+end
+
+group 16. Shortlist Selection
+ORCH -> TOPN : Select top N candidates
+TOPN --> ORCH : Initial shortlist
+end
+
+group 17. Qualitative Validation
+loop For each shortlisted stock
+    ORCH -> VALID : Validate score and suitability
+    VALID -> FIN : Recheck financials
+    FIN --> VALID : Financial validation
+    VALID -> NET : Check news / events / sentiment
+    NET --> VALID : News signals
+    VALID -> DB : Check geo/policy signal alignment
+    DB --> VALID : Signal context for this sector
+    alt Stock approved
+        VALID --> ORCH : Approved with confidence score
+    else Rejected or reduced confidence
+        VALID --> ORCH : Reject / reduce confidence
+        ORCH -> TOPN : Request replacement
+        TOPN --> ORCH : Next-best candidate
+    end
+end
+end
+
+group 18. Portfolio Differentiation — MF Holdings Aware [FIXED]
+ORCH -> DIFF : Filter for genuine differentiation
+DIFF -> DB : Load overlap_scores for shortlisted stocks
+DB --> DIFF : Per-stock overlap scores
+DIFF -> DB : Load normalized_exposure —\nwhich MFs already own each shortlisted stock
+DB --> DIFF : Fund-level ownership detail per stock
+DIFF -> DB : Load identified_gaps — what is genuinely missing
+DB --> DIFF : Confirmed gap sectors
+note right of DIFF
+  Step 1 — Deterministic Hard Overlap Rules:
+  HARD EXCLUDE: overlap > 3% across all MFs + ETFs
+  FLAG: overlap 1-3% → LLM decides with high bar
+
+  Step 2 — Fund Attribution Check:
+  For each remaining candidate, identify:
+  "Which of your funds already owns this stock
+   and at what weight?"
+  This makes the recommendation transparent
+
+  Step 3 — LLM Differentiation Scoring:
+  Score each stock on genuine portfolio add value
+  Penalise stocks that duplicate existing exposure
+  even if overlap score is technically under 3%
+
+  Step 4 — Signal Alignment:
+  Does this stock benefit from current geo/policy?
+  Score +/- accordingly
+
+  Output explicitly states for each stock:
+  GENUINELY NEW: "Not held in any of your funds"
+  MARGINAL ADD: "Held in [Fund X] at 0.8% — small overlap"
+  EXCLUDED: "Already 2.75% in your portfolio via [Fund Y]"
+end note
+DIFF --> ORCH : Complementary shortlist with:\n- overlap score\n- fund attribution detail\n- differentiation rationale\n- signal alignment score
+end
+
+group 19. Contrarian Entry Timing
+ORCH -> TIMING : Validate entry timing
+TIMING -> FIN : Price trend / momentum / 52w range
+FIN --> TIMING : Technical inputs
+TIMING -> NET : Recent market-moving news
+NET --> TIMING : Catalyst signals
+TIMING -> DB : Load contrarian_signals + flow_signals
+DB --> TIMING : Contrarian and flow context
+note right of TIMING
+  Entry Decision Matrix:
+  Quality stock + geo tailwind + contrarian signal
+    → STRONG ENTER NOW
+  Quality stock + geo tailwind + no contrarian signal
+    → ACCUMULATE in tranches
+  Quality stock + neutral geo + contrarian signal
+    → ENTER with smaller initial position
+  Quality stock + geo headwind
+    → WAIT — monitor for signal change
+  Any stock + STRONG_AVOID signal
+    → DO NOT ENTER regardless of quant score
+end note
+TIMING --> ORCH : Entry signal per stock:\nSTRONG ENTER / ACCUMULATE /\nSMALL INITIAL / WAIT / DO NOT ENTER
+end
+
+group 20. Position Sizing with Signal Weighting [ENHANCED]
+ORCH -> SIZING : Calculate conviction-weighted sizes
+SIZING -> DB : Load direct equity allocation +\ninvestable surplus + entry signals
+DB --> SIZING : Allocation context
+note right of SIZING
+  Sizing Rules [Deterministic]:
+  Highest conviction + geo tailwind  → 25-30%
+  High conviction + neutral signal   → 20-25%
+  Medium conviction                  → 15-20%
+  Toe-hold / monitor                 → 5-10%
+
+  Tranche rule:
+  Never deploy full position at once
+  Split into 2-3 tranches over 4-8 weeks
+  Reduces timing risk on entry
+
+  Hard Limits:
+  Max single stock        → 30%
+  Max total direct picks  → 4 stocks
+  Total direct equity     → max 20-25% of
+                            overall portfolio
+end note
+SIZING --> ORCH : Allocation % + tranche schedule per stock
+end
+
+group 21. Tax & Transaction Cost Impact Assessment [NEW]
+ORCH -> TAX : Assess tax and cost impact
+TAX -> DB : Load existing holdings + purchase dates
+DB --> TAX : Holding period per existing stock
+note right of TAX
+  Tax Rules [India - Deterministic]:
+  STCG (held < 1yr): 20% on gains
+  LTCG (held > 1yr): 12.5% above ₹1.25L
+  Dividend: taxed at slab rate
+
+  Cost Rules:
+  Brokerage + STT + stamp duty ~ 0.1-0.2%
+  Frequent churn erodes returns
+
+  Output:
+  Flag any SELL that would trigger STCG
+  Suggest holding to LTCG threshold if
+  thesis still intact
+  Include net-of-tax return estimate
+  in final recommendation
+end note
+TAX -> FIN : Fetch current prices for cost basis calc
+FIN --> TAX : Current market prices
+TAX --> ORCH : Tax impact per position +\nnet-of-tax return projections +\nSTCG / LTCG flags
+end
+
+group 22. Data Freshness and Confidence
+ORCH -> CONF : Validate all data freshness
+CONF -> DB : Check all table timestamps
+DB --> CONF : Freshness status
+CONF -> FIN : Check market data recency
+FIN --> CONF : Data age
+CONF -> NET : Check signal recency
+NET --> CONF : News freshness
+alt All data fresh
+    CONF --> ORCH : Confidence GREEN — proceed
+else Stale data detected
+    CONF --> ORCH : Stale warning — re-trigger ingestion
+    ORCH -> MFP : Re-fetch holdings
+    MFP -> FUNDAPI : Latest AMFI data
+    FUNDAPI --> MFP : Refreshed
+    MFP --> ORCH : Updated
+    ORCH -> OVL : Recompute overlap
+    OVL --> ORCH : Updated scores
+    CONF --> ORCH : Confidence YELLOW — proceed with caveat
+end
+end
+
+group 23. Final Recommendation — Portfolio-Personalised Output [FIXED]
+ORCH -> BUY : Finalize buy recommendations
+BUY -> DB : Load final portfolio context for output generation
+DB --> BUY : Full holdings + overlap + gaps + signals
+note right of BUY
+  Every recommendation output is personalised:
+  Shows exactly WHY this stock is recommended
+  FOR THIS SPECIFIC PORTFOLIO — not generically
+
+  Output must include for each stock:
+  "You already own X% of this sector via [Fund Name]
+   This stock adds [specific gap] not covered by
+   your existing holdings"
+end note
+BUY --> ORCH : Final 3-4 stocks with:\n- 18-30 month investment thesis\n- "Why this stock for YOUR portfolio" rationale\n- Geopolitical tailwind / headwind assessment\n- Exact overlap score vs YOUR MF/ETF holdings\n- Which specific MFs already own this stock\n- Sector gap being filled in YOUR portfolio\n- Quality moat score\n- Entry signal (STRONG ENTER / ACCUMULATE / WAIT)\n- Tranche deployment schedule\n- Suggested allocation % of YOUR direct equity corpus\n- Net-of-tax return projection\n- Data confidence band (GREEN / YELLOW)\n- Sectors NOT recommended + reason (already covered)
+ORCH --> UI : Full portfolio-personalised recommendation
+UI --> User : Display with portfolio context panel:\n"Your current exposure vs recommended addition"\nshown side by side for each recommendation
+end
+
+== FLOW 3 : PORTFOLIO MONITORING ==
+
+group 24. Monitoring Trigger
+User -> UI : Start monitoring
+UI -> ORCH : Monitor portfolio
+ORCH -> SIGREF : Refresh signal intelligence first
+SIGREF -> DB : Trigger signal pipeline re-run\n(geo / policy / flow / contrarian)
+DB --> SIGREF : Confirmed
+SIGREF --> ORCH : Signals refreshed before monitoring begins
+ORCH -> DB : Load portfolio + latest signals
+DB --> ORCH : Full context
+end
+
+group 25. Industry Monitoring [SIGNAL AWARE]
+loop For each portfolio stock
+    ORCH -> PIND : Assess industry outlook
+    PIND -> NET : Latest industry signals
+    NET --> PIND : Industry developments
+    PIND -> DB : Load geo/policy signals for this sector
+    DB --> PIND : Signal context
+    PIND --> ORCH : Industry assessment with\nsignal alignment score
+end
+end
+
+group 26. Stock Monitoring
+loop For each portfolio stock
+    ORCH -> PSTK : Assess individual stock
+    PSTK -> FIN : Financial / price / performance data
+    FIN --> PSTK : Stock metrics
+    PSTK -> NET : Company news / sentiment / events
+    NET --> PSTK : Company signals
+    PSTK --> ORCH : Stock assessment
+end
+end
+
+group 27. Portfolio Quant Re-Scoring
+loop For each portfolio stock
+    ORCH -> QMON : Recalculate quality moat score
+    QMON --> ORCH : Updated score
+end
+end
+
+group 28. Thesis Review with Hard Rules
+loop For each portfolio stock
+    ORCH -> PREV : Review thesis status
+    note right of PREV
+      Thesis Breach Hard Rules:
+      SELL regardless of P&L if:
+      - Management change / fraud signal
+      - ROCE drops below 12% two quarters
+      - Promoter pledge spikes above 40%
+      - Geo signal flips to STRONG_AVOID
+        for this stock's sector
+      - Original macro thesis no longer valid
+      - Structural sector disruption confirmed
+      No price anchoring permitted
+    end note
+    PREV -> FIN : Recheck financials
+    FIN --> PREV : Metrics
+    PREV -> NET : Recheck risks / catalysts
+    NET --> PREV : Signals
+    PREV -> DB : Check if geo signals changed
+    DB --> PREV : Latest signal for sector
+    PREV --> ORCH : Score + thesis:\nINTACT / WEAKENED / BREACHED +\ngeo signal change flag
+end
+end
+
+group 29. Drawdown and Risk Alert [NEW]
+ORCH -> DRAW : Check portfolio drawdown and risk levels
+DRAW -> FIN : Fetch current prices for all holdings
+FIN --> DRAW : Current market values
+DRAW -> DB : Load purchase prices + position sizes
+DB --> DRAW : Cost basis data
+note right of DRAW
+  Drawdown Alert Rules [Deterministic]:
+  Single stock down > 20% from entry:
+    → Flag for thesis review
+  Single stock down > 35% from entry:
+    → Force thesis review + SELL consideration
+  Portfolio down > 15% overall:
+    → Risk-off alert to user
+  Single position now > 35% of portfolio
+  due to others falling:
+    → Rebalancing flag
+
+  These are alerts only — Decision Agent
+  makes final call with thesis context
+end note
+DRAW --> ORCH : Drawdown alerts + concentration flags
+end
+
+group 30. Portfolio Action Decision
+loop For each portfolio stock
+    ORCH -> DEC : Decide action
+    note right of DEC
+      Decision inputs:
+      - Updated quant score
+      - Thesis status (INTACT/WEAKENED/BREACHED)
+      - Geo / policy signal alignment
+      - Drawdown alerts
+      - Sector concentration
+      - STCG / LTCG tax implications
+      - No price anchoring enforced
+    end note
+    DEC --> ORCH : BUY MORE / HOLD / TRIM /\nSELL / REPLACE + rationale
+end
+ORCH --> UI : Consolidated actions
+UI --> User : Show decisions with full rationale
+end
+
+group 31. Behavioural Guard Check [NEW]
+ORCH -> BGUARD : Screen decisions for behavioural bias
+note right of BGUARD
+  Behavioural Bias Rules [Hard Checks]:
+  If user tries to override SELL on breached thesis:
+    → Block and show breach evidence
+  If user tries to add 5th direct stock:
+    → Block — max 4 rule enforcement
+  If same stock sold and rebought within 30 days:
+    → Flag as emotional reversal pattern
+  If user increases position after 20% loss
+  without thesis confirmation:
+    → Flag as averaging-down trap
+  If monitoring frequency > 3x per day:
+    → Show "check less, earn more" reminder
+end note
+BGUARD --> ORCH : Bias flags + override blocks
+ORCH --> UI : Show behavioural guardrail alerts
+UI --> User : Display bias warnings\nbefore any override is accepted
+end
+
+group 32. Replace Feedback Loop
+alt Any stock flagged SELL or REPLACE
+    ORCH -> DB : Update exposure — remove exited stock
+    DB --> ORCH : Updated
+    ORCH -> OVL : Recompute overlap with updated portfolio
+    OVL --> ORCH : Refreshed overlap + new gaps
+    ORCH -> DB : Update overlap_scores + identified_gaps
+    DB --> ORCH : Updated
+    ORCH -> UI : Auto-prompt Flow 2 new buy\nwith refreshed context pre-loaded
+    UI --> User : "Portfolio gap created.\nRun new buy recommendation?"
+end
+end
+
+@enduml
