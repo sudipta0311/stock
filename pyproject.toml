@@ -1,0 +1,26 @@
+[project]
+name = "stock-langgraph-platform"
+version = "0.1.0"
+description = "LangGraph-powered multi-agent stock recommendation and monitoring platform with a Streamlit portal."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "langgraph>=0.2.67",
+    "streamlit>=1.42.0",
+    "pandas>=2.2.3",
+    "anthropic>=0.40.0",
+    "openai>=1.75.0",
+    "python-dotenv>=1.0.1",
+    "pypdf>=6.10.0",
+    "cryptography>=46.0.0",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
