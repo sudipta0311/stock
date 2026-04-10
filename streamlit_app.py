@@ -542,6 +542,13 @@ if llm_status["openai_enabled"]:
     llm_providers_on.append("OpenAI")
 llm_display = " + ".join(llm_providers_on) if llm_providers_on else "Fallback"
 
+if "monitoring_llm_provider" not in st.session_state:
+    st.session_state["monitoring_llm_provider"] = (
+        "anthropic" if llm_status["anthropic_enabled"] else
+        "openai" if llm_status["openai_enabled"] else
+        "anthropic"
+    )
+
 st.markdown(
     f"""
     <div class="hero-shell">
@@ -582,10 +589,11 @@ with top_bar[1]:
 with top_bar[2]:
     if st.button("Run Monitoring", use_container_width=True):
         try:
-            provider_for_mon = st.session_state.get("global_llm_provider", "anthropic")
+            provider_for_mon = st.session_state.get("monitoring_llm_provider", "anthropic")
+            provider_label = "Anthropic Claude" if provider_for_mon == "anthropic" else "OpenAI GPT"
             if hasattr(st, "toast"):
                 st.toast("Monitoring in progress...", icon="⏳")
-            with st.status("Monitoring your direct holdings...", expanded=True) as status:
+            with st.status(f"Monitoring your direct holdings with {provider_label}...", expanded=True) as status:
                 engine.run_monitoring(llm_provider=provider_for_mon)
                 status.write("Monitoring actions are ready.")
                 status.update(label="Monitoring complete", state="complete", expanded=False)
@@ -845,6 +853,49 @@ with tabs[2]:
 with tabs[3]:
     st.markdown('<span class="section-chip">Actions + Behaviour</span>', unsafe_allow_html=True)
     st.subheader("Monitoring")
+
+    st.markdown("#### Monitoring LLM")
+    mon_choice = st.radio(
+        "Select LLM provider for monitoring",
+        options=["Anthropic Claude", "OpenAI GPT"],
+        index=0 if st.session_state.get("monitoring_llm_provider", "anthropic") == "anthropic" else 1,
+        horizontal=True,
+        key="monitoring_provider_radio",
+    )
+    st.session_state["monitoring_llm_provider"] = "anthropic" if mon_choice == "Anthropic Claude" else "openai"
+
+    if st.session_state["monitoring_llm_provider"] == "anthropic":
+        render_provider_model_box(
+            "Monitoring uses Anthropic Claude",
+            llm_status["anthropic_fast_model"],
+            llm_status["anthropic_reasoning_model"],
+            llm_status["anthropic_enabled"],
+            "anthropic",
+        )
+    else:
+        render_provider_model_box(
+            "Monitoring uses OpenAI GPT",
+            llm_status["openai_fast_model"],
+            llm_status["openai_reasoning_model"],
+            llm_status["openai_enabled"],
+            "openai",
+        )
+
+    if st.button("Run Monitoring For Current Portfolio", use_container_width=True, key="monitoring_tab_run_btn"):
+        try:
+            provider_for_mon = st.session_state.get("monitoring_llm_provider", "anthropic")
+            provider_label = "Anthropic Claude" if provider_for_mon == "anthropic" else "OpenAI GPT"
+            if hasattr(st, "toast"):
+                st.toast("Monitoring in progress...", icon="⏳")
+            with st.status(f"Monitoring your direct holdings with {provider_label}...", expanded=True) as status:
+                engine.run_monitoring(llm_provider=provider_for_mon)
+                status.write("Monitoring actions are ready.")
+                status.update(label="Monitoring complete", state="complete", expanded=False)
+            push_notice(f"Monitoring complete using {provider_label}.", "success")
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
+
     if portfolio_updated_at:
         freshness_bits = [f"Portfolio updated: {portfolio_updated_at}"]
         if monitor_created_at:
