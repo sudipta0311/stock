@@ -1005,6 +1005,7 @@ with tabs[3]:
         monitor_frame = pd.DataFrame(
             [
                 {
+                    "llm": monitor_provider_label or "Unknown",
                     "symbol": item["symbol"],
                     "action": item["action"],
                     "severity": item["severity"],
