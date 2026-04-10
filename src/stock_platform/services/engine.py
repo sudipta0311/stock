@@ -163,7 +163,12 @@ class PlatformEngine:
         prefs["monitoring_runs_today"] = int(prefs.get("monitoring_runs_today", 0)) + 1
         self.repo.set_state("user_preferences", prefs)
         graph = self._build_monitor_graph(llm_provider=llm_provider)
-        return graph.invoke({"request": request or {}})
+        result = graph.invoke({"request": request or {}})
+        last_monitor_run = self.repo.get_state("last_monitor_run", {})
+        last_monitor_run["llm_provider"] = llm_provider
+        last_monitor_run["llm_label"] = "Anthropic Claude" if llm_provider == "anthropic" else "OpenAI GPT"
+        self.repo.set_state("last_monitor_run", last_monitor_run)
+        return result
 
     # ── Watchlist ────────────────────────────────────────────────────────────
 

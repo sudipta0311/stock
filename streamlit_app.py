@@ -531,6 +531,7 @@ llm_status = snapshot["llm"]
 portfolio_updated_at = portfolio.get("portfolio_meta", {}).get("portfolio_last_updated", "")
 monitor_run_meta = run_meta.get("monitoring", {})
 monitor_created_at = monitor_run_meta.get("created_at", "")
+monitor_provider_label = monitor_run_meta.get("llm_label", "")
 monitoring_is_stale = bool(portfolio_updated_at) and (
     not monitor_created_at or monitor_created_at < portfolio_updated_at
 )
@@ -900,6 +901,8 @@ with tabs[3]:
         freshness_bits = [f"Portfolio updated: {portfolio_updated_at}"]
         if monitor_created_at:
             freshness_bits.append(f"Last monitoring run: {monitor_created_at}")
+            if monitor_provider_label:
+                freshness_bits.append(f"LLM: {monitor_provider_label}")
         else:
             freshness_bits.append("Last monitoring run: not run yet for current portfolio")
         st.caption(" | ".join(freshness_bits))
@@ -996,6 +999,8 @@ with tabs[3]:
 
     # ── Monitoring Results ────────────────────────────────────────────────────
     st.markdown("#### Latest Monitoring Results")
+    if monitor_provider_label:
+        st.caption(f"Latest monitoring run used {monitor_provider_label}.")
     if monitoring_actions:
         monitor_frame = pd.DataFrame(
             [
