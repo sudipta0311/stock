@@ -60,8 +60,8 @@ ANTHROPIC_API_KEY=your_anthropic_api_key_here
 # ── OpenAI GPT (alternative / comparison) ───────────────────────────────────
 OPENAI_API_KEY=your_openai_api_key_here
 # Optional model overrides (defaults shown):
-# OPENAI_FAST_MODEL=gpt-4.1-mini                # buy & monitoring rationale
-# OPENAI_REASONING_MODEL=gpt-4.1               # industry, validation, thesis review
+# OPENAI_FAST_MODEL=gpt-5.4-mini               # buy & monitoring rationale
+# OPENAI_REASONING_MODEL=gpt-5.4               # industry, validation, thesis review
 ```
 
 Both keys can be set simultaneously to enable the **Compare Both** feature in the Buy Flow tab.
@@ -73,6 +73,32 @@ streamlit run streamlit_app.py
 ```
 
 If the `.env` values are not populated, the platform still runs using deterministic fallbacks for rationale generation.
+
+## Streamlit Cloud
+
+This repo can be deployed on Streamlit Community Cloud with `streamlit_app.py` as the entrypoint.
+
+Use these deployment settings:
+
+- Repository: `sudipta0311/stock`
+- Branch: `codex/streamlit-cloud-ready`
+- Main file path: `streamlit_app.py`
+- Python version: `3.11`
+
+Add your runtime secrets in the app's `Settings -> Secrets` panel using [.streamlit/secrets.toml.example](c:/Project/App/.streamlit/secrets.toml.example) as the template. The app reads both local `.env` files and Streamlit secrets.
+
+### Current deployment reference
+
+- Active deployment branch: `codex/streamlit-cloud-ready`
+- Latest deployment commit at the time of writing: `ee48bbc`
+- App URL: `https://sudipta0311-stock-streamlit-app-codexstreamlit-cloud-rea-ltl7mo.streamlit.app/`
+
+### Redeploy checklist
+
+1. In Streamlit Cloud, confirm the app is pointing to branch `codex/streamlit-cloud-ready`.
+2. Use `Reboot app` or `Redeploy latest commit` after pushing updates.
+3. Re-check the app secrets after any delete/recreate cycle.
+4. If portfolio monitoring looks empty after a PDF upload, re-run `Run Ingestion` after parsing the statement, then run `Run Monitoring`.
 
 ## Portal Flow
 

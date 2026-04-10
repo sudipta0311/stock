@@ -6,3 +6,4 @@ openai>=1.75.0
 python-dotenv>=1.0.1
 pypdf>=6.10.0
 cryptography>=46.0.0
+requests>=2.32.0

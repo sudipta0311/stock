@@ -103,19 +103,32 @@ class NSDLCASParser:
                         return f"{match.group(2)}-{month}"
         return ""
 
-    def _extract_direct_equities(self, page_lines: list[list[str]]) -> list[dict[str, Any]]:
+    def _collect_section_lines(
+        self,
+        page_lines: list[list[str]],
+        *,
+        start_markers: tuple[str, ...],
+        end_markers: tuple[str, ...],
+    ) -> list[str]:
         section_lines: list[str] = []
         active = False
-        for page_no in range(2, min(len(page_lines), 4)):
-            for line in page_lines[page_no]:
-                if line == "Equity Shares":
+        for lines in page_lines:
+            for line in lines:
+                if line in start_markers:
                     active = True
                     continue
-                if active and line == "Mutual Funds (M)":
-                    active = False
-                    break
+                if active and (line in end_markers or any(line.startswith(marker) for marker in end_markers)):
+                    return section_lines
                 if active:
                     section_lines.append(line)
+        return section_lines
+
+    def _extract_direct_equities(self, page_lines: list[list[str]]) -> list[dict[str, Any]]:
+        section_lines = self._collect_section_lines(
+            page_lines,
+            start_markers=("Equity Shares",),
+            end_markers=("Mutual Funds (M)", "Mutual Fund Folios (F)", "Notes:"),
+        )
         records: list[dict[str, Any]] = []
         idx = 0
         while idx < len(section_lines):
@@ -155,18 +168,11 @@ class NSDLCASParser:
         return records
 
     def _extract_etfs(self, page_lines: list[list[str]]) -> list[dict[str, Any]]:
-        section_lines: list[str] = []
-        active = False
-        for page_no in range(2, min(len(page_lines), 4)):
-            for line in page_lines[page_no]:
-                if line == "Mutual Funds (M)":
-                    active = True
-                    continue
-                if active and line.startswith("Sub Total"):
-                    active = False
-                    break
-                if active:
-                    section_lines.append(line)
+        section_lines = self._collect_section_lines(
+            page_lines,
+            start_markers=("Mutual Funds (M)",),
+            end_markers=("Sub Total", "Mutual Fund Folios (F)", "Notes:"),
+        )
         records: list[dict[str, Any]] = []
         idx = 0
         while idx < len(section_lines):
@@ -207,21 +213,11 @@ class NSDLCASParser:
         return records
 
     def _extract_mutual_funds(self, page_lines: list[list[str]]) -> list[dict[str, Any]]:
-        section_lines: list[str] = []
-        capture = False
-        for page_no in range(3, min(len(page_lines), 7)):
-            for line in page_lines[page_no]:
-                if line == "Mutual Fund Folios (F)":
-                    capture = True
-                    continue
-                if capture and line.startswith("Notes:"):
-                    capture = False
-                    continue
-                if capture and line.startswith("Transactions for the period"):
-                    capture = False
-                    break
-                if capture:
-                    section_lines.append(line)
+        section_lines = self._collect_section_lines(
+            page_lines,
+            start_markers=("Mutual Fund Folios (F)",),
+            end_markers=("Notes:", "Transactions for the period"),
+        )
 
         records: list[dict[str, Any]] = []
         idx = 0

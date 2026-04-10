@@ -29,7 +29,7 @@ class PlatformEngine:
         # Buy graphs are keyed by llm_provider so graphs for both providers
         # can coexist in the same session without being rebuilt each time.
         self._buy_graphs: dict[str, Any] = {}
-        self._monitor_graph = None
+        self._monitor_graphs: dict[str, Any] = {}
 
     # ── Graph builders ───────────────────────────────────────────────────────
 
@@ -56,12 +56,12 @@ class PlatformEngine:
         return self._buy_graphs[llm_provider]
 
     def _build_monitor_graph(self, llm_provider: str = "anthropic"):
-        if self._monitor_graph is None:
+        if llm_provider not in self._monitor_graphs:
             from stock_platform.graphs.monitor_graph import build_monitor_graph
             llm = PlatformLLM(self.config, provider=llm_provider)
             agents = MonitoringAgents(self.repo, self.provider, self.config, self.run_signal_refresh, llm)
-            self._monitor_graph = build_monitor_graph(agents)
-        return self._monitor_graph
+            self._monitor_graphs[llm_provider] = build_monitor_graph(agents)
+        return self._monitor_graphs[llm_provider]
 
     # ── Public workflows ─────────────────────────────────────────────────────
 
