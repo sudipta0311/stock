@@ -749,9 +749,17 @@ st.markdown(
 
 
 def _auth_configured() -> bool:
-    """Return True only when Google OAuth secrets are present."""
+    """Return True only when Google OAuth secrets are fully and validly configured."""
     try:
-        return bool(st.secrets.get("auth", {}).get("google"))
+        auth = st.secrets.get("auth", {})
+        if not auth.get("google"):
+            return False
+        cookie = str(auth.get("cookie_secret", ""))
+        # Reject placeholder values — a weak/example cookie_secret silently
+        # breaks Streamlit's OAuth session signing and causes a blank screen.
+        if not cookie or cookie == "replace-with-a-long-random-string" or len(cookie) < 16:
+            return False
+        return True
     except Exception:
         return False
 
