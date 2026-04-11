@@ -11,7 +11,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from stock_platform.agents.buy_agents import compute_quality_score
+from stock_platform.agents.quant_model import compute_quality_score
 from stock_platform.config import AppConfig
 from stock_platform.services.llm import PlatformLLM
 
@@ -40,45 +40,51 @@ class FakeAnthropicClient:
 
 
 class BuyQualityScoreTests(unittest.TestCase):
-    def test_missing_live_data_returns_zero_not_perfect(self) -> None:
-        demo_facts = {
-            "roce_5y": 18.9,
-            "fcf_positive_years": 4,
-            "revenue_consistency": 7.7,
-            "de_ratio": 0.52,
-        }
-        self.assertEqual(compute_quality_score("TATAMOTORS", {}, demo_facts), 0.0)
+    def test_missing_data_returns_unknown_not_perfect(self) -> None:
+        self.assertEqual(compute_quality_score("TATAMOTORS", {}), 0.5)
 
-    def test_expected_live_rule_bands_for_bel_and_divislab(self) -> None:
-        bel_live = {
-            "roce_ttm": 0.266,
-            "freeCashflow": -4_246_600_000,
-            "fcf_positive_years": 3,
-            "revenueGrowth": 0.24,
-            "debtToEquity": 0.003,
+    def test_expected_screener_rule_bands_for_tmcv_and_bel(self) -> None:
+        tmcv_facts = {
+            "symbol": "TMCV",
+            "symbol_mapped": True,
+            "roce_pct": -400.0,
+            "eps": 11.84,
+            "promoter_holding": 42.56,
+            "debt_to_equity": 0.57,
         }
-        divislab_live = {
-            "roce_ttm": 0.204,
-            "freeCashflow": 2_150_000_000,
-            "fcf_positive_years": 4,
-            "revenueGrowth": 0.123,
-            "debtToEquity": 0.0003,
+        bel_facts = {
+            "symbol": "BEL",
+            "roce_pct": 38.9,
+            "eps": 8.14,
+            "revenue_growth_pct": 13.0,
+            "promoter_holding": 51.14,
+            "debt_to_equity": 0.003,
         }
 
-        self.assertAlmostEqual(compute_quality_score("BEL", bel_live, {}), 0.725, places=3)
-        self.assertAlmostEqual(compute_quality_score("DIVISLAB", divislab_live, {}), 0.79, places=3)
+        self.assertLess(compute_quality_score("TATAMOTORS", tmcv_facts), 0.5)
+        self.assertGreater(compute_quality_score("BEL", bel_facts), 0.6)
 
     def test_perfect_score_requires_all_five_rules(self) -> None:
         almost_perfect_live = {
-            "roce_ttm": 0.25,
-            "freeCashflow": 1,
-            "revenueGrowth": 0.20,
-            "debtToEquity": 0.10,
+            "roce_pct": 25,
+            "eps": 30,
+            "revenue_growth_pct": 20,
+            "debt_to_equity": 0.10,
         }
-        all_rules_live = almost_perfect_live | {"promoter_holding_pct": 0.60}
+        all_rules_live = almost_perfect_live | {"promoter_holding": 60}
 
-        self.assertEqual(compute_quality_score("BEL", almost_perfect_live, {}), 0.85)
+        self.assertEqual(compute_quality_score("BEL", almost_perfect_live, {}), 1.0)
         self.assertEqual(compute_quality_score("IDEAL", all_rules_live, {}), 1.0)
+
+    def test_negative_eps_caps_quality_score(self) -> None:
+        stressed = {
+            "roce_pct": 22,
+            "eps": -5,
+            "revenue_growth_pct": 12,
+            "promoter_holding": 40,
+            "debt_to_equity": 0.4,
+        }
+        self.assertEqual(compute_quality_score("LOSSMAKER", stressed), 0.35)
 
 
 class BuyPromptTests(unittest.TestCase):

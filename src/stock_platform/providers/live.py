@@ -13,6 +13,8 @@ import requests
 import yfinance as yf
 
 from stock_platform.utils.rules import clamp
+from stock_platform.utils.screener_fetcher import get_stock_fundamentals
+from stock_platform.utils.symbol_resolver import get_symbol_display_name, resolve_nse_symbol, resolve_symbol_base
 
 
 class LiveMarketDataProvider:
@@ -43,7 +45,7 @@ class LiveMarketDataProvider:
         self._sector_overview: dict[str, dict[str, Any]] | None = None
 
     def _ticker_symbol(self, symbol: str) -> str:
-        return f"{self.normalize_symbol(symbol)}.NS"
+        return resolve_nse_symbol(symbol)
 
     @staticmethod
     def _as_float(value: Any) -> float | None:
@@ -335,11 +337,7 @@ class LiveMarketDataProvider:
         return overview
 
     def normalize_symbol(self, symbol: str) -> str:
-        cleaned = (symbol or "").strip().upper()
-        for suffix in (".NS", ".NSE", ".BSE", ".BO"):
-            if cleaned.endswith(suffix):
-                cleaned = cleaned[: -len(suffix)]
-        return cleaned.replace(" ", "")
+        return resolve_symbol_base(symbol)
 
     def infer_sector(self, instrument_name: str) -> str:
         name = (instrument_name or "").lower()
@@ -387,7 +385,7 @@ class LiveMarketDataProvider:
             info.get("longName")
             or info.get("shortName")
             or index_row.get("company_name")
-            or normalized
+            or get_symbol_display_name(normalized)
         )
         sector = (
             info.get("industry")
@@ -608,79 +606,42 @@ class LiveMarketDataProvider:
             return self._financial_cache[normalized]
 
         snapshot = self.get_stock_snapshot(normalized)
-        info = self._get_info(normalized)
+        screener = get_stock_fundamentals(normalized)
         result: dict[str, Any] = {
-            "symbol": normalized,
+            "symbol": screener.get("symbol", normalized),
             "company_name": snapshot["company_name"],
             "sector": snapshot["sector"],
-            "pe_trailing": self._as_float(info.get("trailingPE")),
+            "source": screener.get("source"),
+            "resolved_symbol": screener.get("resolved_symbol"),
+            "symbol_mapped": screener.get("symbol_mapped", False),
+            "roce_pct": screener.get("roce_pct"),
+            "roe_pct": screener.get("roe_pct"),
+            "roce_ttm": None if screener.get("roce_pct") is None else screener["roce_pct"] / 100.0,
+            "returnOnCapitalEmployed": None if screener.get("roce_pct") is None else screener["roce_pct"] / 100.0,
+            "roce_5y": screener.get("roce_pct"),
+            "freeCashflow": None,
+            "free_cashflow": None,
+            "fcf_positive_years": None,
+            "revenueGrowth": None if screener.get("revenue_growth_pct") is None else screener["revenue_growth_pct"] / 100.0,
+            "revenue_growth": None if screener.get("revenue_growth_pct") is None else screener["revenue_growth_pct"] / 100.0,
+            "revenue_growth_pct": screener.get("revenue_growth_pct"),
+            "debtToEquity": screener.get("debt_to_equity"),
+            "debt_to_equity": screener.get("debt_to_equity"),
+            "pe_trailing": screener.get("pe_ratio"),
+            "pe_ratio": screener.get("pe_ratio"),
             "pe_5yr_avg": None,
             "sector_pe": None,
-            "pe_forward": self._as_float(info.get("forwardPE")),
-            "profit_margins": self._as_float(info.get("profitMargins")),
-            "trailingEps": self._as_float(info.get("trailingEps")),
-            "currentPrice": self._as_float(info.get("regularMarketPrice")) or self._as_float(info.get("currentPrice")),
-            "targetMeanPrice": self._as_float(info.get("targetMeanPrice")),
-            "beta": self._as_float(info.get("beta")),
-            "promoter_holding_pct": None,
+            "pe_forward": None,
+            "profit_margins": None,
+            "trailingEps": screener.get("eps"),
+            "eps": screener.get("eps"),
+            "currentPrice": screener.get("current_price"),
+            "targetMeanPrice": screener.get("target_mean_price"),
+            "beta": snapshot.get("beta"),
+            "promoter_holding_pct": None if screener.get("promoter_holding") is None else screener["promoter_holding"] / 100.0,
+            "promoter_holding": screener.get("promoter_holding"),
+            "negative_pat_quarters": None,
         }
-
-        try:
-            ticker = yf.Ticker(self._ticker_symbol(normalized))
-            income_stmt = ticker.income_stmt
-            quarterly_income_stmt = ticker.quarterly_income_stmt
-            balance_sheet = ticker.balance_sheet
-            cashflow = ticker.cashflow
-
-            ebit = self._series_first(income_stmt, ["EBIT", "Operating Income", "Normalized EBITDA"])
-            invested_capital = self._series_first(balance_sheet, ["Invested Capital"], latest_two=True)
-            roce_ttm = None
-            if ebit is not None and isinstance(invested_capital, list) and invested_capital:
-                average_capital = sum(invested_capital) / len(invested_capital)
-                if average_capital > 0:
-                    roce_ttm = ebit / average_capital
-
-            revenue_growth = self._as_float(info.get("revenueGrowth"))
-            if revenue_growth is None:
-                revenues = self._series_first(income_stmt, ["Total Revenue"], latest_two=True)
-                if isinstance(revenues, list) and len(revenues) == 2 and revenues[1]:
-                    revenue_growth = (revenues[0] - revenues[1]) / revenues[1]
-
-            debt_to_equity = None
-            total_debt = self._series_first(balance_sheet, ["Total Debt"])
-            equity = self._series_first(
-                balance_sheet,
-                ["Stockholders Equity", "Common Stock Equity", "Total Equity Gross Minority Interest"],
-            )
-            if total_debt is not None and equity and equity > 0:
-                debt_to_equity = total_debt / equity
-            if debt_to_equity is None:
-                debt_to_equity = self._as_float(info.get("debtToEquity"))
-                if debt_to_equity is not None and abs(debt_to_equity) > 10:
-                    debt_to_equity /= 100.0
-
-            fcf_values = self._series_values(cashflow, ["Free Cash Flow"], limit=5)
-            free_cashflow = self._as_float(info.get("freeCashflow"))
-            if free_cashflow is None and fcf_values:
-                free_cashflow = fcf_values[0]
-
-            result.update(
-                {
-                    "roce_ttm": roce_ttm,
-                    "returnOnCapitalEmployed": roce_ttm,
-                    "roce_5y": None if roce_ttm is None else roce_ttm * 100.0,
-                    "freeCashflow": free_cashflow,
-                    "free_cashflow": free_cashflow,
-                    "fcf_positive_years": sum(1 for value in fcf_values if value > 0),
-                    "revenueGrowth": revenue_growth,
-                    "revenue_growth": revenue_growth,
-                    "debtToEquity": debt_to_equity,
-                    "debt_to_equity": debt_to_equity,
-                    "negative_pat_quarters": self._consecutive_negative_quarters(quarterly_income_stmt),
-                }
-            )
-        except Exception:
-            pass
 
         filtered = {key: value for key, value in result.items() if value is not None}
         self._financial_cache[normalized] = filtered
