@@ -197,30 +197,56 @@ class PlatformLLM:
 
     def monitoring_rationale(
         self, action_row: dict[str, Any], thesis: dict[str, Any], drawdown: dict[str, Any]
-    ) -> str | None:
+    ) -> dict[str, Any] | None:
         """
-        1-2 sentence action rationale for a monitored holding.
+        Structured action assessment for a monitored holding.
+        Returns {"action": str, "severity": str, "rationale": str} or None.
         Called once per holding (~50/session); system prompt cached on Anthropic.
+        JSON output prevents rationale text that starts with a directive word
+        (e.g. "REJECT" or "BUY MORE") from being misread as the action field.
         """
         system_prompt = (
             "You are a disciplined portfolio monitoring agent for Indian equity portfolios. "
-            "Produce a single short rationale that is specific, decisive, and grounded in "
-            "thesis status, drawdown, and risk context. Maximum 2 sentences."
+            "Return ONLY valid JSON in this exact format:\n"
+            '{"action": "HOLD", "severity": "LOW", "rationale": "explanation here"}\n'
+            "Valid actions: BUY MORE, HOLD, TRIM, SELL, REPLACE\n"
+            "Valid severities: LOW, MEDIUM, HIGH, CRITICAL\n"
+            "The rationale must be 1-2 sentences, specific and grounded in thesis status, "
+            "drawdown, and risk context. Never include action words in the rationale field. "
+            "No markdown, no prose outside the JSON object."
         )
         user_prompt = (
-            f"Action: {action_row['action']} on {action_row['symbol']}\n"
+            f"Computed action: {action_row['action']} on {action_row['symbol']}\n"
+            f"Computed severity: {action_row['severity']}\n"
             f"Computed rationale: {action_row['rationale']}\n"
             f"Thesis status: {thesis['status']} | Sector signal: {thesis['geo_signal_change']}\n"
             f"Drawdown: {drawdown['drawdown_pct']:.1f}% | Alert severity: {drawdown['severity']}"
         )
-        return self._call(
+        raw = self._call(
             model=self._fast_model,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            max_tokens=180,
+            max_tokens=200,
             temperature=0.2,
             cache_system=True,
         )
+        if not raw:
+            return None
+        try:
+            result = json.loads(raw)
+            action = str(result.get("action", action_row["action"])).upper()
+            if action not in {"BUY MORE", "HOLD", "TRIM", "SELL", "REPLACE"}:
+                action = action_row["action"]
+            severity = str(result.get("severity", action_row["severity"])).upper()
+            if severity not in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}:
+                severity = action_row["severity"]
+            return {
+                "action": action,
+                "severity": severity,
+                "rationale": str(result.get("rationale", "")),
+            }
+        except (json.JSONDecodeError, ValueError, KeyError):
+            return None
 
     # ── REASONING TIER ───────────────────────────────────────────────────────
     # Anthropic: Sonnet 4.6   OpenAI: gpt-5.4

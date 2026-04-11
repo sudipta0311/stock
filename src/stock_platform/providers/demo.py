@@ -26,6 +26,10 @@ class DemoDataProvider:
                 "promoter_trend": "stable",
                 "de_ratio": 0.0,
                 "drawdown_from_52w": 7.0,
+                "pe_trailing": 18.5,
+                "pe_5yr_avg": 19.8,
+                "sector_pe": 21.0,
+                "pe_forward": 16.2,
             },
             "ICICIBANK": {
                 "company_name": "ICICI Bank",
@@ -41,6 +45,10 @@ class DemoDataProvider:
                 "promoter_trend": "stable",
                 "de_ratio": 0.0,
                 "drawdown_from_52w": 9.0,
+                "pe_trailing": 16.2,
+                "pe_5yr_avg": 17.5,
+                "sector_pe": 21.0,
+                "pe_forward": 14.1,
             },
             "BEL": {
                 "company_name": "Bharat Electronics",
@@ -56,6 +64,10 @@ class DemoDataProvider:
                 "promoter_trend": "rising",
                 "de_ratio": 0.02,
                 "drawdown_from_52w": 15.0,
+                "pe_trailing": 42.0,
+                "pe_5yr_avg": 30.5,
+                "sector_pe": 46.0,
+                "pe_forward": 36.0,
             },
             "HAL": {
                 "company_name": "Hindustan Aeronautics",
@@ -71,6 +83,10 @@ class DemoDataProvider:
                 "promoter_trend": "stable",
                 "de_ratio": 0.0,
                 "drawdown_from_52w": 11.0,
+                "pe_trailing": 35.0,
+                "pe_5yr_avg": 25.0,
+                "sector_pe": 46.0,
+                "pe_forward": 29.5,
             },
             "COCHINSHIP": {
                 "company_name": "Cochin Shipyard",
@@ -86,6 +102,10 @@ class DemoDataProvider:
                 "promoter_trend": "stable",
                 "de_ratio": 0.04,
                 "drawdown_from_52w": 24.0,
+                "pe_trailing": 50.0,
+                "pe_5yr_avg": 26.0,
+                "sector_pe": 46.0,
+                "pe_forward": 42.0,
             },
             "SOLARINDS": {
                 "company_name": "Solar Industries",
@@ -101,6 +121,10 @@ class DemoDataProvider:
                 "promoter_trend": "rising",
                 "de_ratio": 0.09,
                 "drawdown_from_52w": 13.0,
+                "pe_trailing": 55.0,
+                "pe_5yr_avg": 40.0,
+                "sector_pe": 46.0,
+                "pe_forward": 48.0,
             },
             "DIVISLAB": {
                 "company_name": "Divi's Laboratories",
@@ -116,6 +140,10 @@ class DemoDataProvider:
                 "promoter_trend": "stable",
                 "de_ratio": 0.0,
                 "drawdown_from_52w": 18.0,
+                "pe_trailing": 58.0,
+                "pe_5yr_avg": 52.0,
+                "sector_pe": 55.0,
+                "pe_forward": 50.0,
             },
             "SUNPHARMA": {
                 "company_name": "Sun Pharma",
@@ -131,6 +159,10 @@ class DemoDataProvider:
                 "promoter_trend": "stable",
                 "de_ratio": 0.07,
                 "drawdown_from_52w": 10.0,
+                "pe_trailing": 38.0,
+                "pe_5yr_avg": 35.0,
+                "sector_pe": 38.0,
+                "pe_forward": 33.5,
             },
             "ABBOTINDIA": {
                 "company_name": "Abbott India",
@@ -146,6 +178,10 @@ class DemoDataProvider:
                 "promoter_trend": "stable",
                 "de_ratio": 0.0,
                 "drawdown_from_52w": 6.0,
+                "pe_trailing": 52.0,
+                "pe_5yr_avg": 48.0,
+                "sector_pe": 38.0,
+                "pe_forward": 46.0,
             },
             "KPITTECH": {
                 "company_name": "KPIT Technologies",
@@ -161,6 +197,10 @@ class DemoDataProvider:
                 "promoter_trend": "stable",
                 "de_ratio": 0.01,
                 "drawdown_from_52w": 22.0,
+                "pe_trailing": 65.0,
+                "pe_5yr_avg": 46.0,
+                "sector_pe": 60.0,
+                "pe_forward": 54.0,
             },
             "TATAMOTORS": {
                 "company_name": "Tata Motors",
@@ -176,6 +216,10 @@ class DemoDataProvider:
                 "promoter_trend": "stable",
                 "de_ratio": 0.52,
                 "drawdown_from_52w": 17.0,
+                "pe_trailing": 8.5,
+                "pe_5yr_avg": 22.0,
+                "sector_pe": 28.0,
+                "pe_forward": 7.2,
             },
             "RELIANCE": {
                 "company_name": "Reliance Industries",
@@ -191,6 +235,10 @@ class DemoDataProvider:
                 "promoter_trend": "stable",
                 "de_ratio": 0.44,
                 "drawdown_from_52w": 12.0,
+                "pe_trailing": 22.0,
+                "pe_5yr_avg": 24.5,
+                "sector_pe": 18.0,
+                "pe_forward": 19.5,
             },
             "LT": {
                 "company_name": "Larsen & Toubro",
@@ -206,6 +254,10 @@ class DemoDataProvider:
                 "promoter_trend": "stable",
                 "de_ratio": 0.18,
                 "drawdown_from_52w": 8.0,
+                "pe_trailing": 32.0,
+                "pe_5yr_avg": 28.0,
+                "sector_pe": 30.0,
+                "pe_forward": 27.5,
             },
             "DIXON": {
                 "company_name": "Dixon Technologies",
@@ -221,6 +273,10 @@ class DemoDataProvider:
                 "promoter_trend": "rising",
                 "de_ratio": 0.06,
                 "drawdown_from_52w": 14.0,
+                "pe_trailing": 130.0,
+                "pe_5yr_avg": 80.0,
+                "sector_pe": 100.0,
+                "pe_forward": 98.0,
             },
             "TITAN": {
                 "company_name": "Titan Company",
@@ -236,6 +292,10 @@ class DemoDataProvider:
                 "promoter_trend": "stable",
                 "de_ratio": 0.04,
                 "drawdown_from_52w": 19.0,
+                "pe_trailing": 88.0,
+                "pe_5yr_avg": 66.0,
+                "sector_pe": 75.0,
+                "pe_forward": 78.0,
             },
             "IRCTC": {
                 "company_name": "IRCTC",
@@ -251,6 +311,10 @@ class DemoDataProvider:
                 "promoter_trend": "stable",
                 "de_ratio": 0.0,
                 "drawdown_from_52w": 28.0,
+                "pe_trailing": 68.0,
+                "pe_5yr_avg": 55.0,
+                "sector_pe": 55.0,
+                "pe_forward": 60.0,
             },
         }
         self.index_members = {
@@ -447,6 +511,10 @@ class DemoDataProvider:
             "promoter_trend": "stable",
             "de_ratio": 0.3,
             "drawdown_from_52w": 12.0,
+            "pe_trailing": 25.0,
+            "pe_5yr_avg": 25.0,
+            "sector_pe": 25.0,
+            "pe_forward": 22.0,
         }
 
     def normalize_symbol(self, symbol: str) -> str:
@@ -530,6 +598,10 @@ class DemoDataProvider:
             "revenue_consistency": info["revenue_consistency"],
             "promoter_trend": info["promoter_trend"],
             "de_ratio": info["de_ratio"],
+            "pe_trailing": info["pe_trailing"],
+            "pe_5yr_avg": info["pe_5yr_avg"],
+            "sector_pe": info["sector_pe"],
+            "pe_forward": info["pe_forward"],
         }
 
     def get_risk_metrics(self, symbol: str) -> dict[str, Any]:
