@@ -169,31 +169,155 @@ class PlatformLLM:
     def buy_rationale(self, item: dict[str, Any], portfolio_context: dict[str, Any]) -> str | None:
         """
         2-3 sentence portfolio-personalised buy rationale.
+        Each provider uses a distinct analytical lens so Compare Both surfaces real disagreement.
+          Anthropic — contrarian / risk analyst: challenges the score, surfaces the key bear case.
+          OpenAI    — momentum / catalyst analyst: surfaces near-term catalysts and entry timing.
         Called once per recommendation (~3-4/session).
         System prompt cached on Anthropic to minimise repeated-call cost.
         """
         source_names = [e.get("instrument_name", "") for e in item.get("fund_attribution", [])][:4]
-        system_prompt = (
-            "You are an equity recommendation analyst for Indian markets. "
-            "Write concise, portfolio-personalized rationales in exactly 2-3 sentences. "
-            "Do not use generic disclaimers. Mention portfolio fit, overlap, and current signal context."
-        )
-        user_prompt = (
-            f"Buy rationale for {item['company_name']} ({item['symbol']}), sector: {item['sector']}.\n"
+        live_facts = item.get("live_financials", {}) or {}
+        price_ctx = item.get("price_context", {}) or {}
+        metric_bits: list[str] = []
+        roce = live_facts.get("roce_ttm") or live_facts.get("returnOnCapitalEmployed")
+        if isinstance(roce, (int, float)):
+            metric_bits.append(f"ROCE {roce * 100:.1f}%")
+        revenue_growth = live_facts.get("revenueGrowth") or live_facts.get("revenue_growth")
+        if isinstance(revenue_growth, (int, float)):
+            metric_bits.append(f"Revenue growth {revenue_growth * 100:.1f}%")
+        debt_to_equity = live_facts.get("debtToEquity") or live_facts.get("debt_to_equity")
+        if isinstance(debt_to_equity, (int, float)):
+            metric_bits.append(f"D/E {debt_to_equity:.2f}")
+        eps = live_facts.get("trailingEps")
+        if isinstance(eps, (int, float)):
+            metric_bits.append(f"EPS {eps:.2f}")
+        analyst_target = price_ctx.get("analyst_target") or live_facts.get("targetMeanPrice")
+        if isinstance(analyst_target, (int, float)):
+            metric_bits.append(f"Target {analyst_target:.2f}")
+        stock_line = (
+            f"Stock: {item['company_name']} ({item['symbol']}), sector: {item['sector']}.\n"
             f"Entry signal: {item['entry_signal']} | Quality score: {item['quality_score']:.2f}\n"
-            f"Overlap %: {item['overlap_pct']:.1f}% | Gap reason: {item['gap_reason']}\n"
-            f"Already held via funds: {', '.join(source_names) or 'none'}\n"
-            f"Portfolio holdings count: {len(portfolio_context.get('normalized_exposure', []))}\n"
-            "Explain why this stock fits this specific portfolio in 2-3 sentences."
+            f"Overlap: {item['overlap_pct']:.1f}% | Gap reason: {item['gap_reason']}\n"
+            f"Held via funds: {', '.join(source_names) or 'none'}\n"
+            f"Portfolio size: {len(portfolio_context.get('normalized_exposure', []))} positions\n"
+            f"Metrics: {' | '.join(metric_bits) if metric_bits else 'Live metrics unavailable'}"
         )
+
+        if self.provider == "anthropic":
+            system_prompt = (
+                "You are a contrarian equity risk analyst for Indian markets. "
+                "Your job is to challenge buy recommendations — not to dismiss them, but to surface the real bear case. "
+                "In exactly 2-3 sentences: (1) name the single biggest risk or flaw in the thesis, "
+                "(2) state what would have to be true for this to be a bad entry NOW, "
+                "(3) give your verdict: BUY with caution / WAIT for a better entry / STRONG BUY despite risk. "
+                "Be direct and specific. No generic disclaimers."
+            )
+            user_prompt = f"{stock_line}\nChallenge the thesis and give your risk-focused verdict."
+        else:
+            system_prompt = (
+                "You are a momentum and catalyst equity analyst for Indian markets. "
+                "Your job is to identify why a stock is ready to move NOW. "
+                "In exactly 2-3 sentences: (1) name the specific near-term catalyst the market is underpricing, "
+                "(2) explain what the consensus is getting wrong, "
+                "(3) state your entry timing verdict: enter this week / accumulate over 4 weeks / wait for a trigger. "
+                "Be specific about the catalyst. No generic disclaimers."
+            )
+            user_prompt = f"{stock_line}\nIdentify the catalyst and give your timing verdict."
+
+        if self.provider == "anthropic":
+            system_prompt = (
+                "You are a contrarian portfolio analyst. Your job is to: "
+                "1. Challenge the quantitative recommendation and find weaknesses the score misses. "
+                "2. Identify the single most important RISK that could invalidate this thesis. "
+                "3. State clearly what would make you WRONG about this recommendation. "
+                "4. Give a verdict: does the risk/reward justify entry NOW or should the investor wait for a better entry point? "
+                "Write exactly 4 short bullets labelled RISK, WE ARE WRONG IF, VERDICT, and SUPPORTING METRIC. "
+                "Be direct and specific. Reference actual financial metrics, not generalities."
+            )
+            user_prompt = f"{stock_line}\nChallenge the thesis and produce the risk-focused verdict."
+        else:
+            system_prompt = (
+                "You are a momentum and catalyst analyst. Your job is to: "
+                "1. Identify the specific near-term catalyst in the next 3-6 months that could drive price appreciation. "
+                "2. Explain what market participants are currently underestimating about this stock. "
+                "3. State the precise price level or event that would trigger you to EXIT. "
+                "4. Give a verdict: is the entry timing optimal or should the investor accumulate on any dip? "
+                "Write exactly 4 short bullets labelled CATALYST, MARKET MISREAD, EXIT TRIGGER, and VERDICT. "
+                "Be specific about catalysts, price targets, and timing."
+            )
+            user_prompt = f"{stock_line}\nIdentify the catalyst path and produce the timing verdict."
+
         return self._call(
             model=self._fast_model,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             max_tokens=220,
-            temperature=0.25,
+            temperature=0.35,
             cache_system=True,
         )
+
+    def synthesise_comparison(
+        self,
+        stock_name: str,
+        anthropic_rationale: str,
+        openai_rationale: str,
+    ) -> str | None:
+        """
+        3-bullet synthesis of Anthropic (contrarian/risk) and OpenAI (momentum/catalyst) views.
+        Uses Anthropic Sonnet — called once per stock in Compare Both mode.
+        Returns None if Anthropic is not enabled (caller must skip synthesis section).
+        """
+        # Synthesis always uses Anthropic Sonnet regardless of self.provider.
+        if not self.config.anthropic_enabled:
+            return None
+        try:
+            import anthropic as _anthropic
+            client = _anthropic.Anthropic(api_key=self.config.anthropic_api_key)
+            system_prompt = (
+                "You are a senior portfolio strategist synthesising two analyst views on the same stock. "
+                "One analyst (risk/contrarian) focused on the bear case. "
+                "The other analyst (momentum/catalyst) focused on the bull case. "
+                "Produce exactly 3 bullet points:\n"
+                "• WHERE THEY AGREE — shared conviction or common ground\n"
+                "• WHERE THEY DISAGREE — the core tension or conflicting view\n"
+                "• VERDICT — your synthesis: is the risk-reward favourable enough to act NOW?\n"
+                "Be specific and decisive. Do not hedge excessively."
+            )
+            user_prompt = (
+                f"Stock: {stock_name}\n\n"
+                f"Risk analyst (Anthropic):\n{anthropic_rationale}\n\n"
+                f"Momentum analyst (OpenAI):\n{openai_rationale}\n\n"
+                "Synthesise in exactly 3 bullets as specified."
+            )
+            system_prompt = (
+                "Two analysts reviewed the same stock. "
+                "One is a contrarian risk analyst and the other is a momentum catalyst analyst. "
+                "Produce exactly 3 bullet points:\n"
+                "- Where do both analysts AGREE?\n"
+                "- Where do they DISAGREE and why does that disagreement matter?\n"
+                "- COMBINED VERDICT: ENTER NOW / ACCUMULATE GRADUALLY / WAIT FOR BETTER ENTRY.\n"
+                "Be specific. Reference the actual risk and catalyst identified."
+            )
+            user_prompt = (
+                f"Two analysts reviewed {stock_name}:\n\n"
+                f"RISK ANALYST (Anthropic):\n{anthropic_rationale}\n\n"
+                f"CATALYST ANALYST (OpenAI):\n{openai_rationale}\n\n"
+                "In 3 bullet points:\n"
+                "- Where do both analysts AGREE?\n"
+                "- Where do they DISAGREE and why does the disagreement matter?\n"
+                "- COMBINED VERDICT: ENTER NOW / ACCUMULATE GRADUALLY / WAIT FOR BETTER ENTRY?\n"
+                "Be specific. Reference the actual risk and catalyst identified."
+            )
+            response = client.messages.create(
+                model=self.config.llm_reasoning_model,
+                max_tokens=300,
+                temperature=0.2,
+                system=[{"type": "text", "text": system_prompt}],
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+            return (response.content[0].text or "").strip() or None
+        except Exception:
+            return None
 
     def monitoring_rationale(
         self, action_row: dict[str, Any], thesis: dict[str, Any], drawdown: dict[str, Any]
