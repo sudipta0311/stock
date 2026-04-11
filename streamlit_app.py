@@ -1171,6 +1171,14 @@ with tabs[2]:
             else:
                 for item in o_data["recommendations"]:
                     render_recommendation_card(item, provider="openai")
+        synthesis_map: dict[str, str] = comp.get("synthesis", {})
+        if synthesis_map:
+            st.markdown("---")
+            st.markdown("#### Analyst Synthesis")
+            st.caption("Contrarian risk view (Anthropic) vs. momentum catalyst view (OpenAI) — synthesised by Claude Sonnet.")
+            for symbol, synthesis_text in synthesis_map.items():
+                with st.expander(f"Synthesis — {symbol}", expanded=True):
+                    st.markdown(synthesis_text)
         if st.button("Clear comparison view"):
             st.session_state.pop("comparison_result", None)
             st.rerun()

@@ -154,6 +154,29 @@ class PlatformEngine:
                     "model_info": model_info,
                     "error": str(exc),
                 }
+
+        # Build per-stock synthesis when both providers returned recommendations.
+        a_recs = results.get("anthropic", {}).get("recommendations", [])
+        o_recs = results.get("openai", {}).get("recommendations", [])
+        synthesis_map: dict[str, str] = {}
+        if a_recs and o_recs:
+            a_by_symbol = {r["symbol"]: r for r in a_recs}
+            o_by_symbol = {r["symbol"]: r for r in o_recs}
+            synth_llm = PlatformLLM(self.config, provider="anthropic")
+            for symbol, a_rec in a_by_symbol.items():
+                o_rec = o_by_symbol.get(symbol)
+                if not o_rec:
+                    continue
+                a_rationale = a_rec.get("rationale", "")
+                o_rationale = o_rec.get("rationale", "")
+                synthesis = synth_llm.synthesise_comparison(
+                    stock_name=f"{a_rec.get('company_name', symbol)} ({symbol})",
+                    anthropic_rationale=a_rationale,
+                    openai_rationale=o_rationale,
+                )
+                if synthesis:
+                    synthesis_map[symbol] = synthesis
+        results["synthesis"] = synthesis_map
         return results
 
     def run_monitoring(
