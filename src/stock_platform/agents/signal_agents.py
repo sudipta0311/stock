@@ -14,6 +14,8 @@ class SignalAgents:
 
     def collect_geopolitical_signals(self, state: dict[str, Any]) -> dict[str, Any]:
         macro_thesis = state.get("macro_thesis") or self.repo.get_state("user_preferences", {}).get("macro_thesis", "")
+        raw_geo = self.provider.get_geopolitical_signals(macro_thesis)
+        tariff_signals = self.provider.get_tariff_signals()
         rows = [
             SignalRecord(
                 family="geo",
@@ -27,7 +29,7 @@ class SignalAgents:
                 signal_key=row.get("signal_key"),
                 payload=row.get("payload", {}),
             )
-            for row in self.provider.get_geopolitical_signals(macro_thesis)
+            for row in raw_geo + tariff_signals
         ]
         self.repo.replace_signals("geo", rows)
         return {"geo_signals": [asdict(row) for row in rows]}

@@ -730,8 +730,9 @@ def render_recommendation_card(item: dict[str, Any], provider: str = "") -> None
     why_for_portfolio = str(payload.get("why_for_portfolio", ""))
     validation_reasoning = str(payload.get("validation_reasoning", ""))
     overlap = payload.get("overlap_pct", 0)
-    allocation = payload.get("allocation_pct", 0)
-    net_return = payload.get("net_of_tax_return_projection", 0)
+    initial_pct = payload.get("initial_tranche_pct", payload.get("allocation_pct", 0))
+    target_pct = payload.get("target_pct", 0)
+    net_return = payload.get("net_of_tax_return_pct", payload.get("net_of_tax_return_projection", 0))
 
     provider_label = ""
     if provider == "anthropic":
@@ -753,9 +754,14 @@ def render_recommendation_card(item: dict[str, Any], provider: str = "") -> None
         if rationale:
             st.write(rationale)
 
+        sizing_label = (
+            f"Deploy now: {initial_pct}% | Target: {target_pct}% over 3 months"
+            if target_pct
+            else f"Allocation {initial_pct}%"
+        )
         summary_bits = [
             f"Overlap {overlap}%",
-            f"Allocation {allocation}%",
+            sizing_label,
             f"Confidence {confidence_band}",
             f"Net Return {net_return}%",
         ]
@@ -1254,8 +1260,20 @@ with tabs[3]:
         "Mutual fund & ETF holdings are managed by fund managers — they are excluded."
     )
 
-    direct_holdings = [r for r in portfolio["raw_holdings"] if r["holding_type"] == "direct_equity"]
+    _all_raw = portfolio.get("raw_holdings", [])
+    direct_holdings = [r for r in _all_raw if r.get("holding_type") == "direct_equity"]
     watchlist = portfolio.get("watchlist", [])
+
+    # DEBUG — confirms what the DB actually contains; remove after verifying fix.
+    with st.expander("Debug: raw_holdings DB state", expanded=False):
+        _holding_counts = {}
+        for _r in _all_raw:
+            _t = _r.get("holding_type", "unknown")
+            _holding_counts[_t] = _holding_counts.get(_t, 0) + 1
+        st.write(f"Total raw_holdings rows: {len(_all_raw)}")
+        st.write(f"Breakdown by holding_type: {_holding_counts}")
+        if direct_holdings:
+            st.write("Direct equity symbols found:", [r.get("symbol") or r.get("instrument_name") for r in direct_holdings])
 
     scope_cols = st.columns([1, 1])
     with scope_cols[0]:
