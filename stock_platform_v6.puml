@@ -1,5 +1,5 @@
 @startuml
-title EA View - Multi-Agent Stock Recommendation & Monitoring Platform (v6.0 - Tiered LLM Architecture)
+title EA View - Multi-Agent Stock Recommendation & Monitoring Platform (v7.0 - Weighted P/E Quant + JSON Monitoring)
 
 skinparam backgroundColor white
 skinparam shadowing false
@@ -34,8 +34,8 @@ note over LLMFAST, LLMSMART
   LLM Routing Policy:
   ─────────────────────────────────────
   Haiku 4.5 (Fast Tier) — high-volume, short-output tasks
-    • buy_rationale per recommendation (2-3 sentences)
-    • monitoring_rationale per action (1-2 sentences)
+    • buy_rationale per recommendation (2-3 sentences, free text)
+    • monitoring_rationale per action → strict JSON {action, severity, rationale}
     • System prompts are cached: ~90% input token savings on repeated calls
   Sonnet 4.6 (Reasoning Tier) — low-volume, complex reasoning
     • industry_reasoning — multi-factor sector prioritization
@@ -670,13 +670,32 @@ end
 
 group 24. Monitoring Trigger
 User -> UI : Start monitoring
-UI -> ORCH : Monitor portfolio
-ORCH -> SIGREF : Refresh signal intelligence first
-SIGREF -> DB : Trigger signal pipeline re-run\n(geo / policy / flow / contrarian)
-DB --> SIGREF : Confirmed
-SIGREF --> ORCH : Signals refreshed before monitoring begins
-ORCH -> DB : Load portfolio + latest signals
-DB --> ORCH : Full context
+
+note over UI
+  MANDATORY OVERLAP GATE — enforced before monitoring runs.
+  UI checks overlap_scores table for rows with
+  updated_at within the last 35 days.
+  If none found → block run with warning:
+  "Portfolio context missing. Please upload
+   CAMS statement first."
+  st.stop() prevents button from rendering.
+end note
+
+alt Fresh overlap scores exist (updated_at < 35 days ago)
+    UI -> ORCH : Monitor portfolio
+    ORCH -> SIGREF : Refresh signal intelligence first
+    SIGREF -> DB : Trigger signal pipeline re-run\n(geo / policy / flow / contrarian)
+    DB --> SIGREF : Confirmed
+    SIGREF --> ORCH : Signals refreshed before monitoring begins
+    ORCH -> DB : Load portfolio + latest signals
+    DB --> ORCH : Full context
+else No fresh overlap scores
+    UI --> User : "Portfolio context missing.\nPlease upload CAMS statement first."
+    note over UI
+      st.stop() — monitoring button never rendered.
+      User must complete Flow 1 ingestion first.
+    end note
+end
 end
 
 group 25. Industry Monitoring [SIGNAL AWARE]
@@ -704,7 +723,29 @@ end
 group 27. Portfolio Quant Re-Scoring
 loop For each portfolio stock
     ORCH -> QMON : Recalculate quality moat score
-    QMON --> ORCH : Updated score
+    note right of QMON
+      Overall quant score = quality (80%) + valuation (20%):
+      ─────────────────────────────────────────────────
+      ROCE 5yr component         × 0.35
+      FCF positive years         × 0.25
+      Revenue consistency        × 0.20
+      P/E score (sub-model)      × 0.20
+      ─────────────────────────────────────────────────
+      P/E score — weighted relative comparison (NOT absolute threshold):
+        40%: stock trailing P/E vs own 5yr avg P/E
+             clamp(1 - (pe_trailing - pe_5yr_avg) / pe_5yr_avg, 0, 1)
+             trading below own history = good
+        35%: stock trailing P/E vs sector peer P/E
+             clamp(1 - (pe_trailing - sector_pe) / sector_pe, 0, 1)
+             discount to peers = good
+        25%: forward P/E vs trailing P/E
+             clamp(2 - pe_forward / pe_trailing, 0, 1)
+             forward < trailing = earnings growth expected = good
+      ─────────────────────────────────────────────────
+      PE fields per stock: pe_trailing, pe_5yr_avg,
+      sector_pe, pe_forward (from get_financials).
+    end note
+    QMON --> ORCH : Updated quant score (quality + P/E blend)
 end
 end
 
@@ -788,7 +829,7 @@ loop For each portfolio stock
     DEC --> ORCH : BUY MORE / HOLD / TRIM /\nSELL / REPLACE + rationale
 end
 ORCH --> UI : Consolidated actions
-UI --> User : Show decisions with full rationale
+UI --> User : Show decisions table with columns:\nsymbol | action | severity | overlap_pct | rationale\n(overlap_pct joined from overlap_scores —\nimmediately shows why a stock is flagged,\ne.g. HDFCBANK ~3.1% triggers reject logic)
 end
 
 group 31. Behavioural Guard Check
@@ -816,12 +857,26 @@ group 32. Monitoring Rationale + Replace Feedback Loop [LLM:Haiku + Cached]
 loop For each action
     ORCH -> LLMFAST : monitoring_rationale(\n  action_row, thesis, drawdown\n)\n[system prompt cached]
     note right of LLMFAST
-      Haiku generates a 1-2 sentence action rationale.
-      Same system prompt cached across all 50+ holding calls.
-      Temperature 0.2, max_tokens 180.
-      Fallback: deterministic template.
+      Haiku returns STRICT JSON — not free text:
+      {
+        "action":   "HOLD"|"BUY MORE"|"TRIM"|"SELL"|"REPLACE",
+        "severity": "LOW"|"MEDIUM"|"HIGH"|"CRITICAL",
+        "rationale": "1-2 sentence explanation"
+      }
+
+      Why JSON: free-text rationale starting with a directive
+      word (e.g. "REJECT" or "BUY MORE") would pollute the
+      action field if parsed naively. Strict JSON eliminates
+      the parsing ambiguity entirely.
+
+      Parser validates action + severity against allowed enums.
+      Falls back to deterministic decide_actions() values if
+      JSON parse fails — no action row is ever dropped.
+
+      System prompt cached across all 50+ calls per session.
+      Temperature 0.2, max_tokens 200.
     end note
-    LLMFAST --> ORCH : Action rationale string
+    LLMFAST --> ORCH : dict {action, severity, rationale}\nor None (fallback to deterministic)
 end
 
 alt Any stock flagged SELL or REPLACE
