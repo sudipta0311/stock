@@ -201,6 +201,13 @@ st.markdown(
         color: #f8fcfa !important;
         -webkit-text-fill-color: #f8fcfa !important;
     }
+    .stButton > button [data-testid="stMarkdownContainer"] p,
+    div[data-testid="stFormSubmitButton"] > button [data-testid="stMarkdownContainer"] p,
+    div[data-testid="stDownloadButton"] > button [data-testid="stMarkdownContainer"] p {
+        color: #ffffff !important;
+        -webkit-text-fill-color: #ffffff !important;
+        opacity: 1 !important;
+    }
     .stButton > button:hover,
     div[data-testid="stFormSubmitButton"] > button:hover,
     div[data-testid="stDownloadButton"] > button:hover {
