@@ -17,6 +17,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+from stock_platform.config import AppConfig
 from stock_platform.services.engine import PlatformEngine
 
 
@@ -229,9 +230,26 @@ st.markdown(
 )
 
 
+def _auth_configured() -> bool:
+    """Return True only when Google OAuth secrets are present."""
+    try:
+        return bool(st.secrets.get("auth", {}).get("google"))
+    except Exception:
+        return False
+
+
 @st.cache_resource
-def get_engine() -> PlatformEngine:
-    return PlatformEngine()
+def get_engine(user_key: str = "local") -> PlatformEngine:
+    """Return a PlatformEngine scoped to this user.
+
+    user_key is the first 16 chars of sha256(email) for authenticated users,
+    or 'local' for unauthenticated / single-user mode.
+    """
+    if user_key == "local":
+        return PlatformEngine()
+    users_dir = ROOT / "data" / "users"
+    users_dir.mkdir(parents=True, exist_ok=True)
+    return PlatformEngine(config=AppConfig(db_path=users_dir / f"{user_key}.db"))
 
 
 def push_notice(message: str, level: str = "info") -> None:
@@ -293,10 +311,14 @@ def run_buy_workflow(
     if hasattr(st, "toast"):
         st.toast("Recommendation run in progress...", icon="⏳")
     with st.status(f"Generating recommendations with {provider_choice}...", expanded=True) as status:
-        engine.run_buy_analysis(buy_request, llm_provider=llm_provider)
-        status.write("Recommendation cards are ready to review.")
-        status.update(label="Recommendations ready", state="complete", expanded=False)
-    return None
+        result = engine.run_buy_analysis(buy_request, llm_provider=llm_provider)
+        run_summary = result.get("run_summary", {}) if result else {}
+        if run_summary.get("blocked_reason"):
+            status.update(label="Market signals too weak — no recommendations", state="error", expanded=False)
+        else:
+            status.write("Recommendation cards are ready to review.")
+            status.update(label="Recommendations ready", state="complete", expanded=False)
+    return {"run_summary": run_summary} if run_summary.get("blocked_reason") else None
 
 
 def _df(rows: list[dict[str, Any]], columns: list[str]) -> pd.DataFrame:
@@ -502,7 +524,36 @@ def build_render_checks(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-engine = get_engine()
+# ── Auth gate ────────────────────────────────────────────────────────────────
+_use_auth = _auth_configured()
+if _use_auth:
+    if not st.user.is_logged_in:
+        st.markdown(
+            """
+            <div class="hero-shell" style="text-align:center;padding:2.5rem 1.5rem;">
+                <h1 class="hero-title">Portfolio Assistant</h1>
+                <p class="hero-copy" style="margin-top:0.5rem;">
+                    Sign in with your Google account to access your personal portfolio,
+                    buy ideas and stock monitoring.
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        _, mid, _ = st.columns([1, 2, 1])
+        with mid:
+            if st.button("Sign in with Google", use_container_width=True, type="primary"):
+                st.login("google")
+        st.stop()
+    _user_email: str = st.user.email
+    _user_display: str = getattr(st.user, "name", None) or _user_email
+    _user_key = hashlib.sha256(_user_email.encode()).hexdigest()[:16]
+else:
+    _user_email = "local"
+    _user_display = "Local"
+    _user_key = "local"
+
+engine = get_engine(_user_key)
 render_pending_notice()
 snapshot = engine.get_dashboard_snapshot()
 portfolio = snapshot["portfolio"]
@@ -533,21 +584,32 @@ if "monitoring_llm_provider" not in st.session_state:
         "anthropic"
     )
 
-st.markdown(
-    f"""
-    <div class="hero-shell">
-        <h1 class="hero-title">Your Portfolio Assistant</h1>
-        <p class="hero-copy">Upload your statement · Get buy ideas · Monitor direct stocks &nbsp;·&nbsp; LLM: {_html.escape(llm_display)}</p>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+_hero_col, _logout_col = st.columns([5, 1])
+with _hero_col:
+    st.markdown(
+        f"""
+        <div class="hero-shell">
+            <h1 class="hero-title">Portfolio Assistant</h1>
+            <p class="hero-copy">
+                {_html.escape(_user_display)} &nbsp;·&nbsp;
+                Upload statement · Buy ideas · Monitor stocks &nbsp;·&nbsp;
+                LLM: {_html.escape(llm_display)}
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+with _logout_col:
+    if _use_auth:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("Sign out", use_container_width=True):
+            st.logout()
 
 tabs = st.tabs(["Overview", "Portfolio", "Buy Ideas", "Monitoring", "Signals"])
 
 with tabs[0]:
     st.markdown('<span class="section-chip">Quick Snapshot</span>', unsafe_allow_html=True)
-    st.info("Start with **Portfolio** tab to upload your statement or seed demo data. Then go to **Buy Ideas** and **Monitoring**.")
+    st.info("Upload your statement in the **Portfolio** tab — your data is saved for your account. Then go to **Buy Ideas** and **Monitoring**.")
     top_cols = st.columns([1.15, 0.85])
     with top_cols[0]:
         st.subheader("Portfolio Exposure")
@@ -584,13 +646,6 @@ with tabs[0]:
 with tabs[1]:
     st.markdown('<span class="section-chip">Upload And Ingest</span>', unsafe_allow_html=True)
     st.subheader("Portfolio")
-    if st.button("Seed Demo Portfolio", use_container_width=True):
-        try:
-            engine.seed_demo_data()
-            push_notice("Sample portfolio loaded successfully.", "success")
-            st.rerun()
-        except ModuleNotFoundError as exc:
-            st.error(f"Dependency missing: {exc}. Install project dependencies first.")
     st.caption("Upload JSON, CSV, or an encrypted NSDL / CAS PDF. PDF uploads start ingestion automatically after parsing.")
 
     pdf_password = st.text_input(
@@ -737,10 +792,17 @@ with tabs[2]:
                 comp = run_buy_workflow(engine, buy_request, provider_choice=provider_choice)
                 if provider_choice == "Compare Both":
                     st.session_state["comparison_result"] = comp
+                    st.session_state.pop("buy_blocked_reason", None)
                     push_notice("Recommendation comparison complete.", "success")
                 else:
                     st.session_state.pop("comparison_result", None)
-                    push_notice("Recommendation run complete.", "success")
+                    blocked = (comp or {}).get("run_summary", {}).get("blocked_reason", "")
+                    if blocked:
+                        st.session_state["buy_blocked_reason"] = blocked
+                        push_notice("Market signals too weak — no recommendations generated.", "warning")
+                    else:
+                        st.session_state.pop("buy_blocked_reason", None)
+                        push_notice("Recommendation run complete.", "success")
                 st.rerun()
             except Exception as exc:
                 st.error(str(exc))
@@ -773,8 +835,10 @@ with tabs[2]:
             st.session_state.pop("comparison_result", None)
             st.rerun()
     else:
-        st.subheader("Latest Recommendation Run")
-        if recommendations:
+        _blocked = st.session_state.get("buy_blocked_reason", "")
+        if _blocked:
+            st.warning(f"**No recommendations — market signals too weak.**\n\n{_blocked}")
+        elif recommendations:
             for item in recommendations:
                 render_recommendation_card(item)
         else:
