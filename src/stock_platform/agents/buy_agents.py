@@ -489,14 +489,11 @@ class BuyAgents:
     def score_quality(self, state: dict[str, Any]) -> dict[str, Any]:
         unified = {row["sector"]: row for row in self.repo.list_signals("unified")}
         flow = self.repo.list_signals("flow")
-        accumulation_bonus = 0.05 if flow and flow[0]["payload"].get("label") == "ACCUMULATION" else 0.0
+        accumulation_bonus = 0.05 if any(float(row.get("score", 0.0)) >= 0.65 for row in flow) else 0.0
         scored = []
         for candidate in state["candidates"]:
-            demo_facts = self.provider.get_financials(candidate["symbol"])
-            live_facts = fetch_financial_data(candidate["symbol"])
-
-            # compute_quality_score uses 5 live-data rules; falls back to demo fields.
-            base_score = compute_quality_score(candidate["symbol"], live_facts, demo_facts)
+            live_facts = self.provider.get_financials(candidate["symbol"])
+            base_score = compute_quality_score(candidate["symbol"], live_facts, {})
 
             # Geo signal bonus — applied on top of the computed base (small additive).
             geo_bonus = 0.04 if unified.get(candidate["sector"], {}).get("conviction") in {"BUY", "STRONG_BUY"} else 0.0
@@ -506,7 +503,7 @@ class BuyAgents:
             scored.append(candidate | {
                 "quality_score": round(base_score, 3),
                 "selection_score": round(selection_score, 3),
-                "financials": demo_facts,
+                "financials": live_facts,
                 "live_financials": live_facts,
             })
         scored.sort(key=lambda row: row.get("selection_score", row["quality_score"]), reverse=True)
@@ -520,13 +517,13 @@ class BuyAgents:
         filtered = []
         for candidate in state["scored_candidates"]:
             risk = self.provider.get_risk_metrics(candidate["symbol"])
-            if risk["avg_daily_value_cr"] < 5:
+            if risk.get("avg_daily_value_cr") is not None and risk["avg_daily_value_cr"] < 5:
                 continue
-            if risk["beta"] > 2.0:
+            if risk.get("beta") is not None and risk["beta"] > 2.0:
                 continue
-            if risk["promoter_pledge_pct"] > 50:
+            if risk.get("promoter_pledge_pct") is not None and risk["promoter_pledge_pct"] > 50:
                 continue
-            if risk["sebi_flag"]:
+            if risk.get("sebi_flag"):
                 continue
             if sector_weights.get(candidate["sector"], 0.0) > self.config.max_sector_pct:
                 continue
@@ -720,8 +717,8 @@ class BuyAgents:
                 f"{item['entry_signal'].lower()} timing."
             )
             price_ctx = item["price_context"]
-            current_price = price_ctx["price"]
-            analyst_target = price_ctx.get("analyst_target") or current_price * 1.25
+            current_price = price_ctx.get("price")
+            analyst_target = price_ctx.get("analyst_target") or item.get("live_financials", {}).get("targetMeanPrice")
             net_return_pct = compute_net_return(current_price, analyst_target, holding_months=24)
 
             payload = {

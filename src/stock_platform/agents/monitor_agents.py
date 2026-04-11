@@ -106,6 +106,50 @@ class MonitoringAgents:
         for holding in state["portfolio_context"]["monitor_universe"]:
             financials = self.provider.get_financials(holding["symbol"])
 
+            pe_t = financials.get("pe_trailing")
+            pe_5y = financials.get("pe_5yr_avg")
+            pe_sec = financials.get("sector_pe")
+            pe_fwd = financials.get("pe_forward")
+
+            pe_components: list[tuple[float, float]] = []
+            if pe_t and pe_5y:
+                pe_components.append((0.40, max(0.0, min(1.0, 1.0 - (pe_t - pe_5y) / pe_5y))))
+            if pe_t and pe_sec:
+                pe_components.append((0.35, max(0.0, min(1.0, 1.0 - (pe_t - pe_sec) / pe_sec))))
+            if pe_t and pe_fwd:
+                pe_components.append((0.25, max(0.0, min(1.0, 2.0 - pe_fwd / pe_t))))
+            pe_weight = sum(weight for weight, _ in pe_components)
+            pe_score = sum(weight * score for weight, score in pe_components) / pe_weight if pe_weight > 0 else 0.5
+
+            quality_components: list[tuple[float, float]] = []
+            roce = financials.get("roce_ttm") or financials.get("returnOnCapitalEmployed")
+            if roce is not None:
+                quality_components.append((0.35, min(roce / 0.20, 1.0)))
+
+            fcf_positive_years = financials.get("fcf_positive_years")
+            free_cashflow = financials.get("freeCashflow") or financials.get("free_cashflow")
+            if isinstance(fcf_positive_years, int):
+                quality_components.append((0.25, min(fcf_positive_years / 5, 1.0)))
+            elif free_cashflow is not None:
+                quality_components.append((0.25, 1.0 if free_cashflow > 0 else 0.0))
+
+            revenue_growth = financials.get("revenueGrowth") or financials.get("revenue_growth")
+            if revenue_growth is not None:
+                quality_components.append((0.20, min(max(revenue_growth, 0.0) / 0.15, 1.0)))
+
+            quality_components.append((0.20, pe_score))
+            total_weight = sum(weight for weight, _ in quality_components)
+            quant = round(
+                sum(weight * score for weight, score in quality_components) / total_weight if total_weight > 0 else 0.5,
+                3,
+            )
+            scores.append({"symbol": holding["symbol"], "quant_score": quant})
+        return {"quant_scores": scores}
+
+        scores = []
+        for holding in state["portfolio_context"]["monitor_universe"]:
+            financials = self.provider.get_financials(holding["symbol"])
+
             # P/E score: weighted combination of three relative comparisons.
             # NOT an absolute threshold — each sub-component is scored 0–1.
             pe_t = financials["pe_trailing"]

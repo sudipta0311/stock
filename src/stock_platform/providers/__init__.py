@@ -1,6 +1,6 @@
-"""Provider layer for demo and future live integrations."""
+"""Provider layer for live and sample data integrations."""
 
 from .demo import DemoDataProvider
+from .live import LiveMarketDataProvider
 
-__all__ = ["DemoDataProvider"]
-
+__all__ = ["DemoDataProvider", "LiveMarketDataProvider"]

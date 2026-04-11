@@ -952,7 +952,7 @@ with tabs[0]:
         if len(exposure_frame):
             st.dataframe(exposure_frame, use_container_width=True, hide_index=True)
         else:
-            render_empty_panel("No normalized exposure yet. Seed demo data or upload a statement to populate this view.")
+            render_empty_panel("No normalized exposure yet. Load the sample portfolio or upload a statement to populate this view.")
     with top_cols[1]:
         st.subheader("Sector Gaps")
         gap_frame = _df(portfolio["identified_gaps"], ["sector", "underweight_pct", "conviction", "score", "reason"])
@@ -1223,7 +1223,7 @@ with tabs[3]:
         )
 
     _overlap_rows = snapshot["portfolio"].get("overlap_scores", [])
-    _cutoff = (datetime.utcnow() - timedelta(days=35)).isoformat()
+    _cutoff = (datetime.now() - timedelta(days=35)).isoformat()
     _fresh_overlap = [r for r in _overlap_rows if r.get("updated_at", "") > _cutoff]
     if not _fresh_overlap:
         st.warning(
@@ -1271,17 +1271,6 @@ with tabs[3]:
     _all_raw = portfolio.get("raw_holdings", [])
     direct_holdings = [r for r in _all_raw if r.get("holding_type") == "direct_equity"]
     watchlist = portfolio.get("watchlist", [])
-
-    # DEBUG — confirms what the DB actually contains; remove after verifying fix.
-    with st.expander("Debug: raw_holdings DB state", expanded=False):
-        _holding_counts = {}
-        for _r in _all_raw:
-            _t = _r.get("holding_type", "unknown")
-            _holding_counts[_t] = _holding_counts.get(_t, 0) + 1
-        st.write(f"Total raw_holdings rows: {len(_all_raw)}")
-        st.write(f"Breakdown by holding_type: {_holding_counts}")
-        if direct_holdings:
-            st.write("Direct equity symbols found:", [r.get("symbol") or r.get("instrument_name") for r in direct_holdings])
 
     scope_cols = st.columns([1, 1])
     with scope_cols[0]:
@@ -1407,5 +1396,5 @@ with tabs[4]:
     if len(signal_frame):
         st.dataframe(signal_frame, use_container_width=True, hide_index=True)
     else:
-        render_empty_panel("No signals available yet. Refresh signals or seed demo data.")
+        render_empty_panel("No signals available yet. Refresh signals or load the sample portfolio.")
 
