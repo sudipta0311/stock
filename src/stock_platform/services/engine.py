@@ -161,6 +161,7 @@ class PlatformEngine:
                 results[llm_provider] = {
                     "enabled": True,
                     "recommendations": result.get("recommendations", []),
+                    "skipped_stocks": result.get("skipped_stocks", []),
                     "run_summary": result.get("run_summary", {}),
                     "model_info": model_info,
                     "error": None,
@@ -169,10 +170,18 @@ class PlatformEngine:
                 results[llm_provider] = {
                     "enabled": True,
                     "recommendations": [],
+                    "skipped_stocks": [],
                     "run_summary": {},
                     "model_info": model_info,
                     "error": str(exc),
                 }
+
+        # Merge skipped stocks from both providers (deduplicate by symbol).
+        all_skipped: dict[str, dict] = {}
+        for provider_key in ("anthropic", "openai"):
+            for sk in results.get(provider_key, {}).get("skipped_stocks", []):
+                all_skipped.setdefault(sk["symbol"], sk)
+        results["skipped_stocks"] = list(all_skipped.values())
 
         # Build per-stock synthesis when both providers returned recommendations.
         a_recs = results.get("anthropic", {}).get("recommendations", [])
