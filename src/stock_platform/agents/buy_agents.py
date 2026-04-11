@@ -10,6 +10,67 @@ from stock_platform.models import RecommendationRecord
 from stock_platform.utils.rules import clamp, parse_iso_datetime
 
 
+def compute_position_size(
+    entry_signal: str,
+    conviction_score: float,
+    direct_equity_corpus: float,
+) -> dict[str, Any]:
+    """
+    Returns initial_tranche_pct and target_pct separately.
+    Initial tranche is what to deploy NOW.
+    Target is the full intended position over 2-3 months.
+    """
+    # Map timing signals from assess_timing to conviction tiers
+    signal_map = {
+        "STRONG ENTER": "STRONG_BUY",
+        "ACCUMULATE":   "BUY",
+        "SMALL INITIAL": "ACCUMULATE",
+        "WAIT":          "WAIT",
+    }
+    conviction_key = signal_map.get(entry_signal, "ACCUMULATE")
+
+    sizing_rules: dict[str, dict[str, float]] = {
+        "STRONG_BUY": {"initial": 0.10, "target": 0.28},
+        "BUY":        {"initial": 0.08, "target": 0.22},
+        "ACCUMULATE": {"initial": 0.06, "target": 0.18},
+        "WAIT":       {"initial": 0.00, "target": 0.10},
+    }
+    rule = sizing_rules.get(conviction_key, {"initial": 0.05, "target": 0.10})
+
+    conviction_multiplier = 0.85 + (conviction_score * 0.30)
+
+    initial_pct = round(rule["initial"] * conviction_multiplier * 100, 1)
+    target_pct  = round(rule["target"]  * conviction_multiplier * 100, 1)
+
+    initial_amount = round(direct_equity_corpus * initial_pct / 100, 0)
+    target_amount  = round(direct_equity_corpus * target_pct  / 100, 0)
+
+    hard_cap_pct = 30.0
+    initial_pct = min(initial_pct, hard_cap_pct)
+    target_pct  = min(target_pct,  hard_cap_pct)
+
+    return {
+        "initial_tranche_pct": initial_pct,
+        "target_pct": target_pct,
+        "initial_amount_inr": initial_amount,
+        "target_amount_inr": target_amount,
+        "rule_applied": entry_signal,
+    }
+
+
+def compute_net_return(
+    current_price: float,
+    analyst_target: float,
+    holding_months: int = 24,
+) -> float | None:
+    """Stock-specific net return (%) after LTCG/STCG tax, based on analyst target price."""
+    if not current_price or not analyst_target or current_price == 0:
+        return None
+    gross_return = (analyst_target - current_price) / current_price
+    tax_rate = 0.125 if holding_months >= 12 else 0.20
+    return round(gross_return * (1 - tax_rate) * 100, 2)
+
+
 class BuyAgents:
     def __init__(self, repo: Any, provider: Any, config: AppConfig, llm: Any) -> None:
         self.repo = repo
@@ -96,7 +157,7 @@ class BuyAgents:
         for candidate in state["candidates"]:
             facts = self.provider.get_financials(candidate["symbol"])
             geo_bonus = 0.05 if unified.get(candidate["sector"], {}).get("conviction") in {"BUY", "STRONG_BUY"} else 0.0
-            raw = (
+            base_quality = (
                 min(facts["roce_5y"] / 20, 1.0) * 0.25
                 + min(facts["fcf_positive_years"] / 5, 1.0) * 0.25
                 + min(facts["revenue_consistency"] / 10, 1.0) * 0.20
@@ -105,7 +166,12 @@ class BuyAgents:
                 + geo_bonus
                 + accumulation_bonus
             )
-            scored.append(candidate | {"quality_score": round(min(raw, 1.0), 3), "financials": facts})
+            # Relative P/E: ratio of 5-year historical average to current trailing P/E.
+            # > 1.0 means stock is cheaper than its own history (bonus); < 1.0 means expensive (penalty).
+            pe_trailing = facts["pe_trailing"] or 1.0
+            relative_pe_score = clamp(facts["pe_5yr_avg"] / pe_trailing, 0.0, 2.5)
+            quality_score = clamp(base_quality * 0.7 + relative_pe_score * 0.3, 0.0, 1.0)
+            scored.append(candidate | {"quality_score": round(quality_score, 3), "financials": facts})
         scored.sort(key=lambda row: row["quality_score"], reverse=True)
         return {"scored_candidates": scored}
 
@@ -219,24 +285,17 @@ class BuyAgents:
 
     def size_positions(self, state: dict[str, Any]) -> dict[str, Any]:
         prefs = state["portfolio_context"]["user_preferences"]
-        corpus = float(prefs.get("direct_equity_corpus", 0) or 0)
-        surplus = float(prefs.get("investable_surplus", 0) or 0)
-        deployable = max(corpus, surplus) or 100.0
+        corpus = float(prefs.get("direct_equity_corpus", 0) or 0) or 100.0
         allocations = []
-        base_map = {
-            "STRONG ENTER": 0.28,
-            "ACCUMULATE": 0.22,
-            "SMALL INITIAL": 0.12,
-            "WAIT": 0.06,
-            "DO NOT ENTER": 0.0,
-        }
         for item in state["timing_assessments"]:
-            pct = min(base_map[item["entry_signal"]], self.config.max_single_stock_pct / 100)
+            sizing = compute_position_size(item["entry_signal"], item["quality_score"], corpus)
             allocations.append(
                 item
+                | sizing
                 | {
-                    "allocation_pct": round(pct * 100, 1),
-                    "allocation_amount": round(deployable * pct, 2),
+                    # Keep legacy key for backward-compat with any stored recommendation reads.
+                    "allocation_pct": sizing["initial_tranche_pct"],
+                    "allocation_amount": sizing["initial_amount_inr"],
                     "tranches": 3 if item["entry_signal"] in {"STRONG ENTER", "ACCUMULATE"} else 2,
                 }
             )
@@ -321,6 +380,11 @@ class BuyAgents:
                 f"{item['company_name']} adds differentiated {item['sector']} exposure with "
                 f"{item['entry_signal'].lower()} timing."
             )
+            price_ctx = item["price_context"]
+            current_price = price_ctx["price"]
+            analyst_target = price_ctx.get("analyst_target") or current_price * 1.25
+            net_return_pct = compute_net_return(current_price, analyst_target, holding_months=24)
+
             payload = {
                 "investment_thesis": f"{item['sector']} benefits from current signal stack and fills a real portfolio gap.",
                 "why_for_portfolio": item["gap_reason"],
@@ -328,10 +392,18 @@ class BuyAgents:
                 "fund_attribution": item["fund_attribution"],
                 "entry_signal": item["entry_signal"],
                 "tranche_schedule": f"{item['tranches']} tranches over 4-8 weeks",
+                # Position sizing — initial tranche (deploy now) and full target separately.
+                "initial_tranche_pct": item["initial_tranche_pct"],
+                "target_pct": item["target_pct"],
+                "initial_amount_inr": item["initial_amount_inr"],
+                "target_amount_inr": item["target_amount_inr"],
+                # Legacy key kept for backward compatibility with stored recommendations.
                 "allocation_pct": item["allocation_pct"],
                 "allocation_amount": item["allocation_amount"],
                 "quality_score": item["quality_score"],
-                "net_of_tax_return_projection": round(13 + item["quality_score"] * 8 - state["tax_assessment"]["cost_drag_pct"], 2),
+                "net_of_tax_return_pct": net_return_pct,
+                # Legacy key for backward compat.
+                "net_of_tax_return_projection": round(net_return_pct / 100, 4) if net_return_pct else None,
                 "confidence_band": confidence_band,
                 "headline": item["news"]["headline"],
                 "validation_reasoning": item.get("validation_reasoning", ""),
