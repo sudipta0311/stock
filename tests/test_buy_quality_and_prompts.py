@@ -32,7 +32,16 @@ class FakeAnthropicClient:
     class _Messages:
         def create(self, **kwargs):
             FakeAnthropicClient.last_request = kwargs
-            return types.SimpleNamespace(content=[types.SimpleNamespace(text="synthesis")])
+            # Fake response must contain "COMBINED VERDICT" — the guard in
+            # synthesise_comparison() appends a fallback when it's absent.
+            return types.SimpleNamespace(
+                content=[types.SimpleNamespace(
+                    text="• WHERE THEY AGREE: both see defence tailwinds.\n"
+                         "• WHERE THEY DISAGREE: margin timing differs.\n"
+                         "• COMBINED VERDICT: ACCUMULATE GRADUALLY."
+                )],
+                stop_reason="end_turn",
+            )
 
     def __init__(self, api_key: str) -> None:
         self.api_key = api_key
@@ -135,7 +144,7 @@ class BuyPromptTests(unittest.TestCase):
                 openai_rationale="CATALYST: export order wins.",
             )
 
-        self.assertEqual(result, "synthesis")
+        self.assertIn("COMBINED VERDICT", result or "")
         request = FakeAnthropicClient.last_request or {}
         system_text = request["system"][0]["text"]  # type: ignore[index]
         user_text = request["messages"][0]["content"]  # type: ignore[index]

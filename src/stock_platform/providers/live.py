@@ -18,6 +18,7 @@ import yfinance as yf
 from stock_platform.utils.index_config import NSE_INDEX_CSV_URLS
 from stock_platform.utils.rules import clamp
 from stock_platform.utils.screener_fetcher import get_stock_fundamentals
+from stock_platform.utils.sector_config import get_sector
 from stock_platform.utils.symbol_resolver import get_symbol_display_name, resolve_nse_symbol, resolve_symbol_base
 
 # Disk-cache directory for index constituents (7-day TTL — indices rebalance monthly).
@@ -420,13 +421,14 @@ class LiveMarketDataProvider:
             or index_row.get("company_name")
             or get_symbol_display_name(normalized)
         )
-        sector = (
+        raw_sector = (
             info.get("industry")
             or info.get("sector")
             or index_row.get("sector")
             or self.infer_sector(normalized)
             or "Unknown"
         )
+        sector = get_sector(normalized, raw_sector)
         current_price = (
             self._as_float(info.get("regularMarketPrice"))
             or self._as_float(info.get("currentPrice"))
