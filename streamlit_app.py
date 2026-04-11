@@ -600,6 +600,8 @@ def run_buy_workflow(
         else:
             status.write("Recommendation cards are ready to review.")
             status.update(label="Recommendations ready", state="complete", expanded=False)
+    # Persist skipped stocks in session state so the display section can show them.
+    st.session_state["buy_skipped_stocks"] = (result or {}).get("skipped_stocks", [])
     return {"run_summary": run_summary} if run_summary.get("blocked_reason") else None
 
 
@@ -786,6 +788,24 @@ def render_check_card(title: str, passed: bool, detail: str) -> None:
         """,
         unsafe_allow_html=True,
     )
+
+
+def _render_skipped_stocks(skipped: list[dict[str, Any]]) -> None:
+    """Show the skipped-stocks transparency panel below recommendation cards."""
+    if not skipped:
+        return
+    with st.expander(f"⚠️ {len(skipped)} stock(s) skipped — data unavailable", expanded=False):
+        st.caption(
+            "These stocks were considered but excluded because financial data "
+            "could not be validated. They will not appear in recommendations "
+            "until data is available."
+        )
+        for sk in skipped:
+            st.warning(f"**{sk['symbol']}** — {sk['status']}: {sk['reason']}")
+        st.caption(
+            "To fix: update `NSE_SYMBOL_MAP` in "
+            "`src/stock_platform/utils/symbol_resolver.py` with the correct current ticker."
+        )
 
 
 def build_render_checks(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1179,6 +1199,7 @@ with tabs[2]:
             for symbol, synthesis_text in synthesis_map.items():
                 with st.expander(f"Synthesis — {symbol}", expanded=True):
                     st.markdown(synthesis_text)
+        _render_skipped_stocks(comp.get("skipped_stocks", []))
         if st.button("Clear comparison view"):
             st.session_state.pop("comparison_result", None)
             st.rerun()
@@ -1191,6 +1212,7 @@ with tabs[2]:
                 render_recommendation_card(item)
         else:
             render_empty_panel("Run the buy workflow to populate the recommendation feed.")
+        _render_skipped_stocks(st.session_state.get("buy_skipped_stocks", []))
 
 with tabs[3]:
     render_section_header(

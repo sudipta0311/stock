@@ -9,6 +9,7 @@ from stock_platform.config import AppConfig
 from stock_platform.models import RecommendationRecord
 from stock_platform.agents.quant_model import compute_quality_score as compute_quality_score_v2
 from stock_platform.utils.rules import clamp, parse_iso_datetime
+from stock_platform.utils.stock_validator import ValidationResult, log_skipped_stock, validate_stock
 
 
 def compute_position_size(
@@ -154,9 +155,21 @@ class BuyAgents:
         unified = {row["sector"]: row for row in self.repo.list_signals("unified")}
         flow = self.repo.list_signals("flow")
         accumulation_bonus = 0.05 if any(float(row.get("score", 0.0)) >= 0.65 for row in flow) else 0.0
-        scored = []
+        validation_run_id = f"val-{uuid4().hex[:8]}"
+        scored: list[dict[str, Any]] = []
+        skipped: list[ValidationResult] = []
         for candidate in state["candidates"]:
             live_facts = self.provider.get_financials(candidate["symbol"])
+            current_price = live_facts.get("currentPrice") or live_facts.get("current_price")
+
+            # Safety gate: block unresolvable stocks before any scoring or LLM call.
+            vr = validate_stock(candidate["symbol"], live_facts, current_price)
+            if not vr.can_recommend:
+                skipped.append(vr)
+                log_skipped_stock(str(self.config.db_path), vr, validation_run_id)
+                print(f"SKIPPED {candidate['symbol']}: {vr.reason}")
+                continue
+
             base_score = compute_quality_score_v2(candidate["symbol"], live_facts)
 
             # Geo signal bonus — applied on top of the computed base (small additive).
@@ -171,7 +184,11 @@ class BuyAgents:
                 "live_financials": live_facts,
             })
         scored.sort(key=lambda row: row.get("selection_score", row["quality_score"]), reverse=True)
-        return {"scored_candidates": scored}
+        return {
+            "scored_candidates": scored,
+            "skipped_candidates": skipped,
+            "validation_run_id": validation_run_id,
+        }
 
     def filter_risk(self, state: dict[str, Any]) -> dict[str, Any]:
         sector_weights: dict[str, float] = {}
@@ -364,6 +381,7 @@ class BuyAgents:
             self.repo.save_recommendations(run_id, [])
             return {
                 "recommendations": [],
+                "skipped_stocks": [],
                 "run_summary": {
                     "run_id": run_id,
                     "recommendation_count": 0,
@@ -423,7 +441,18 @@ class BuyAgents:
                 )
             )
         self.repo.save_recommendations(run_id, recommendations)
+        skipped_candidates: list[ValidationResult] = state.get("skipped_candidates", [])
+        skipped_stocks = [
+            {
+                "symbol": vr.symbol,
+                "status": vr.status.value,
+                "resolved_symbol": vr.resolved_symbol,
+                "reason": vr.reason,
+            }
+            for vr in skipped_candidates
+        ]
         return {
             "recommendations": [asdict(record) for record in recommendations],
             "run_summary": {"run_id": run_id, "recommendation_count": len(recommendations)},
+            "skipped_stocks": skipped_stocks,
         }
