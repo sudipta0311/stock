@@ -31,7 +31,9 @@ st.set_page_config(
 st.markdown(
     """
     <style>
+    /* ── Force light mode on iOS Safari (prevents black boxes & invisible tabs) ── */
     :root {
+        color-scheme: light !important;
         --bg: #f3f4ee;
         --panel: rgba(255,255,255,0.92);
         --panel-strong: #ffffff;
@@ -49,37 +51,91 @@ st.markdown(
         --radius-lg: 20px;
         --radius-md: 16px;
     }
+    html, body {
+        color-scheme: light !important;
+        background-color: #f7f8f3 !important;
+        color: #122c24 !important;
+    }
     .stApp {
         background:
             radial-gradient(circle at 0% 0%, rgba(15,118,110,0.18), transparent 28%),
             radial-gradient(circle at 100% 0%, rgba(180,83,9,0.12), transparent 24%),
-            linear-gradient(180deg, #f7f8f3 0%, #eef2eb 100%);
-        color: var(--text);
+            linear-gradient(180deg, #f7f8f3 0%, #eef2eb 100%) !important;
+        color: var(--text) !important;
     }
+    /* Prevent Streamlit's own dark-mode theme from overriding our palette */
+    [data-theme="dark"] .stApp,
+    [data-theme="dark"] .block-container { filter: none !important; }
     .block-container {
         max-width: 900px;
         padding-top: 1rem;
         padding-bottom: 2rem;
         padding-left: 1.2rem;
         padding-right: 1.2rem;
+        background: transparent !important;
+    }
+    /* ── Tabs: explicit colors so Safari dark mode can't hide text ────────── */
+    div[data-testid="stTabs"] {
+        background: transparent !important;
     }
     div[data-testid="stTabs"] button {
         border-radius: 999px;
         padding: 0.45rem 0.9rem;
+        color: var(--text) !important;
+        background-color: transparent !important;
+        -webkit-text-fill-color: #122c24 !important;
+    }
+    div[data-testid="stTabs"] button[aria-selected="true"] {
+        color: var(--teal) !important;
+        -webkit-text-fill-color: #0f766e !important;
+        background-color: rgba(15,118,110,0.10) !important;
+        font-weight: 700;
+    }
+    div[data-testid="stTabs"] button:hover {
+        background-color: rgba(15,118,110,0.06) !important;
     }
     div[data-testid="stDataFrame"] {
         border-radius: var(--radius-md);
         overflow-x: auto;
         border: 1px solid var(--line);
         box-shadow: var(--shadow-soft);
-        background: var(--panel-strong);
+        background-color: #ffffff !important;
+        color: #122c24 !important;
     }
     div[data-testid="stForm"] {
-        background: var(--panel);
-        border: 1px solid var(--line);
+        background-color: rgba(255,255,255,0.92) !important;
+        border: 1px solid rgba(18,44,36,0.10);
         border-radius: var(--radius-lg);
         padding: 1rem 1rem 0.6rem 1rem;
         box-shadow: var(--shadow-soft);
+    }
+    /* ── Fix labels, inputs, text inside forms ────────────────────────────── */
+    div[data-testid="stForm"] label,
+    div[data-testid="stForm"] p,
+    div[data-testid="stForm"] span,
+    div[data-testid="stForm"] input,
+    div[data-testid="stForm"] select,
+    div[data-testid="stForm"] textarea {
+        color: #122c24 !important;
+        -webkit-text-fill-color: #122c24 !important;
+        background-color: transparent;
+    }
+    div[data-testid="stForm"] input,
+    div[data-testid="stForm"] select,
+    div[data-testid="stForm"] textarea {
+        background-color: #ffffff !important;
+    }
+    /* General text safeguard */
+    p, span, label, h1, h2, h3, h4, h5, h6, li, td, th {
+        color: #122c24 !important;
+        -webkit-text-fill-color: #122c24 !important;
+    }
+    /* Metric labels */
+    div[data-testid="stMetric"] label,
+    div[data-testid="stMetric"] div[data-testid="stMetricValue"],
+    div[data-testid="stMetric"] div[data-testid="stMetricDelta"] {
+        color: #122c24 !important;
+        -webkit-text-fill-color: #122c24 !important;
     }
     .hero-shell {
         background:
@@ -126,8 +182,9 @@ st.markdown(
     }
     .section-chip, .pill {
         padding: 0.28rem 0.68rem;
-        background: var(--green-soft);
-        color: var(--teal-dark);
+        background-color: rgba(15,118,110,0.10) !important;
+        color: #134e4a !important;
+        -webkit-text-fill-color: #134e4a !important;
         font-weight: 600;
     }
     .provider-badge {
@@ -136,56 +193,65 @@ st.markdown(
         margin-bottom: 0.45rem;
     }
     .provider-badge-anthropic {
-        background: var(--gold-soft);
-        color: var(--gold);
+        background-color: rgba(180,83,9,0.11) !important;
+        color: #b45309 !important;
+        -webkit-text-fill-color: #b45309 !important;
     }
     .provider-badge-openai {
-        background: rgba(16,163,127,0.12);
-        color: #0f8a6c;
+        background-color: rgba(16,163,127,0.12) !important;
+        color: #0f8a6c !important;
+        -webkit-text-fill-color: #0f8a6c !important;
     }
     .status-ok, .status-warn {
         padding: 0.18rem 0.56rem;
         font-weight: 700;
     }
     .status-ok {
-        background: rgba(22,163,74,0.12);
-        color: #166534;
+        background-color: rgba(22,163,74,0.12) !important;
+        color: #166534 !important;
+        -webkit-text-fill-color: #166534 !important;
     }
     .status-warn {
-        background: rgba(217,119,6,0.12);
-        color: #92400e;
+        background-color: rgba(217,119,6,0.12) !important;
+        color: #92400e !important;
+        -webkit-text-fill-color: #92400e !important;
     }
     .qa-card, .rec-card {
         border-radius: var(--radius-md);
         padding: 0.9rem 1rem;
+        background-color: #ffffff !important;
+        color: #122c24 !important;
     }
     .rec-card {
-        border-left: 5px solid var(--teal);
+        border-left: 5px solid #0f766e;
         margin-bottom: 0.9rem;
     }
-    .rec-card-anthropic { border-left-color: #b45309; }
-    .rec-card-openai { border-left-color: #10a37f; }
+    .rec-card-anthropic { border-left-color: #b45309 !important; }
+    .rec-card-openai { border-left-color: #10a37f !important; }
     .model-row {
         display: flex;
         gap: 0.5rem;
         flex-wrap: wrap;
-        color: var(--muted);
+        color: #627267 !important;
+        -webkit-text-fill-color: #627267 !important;
         font-size: 0.83rem;
     }
     .model-chip {
-        background: rgba(18,44,36,0.06);
+        background-color: rgba(18,44,36,0.06) !important;
         border-radius: 8px;
         padding: 0.13rem 0.45rem;
         font-family: Consolas, monospace;
         font-size: 0.78rem;
-        color: var(--text);
+        color: #122c24 !important;
+        -webkit-text-fill-color: #122c24 !important;
     }
     .empty-panel {
-        background: rgba(255,255,255,0.7);
+        background-color: rgba(255,255,255,0.85) !important;
         border: 1px dashed rgba(18,44,36,0.2);
         border-radius: var(--radius-lg);
         padding: 1.1rem;
-        color: var(--muted);
+        color: #627267 !important;
+        -webkit-text-fill-color: #627267 !important;
     }
     /* ── Mobile responsive ──────────────────────────────────────────────────── */
     @media (max-width: 640px) {
@@ -224,6 +290,43 @@ st.markdown(
         .rec-card, .qa-card { padding: 0.65rem 0.7rem; }
         .empty-panel { padding: 0.8rem; }
     }
+    /* ── Metric cards and info tiles (unstyled by default → black on iOS dark) ── */
+    .metric-card {
+        background-color: #ffffff !important;
+        border: 1px solid rgba(18,44,36,0.10);
+        border-radius: 16px;
+        padding: 0.85rem 0.95rem;
+        box-shadow: 0 8px 18px rgba(18,44,36,0.05);
+        color: #122c24 !important;
+    }
+    .metric-label {
+        font-size: 0.76rem;
+        color: #627267 !important;
+        -webkit-text-fill-color: #627267 !important;
+        margin-bottom: 0.25rem;
+        font-weight: 500;
+    }
+    .metric-value {
+        font-size: 1.3rem;
+        font-weight: 700;
+        color: #122c24 !important;
+        -webkit-text-fill-color: #122c24 !important;
+        line-height: 1.15;
+    }
+    .metric-subtle {
+        font-size: 0.78rem;
+        color: #627267 !important;
+        -webkit-text-fill-color: #627267 !important;
+        margin-top: 0.2rem;
+    }
+    .info-tile {
+        background-color: rgba(255,255,255,0.85) !important;
+        border: 1px solid rgba(18,44,36,0.08);
+        border-radius: 14px;
+        padding: 0.7rem 0.9rem;
+        color: #122c24 !important;
+    }
+    .info-tile .metric-label { margin-bottom: 0.18rem; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -393,7 +496,7 @@ def render_info_tile(title: str, value: str) -> None:
         f"""
         <div class="info-tile">
             <div class="metric-label">{_html.escape(title)}</div>
-            <div style="font-size:1rem;font-weight:700;color:#122c24;">{_html.escape(value)}</div>
+            <div style="font-size:1rem;font-weight:700;color:#122c24;-webkit-text-fill-color:#122c24;">{_html.escape(value)}</div>
         </div>
         """,
         unsafe_allow_html=True,
