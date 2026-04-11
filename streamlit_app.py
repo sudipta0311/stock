@@ -1057,15 +1057,15 @@ def build_render_checks(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
 
 # ── Auth gate ────────────────────────────────────────────────────────────────
 _use_auth = _auth_configured()
-if _use_auth:
-    if not st.user.is_logged_in:
+try:
+    if _use_auth and not st.user.is_logged_in:
         st.markdown(
             """
             <div class="hero-shell hero-shell-login">
                 <div class="hero-kicker-row" style="justify-content:center;">
                     <span class="hero-kicker">Secure access</span>
                 </div>
-                <h1 class="hero-title">Portfolio Assistant</h1>
+                <h1 class="hero-title" style="color:#ffffff;">Portfolio Assistant</h1>
                 <p class="hero-copy" style="margin:0.5rem auto 0;">
                     Sign in with your Google account to access your personal portfolio,
                     buy ideas and stock monitoring.
@@ -1079,10 +1079,17 @@ if _use_auth:
             if st.button("Sign in with Google", use_container_width=True, type="primary"):
                 st.login("google")
         st.stop()
-    _user_email: str = st.user.email
-    _user_display: str = getattr(st.user, "name", None) or _user_email
-    _user_key = hashlib.sha256(_user_email.encode()).hexdigest()[:16]
-else:
+    if _use_auth:
+        _user_email: str = st.user.email
+        _user_display: str = getattr(st.user, "name", None) or _user_email
+        _user_key = hashlib.sha256(_user_email.encode()).hexdigest()[:16]
+    else:
+        _user_email = "local"
+        _user_display = "Local"
+        _user_key = "local"
+except Exception:
+    # Auth misconfigured or Streamlit auth not ready — fall back to single-user mode
+    # so the app renders rather than showing a blank screen.
     _user_email = "local"
     _user_display = "Local"
     _user_key = "local"
