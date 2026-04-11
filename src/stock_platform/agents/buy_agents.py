@@ -9,6 +9,7 @@ from stock_platform.config import AppConfig
 from stock_platform.models import RecommendationRecord
 from stock_platform.agents.quant_model import compute_quality_score as compute_quality_score_v2
 from stock_platform.utils.rules import clamp, parse_iso_datetime
+from stock_platform.utils.sector_config import governance_risk_blocks
 from stock_platform.utils.stock_validator import ValidationResult, log_skipped_stock, validate_stock
 
 
@@ -390,18 +391,31 @@ class BuyAgents:
             }
 
         recommendations = []
+        gov_skipped: list[dict] = []   # governance-blocked stocks collected during this loop
         for item in state["allocations"]:
             if item["entry_signal"] == "DO NOT ENTER":
                 continue
-            llm_rationale = self.llm.buy_rationale(item, state["portfolio_context"])
-            rationale = llm_rationale or (
-                f"{item['company_name']} adds differentiated {item['sector']} exposure with "
-                f"{item['entry_signal'].lower()} timing."
-            )
             price_ctx = item["price_context"]
             current_price = price_ctx.get("price")
             analyst_target = price_ctx.get("analyst_target") or item.get("live_financials", {}).get("targetMeanPrice")
             net_return_pct = compute_net_return(current_price, analyst_target, holding_months=24)
+
+            # Governance risk gate: Adani Group and peers need ≥10% net return.
+            gov_blocked, gov_reason = governance_risk_blocks(item["symbol"], net_return_pct)
+            if gov_blocked:
+                print(f"GOVERNANCE FILTER: {item['symbol']} excluded — {gov_reason}")
+                gov_skipped.append({
+                    "symbol": item["symbol"],
+                    "status": "GOVERNANCE_RISK",
+                    "resolved_symbol": item["symbol"],
+                    "reason": gov_reason,
+                })
+                continue
+
+            llm_rationale = self.llm.buy_rationale(item, state["portfolio_context"])
+            if not llm_rationale:
+                print(f"LLM rationale unavailable for {item['symbol']} — proceeding without narrative")
+            rationale = llm_rationale or "[LLM analysis unavailable for this stock]"
 
             payload = {
                 "investment_thesis": f"{item['sector']} benefits from current signal stack and fills a real portfolio gap.",
@@ -441,16 +455,17 @@ class BuyAgents:
                 )
             )
         self.repo.save_recommendations(run_id, recommendations)
-        skipped_candidates: list[ValidationResult] = state.get("skipped_candidates", [])
-        skipped_stocks = [
+        # Merge validation-gate skips (ValidationResult objects) + governance-filter skips (dicts).
+        validation_skipped: list[ValidationResult] = state.get("skipped_candidates", [])
+        skipped_stocks: list[dict] = [
             {
                 "symbol": vr.symbol,
                 "status": vr.status.value,
                 "resolved_symbol": vr.resolved_symbol,
                 "reason": vr.reason,
             }
-            for vr in skipped_candidates
-        ]
+            for vr in validation_skipped
+        ] + gov_skipped
         return {
             "recommendations": [asdict(record) for record in recommendations],
             "run_summary": {"run_id": run_id, "recommendation_count": len(recommendations)},

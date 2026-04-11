@@ -21,6 +21,7 @@ if str(SRC) not in sys.path:
 from stock_platform.config import AppConfig
 from stock_platform.services.engine import PlatformEngine
 from stock_platform.utils.index_config import DEFAULT_INDEX, INDEX_UNIVERSE, SELECTABLE_INDICES
+from stock_platform.utils.sector_config import ELEVATED_GOVERNANCE_RISK
 
 
 st.set_page_config(
@@ -1211,6 +1212,12 @@ with tabs[2]:
             for symbol, synthesis_text in synthesis_map.items():
                 with st.expander(f"Synthesis — {symbol}", expanded=True):
                     st.markdown(synthesis_text)
+                    if symbol.upper().replace(".NS", "") in ELEVATED_GOVERNANCE_RISK:
+                        st.caption(
+                            "⚠️ Adani Group stocks carry elevated governance risk. "
+                            "This recommendation requires your independent judgment "
+                            "on group-level political and regulatory exposure."
+                        )
         _render_skipped_stocks(comp.get("skipped_stocks", []))
         if st.button("Clear comparison view"):
             st.session_state.pop("comparison_result", None)

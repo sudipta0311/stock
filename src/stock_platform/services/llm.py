@@ -273,12 +273,23 @@ class PlatformLLM:
             )
             response = client.messages.create(
                 model=self.config.llm_reasoning_model,
-                max_tokens=300,
+                max_tokens=1500,
                 temperature=0.2,
                 system=[{"type": "text", "text": system_prompt}],
                 messages=[{"role": "user", "content": user_prompt}],
             )
-            return (response.content[0].text or "").strip() or None
+            synthesis_text = (response.content[0].text or "").strip()
+            if response.stop_reason == "max_tokens":
+                synthesis_text += "\n\n[Analysis truncated — re-run for full synthesis]"
+                print(f"WARNING: synthesis truncated for {stock_name}")
+            if not synthesis_text:
+                return None
+            if "COMBINED VERDICT" not in synthesis_text:
+                synthesis_text += (
+                    "\n\n• COMBINED VERDICT: Synthesis incomplete — "
+                    "re-run Compare Both to regenerate."
+                )
+            return synthesis_text
         except Exception:
             return None
 
