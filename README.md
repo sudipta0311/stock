@@ -110,7 +110,7 @@ If you update secrets or OAuth settings, reboot the Streamlit app before re-test
 ### Current deployment reference
 
 - Active deployment branch: `codex/streamlit-cloud-ready`
-- Latest deployment branch commit verified in this workspace: `f474343`
+- Latest deployment branch commit verified in this workspace: `67443fc`
 - App URL: `https://sudipta0311-stock-streamlit-app-codexstreamlit-cloud-rea-ynukc3.streamlit.app/`
 
 ### Redeploy checklist
@@ -122,6 +122,7 @@ If you update secrets or OAuth settings, reboot the Streamlit app before re-test
 5. If Google login reaches Google but stops with `redirect_uri_mismatch`, add the exact callback URI shown in the browser to the Google OAuth client.
 6. If portfolio monitoring looks empty after a PDF upload, re-upload the statement, let auto-ingestion complete, then run monitoring from the `Monitoring` tab.
 7. The Monitoring tab now includes a visible LLM selector and shows the LLM used in the latest monitoring results.
+8. Direct equity holdings entered manually are preserved across PDF re-ingestions — a PDF upload will no longer wipe manually saved direct equities.
 
 ## Portal Flow
 
@@ -150,3 +151,14 @@ The ingestion tab supports:
 - All LLM calls fall back gracefully to deterministic text when the relevant API key is absent or a call fails.
 - **Monitoring scope** is limited to direct equities from the ingested statement and any manually added watchlist stocks. MF/ETF look-through holdings are excluded from monitoring because they are managed by fund managers.
 - The watchlist persists in SQLite (`monitoring_watchlist` table) and survives app restarts.
+
+## Recent fixes (commit `67443fc`)
+
+| Area | What changed |
+|---|---|
+| **Direct holdings — Monitoring Desk** | `capture_user_portfolio` now skips blank data-editor rows (`float("")` no longer crashes ingestion). Direct equity rows are preserved on PDF re-ingestion — only replaced when the new payload explicitly provides at least one valid row. `normalize_exposure` no longer crashes on stocks with no symbol. Debug expander added to Monitoring Desk to inspect raw DB state. |
+| **Position sizing** | Buy recommendations now show **"Deploy now: X% \| Target: Y% over 3 months"** using `compute_position_size(entry_signal, quality_score, corpus)`. Each stock gets a different initial tranche (BEL ≠ HAL ≠ SUNPHARMA). Hard cap remains 30%. |
+| **Net return** | Replaced static 20.85% with per-stock `compute_net_return(current_price, analyst_target, 24)` using LTCG rate (12.5%) at 24-month horizon. Falls back to `price × 1.25` if no analyst target is available. |
+| **Sector gap conviction** | `identify_gaps` now computes true sector exposure across all instruments (MF + ETF + direct equity). Sectors ≥ 6% total exposure → `AVOID` (score 0). Sectors 4–6% → `NEUTRAL` max (score penalised 60%). Private Banking (~8% MF look-through) now correctly shows `AVOID`, not `BUY`. |
+| **US tariff signals** | Geopolitical pipeline now includes tariff impact signals scored by sector US-revenue exposure (IT Services 72%, CDMO 60%, Pharma 55%, …). Flows into unified signal aggregation at geo weight. |
+| **Relative P/E in quality score** | `score_quality` blends 70% base quality with 30% `pe_5yr_avg / pe_trailing` — stocks trading above their historical P/E are penalised; stocks trading below get a bonus. |
