@@ -110,7 +110,7 @@ If you update secrets or OAuth settings, reboot the Streamlit app before re-test
 ### Current deployment reference
 
 - Active deployment branch: `codex/streamlit-cloud-ready`
-- Latest deployment branch commit verified in this workspace: `67443fc`
+- Latest deployment branch commit verified in this workspace: `166ffae`
 - App URL: `https://sudipta0311-stock-streamlit-app-codexstreamlit-cloud-rea-ynukc3.streamlit.app/`
 
 ### Redeploy checklist
@@ -156,11 +156,13 @@ The ingestion tab supports:
 
 | Area | What changed |
 |---|---|
-| **Direct holdings — Monitoring Desk** | `capture_user_portfolio` now skips blank data-editor rows (`float("")` no longer crashes ingestion). Direct equity rows are preserved on PDF re-ingestion — only replaced when the new payload explicitly provides at least one valid row. `normalize_exposure` no longer crashes on stocks with no symbol. Debug expander added to Monitoring Desk to inspect raw DB state. |
-| **Position sizing** | Buy recommendations now show **"Deploy now: X% \| Target: Y% over 3 months"** using `compute_position_size(entry_signal, quality_score, corpus)`. Each stock gets a different initial tranche (BEL ≠ HAL ≠ SUNPHARMA). Hard cap remains 30%. |
-| **Net return** | Replaced static 20.85% with per-stock `compute_net_return(current_price, analyst_target, 24)` using LTCG rate (12.5%) at 24-month horizon. Falls back to `price × 1.25` if no analyst target is available. |
-| **Sector gap conviction** | `identify_gaps` now computes true sector exposure across all instruments (MF + ETF + direct equity). Sectors ≥ 6% total exposure → `AVOID` (score 0). Sectors 4–6% → `NEUTRAL` max (score penalised 60%). Private Banking (~8% MF look-through) now correctly shows `AVOID`, not `BUY`. |
-| **US tariff signals** | Geopolitical pipeline now includes tariff impact signals scored by sector US-revenue exposure (IT Services 72%, CDMO 60%, Pharma 55%, …). Flows into unified signal aggregation at geo weight. |
-| **Relative P/E in quality score** | `score_quality` blends 70% base quality with 30% `pe_5yr_avg / pe_trailing` — stocks trading above their historical P/E are penalised; stocks trading below get a bonus. |
-| **Live market-data runtime** | `PlatformEngine` now uses `LiveMarketDataProvider` instead of `DemoDataProvider`. Candidate discovery uses official NSE constituent files, stock snapshots/price context/financials come from `yfinance`, and unknown live fields are left unknown rather than replaced with optimistic demo defaults. |
-| **Quality score and compare flow** | Quality scoring now returns `0.0` on total live-data failure, does not default to `1.0`, and Compare Both includes provider-specific analyst prompts plus a synthesis verdict. |
+| **Stock validation safety gate** | Every candidate stock now passes a 4-gate `validate_stock()` check before scoring or any LLM call. Gates: (1) no Screener.in data → `NOT_FOUND`; (2) all key fields None → `NO_DATA`; (3) price unavailable → `PRICE_MISSING`; (4) fewer than 2 key fields → `NO_DATA`. Blocked stocks are logged to a `skipped_stocks` SQLite table and shown to the user in a **⚠️ Skipped stocks** expander below recommendation cards. |
+| **Demerged / delisted symbol resolution** | `utils/symbol_resolver.py` maps old symbols to their current NSE tickers (e.g. `TATAMOTORS → TMCV`). Unresolvable symbols are blocked at the gate and never reach qualitative validation or the LLM rationale step. |
+| **Screener.in data source** | Fundamentals (ROCE, D/E, EPS, promoter holding, revenue growth) are now fetched from Screener.in via `utils/screener_fetcher.py`, with consolidated/standalone fallback. `yfinance` is retained for current price and analyst target only. This fixes stale/missing data for Indian stocks that `yfinance` returns incorrectly. |
+| **Quality score accuracy** | `agents/quant_model.py` scores on 5 rules using Screener field names (`roce_pct`, `eps`, `revenue_growth_pct`, `promoter_holding`, `debt_to_equity`). No-data returns `0.5` (never `1.0`). Negative EPS hard-caps quality at `0.35`. |
+| **Compare Both — analyst differentiation** | Anthropic Claude uses a **contrarian risk analyst** prompt (4 bullets: RISK / WE ARE WRONG IF / VERDICT / SUPPORTING METRIC). OpenAI GPT uses a **momentum catalyst analyst** prompt (4 bullets: CATALYST / MARKET MISREAD / EXIT TRIGGER / VERDICT). The two rationales are structurally different and surface distinct information. |
+| **Compare Both — synthesis** | When both providers return recommendations, a third **Analyst Synthesis** section appears below the two columns. Claude Sonnet synthesises the contrarian and catalyst views into 3 bullets: WHERE THEY AGREE / WHERE THEY DISAGREE / COMBINED VERDICT (ENTER NOW / ACCUMULATE GRADUALLY / WAIT FOR BETTER ENTRY). |
+| **Live market-data runtime** | `PlatformEngine` now uses `LiveMarketDataProvider` instead of `DemoDataProvider`. Candidate discovery uses official NSE constituent files, stock snapshots/price context/financials come from live sources, and unknown live fields are left unknown rather than replaced with optimistic demo defaults. |
+| **Direct holdings — Monitoring Desk** | `capture_user_portfolio` now skips blank data-editor rows (`float("")` no longer crashes ingestion). Direct equity rows are preserved on PDF re-ingestion — only replaced when the new payload explicitly provides at least one valid row. `normalize_exposure` no longer crashes on stocks with no symbol. |
+| **Position sizing** | Buy recommendations show **"Deploy now: X% \| Target: Y% over 3 months"** using `compute_position_size(entry_signal, quality_score, corpus)`. Each stock gets a different initial tranche. Hard cap remains 30%. |
+| **Sector gap conviction** | `identify_gaps` computes true sector exposure across all instruments (MF + ETF + direct equity). Sectors ≥ 6% total exposure → `AVOID`. Sectors 4–6% → `NEUTRAL` max. |
