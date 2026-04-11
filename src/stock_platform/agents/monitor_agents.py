@@ -105,10 +105,29 @@ class MonitoringAgents:
         scores = []
         for holding in state["portfolio_context"]["monitor_universe"]:
             financials = self.provider.get_financials(holding["symbol"])
+
+            # P/E score: weighted combination of three relative comparisons.
+            # NOT an absolute threshold — each sub-component is scored 0–1.
+            pe_t = financials["pe_trailing"]
+            pe_5y = financials["pe_5yr_avg"]
+            pe_sec = financials["sector_pe"]
+            pe_fwd = financials["pe_forward"]
+
+            # 40%: stock vs own 5yr avg P/E (discount to own history = good)
+            vs_own = max(0.0, min(1.0, 1.0 - (pe_t - pe_5y) / pe_5y))
+            # 35%: stock vs sector peer P/E (discount to peers = good)
+            vs_sector = max(0.0, min(1.0, 1.0 - (pe_t - pe_sec) / pe_sec))
+            # 25%: forward vs trailing P/E (forward < trailing = earnings growth = good)
+            fwd_vs_trail = max(0.0, min(1.0, 2.0 - pe_fwd / pe_t))
+
+            pe_score = 0.40 * vs_own + 0.35 * vs_sector + 0.25 * fwd_vs_trail
+
+            # Overall quant score: quality + valuation blend.
             quant = round(
-                min(financials["roce_5y"] / 20, 1.0) * 0.4
-                + min(financials["fcf_positive_years"] / 5, 1.0) * 0.3
-                + min(financials["revenue_consistency"] / 10, 1.0) * 0.3,
+                min(financials["roce_5y"] / 20, 1.0) * 0.35
+                + min(financials["fcf_positive_years"] / 5, 1.0) * 0.25
+                + min(financials["revenue_consistency"] / 10, 1.0) * 0.20
+                + pe_score * 0.20,
                 3,
             )
             scores.append({"symbol": holding["symbol"], "quant_score": quant})
@@ -254,13 +273,18 @@ class MonitoringAgents:
         for row in state["actions"]:
             thesis = next(item for item in state["thesis_reviews"] if item["symbol"] == row["symbol"])
             drawdown = next(item for item in state["drawdown_alerts"] if item["symbol"] == row["symbol"])
-            llm_rationale = self.llm.monitoring_rationale(row, thesis, drawdown)
+            llm_result = self.llm.monitoring_rationale(row, thesis, drawdown)
+            # Use LLM-confirmed action/severity/rationale if parsing succeeded;
+            # fall back to deterministic values so a JSON failure never drops a row.
+            final_action = llm_result["action"] if llm_result else row["action"]
+            final_severity = llm_result["severity"] if llm_result else row["severity"]
+            final_rationale = llm_result["rationale"] if llm_result else row["rationale"]
             rows.append(
                 MonitoringAction(
                     symbol=row["symbol"],
-                    action=row["action"],
-                    severity=row["severity"],
-                    rationale=llm_rationale or row["rationale"],
+                    action=final_action,
+                    severity=final_severity,
+                    rationale=final_rationale,
                     payload={
                         "behavioural_flags": [
                             flag for flag in state["behavioural_flags"] if flag["symbol"] in {row["symbol"], "PORTFOLIO"}
@@ -268,7 +292,7 @@ class MonitoringAgents:
                         "drawdown": drawdown,
                         "thesis": thesis,
                         "thesis_llm_reasoning": thesis.get("llm_reasoning", ""),
-                        "llm_used": bool(llm_rationale),
+                        "llm_used": bool(llm_result),
                     },
                 )
             )

@@ -6,6 +6,7 @@ import html as _html
 import io
 import json
 import sys
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -974,6 +975,16 @@ with tabs[3]:
             f"Reasoning: `{llm_status['openai_reasoning_model']}` · {_m_status}"
         )
 
+    _overlap_rows = snapshot["portfolio"].get("overlap_scores", [])
+    _cutoff = (datetime.utcnow() - timedelta(days=35)).isoformat()
+    _fresh_overlap = [r for r in _overlap_rows if r.get("updated_at", "") > _cutoff]
+    if not _fresh_overlap:
+        st.warning(
+            "Portfolio context missing. Please upload a CAMS statement first "
+            "so overlap scores can be computed before monitoring runs."
+        )
+        st.stop()
+
     if st.button("Run Monitoring For Current Portfolio", use_container_width=True, key="monitoring_tab_run_btn"):
         try:
             provider_for_mon = st.session_state.get("monitoring_llm_provider", "anthropic")
@@ -1096,6 +1107,7 @@ with tabs[3]:
     if monitor_provider_label:
         st.caption(f"Latest monitoring run used {monitor_provider_label}.")
     if monitoring_actions:
+        _overlap_map = {r["symbol"]: r.get("overlap_pct", 0.0) for r in snapshot["portfolio"].get("overlap_scores", [])}
         monitor_frame = pd.DataFrame(
             [
                 {
@@ -1103,6 +1115,7 @@ with tabs[3]:
                     "symbol": item["symbol"],
                     "action": item["action"],
                     "severity": item["severity"],
+                    "overlap_pct": _overlap_map.get(item["symbol"], 0.0),
                     "rationale": item["rationale"],
                 }
                 for item in monitoring_actions
