@@ -253,15 +253,66 @@ class BuyAgents:
         }
 
     def check_confidence(self, state: dict[str, Any]) -> dict[str, Any]:
-        signal_count = len(self.repo.list_signals("unified"))
+        unified = self.repo.list_signals("unified")
+        signal_count = len(unified)
         exposure_count = len(state["portfolio_context"]["normalized_exposure"])
-        band = "GREEN" if signal_count >= 5 and exposure_count > 0 else "YELLOW"
-        return {"confidence": {"band": band, "signal_count": signal_count, "exposure_count": exposure_count}}
+
+        # Market-level confidence: look at the distribution of unified signal scores.
+        if unified:
+            avg_score = sum(float(s.get("score", 0.5)) for s in unified) / signal_count
+            avoid_count = sum(
+                1 for s in unified
+                if s.get("conviction", "NEUTRAL") in ("AVOID", "STRONG_AVOID")
+            )
+            avoid_ratio = avoid_count / signal_count
+        else:
+            avg_score = 0.5
+            avoid_count = 0
+            avoid_ratio = 0.0
+
+        # RED: market broadly weak — more than half of signals in avoid territory
+        # OR average score below NEUTRAL threshold (0.35). Do not recommend.
+        if avg_score < 0.35 or avoid_ratio > 0.5:
+            band = "RED"
+            market_note = (
+                f"Market signals too weak for confident buy recommendations "
+                f"(avg score {avg_score:.2f}, {avoid_count}/{signal_count} sectors in avoid territory). "
+                "Wait for clearer conditions before adding new positions."
+            )
+        elif signal_count >= 5 and exposure_count > 0:
+            band = "GREEN"
+            market_note = ""
+        else:
+            band = "YELLOW"
+            market_note = ""
+
+        return {
+            "confidence": {
+                "band": band,
+                "signal_count": signal_count,
+                "exposure_count": exposure_count,
+                "avg_market_score": round(avg_score, 3),
+                "market_note": market_note,
+            }
+        }
 
     def finalize_recommendation(self, state: dict[str, Any]) -> dict[str, Any]:
-        recommendations = []
         confidence_band = state["confidence"]["band"]
         run_id = f"buy-{uuid4().hex[:10]}"
+
+        # RED band: market signals too weak — save empty run and return early.
+        if confidence_band == "RED":
+            self.repo.save_recommendations(run_id, [])
+            return {
+                "recommendations": [],
+                "run_summary": {
+                    "run_id": run_id,
+                    "recommendation_count": 0,
+                    "blocked_reason": state["confidence"].get("market_note", "Market signals too weak."),
+                },
+            }
+
+        recommendations = []
         for item in state["allocations"]:
             if item["entry_signal"] == "DO NOT ENTER":
                 continue
