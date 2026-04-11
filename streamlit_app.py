@@ -112,47 +112,7 @@ st.markdown(
         color: rgba(255,255,255,0.84);
         font-size: 0.95rem;
     }
-    .hero-badges {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.45rem;
-        margin-top: 0.9rem;
-    }
-    .hero-badge {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.35rem;
-        padding: 0.3rem 0.65rem;
-        border-radius: 999px;
-        background: rgba(255,255,255,0.12);
-        color: #f9fffd;
-        font-size: 0.76rem;
-        border: 1px solid rgba(255,255,255,0.12);
-    }
-    .metric-card, .glass-card, .model-box, .qa-card, .info-tile, .rec-card {
-        background: var(--panel-strong);
-        border: 1px solid var(--line);
-        box-shadow: var(--shadow-soft);
-    }
-    .metric-card, .glass-card {
-        border-radius: var(--radius-lg);
-        padding: 1rem;
-    }
-    .metric-label {
-        color: var(--muted);
-        font-size: 0.82rem;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        margin-bottom: 0.45rem;
-    }
-    .metric-value {
-        color: var(--text);
-        font-size: 1.7rem;
-        font-weight: 700;
-        line-height: 1.0;
-        margin-bottom: 0.28rem;
-    }
-    .metric-subtle, .mini-note {
+    .mini-note {
         color: var(--muted);
         font-size: 0.88rem;
     }
@@ -194,7 +154,7 @@ st.markdown(
         background: rgba(217,119,6,0.12);
         color: #92400e;
     }
-    .info-tile, .model-box, .qa-card, .rec-card {
+    .qa-card, .rec-card {
         border-radius: var(--radius-md);
         padding: 0.9rem 1rem;
     }
@@ -228,61 +188,40 @@ st.markdown(
     }
     /* ── Mobile responsive ──────────────────────────────────────────────────── */
     @media (max-width: 640px) {
-        /* Stack all Streamlit column blocks vertically */
+        /* Stack Streamlit columns vertically — stColumn is the correct testid in 1.28+ */
         div[data-testid="stHorizontalBlock"] {
             flex-wrap: wrap !important;
-            gap: 0.5rem !important;
+            gap: 0.4rem !important;
         }
-        div[data-testid="column"] {
+        div[data-testid="stColumn"] {
             width: 100% !important;
             min-width: 100% !important;
             flex: 1 1 100% !important;
         }
-        /* Tighten page padding */
         .block-container {
             padding-left: 0.5rem !important;
             padding-right: 0.5rem !important;
-            padding-top: 0.5rem !important;
+            padding-top: 0.4rem !important;
         }
-        /* Hero banner */
         .hero-shell {
-            padding: 0.9rem;
+            padding: 0.85rem;
             border-radius: 16px;
-            margin-bottom: 0.6rem;
+            margin-bottom: 0.5rem;
         }
-        .hero-title { font-size: 1.35rem; }
-        .hero-copy { font-size: 0.85rem; }
-        .hero-badges { gap: 0.28rem; margin-top: 0.55rem; }
-        .hero-badge { font-size: 0.68rem; padding: 0.2rem 0.45rem; }
-        /* Metric and info cards */
-        .metric-card, .glass-card { padding: 0.75rem; }
-        .metric-value { font-size: 1.3rem; }
-        .metric-label { font-size: 0.75rem; }
-        .info-tile { padding: 0.65rem 0.8rem; }
-        /* Tab bar — allow horizontal scroll */
-        div[data-testid="stTabs"] {
-            overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
-        }
+        .hero-title { font-size: 1.3rem; }
+        .hero-copy { font-size: 0.83rem; }
         div[data-testid="stTabs"] button {
-            padding: 0.3rem 0.55rem !important;
-            font-size: 0.78rem !important;
+            padding: 0.28rem 0.5rem !important;
+            font-size: 0.76rem !important;
             white-space: nowrap;
         }
-        /* Ensure data tables scroll horizontally */
         div[data-testid="stDataFrame"] {
             overflow-x: auto !important;
             -webkit-overflow-scrolling: touch;
         }
-        /* Forms */
-        div[data-testid="stForm"] {
-            padding: 0.75rem 0.7rem 0.5rem !important;
-        }
-        /* Cards and panels */
-        .qa-card, .rec-card, .model-box {
-            padding: 0.7rem 0.75rem;
-        }
-        .empty-panel { padding: 0.85rem; }
+        div[data-testid="stForm"] { padding: 0.7rem 0.65rem 0.45rem !important; }
+        .rec-card, .qa-card { padding: 0.65rem 0.7rem; }
+        .empty-panel { padding: 0.8rem; }
     }
     </style>
     """,
@@ -598,74 +537,11 @@ st.markdown(
     f"""
     <div class="hero-shell">
         <h1 class="hero-title">Your Portfolio Assistant</h1>
-        <p class="hero-copy">
-            Upload your statement, let the app ingest it automatically, then review simple buy ideas
-            and direct-stock monitoring without digging through technical screens.
-        </p>
-        <div class="hero-badges">
-            <span class="hero-badge">1. Upload PDF</span>
-            <span class="hero-badge">2. Auto Ingest</span>
-            <span class="hero-badge">3. Review Buy Ideas</span>
-            <span class="hero-badge">4. Monitor Direct Stocks</span>
-            <span class="hero-badge">LLM: {_html.escape(llm_display)}</span>
-        </div>
+        <p class="hero-copy">Upload your statement · Get buy ideas · Monitor direct stocks &nbsp;·&nbsp; LLM: {_html.escape(llm_display)}</p>
     </div>
     """,
     unsafe_allow_html=True,
 )
-
-top_bar = st.columns([1, 1, 1])
-with top_bar[0]:
-    if st.button("Seed Demo Portfolio", use_container_width=True):
-        try:
-            engine.seed_demo_data()
-            push_notice("Sample portfolio loaded successfully.", "success")
-            st.rerun()
-        except ModuleNotFoundError as exc:
-            st.error(f"Dependency missing: {exc}. Install project dependencies first.")
-with top_bar[1]:
-    if st.button("Refresh Signals", use_container_width=True):
-        try:
-            engine.run_signal_refresh(trigger="manual")
-            push_notice("Signals refreshed.", "success")
-            st.rerun()
-        except Exception as exc:
-            st.error(str(exc))
-with top_bar[2]:
-    if st.button("Run Monitoring", use_container_width=True):
-        try:
-            provider_for_mon = st.session_state.get("monitoring_llm_provider", "anthropic")
-            provider_label = "Anthropic Claude" if provider_for_mon == "anthropic" else "OpenAI GPT"
-            if hasattr(st, "toast"):
-                st.toast("Monitoring in progress...", icon="⏳")
-            with st.status(f"Monitoring your direct holdings with {provider_label}...", expanded=True) as status:
-                engine.run_monitoring(llm_provider=provider_for_mon)
-                status.write("Monitoring actions are ready.")
-                status.update(label="Monitoring complete", state="complete", expanded=False)
-            push_notice("Monitoring complete.", "success")
-            st.rerun()
-        except Exception as exc:
-            st.error(str(exc))
-
-metric_cols = st.columns(4)
-with metric_cols[0]:
-    render_metric("Normalized Holdings", str(len(portfolio["normalized_exposure"])), "Look-through after MF / ETF expansion")
-with metric_cols[1]:
-    render_metric("Unified Signals", str(len(signals["unified"])), "Geo, policy, flow, contrarian blend")
-with metric_cols[2]:
-    render_metric("Open Recommendations", str(len(recommendations)), "Latest personalized buy run")
-with metric_cols[3]:
-    render_metric("Portal LLM", llm_display, "Rendering rationale providers")
-
-info_cols = st.columns(3)
-with info_cols[0]:
-    render_info_tile("Portfolio State", "Ready" if portfolio["normalized_exposure"] else "Awaiting ingestion")
-with info_cols[1]:
-    render_info_tile("AMC Look-Through", "Official + fallback" if portfolio["normalized_exposure"] else "No portfolio context")
-with info_cols[2]:
-    _direct_count = len([r for r in portfolio["raw_holdings"] if r["holding_type"] == "direct_equity"])
-    _watch_count = len(portfolio.get("watchlist", []))
-    render_info_tile("Monitoring Scope", f"{_direct_count} direct + {_watch_count} watchlist")
 
 tabs = st.tabs(["Overview", "Portfolio", "Buy Ideas", "Monitoring", "Signals"])
 
@@ -708,6 +584,13 @@ with tabs[0]:
 with tabs[1]:
     st.markdown('<span class="section-chip">Upload And Ingest</span>', unsafe_allow_html=True)
     st.subheader("Portfolio")
+    if st.button("Seed Demo Portfolio", use_container_width=True):
+        try:
+            engine.seed_demo_data()
+            push_notice("Sample portfolio loaded successfully.", "success")
+            st.rerun()
+        except ModuleNotFoundError as exc:
+            st.error(f"Dependency missing: {exc}. Install project dependencies first.")
     st.caption("Upload JSON, CSV, or an encrypted NSDL / CAS PDF. PDF uploads start ingestion automatically after parsing.")
 
     pdf_password = st.text_input(
@@ -1067,6 +950,13 @@ with tabs[3]:
 with tabs[4]:
     st.markdown('<span class="section-chip">Signal Intelligence Layer</span>', unsafe_allow_html=True)
     st.subheader("Signals")
+    if st.button("Refresh Signals", use_container_width=True):
+        try:
+            engine.run_signal_refresh(trigger="manual")
+            push_notice("Signals refreshed.", "success")
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
     signal_family = st.radio(
         "Signal family",
         options=["unified", "geo", "policy", "flow", "contrarian"],
