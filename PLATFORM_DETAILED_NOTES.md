@@ -30,7 +30,7 @@ The platform is organized around four major flows from the PlantUML sequence dia
 - `SQLite` for persistence
 - `Streamlit` for the user portal
 - `OpenAI API` for narrative reasoning/rationale generation
-- deterministic provider fallbacks where live data is unavailable
+- live provider inputs via NSE constituent files, `yfinance`, and AMC/fallback holdings adapters
 
 ### Main entry points
 
@@ -67,6 +67,9 @@ The platform is organized around four major flows from the PlantUML sequence dia
 
 - [mf_lookup.py](c:/Project/App/src/stock_platform/services/mf_lookup.py)
   Live fund holdings resolver. Prefers official AMC adapters first, then tries generic fallback lookup.
+
+- [live.py](c:/Project/App/src/stock_platform/providers/live.py)
+  Runtime market-data provider. Uses NSE archive constituent files for the buy universe and `yfinance` for snapshots, price context, financials, sector breadth, and monitoring signals.
 
 - [amc_adapters.py](c:/Project/App/src/stock_platform/services/amc_adapters.py)
   Official AMC adapter framework. Currently includes official Mirae Asset parsing.
@@ -217,7 +220,7 @@ Reusable E2E script:
 6. Run monitoring flow
 7. Inspect recommendation and action outputs
 
-### Latest successful result (v6.0 — 2026-04-10)
+### Latest successful result (live-runtime branch — 2026-04-11)
 
 ```json
 {
@@ -253,16 +256,15 @@ Reusable E2E script:
 
 ### Recommendation results from the run
 
-- `BEL` / `Defence` / `WAIT` — overlap 0%, alloc 6%, confidence GREEN
-- `DIVISLAB` / `CDMO` / `SMALL INITIAL` — overlap 0%, alloc 12%, confidence GREEN
-- `SUNPHARMA` / `Pharma Exports` / `WAIT` — overlap 0%, alloc 6%, confidence GREEN
+- The buy universe now comes from official NSE archive constituent CSVs rather than a baked-in symbol list.
+- The quality scorer consumes live provider financials, and stocks with total live-data failure return `0.0` instead of inheriting demo-perfect scores.
+- Monitoring still stays restricted to direct holdings and watchlist names, but the quant/news context now comes from live provider methods rather than demo records.
 
 ### Monitoring results
 
-Monitoring completed across all 54 normalized positions.
-Action distribution: 50 HOLD, 2 BUY MORE, 2 SELL.
-Behavioural guardrail (BEHAVIOURAL_REMINDER) fires correctly after >3 monitoring runs in a day.
-LLM rationales use deterministic fallback when `ANTHROPIC_API_KEY` is absent.
+Monitoring now runs only against the direct-holdings/watchlist universe produced by the current portfolio context.
+Behavioural guardrails still trigger after repeated monitoring runs in a single day.
+LLM rationales still use deterministic fallback when the selected provider API key is absent.
 
 ## What Is Accurate Today
 
@@ -274,8 +276,8 @@ LLM rationales use deterministic fallback when `ANTHROPIC_API_KEY` is absent.
 - mutual fund folio extraction and valuation
 - LangGraph orchestration
 - Streamlit workflow
-- OpenAI-backed rationale generation
-- complete E2E execution from PDF to recommendations and monitoring
+- provider-differentiated Anthropic/OpenAI rationale generation
+- live NSE + `yfinance` recommendation and monitoring inputs
 
 ### Partially accurate
 
@@ -380,4 +382,3 @@ The next good companion document would be an AMC integration tracker with:
 - known parsing caveats
 
 That would make the remaining path to full statement-accurate overlap much easier to manage.
-

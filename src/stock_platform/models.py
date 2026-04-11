@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 
@@ -59,5 +59,4 @@ class MonitoringAction:
 
 
 def utc_now_iso() -> str:
-    return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
-
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")

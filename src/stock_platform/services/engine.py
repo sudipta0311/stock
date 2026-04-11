@@ -6,10 +6,29 @@ from typing import Any
 from stock_platform.agents import BuyAgents, MonitoringAgents, PortfolioAgents, SignalAgents
 from stock_platform.config import AppConfig, ensure_data_dir, load_app_env
 from stock_platform.data.repository import PlatformRepository
-from stock_platform.providers import DemoDataProvider
+from stock_platform.providers import LiveMarketDataProvider
 from stock_platform.services.llm import PlatformLLM
 from stock_platform.services.mf_lookup import MutualFundHoldingsClient
 from stock_platform.services.pdf_parser import NSDLCASParser
+
+
+def _sample_portfolio_payload() -> dict[str, Any]:
+    return {
+        "macro_thesis": "Prefer defence, healthcare exporters, and industrial capex leaders over crowded consumer trades.",
+        "investable_surplus": 500000,
+        "direct_equity_corpus": 800000,
+        "mutual_funds": [
+            {"instrument_name": "Axis Bluechip Fund", "market_value": 650000},
+            {"instrument_name": "Parag Parikh Flexi Cap", "market_value": 540000},
+        ],
+        "etfs": [
+            {"instrument_name": "Nifty Bees", "market_value": 250000},
+        ],
+        "direct_equities": [
+            {"instrument_name": "HDFC Bank", "symbol": "HDFCBANK", "quantity": 45, "market_value": 75600},
+            {"instrument_name": "Titan Company", "symbol": "TITAN", "quantity": 20, "market_value": 73600},
+        ],
+    }
 
 
 class PlatformEngine:
@@ -20,7 +39,7 @@ class PlatformEngine:
         self.repo = PlatformRepository(Path(self.config.db_path))
         self.repo.initialize()
         self.mf_holdings = MutualFundHoldingsClient(self.config)
-        self.provider = DemoDataProvider(holdings_client=self.mf_holdings)
+        self.provider = LiveMarketDataProvider(holdings_client=self.mf_holdings)
         # Default LLM uses Anthropic; provider-keyed buy graphs are built on demand.
         self.llm = PlatformLLM(self.config, provider="anthropic")
         self.pdf_parser = NSDLCASParser()
@@ -66,7 +85,7 @@ class PlatformEngine:
     # ── Public workflows ─────────────────────────────────────────────────────
 
     def seed_demo_data(self) -> dict[str, Any]:
-        payload = self.provider.demo_portfolio_payload()
+        payload = _sample_portfolio_payload()
         self.run_signal_refresh(trigger="seed")
         ingestion = self.ingest_portfolio(payload)
         return {"payload": payload, "ingestion": ingestion}

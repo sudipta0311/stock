@@ -5,7 +5,7 @@ This project turns the `stock_platform_v5.puml` sequence diagram into a working 
 - `LangGraph` workflows for signal refresh, portfolio ingestion, new-buy recommendations, and monitoring
 - `SQLite` persistence for signals, look-through exposure, overlap, gaps, recommendations, and monitoring actions
 - `Streamlit` portal with a mobile-friendly layout
-- A deterministic local demo data provider so the platform can run without live API keys
+- Live market data via NSE constituent files, `yfinance`, and official/fallback mutual-fund look-through adapters
 
 ## Architecture
 
@@ -21,7 +21,7 @@ Key modules:
 - `src/stock_platform/agents/`: stage-specific agent logic
 - `src/stock_platform/graphs/`: LangGraph workflow definitions
 - `src/stock_platform/data/`: SQLite schema and repository
-- `src/stock_platform/providers/demo.py`: deterministic local data source
+- `src/stock_platform/providers/live.py`: live NSE and `yfinance` data source used by the runtime
 - `streamlit_app.py`: Streamlit portal
 
 ### Monitoring scope
@@ -72,7 +72,7 @@ Both keys can be set simultaneously to enable the **Compare Both** feature in th
 streamlit run streamlit_app.py
 ```
 
-If the `.env` values are not populated, the platform still runs using deterministic fallbacks for rationale generation.
+If the `.env` values are not populated, the platform still runs using deterministic text fallbacks for rationale generation, but the market-data pipeline remains live.
 
 ## Streamlit Cloud
 
@@ -126,7 +126,7 @@ If you update secrets or OAuth settings, reboot the Streamlit app before re-test
 
 ## Portal Flow
 
-1. Click `Seed Demo Portfolio` for a ready-made walkthrough.
+1. Load the sample portfolio for a ready-made walkthrough if you want to test without a statement first.
 2. Or go to `Upload Portfolio` and upload/import holdings.
 3. For PDFs, enter the password and let auto-ingestion complete.
 4. Open `Buy Ideas` to generate recommendations.
@@ -139,12 +139,12 @@ The ingestion tab supports:
 - Manual entry through editable tables
 - `.json` upload with keys: `macro_thesis`, `investable_surplus`, `direct_equity_corpus`, `mutual_funds`, `etfs`, `direct_equities`
 - `.csv` upload with columns: `holding_type`, `instrument_name`, `symbol`, `market_value`, `quantity`
-- `.pdf` upload as a workflow trigger placeholder; the current scaffold still relies on manual table content for parsing
+- `.pdf` upload for encrypted NSDL CAS statements; the parser extracts holdings directly into the ingestion workflow
 
 ## Notes
 
-- The app is built around a local demo provider to keep it runnable without network access.
-- Replacing the demo provider with live data adapters is straightforward because the agent layer already consumes provider methods rather than hardcoding APIs.
+- The runtime provider is now live: index membership comes from NSE archives, stock-level market/financial context comes from `yfinance`, and MF/ETF look-through continues to use official AMC pages plus the existing fallback resolver.
+- `seed_demo_data()` remains available only as a sample portfolio helper for testing the UI quickly. It no longer powers runtime recommendations or monitoring.
 - The **Buy Ideas** tab has a **Model Platform selector**: choose Anthropic Claude, OpenAI GPT, or **Compare Both** to run both providers side-by-side and view their recommendations in two columns.
 - The **Monitoring** tab has its own LLM selector and the latest monitoring results show which LLM generated the run.
 - Both providers follow the same fast/reasoning tier split. Anthropic adds system-prompt caching on high-volume calls.
@@ -152,7 +152,7 @@ The ingestion tab supports:
 - **Monitoring scope** is limited to direct equities from the ingested statement and any manually added watchlist stocks. MF/ETF look-through holdings are excluded from monitoring because they are managed by fund managers.
 - The watchlist persists in SQLite (`monitoring_watchlist` table) and survives app restarts.
 
-## Recent fixes (commit `67443fc`)
+## Recent fixes
 
 | Area | What changed |
 |---|---|
@@ -162,3 +162,5 @@ The ingestion tab supports:
 | **Sector gap conviction** | `identify_gaps` now computes true sector exposure across all instruments (MF + ETF + direct equity). Sectors ≥ 6% total exposure → `AVOID` (score 0). Sectors 4–6% → `NEUTRAL` max (score penalised 60%). Private Banking (~8% MF look-through) now correctly shows `AVOID`, not `BUY`. |
 | **US tariff signals** | Geopolitical pipeline now includes tariff impact signals scored by sector US-revenue exposure (IT Services 72%, CDMO 60%, Pharma 55%, …). Flows into unified signal aggregation at geo weight. |
 | **Relative P/E in quality score** | `score_quality` blends 70% base quality with 30% `pe_5yr_avg / pe_trailing` — stocks trading above their historical P/E are penalised; stocks trading below get a bonus. |
+| **Live market-data runtime** | `PlatformEngine` now uses `LiveMarketDataProvider` instead of `DemoDataProvider`. Candidate discovery uses official NSE constituent files, stock snapshots/price context/financials come from `yfinance`, and unknown live fields are left unknown rather than replaced with optimistic demo defaults. |
+| **Quality score and compare flow** | Quality scoring now returns `0.0` on total live-data failure, does not default to `1.0`, and Compare Both includes provider-specific analyst prompts plus a synthesis verdict. |

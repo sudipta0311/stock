@@ -11,7 +11,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from stock_platform.data.repository import PlatformRepository
-from stock_platform.providers.demo import DemoDataProvider
+from stock_platform.providers.live import LiveMarketDataProvider
 
 
 class RepositoryTests(unittest.TestCase):
@@ -52,12 +52,11 @@ class RepositoryTests(unittest.TestCase):
         self.assertAlmostEqual(rows[0]["total_weight"], 4.2)
 
 
-class DemoProviderTests(unittest.TestCase):
-    def test_demo_provider_has_index_members(self) -> None:
-        provider = DemoDataProvider()
-        members = provider.get_index_members("NIFTY50")
-        self.assertGreaterEqual(len(members), 5)
-        self.assertIn("symbol", members[0])
+class LiveProviderTests(unittest.TestCase):
+    def test_live_provider_normalizes_exchange_suffixes(self) -> None:
+        provider = LiveMarketDataProvider()
+        self.assertEqual(provider.normalize_symbol("bel.ns"), "BEL")
+        self.assertEqual(provider.normalize_symbol(" tcs.nse "), "TCS")
 
 
 if __name__ == "__main__":
