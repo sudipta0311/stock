@@ -20,6 +20,7 @@ if str(SRC) not in sys.path:
 
 from stock_platform.config import AppConfig
 from stock_platform.services.engine import PlatformEngine
+from stock_platform.utils.index_config import DEFAULT_INDEX, INDEX_UNIVERSE, SELECTABLE_INDICES
 
 
 st.set_page_config(
@@ -1125,7 +1126,18 @@ with tabs[2]:
     with st.form("buy-form"):
         c1, c2 = st.columns(2)
         with c1:
-            index_name = st.selectbox("Index", ["NIFTY50", "NIFTYNEXT50"])
+            _selectable = list(SELECTABLE_INDICES.keys())
+            selected_display = st.selectbox(
+                "Index universe",
+                options=_selectable,
+                index=_selectable.index(DEFAULT_INDEX),
+                help=(
+                    "Larger index = more candidates = better gap-filling. "
+                    "Use sectoral indices for targeted searches."
+                ),
+            )
+            _sel_cfg = SELECTABLE_INDICES[selected_display]
+            st.caption(f"{_sel_cfg['description']} · {_sel_cfg['count']} stocks in universe")
         with c2:
             risk_profile = st.selectbox("Risk", ["Balanced", "Moderate", "Aggressive"])
         c3, c4 = st.columns(2)
@@ -1143,7 +1155,7 @@ with tabs[2]:
 
         if run_buy:
             buy_request = {
-                "index_name": index_name,
+                "index_name": _sel_cfg["code"],
                 "horizon_months": horizon_months,
                 "risk_profile": risk_profile,
                 "top_n": top_n,
