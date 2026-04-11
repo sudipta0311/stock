@@ -311,19 +311,22 @@ class DemoDataProvider:
                 "COCHINSHIP": 0.02,
             },
         }
+        # Scores represent signal strength, not directionality — use low-positive
+        # values (0.10–0.25) for headwind sectors instead of negative numbers so
+        # that weighted aggregation doesn't drag the unified score below zero.
         self.geo_templates = [
             ("India-Pakistan tension", "Defence", 0.92, "STRONGLY_POSITIVE", "long"),
-            ("India-Pakistan tension", "Tourism", -0.72, "NEGATIVE", "short"),
+            ("India-Pakistan tension", "Tourism", 0.14, "CAUTIOUS", "short"),
             ("US-China decoupling", "Electronics Manufacturing", 0.76, "POSITIVE", "medium"),
-            ("Middle East oil spike", "Energy", -0.45, "NEGATIVE", "short"),
-            ("Middle East oil spike", "Renewables", 0.44, "POSITIVE", "medium"),
+            ("Middle East oil spike", "Energy", 0.18, "CAUTIOUS", "short"),
+            ("Middle East oil spike", "Renewables", 0.55, "POSITIVE", "medium"),
             ("India-EU FTA progress", "Pharma Exports", 0.71, "POSITIVE", "medium"),
         ]
         self.policy_templates = [
             ("RBI rate easing", "Private Banking", 0.68, "POSITIVE", "medium"),
-            ("Budget capex push", "Infrastructure", 0.8, "POSITIVE", "medium"),
+            ("Budget capex push", "Infrastructure", 0.80, "POSITIVE", "medium"),
             ("PLI expansion", "Electronics Manufacturing", 0.82, "POSITIVE", "long"),
-            ("SEBI tightening", "Broking", -0.52, "NEGATIVE", "short"),
+            ("SEBI tightening", "Broking", 0.16, "CAUTIOUS", "short"),
             ("State election win", "Consumption", 0.58, "POSITIVE", "short"),
         ]
 
@@ -399,8 +402,8 @@ class DemoDataProvider:
     def get_contrarian_signals(self) -> list[dict[str, Any]]:
         rows = []
         for sector in {"Defence", "CDMO", "Tourism", "IT Services"}:
-            raw = self._stable_value(sector, -0.3, 0.9)
-            conviction = "BUY" if raw > 0.35 else "CAUTION" if raw > 0.0 else "AVOID"
+            raw = self._stable_value(sector, 0.20, 0.80)
+            conviction = "BUY" if raw > 0.55 else "NEUTRAL" if raw > 0.35 else "CAUTION"
             rows.append(
                 {
                     "signal_key": f"CONTRA_{sector.upper().replace(' ', '_')}",

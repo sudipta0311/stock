@@ -75,9 +75,10 @@ class SignalAgents:
             for row in rows:
                 bucket = grouped.setdefault(
                     row["sector"],
-                    {"sector": row["sector"], "score": 0.0, "sources": [], "source_weights": {}},
+                    {"sector": row["sector"], "score": 0.0, "weight_used": 0.0, "sources": [], "source_weights": {}},
                 )
                 bucket["score"] += row["score"] * weight
+                bucket["weight_used"] += weight
                 bucket["sources"].append(family)
                 bucket["source_weights"][family] = row["score"] * weight
 
@@ -88,7 +89,13 @@ class SignalAgents:
 
         unified: list[SignalRecord] = []
         for sector, payload in grouped.items():
-            score = clamp(payload["score"], 0.0, 1.0)
+            # Normalise by the weight of signal families that actually contributed
+            # to this sector so single-family sectors aren't penalised for missing
+            # families (e.g. a sector with only a strong policy signal should score
+            # near that signal's value, not be capped at 0.25).
+            weight_used = payload["weight_used"]
+            raw = payload["score"] / weight_used if weight_used > 0 else 0.0
+            score = clamp(raw, 0.0, 1.0)
             primary_source = max(payload["source_weights"], key=payload["source_weights"].get)
             unified.append(
                 SignalRecord(
