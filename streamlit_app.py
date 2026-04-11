@@ -50,8 +50,21 @@ st.markdown(
         height: auto !important;
         min-height: 100vh !important;
     }
-    body, p, span, label, li, td, th, input, textarea, button {
+    body, p, label, li, td, th, input, textarea, button {
         font-family: var(--font-sans) !important;
+    }
+    [data-testid="stIconMaterial"],
+    [data-testid="stIconMaterial"] *,
+    .material-symbols-rounded,
+    .material-symbols-outlined,
+    .material-icons {
+        font-family: "Material Symbols Rounded", "Material Symbols Outlined", "Material Icons" !important;
+        font-style: normal !important;
+        font-weight: 400 !important;
+        letter-spacing: normal !important;
+        line-height: 1 !important;
+        text-transform: none !important;
+        white-space: nowrap !important;
     }
     h1, h2, h3, h4, h5, h6, .hero-title, .section-title {
         font-family: var(--font-display) !important;
@@ -153,6 +166,21 @@ st.markdown(
         color: #627267 !important;
         -webkit-text-fill-color: #627267 !important;
         line-height: 1.6;
+    }
+    div[data-testid="stMarkdownContainer"] .hero-copy,
+    div[data-testid="stMarkdownContainer"] .hero-copy p,
+    .hero-copy {
+        color: rgba(255, 251, 245, 0.90) !important;
+        -webkit-text-fill-color: rgba(255, 251, 245, 0.90) !important;
+    }
+    div[data-testid="stMarkdownContainer"] .hero-pill,
+    div[data-testid="stMarkdownContainer"] .hero-kicker,
+    div[data-testid="stMarkdownContainer"] .hero-stat,
+    .hero-pill,
+    .hero-kicker,
+    .hero-stat {
+        color: #ffffff !important;
+        -webkit-text-fill-color: #ffffff !important;
     }
     .stButton > button,
     div[data-testid="stFormSubmitButton"] > button,
@@ -304,9 +332,9 @@ st.markdown(
         gap: 0.4rem;
         padding: 0.46rem 0.76rem;
         border-radius: 16px;
-        background: rgba(255, 255, 255, 0.10);
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        color: rgba(255, 253, 248, 0.92) !important;
+        background: rgba(255, 255, 255, 0.16);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        color: rgba(255, 253, 248, 0.98) !important;
         font-size: 0.82rem;
         backdrop-filter: blur(8px);
     }
