@@ -333,6 +333,420 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+st.markdown(
+    """
+    <style>
+    :root {
+        --font-sans: "Aptos", "Segoe UI", "Helvetica Neue", sans-serif;
+        --font-display: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+        --bg-soft-2: rgba(250, 248, 241, 0.82);
+        --line-strong: rgba(28, 49, 41, 0.16);
+        --shadow-strong: 0 28px 64px rgba(26, 48, 40, 0.16);
+    }
+    html, body {
+        background-color: #fbfaf6 !important;
+        font-family: var(--font-sans) !important;
+    }
+    body, p, span, label, li, td, th, input, textarea, button {
+        font-family: var(--font-sans) !important;
+    }
+    h1, h2, h3, h4, h5, h6, .hero-title, .section-title {
+        font-family: var(--font-display) !important;
+        letter-spacing: -0.035em;
+    }
+    .stApp {
+        position: relative;
+        background:
+            radial-gradient(circle at top left, rgba(15, 118, 110, 0.18), transparent 32%),
+            radial-gradient(circle at top right, rgba(182, 103, 26, 0.12), transparent 25%),
+            linear-gradient(180deg, #fbfaf6 0%, #eef1e9 52%, #f6f4ee 100%) !important;
+        overflow-x: hidden;
+    }
+    .stApp::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background-image:
+            linear-gradient(rgba(255, 255, 255, 0.18) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255, 255, 255, 0.18) 1px, transparent 1px);
+        background-size: 32px 32px;
+        mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.28), transparent 78%);
+        opacity: 0.42;
+        pointer-events: none;
+    }
+    header[data-testid="stHeader"],
+    [data-testid="stToolbar"] {
+        background: transparent !important;
+    }
+    .block-container {
+        max-width: 980px;
+        padding: 1.1rem 1.35rem 3rem;
+    }
+    div[data-testid="stTabs"] [role="tablist"] {
+        gap: 0.45rem;
+        padding: 0.42rem;
+        margin-bottom: 1.1rem;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.50);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(250, 247, 239, 0.82));
+        box-shadow: 0 10px 24px rgba(26, 48, 40, 0.06);
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+    div[data-testid="stTabs"] [role="tablist"]::-webkit-scrollbar {
+        display: none;
+    }
+    div[data-testid="stTabs"] button {
+        min-height: 2.55rem;
+        padding: 0.55rem 1rem;
+        border: 1px solid transparent !important;
+        font-size: 0.92rem;
+        font-weight: 700;
+        transition: background-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
+    }
+    div[data-testid="stTabs"] button[aria-selected="true"] {
+        color: #134e4a !important;
+        -webkit-text-fill-color: #134e4a !important;
+        background: linear-gradient(180deg, rgba(15, 118, 110, 0.16), rgba(15, 118, 110, 0.08)) !important;
+        border-color: rgba(15, 118, 110, 0.18) !important;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+    }
+    div[data-testid="stTabs"] button:hover {
+        background-color: rgba(15, 118, 110, 0.07) !important;
+        transform: translateY(-1px);
+    }
+    div[data-testid="stDataFrame"],
+    div[data-testid="stDataEditor"] {
+        border-radius: 18px;
+        border: 1px solid rgba(18, 44, 36, 0.10);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(249, 247, 241, 0.94)) !important;
+        box-shadow: 0 10px 24px rgba(26, 48, 40, 0.06);
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        border-radius: 22px !important;
+        border: 1px solid rgba(18, 44, 36, 0.10) !important;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(250, 248, 243, 0.96)) !important;
+        box-shadow: 0 10px 24px rgba(26, 48, 40, 0.06);
+        overflow: hidden;
+    }
+    div[data-testid="stForm"] {
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(250, 247, 239, 0.94)) !important;
+        border: 1px solid rgba(18, 44, 36, 0.10) !important;
+        border-radius: 22px;
+        padding: 1.05rem 1rem 0.7rem;
+        box-shadow: 0 10px 24px rgba(26, 48, 40, 0.06);
+    }
+    div[data-testid="stExpander"] {
+        border: 1px solid rgba(18, 44, 36, 0.10) !important;
+        border-radius: 22px !important;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(248, 246, 240, 0.86)) !important;
+        box-shadow: 0 10px 24px rgba(26, 48, 40, 0.06);
+        overflow: hidden;
+    }
+    div[data-testid="stMarkdownContainer"] p,
+    div[data-testid="stCaptionContainer"] p,
+    .mini-note,
+    .section-copy {
+        color: #627267 !important;
+        -webkit-text-fill-color: #627267 !important;
+        line-height: 1.6;
+    }
+    .stButton > button,
+    div[data-testid="stFormSubmitButton"] > button,
+    div[data-testid="stDownloadButton"] > button {
+        min-height: 2.9rem;
+        border-radius: 16px;
+        border: 1px solid rgba(15, 118, 110, 0.18) !important;
+        background: linear-gradient(180deg, rgba(15, 118, 110, 0.98), rgba(19, 78, 74, 0.94)) !important;
+        color: #f8fcfa !important;
+        font-weight: 800;
+        box-shadow: 0 14px 28px rgba(15, 118, 110, 0.18);
+        transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease;
+    }
+    .stButton > button:hover,
+    div[data-testid="stFormSubmitButton"] > button:hover,
+    div[data-testid="stDownloadButton"] > button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 18px 34px rgba(15, 118, 110, 0.22);
+        filter: saturate(1.02);
+    }
+    .stTextInput input,
+    .stTextArea textarea,
+    .stNumberInput input,
+    div[data-baseweb="select"] > div,
+    div[data-baseweb="base-input"] > div {
+        border-radius: 14px !important;
+        border: 1px solid var(--line-strong) !important;
+        background: rgba(255, 255, 255, 0.95) !important;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+    }
+    div[data-testid="stFileUploaderDropzone"] {
+        border-radius: 22px !important;
+        border: 1.5px dashed rgba(15, 118, 110, 0.28) !important;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(241, 247, 244, 0.92)) !important;
+        padding: 1.2rem !important;
+        box-shadow: 0 10px 24px rgba(26, 48, 40, 0.06);
+    }
+    div[data-testid="stRadio"] label {
+        border-radius: 999px !important;
+        border: 1px solid rgba(18, 44, 36, 0.10) !important;
+        background: rgba(255, 255, 255, 0.72) !important;
+        padding: 0.38rem 0.72rem !important;
+        margin-right: 0.45rem;
+    }
+    div[data-testid="stRadio"] label:has(input:checked) {
+        border-color: rgba(15, 118, 110, 0.20) !important;
+        background: rgba(15, 118, 110, 0.10) !important;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+    }
+    div[data-baseweb="notification"] {
+        border-radius: 18px !important;
+        border: 1px solid rgba(18, 44, 36, 0.10) !important;
+        box-shadow: 0 10px 24px rgba(26, 48, 40, 0.06);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 246, 240, 0.96)) !important;
+    }
+    .hero-shell {
+        position: relative;
+        overflow: hidden;
+        margin-bottom: 1rem;
+        padding: 1.4rem 1.35rem 1.3rem;
+        border-radius: 30px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        background:
+            radial-gradient(circle at top right, rgba(255, 255, 255, 0.20), transparent 30%),
+            linear-gradient(135deg, rgba(15, 118, 110, 0.98), rgba(19, 78, 74, 0.95) 58%, rgba(182, 103, 26, 0.88));
+        box-shadow: var(--shadow-strong);
+    }
+    .hero-shell::before {
+        content: "";
+        position: absolute;
+        inset: auto -12% -34% auto;
+        width: 240px;
+        height: 240px;
+        background: radial-gradient(circle, rgba(255, 255, 255, 0.18), transparent 64%);
+        pointer-events: none;
+    }
+    .hero-shell::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background:
+            linear-gradient(120deg, rgba(255, 255, 255, 0.04), transparent 35%),
+            linear-gradient(180deg, transparent, rgba(8, 20, 16, 0.12));
+        pointer-events: none;
+    }
+    .hero-shell-login {
+        text-align: center;
+        padding: 2.65rem 1.6rem;
+    }
+    .hero-kicker-row,
+    .hero-stat-row {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        align-items: center;
+    }
+    .hero-kicker-row {
+        margin-bottom: 0.8rem;
+    }
+    .hero-kicker,
+    .hero-pill,
+    .section-chip,
+    .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.3rem;
+        padding: 0.3rem 0.72rem;
+        border-radius: 999px;
+        font-size: 0.74rem;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+    }
+    .hero-kicker {
+        background: rgba(255, 255, 255, 0.16);
+        color: rgba(255, 255, 255, 0.92) !important;
+    }
+    .hero-pill {
+        background: rgba(10, 20, 17, 0.18);
+        color: rgba(255, 251, 245, 0.92) !important;
+    }
+    .hero-title {
+        position: relative;
+        z-index: 1;
+        margin: 0 0 0.4rem;
+        font-size: clamp(2rem, 5vw, 3rem);
+        line-height: 0.98;
+    }
+    .hero-copy {
+        position: relative;
+        z-index: 1;
+        max-width: 44rem;
+        margin: 0;
+        color: rgba(255, 253, 248, 0.82) !important;
+        font-size: 0.98rem;
+        line-height: 1.6;
+    }
+    .hero-stat-row {
+        margin-top: 1rem;
+    }
+    .hero-stat {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        padding: 0.46rem 0.76rem;
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.10);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        color: rgba(255, 253, 248, 0.92) !important;
+        font-size: 0.82rem;
+        backdrop-filter: blur(8px);
+    }
+    .hero-stat strong {
+        color: white !important;
+        font-size: 0.92rem;
+    }
+    .section-intro {
+        margin: 0.3rem 0 0.95rem;
+    }
+    .section-chip,
+    .pill {
+        background: linear-gradient(180deg, rgba(15, 118, 110, 0.13), rgba(15, 118, 110, 0.08)) !important;
+        color: #134e4a !important;
+        -webkit-text-fill-color: #134e4a !important;
+        border: 1px solid rgba(15, 118, 110, 0.12);
+    }
+    .section-title {
+        margin: 0.55rem 0 0.2rem;
+        font-size: clamp(1.45rem, 3vw, 2rem);
+    }
+    .provider-badge {
+        padding: 0.28rem 0.68rem;
+        margin-bottom: 0.55rem;
+        border: 1px solid transparent;
+        font-weight: 800;
+        letter-spacing: 0.01em;
+    }
+    .provider-badge-anthropic {
+        background-color: rgba(182, 103, 26, 0.12) !important;
+        color: #9a5513 !important;
+        -webkit-text-fill-color: #9a5513 !important;
+        border-color: rgba(182, 103, 26, 0.14);
+    }
+    .provider-badge-openai {
+        background-color: rgba(16, 163, 127, 0.12) !important;
+        color: #0f8a6c !important;
+        -webkit-text-fill-color: #0f8a6c !important;
+        border-color: rgba(16, 163, 127, 0.14);
+    }
+    .status-ok,
+    .status-warn {
+        padding: 0.24rem 0.58rem;
+        font-weight: 800;
+        letter-spacing: 0.02em;
+    }
+    .metric-card,
+    .info-tile,
+    .qa-card,
+    .model-box,
+    .empty-panel {
+        box-shadow: 0 10px 24px rgba(26, 48, 40, 0.06);
+    }
+    .metric-card {
+        min-height: 100%;
+        padding: 0.95rem 1rem;
+        border: 1px solid rgba(18, 44, 36, 0.10);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(248, 246, 240, 0.95)) !important;
+    }
+    .metric-label {
+        margin-bottom: 0.28rem;
+        color: #627267 !important;
+        -webkit-text-fill-color: #627267 !important;
+        font-size: 0.76rem;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+    }
+    .metric-value {
+        font-size: 1.55rem;
+        font-weight: 800;
+        line-height: 1.1;
+    }
+    .metric-subtle {
+        margin-top: 0.26rem;
+        color: #627267 !important;
+        -webkit-text-fill-color: #627267 !important;
+        font-size: 0.82rem;
+    }
+    .info-tile,
+    .qa-card,
+    .model-box {
+        padding: 0.9rem 1rem;
+        border: 1px solid rgba(18, 44, 36, 0.10);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), var(--bg-soft-2)) !important;
+    }
+    .empty-panel {
+        padding: 1rem 1.05rem;
+        border: 1px dashed rgba(28, 49, 41, 0.22);
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.74), rgba(247, 244, 237, 0.82)) !important;
+    }
+    @media (max-width: 640px) {
+        div[data-testid="stHorizontalBlock"] {
+            flex-wrap: wrap !important;
+            gap: 0.55rem !important;
+        }
+        div[data-testid="stColumn"] {
+            width: 100% !important;
+            min-width: 100% !important;
+            flex: 1 1 100% !important;
+        }
+        .block-container {
+            padding: 0.7rem 0.65rem 2rem !important;
+        }
+        .hero-shell {
+            padding: 1rem 0.92rem;
+            border-radius: 20px;
+            margin-bottom: 0.7rem;
+        }
+        .hero-shell-login {
+            padding: 2rem 1rem;
+        }
+        .hero-title {
+            font-size: 1.7rem;
+        }
+        .hero-copy {
+            font-size: 0.88rem;
+        }
+        .hero-stat {
+            width: 100%;
+            justify-content: space-between;
+        }
+        div[data-testid="stTabs"] button {
+            padding: 0.42rem 0.78rem !important;
+            font-size: 0.82rem !important;
+            white-space: nowrap;
+        }
+        div[data-testid="stForm"] {
+            padding: 0.8rem 0.78rem 0.5rem !important;
+        }
+        .section-title {
+            font-size: 1.42rem;
+        }
+        .metric-card,
+        .qa-card,
+        .empty-panel,
+        .info-tile,
+        .model-box {
+            padding: 0.78rem 0.82rem;
+        }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 
 def _auth_configured() -> bool:
     """Return True only when Google OAuth secrets are present."""
@@ -504,6 +918,19 @@ def render_info_tile(title: str, value: str) -> None:
     )
 
 
+def render_section_header(chip: str, title: str, description: str) -> None:
+    st.markdown(
+        f"""
+        <div class="section-intro">
+            <span class="section-chip">{_html.escape(chip)}</span>
+            <h2 class="section-title">{_html.escape(title)}</h2>
+            <p class="section-copy">{_html.escape(description)}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def render_empty_panel(message: str) -> None:
     st.markdown(f'<div class="empty-panel">{_html.escape(message)}</div>', unsafe_allow_html=True)
 
@@ -634,9 +1061,12 @@ if _use_auth:
     if not st.user.is_logged_in:
         st.markdown(
             """
-            <div class="hero-shell" style="text-align:center;padding:2.5rem 1.5rem;">
+            <div class="hero-shell hero-shell-login">
+                <div class="hero-kicker-row" style="justify-content:center;">
+                    <span class="hero-kicker">Secure access</span>
+                </div>
                 <h1 class="hero-title">Portfolio Assistant</h1>
-                <p class="hero-copy" style="margin-top:0.5rem;">
+                <p class="hero-copy" style="margin:0.5rem auto 0;">
                     Sign in with your Google account to access your personal portfolio,
                     buy ideas and stock monitoring.
                 </p>
@@ -680,6 +1110,10 @@ if llm_status["anthropic_enabled"]:
 if llm_status["openai_enabled"]:
     llm_providers_on.append("OpenAI")
 llm_display = " + ".join(llm_providers_on) if llm_providers_on else "Fallback"
+holding_count = len(portfolio["raw_holdings"])
+gap_count = len(portfolio["identified_gaps"])
+recommendation_count = len(recommendations)
+signal_count = sum(len(value) for value in signals.values())
 
 if "monitoring_llm_provider" not in st.session_state:
     st.session_state["monitoring_llm_provider"] = (
@@ -693,12 +1127,21 @@ with _hero_col:
     st.markdown(
         f"""
         <div class="hero-shell">
+            <div class="hero-kicker-row">
+                <span class="hero-kicker">Portfolio intelligence</span>
+                <span class="hero-pill">LLM stack: {_html.escape(llm_display)}</span>
+            </div>
             <h1 class="hero-title">Portfolio Assistant</h1>
             <p class="hero-copy">
                 {_html.escape(_user_display)} &nbsp;·&nbsp;
                 Upload statement · Buy ideas · Monitor stocks &nbsp;·&nbsp;
                 LLM: {_html.escape(llm_display)}
             </p>
+            <div class="hero-stat-row">
+                <span class="hero-stat"><strong>{holding_count}</strong> tracked holdings</span>
+                <span class="hero-stat"><strong>{signal_count}</strong> signal rows</span>
+                <span class="hero-stat"><strong>{recommendation_count}</strong> current ideas</span>
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -709,10 +1152,24 @@ with _logout_col:
         if st.button("Sign out", use_container_width=True):
             st.logout()
 
+summary_cols = st.columns(4)
+with summary_cols[0]:
+    render_metric("Tracked Holdings", str(holding_count), "All ingested portfolio rows")
+with summary_cols[1]:
+    render_metric("Sector Gaps", str(gap_count), "Detected from exposure analysis")
+with summary_cols[2]:
+    render_metric("Buy Ideas", str(recommendation_count), "Most recent recommendation feed")
+with summary_cols[3]:
+    render_metric("Signals", str(signal_count), "Across all signal families")
+
 tabs = st.tabs(["Overview", "Portfolio", "Buy Ideas", "Monitoring", "Signals"])
 
 with tabs[0]:
-    st.markdown('<span class="section-chip">Quick Snapshot</span>', unsafe_allow_html=True)
+    render_section_header(
+        "Quick Snapshot",
+        "Dashboard Overview",
+        "See the current portfolio shape, sector gaps, and pipeline readiness before you drill into each workflow.",
+    )
     st.info("Upload your statement in the **Portfolio** tab — your data is saved for your account. Then go to **Buy Ideas** and **Monitoring**.")
     top_cols = st.columns([1.15, 0.85])
     with top_cols[0]:
@@ -748,9 +1205,11 @@ with tabs[0]:
         st.json(preview)
 
 with tabs[1]:
-    st.markdown('<span class="section-chip">Upload And Ingest</span>', unsafe_allow_html=True)
-    st.subheader("Portfolio")
-    st.caption("Upload JSON, CSV, or an encrypted NSDL / CAS PDF. PDF uploads start ingestion automatically after parsing.")
+    render_section_header(
+        "Upload And Ingest",
+        "Portfolio Workspace",
+        "Upload JSON, CSV, or an encrypted NSDL / CAS PDF. PDF uploads start ingestion automatically after parsing.",
+    )
 
     pdf_password = st.text_input(
         "PDF password",
@@ -838,8 +1297,11 @@ with tabs[1]:
                     st.error(str(exc))
 
 with tabs[2]:
-    st.markdown('<span class="section-chip">Buy Ideas</span>', unsafe_allow_html=True)
-    st.subheader("Generate Recommendations")
+    render_section_header(
+        "Buy Ideas",
+        "Recommendation Studio",
+        "Run the existing buy-idea flow with Anthropic, OpenAI, or both providers side by side.",
+    )
 
     provider_choice = st.radio(
         "LLM provider",
@@ -949,8 +1411,11 @@ with tabs[2]:
             render_empty_panel("Run the buy workflow to populate the recommendation feed.")
 
 with tabs[3]:
-    st.markdown('<span class="section-chip">Actions + Behaviour</span>', unsafe_allow_html=True)
-    st.subheader("Monitoring")
+    render_section_header(
+        "Actions + Behaviour",
+        "Monitoring Desk",
+        "Track direct holdings and watchlist names, then refresh monitoring actions for the latest ingested portfolio.",
+    )
 
     st.markdown("#### Monitoring LLM")
     mon_choice = st.radio(
@@ -1128,8 +1593,11 @@ with tabs[3]:
         )
 
 with tabs[4]:
-    st.markdown('<span class="section-chip">Signal Intelligence Layer</span>', unsafe_allow_html=True)
-    st.subheader("Signals")
+    render_section_header(
+        "Signal Intelligence Layer",
+        "Macro Signal Feed",
+        "Refresh and inspect the signal families that shape gap analysis, monitoring, and recommendation runs.",
+    )
     if st.button("Refresh Signals", use_container_width=True):
         try:
             engine.run_signal_refresh(trigger="manual")
