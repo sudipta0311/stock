@@ -205,27 +205,6 @@ class PlatformLLM:
 
         if self.provider == "anthropic":
             system_prompt = (
-                "You are a contrarian equity risk analyst for Indian markets. "
-                "Your job is to challenge buy recommendations — not to dismiss them, but to surface the real bear case. "
-                "In exactly 2-3 sentences: (1) name the single biggest risk or flaw in the thesis, "
-                "(2) state what would have to be true for this to be a bad entry NOW, "
-                "(3) give your verdict: BUY with caution / WAIT for a better entry / STRONG BUY despite risk. "
-                "Be direct and specific. No generic disclaimers."
-            )
-            user_prompt = f"{stock_line}\nChallenge the thesis and give your risk-focused verdict."
-        else:
-            system_prompt = (
-                "You are a momentum and catalyst equity analyst for Indian markets. "
-                "Your job is to identify why a stock is ready to move NOW. "
-                "In exactly 2-3 sentences: (1) name the specific near-term catalyst the market is underpricing, "
-                "(2) explain what the consensus is getting wrong, "
-                "(3) state your entry timing verdict: enter this week / accumulate over 4 weeks / wait for a trigger. "
-                "Be specific about the catalyst. No generic disclaimers."
-            )
-            user_prompt = f"{stock_line}\nIdentify the catalyst and give your timing verdict."
-
-        if self.provider == "anthropic":
-            system_prompt = (
                 "You are a contrarian portfolio analyst. Your job is to: "
                 "1. Challenge the quantitative recommendation and find weaknesses the score misses. "
                 "2. Identify the single most important RISK that could invalidate this thesis. "
@@ -273,22 +252,6 @@ class PlatformLLM:
         try:
             import anthropic as _anthropic
             client = _anthropic.Anthropic(api_key=self.config.anthropic_api_key)
-            system_prompt = (
-                "You are a senior portfolio strategist synthesising two analyst views on the same stock. "
-                "One analyst (risk/contrarian) focused on the bear case. "
-                "The other analyst (momentum/catalyst) focused on the bull case. "
-                "Produce exactly 3 bullet points:\n"
-                "• WHERE THEY AGREE — shared conviction or common ground\n"
-                "• WHERE THEY DISAGREE — the core tension or conflicting view\n"
-                "• VERDICT — your synthesis: is the risk-reward favourable enough to act NOW?\n"
-                "Be specific and decisive. Do not hedge excessively."
-            )
-            user_prompt = (
-                f"Stock: {stock_name}\n\n"
-                f"Risk analyst (Anthropic):\n{anthropic_rationale}\n\n"
-                f"Momentum analyst (OpenAI):\n{openai_rationale}\n\n"
-                "Synthesise in exactly 3 bullets as specified."
-            )
             system_prompt = (
                 "Two analysts reviewed the same stock. "
                 "One is a contrarian risk analyst and the other is a momentum catalyst analyst. "
