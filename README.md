@@ -87,20 +87,41 @@ Use these deployment settings:
 
 Add your runtime secrets in the app's `Settings -> Secrets` panel using [.streamlit/secrets.toml.example](c:/Project/App/.streamlit/secrets.toml.example) as the template. The app reads both local `.env` files and Streamlit secrets.
 
+For Google sign-in, the hosted secrets must include the OpenID Connect metadata URL:
+
+```toml
+[auth]
+redirect_uri = "https://<your-app-subdomain>.streamlit.app/oauth2callback"
+cookie_secret = "replace-with-a-long-random-string"
+
+[auth.google]
+client_id = "xxxxxxxxxxxx.apps.googleusercontent.com"
+client_secret = "GOCSPX-xxxxxxxxxxxxxxxxxxxxxxxx"
+server_metadata_url = "https://accounts.google.com/.well-known/openid-configuration"
+```
+
+In Google Cloud Console, add these exact redirect URIs to the OAuth client that backs the app:
+
+- `https://<your-app-subdomain>.streamlit.app/oauth2callback`
+- `http://localhost:8501/oauth2callback` for local testing
+
+If you update secrets or OAuth settings, reboot the Streamlit app before re-testing login.
+
 ### Current deployment reference
 
 - Active deployment branch: `codex/streamlit-cloud-ready`
-- Latest Streamlit deployment branch commit: `2d2abc5`
-- Latest `main` branch commit at the time of writing: `b6324be`
-- App URL: `https://sudipta0311-stock-streamlit-app-codexstreamlit-cloud-rea-ltl7mo.streamlit.app/`
+- Latest deployment branch commit verified in this workspace: `f474343`
+- App URL: `https://sudipta0311-stock-streamlit-app-codexstreamlit-cloud-rea-ynukc3.streamlit.app/`
 
 ### Redeploy checklist
 
 1. In Streamlit Cloud, confirm the app is pointing to branch `codex/streamlit-cloud-ready`.
 2. Use `Reboot app` or `Redeploy latest commit` after pushing updates.
 3. Re-check the app secrets after any delete/recreate cycle.
-4. If portfolio monitoring looks empty after a PDF upload, re-upload the statement, let auto-ingestion complete, then run monitoring from the `Monitoring` tab.
-5. The Monitoring tab now includes a visible LLM selector and shows the LLM used in the latest monitoring results.
+4. If Google login fails immediately inside Streamlit, verify `server_metadata_url` is present in `[auth.google]` and the redirect URI matches Google Cloud exactly.
+5. If Google login reaches Google but stops with `redirect_uri_mismatch`, add the exact callback URI shown in the browser to the Google OAuth client.
+6. If portfolio monitoring looks empty after a PDF upload, re-upload the statement, let auto-ingestion complete, then run monitoring from the `Monitoring` tab.
+7. The Monitoring tab now includes a visible LLM selector and shows the LLM used in the latest monitoring results.
 
 ## Portal Flow
 
