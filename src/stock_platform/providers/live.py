@@ -3,8 +3,11 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import json
+import time
 from collections import defaultdict
 from datetime import date, timedelta
+from pathlib import Path
 from statistics import median
 from typing import Any
 
@@ -12,18 +15,21 @@ import pandas as pd
 import requests
 import yfinance as yf
 
+from stock_platform.utils.index_config import NSE_INDEX_CSV_URLS
 from stock_platform.utils.rules import clamp
 from stock_platform.utils.screener_fetcher import get_stock_fundamentals
 from stock_platform.utils.symbol_resolver import get_symbol_display_name, resolve_nse_symbol, resolve_symbol_base
+
+# Disk-cache directory for index constituents (7-day TTL — indices rebalance monthly).
+_INDEX_CACHE_DIR = Path(__file__).resolve().parents[3] / "data" / "index_constituents"
+_INDEX_CACHE_TTL_DAYS = 7
 
 
 class LiveMarketDataProvider:
     """Live market-data provider backed by NSE constituents, yfinance, and AMC look-through data."""
 
-    INDEX_URLS = {
-        "NIFTY50": "https://nsearchives.nseindia.com/content/indices/ind_nifty50list.csv",
-        "NIFTYNEXT50": "https://nsearchives.nseindia.com/content/indices/ind_niftynext50list.csv",
-    }
+    # All supported index CSV URLs — sourced from index_config.NSE_INDEX_CSV_URLS.
+    INDEX_URLS = NSE_INDEX_CSV_URLS
 
     def __init__(self, holdings_client: Any | None = None) -> None:
         self.holdings_client = holdings_client
@@ -132,28 +138,55 @@ class LiveMarketDataProvider:
             return "NEUTRAL"
         return "AVOID"
 
+    def _parse_index_csv_text(self, text: str) -> list[dict[str, Any]]:
+        """Parse NSE index CSV text into a list of symbol dicts."""
+        rows: list[dict[str, Any]] = []
+        reader = csv.DictReader(io.StringIO(text))
+        for row in reader:
+            symbol = self.normalize_symbol(row.get("Symbol") or row.get("symbol") or "")
+            if not symbol:
+                continue
+            rows.append({
+                "symbol": symbol,
+                "company_name": (row.get("Company Name") or row.get("Company") or symbol).strip(),
+                "sector": (row.get("Industry") or row.get("Sector") or "Unknown").strip() or "Unknown",
+            })
+        return rows
+
     def _download_index_csv(self, index_name: str) -> list[dict[str, Any]]:
+        # L1: in-memory cache (per session).
         if index_name in self._index_cache:
             return self._index_cache[index_name]
+
+        # L2: disk cache with 7-day TTL.
+        cache_file = _INDEX_CACHE_DIR / f"{index_name}.json"
+        if cache_file.exists():
+            age_days = (time.time() - cache_file.stat().st_mtime) / 86400
+            if age_days < _INDEX_CACHE_TTL_DAYS:
+                try:
+                    rows = json.loads(cache_file.read_text(encoding="utf-8"))
+                    self._index_cache[index_name] = rows
+                    return rows
+                except Exception:
+                    pass  # corrupt cache — fall through to fresh fetch
+
+        # L3: fetch from NSE archives.
         url = self.INDEX_URLS.get(index_name, self.INDEX_URLS["NIFTY50"])
         rows: list[dict[str, Any]] = []
         try:
             response = self.session.get(url, timeout=20)
             response.raise_for_status()
-            reader = csv.DictReader(io.StringIO(response.text))
-            for row in reader:
-                symbol = self.normalize_symbol(row.get("Symbol") or row.get("symbol") or "")
-                if not symbol:
-                    continue
-                rows.append(
-                    {
-                        "symbol": symbol,
-                        "company_name": (row.get("Company Name") or row.get("Company") or symbol).strip(),
-                        "sector": (row.get("Industry") or row.get("Sector") or "Unknown").strip() or "Unknown",
-                    }
-                )
+            rows = self._parse_index_csv_text(response.text)
         except Exception:
             rows = []
+
+        if rows:
+            try:
+                _INDEX_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                cache_file.write_text(json.dumps(rows), encoding="utf-8")
+            except Exception:
+                pass  # disk write failure is non-fatal
+
         self._index_cache[index_name] = rows
         return rows
 
