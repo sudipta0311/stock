@@ -190,9 +190,16 @@ st.markdown(
         border: 1px solid rgba(15, 118, 110, 0.18) !important;
         background: linear-gradient(180deg, rgba(15, 118, 110, 0.98), rgba(19, 78, 74, 0.94)) !important;
         color: #f8fcfa !important;
+        -webkit-text-fill-color: #f8fcfa !important;
         font-weight: 800;
         box-shadow: 0 14px 28px rgba(15, 118, 110, 0.18);
         transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease;
+    }
+    .stButton > button *,
+    div[data-testid="stFormSubmitButton"] > button *,
+    div[data-testid="stDownloadButton"] > button * {
+        color: #f8fcfa !important;
+        -webkit-text-fill-color: #f8fcfa !important;
     }
     .stButton > button:hover,
     div[data-testid="stFormSubmitButton"] > button:hover,
@@ -200,6 +207,12 @@ st.markdown(
         transform: translateY(-1px);
         box-shadow: 0 18px 34px rgba(15, 118, 110, 0.22);
         filter: saturate(1.02);
+    }
+    .stButton > button:focus-visible,
+    div[data-testid="stFormSubmitButton"] > button:focus-visible,
+    div[data-testid="stDownloadButton"] > button:focus-visible {
+        color: #ffffff !important;
+        -webkit-text-fill-color: #ffffff !important;
     }
     .stTextInput input,
     .stTextArea textarea,
@@ -498,12 +511,14 @@ def _auth_configured() -> bool:
         return False
 
 
-@st.cache_resource
+@st.cache_resource(max_entries=50)
 def get_engine(user_key: str = "local") -> PlatformEngine:
     """Return a PlatformEngine scoped to this user.
 
-    user_key is the first 16 chars of sha256(email) for authenticated users,
-    or 'local' for unauthenticated / single-user mode.
+    Chinese wall: each authenticated user gets a dedicated SQLite database
+    at data/users/<sha256(email)>.db — no data crosses between accounts.
+    user_key is the full sha256 hex digest of the user's Google email,
+    or 'local' for single-user / unauthenticated mode.
     """
     if user_key == "local":
         return PlatformEngine()
@@ -824,7 +839,9 @@ if _use_auth and not st.user.is_logged_in:
 if _use_auth:
     _user_email: str = st.user.email
     _user_display: str = getattr(st.user, "name", None) or _user_email
-    _user_key = hashlib.sha256(_user_email.encode()).hexdigest()[:16]
+    # Full SHA-256 hex digest (64 chars) — zero collision risk across users.
+    # This is the DB filename: data/users/<digest>.db — one file per Google account.
+    _user_key = hashlib.sha256(_user_email.encode()).hexdigest()
 else:
     _user_email = "local"
     _user_display = "Local"
@@ -876,8 +893,9 @@ with _hero_col:
             </div>
             <h1 class="hero-title">Portfolio Assistant</h1>
             <p class="hero-copy">
-                {_html.escape(_user_display)} &nbsp;·&nbsp;
-                Upload statement · Buy ideas · Monitor stocks &nbsp;·&nbsp;
+                {_html.escape(_user_display)}
+                {f'&nbsp;<span style="opacity:0.65;font-size:0.85em;">({_html.escape(_user_email)})</span>' if _use_auth else ''}
+                &nbsp;·&nbsp; Upload statement · Buy ideas · Monitor stocks &nbsp;·&nbsp;
                 LLM: {_html.escape(llm_display)}
             </p>
             <div class="hero-stat-row">
