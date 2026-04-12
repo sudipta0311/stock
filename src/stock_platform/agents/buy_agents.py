@@ -350,7 +350,9 @@ class BuyAgents:
 
     def validate_qualitative(self, state: dict[str, Any]) -> dict[str, Any]:
         unified = {row["sector"]: row for row in self.repo.list_signals("unified")}
+        top_n = int(state["request"]["top_n"])
         approved = []
+        fallback_pool = []
         for candidate in state["shortlist"]:
             news = self.provider.get_stock_news(candidate["symbol"])
             signal_context = unified.get(candidate["sector"], {})
@@ -359,6 +361,25 @@ class BuyAgents:
             llm_result = self.llm.qualitative_analysis(candidate, news, signal_context)
             if llm_result is not None:
                 if not llm_result["approved"]:
+                    if news["sentiment_score"] >= -0.1:
+                        fallback_pool.append(
+                            candidate | {
+                                "validation_confidence": round(
+                                    clamp(
+                                        candidate["quality_score"] * 0.7
+                                        + max(news["sentiment_score"], 0) * 0.3,
+                                        0.0,
+                                        1.0,
+                                    ),
+                                    3,
+                                ),
+                                "news": news,
+                                "validation_reasoning": (
+                                    llm_result["reasoning"]
+                                    or "Fallback used after qualitative rejection."
+                                ),
+                            }
+                        )
                     continue
                 confidence = round(clamp(llm_result["confidence"], 0.0, 1.0), 3)
             else:
@@ -377,7 +398,27 @@ class BuyAgents:
                     "validation_reasoning": llm_result["reasoning"] if llm_result else "",
                 }
             )
-        return {"shortlist": approved[: int(state["request"]["top_n"])]}
+        if len(approved) < top_n and fallback_pool:
+            used_symbols = {row["symbol"] for row in approved}
+            fallback_pool.sort(
+                key=lambda row: (
+                    row.get("validation_confidence", 0.0),
+                    row.get("selection_score", row.get("quality_score", 0.0)),
+                ),
+                reverse=True,
+            )
+            for candidate in fallback_pool:
+                if len(approved) >= top_n:
+                    break
+                if candidate["symbol"] in used_symbols:
+                    continue
+                approved.append(candidate)
+                used_symbols.add(candidate["symbol"])
+
+        if not approved:
+            print("WARNING: qualitative validation approved zero candidates - buy feed will be empty.")
+
+        return {"shortlist": approved[:top_n]}
 
     def differentiate_portfolio(self, state: dict[str, Any]) -> dict[str, Any]:
         overlaps = {row["symbol"]: row for row in state["portfolio_context"]["overlap_scores"]}
