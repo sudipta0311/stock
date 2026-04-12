@@ -33,6 +33,7 @@ Monitoring is intentionally scoped to a narrower universe:
 | Source | Included in monitoring |
 |---|---|
 | Direct equities (from statement PDF) | Yes |
+| Direct equities (from broker statement upload) | Yes |
 | Manual watchlist | Yes |
 | Mutual fund look-through holdings | No — managed by the fund manager |
 | ETF look-through holdings | No — managed by the fund manager |
@@ -130,7 +131,8 @@ If you update secrets or OAuth settings, reboot the Streamlit app before re-test
 2. Or go to `Upload Portfolio` and upload/import holdings.
 3. For PDFs, enter the password and let auto-ingestion complete.
 4. Open `Buy Ideas` to generate recommendations.
-5. Open `Monitoring` to review direct holdings, choose the monitoring LLM, and run monitoring.
+5. In `Portfolio`, upload a broker holdings statement or manually enter a buy price if you want tax-aware monitoring.
+6. Open `Monitoring` to review direct holdings, choose the monitoring LLM, and run monitoring.
 
 ## Supported Inputs
 
@@ -140,6 +142,7 @@ The ingestion tab supports:
 - `.json` upload with keys: `macro_thesis`, `investable_surplus`, `direct_equity_corpus`, `mutual_funds`, `etfs`, `direct_equities`
 - `.csv` upload with columns: `holding_type`, `instrument_name`, `symbol`, `market_value`, `quantity`
 - `.pdf` upload for encrypted NSDL CAS statements; the parser extracts holdings directly into the ingestion workflow
+- Broker statement upload for direct-equity buy prices: Zerodha Console holdings CSV, Groww holdings CSV, ICICI Direct PDF/CSV, or any CSV with symbol + quantity + average buy price columns
 
 ## Notes
 
@@ -147,9 +150,11 @@ The ingestion tab supports:
 - `seed_demo_data()` remains available only as a sample portfolio helper for testing the UI quickly. It no longer powers runtime recommendations or monitoring.
 - The **Buy Ideas** tab has a **Model Platform selector**: choose Anthropic Claude, OpenAI GPT, or **Compare Both** to run both providers side-by-side and view their recommendations in two columns.
 - The **Monitoring** tab has its own LLM selector and the latest monitoring results show which LLM generated the run.
+- The **Portfolio** tab now includes a dedicated broker statement upload below the main portfolio upload flow.
 - Both providers follow the same fast/reasoning tier split. Anthropic adds system-prompt caching on high-volume calls.
 - All LLM calls fall back gracefully to deterministic text when the relevant API key is absent or a call fails.
 - **Monitoring scope** is limited to direct equities from the ingested statement and any manually added watchlist stocks. MF/ETF look-through holdings are excluded from monitoring because they are managed by fund managers.
+- Monitoring now uses broker buy-price data when available to show P&L, days held, tax type, urgency, and tax-aware exit guidance such as `WAIT X days then EXIT`.
 - The watchlist persists in SQLite (`monitoring_watchlist` table) and survives app restarts.
 
 ## Recent fixes
@@ -166,3 +171,9 @@ The ingestion tab supports:
 | **Direct holdings — Monitoring Desk** | `capture_user_portfolio` now skips blank data-editor rows (`float("")` no longer crashes ingestion). Direct equity rows are preserved on PDF re-ingestion — only replaced when the new payload explicitly provides at least one valid row. `normalize_exposure` no longer crashes on stocks with no symbol. |
 | **Position sizing** | Buy recommendations show **"Deploy now: X% \| Target: Y% over 3 months"** using `compute_position_size(entry_signal, quality_score, corpus)`. Each stock gets a different initial tranche. Hard cap remains 30%. |
 | **Sector gap conviction** | `identify_gaps` computes true sector exposure across all instruments (MF + ETF + direct equity). Sectors ≥ 6% total exposure → `AVOID`. Sectors 4–6% → `NEUTRAL` max. |
+
+## Monitoring update
+
+- Broker statement uploads are now supported in the Portfolio Workspace for direct-equity buy prices.
+- Monitoring now shows P&L, holding period, tax type, urgency, and tax-aware guidance such as `WAIT X days then EXIT` when broker buy-price data is available.
+- The monitoring table now reads `overlap_pct` from the stored overlap scores instead of showing zero for every stock.
