@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from stock_platform.utils.symbol_resolver import resolve_symbol_base
 
 try:
     import pdfplumber
@@ -40,6 +41,30 @@ BROKER_COLUMN_ALIASES = {
     ],
     "current_price": ["ltp", "last price", "current price", "market price", "close price", "cmp"],
     "buy_date": ["buy date", "purchase date", "date of purchase", "acquisition date", "date"],
+    "company_name": ["company name", "company", "security name", "issuer name"],
+}
+
+BROKER_COMPANY_SYMBOL_MAP = {
+    "ASIAN PAINTS LIMITED": "ASIANPAINT",
+    "AXITA COTTON LIMITED": "AXITA",
+    "HDFC BANK LTD": "HDFCBANK",
+    "HDFC BANK LIMITED": "HDFCBANK",
+    "HINDUSTAN UNILEVER LTD": "HINDUNILVR",
+    "HINDUSTAN UNILEVER LIMITED": "HINDUNILVR",
+    "ICICI BANK LTD": "ICICIBANK",
+    "ICICI BANK LIMITED": "ICICIBANK",
+    "JIO FINANCIAL SERVICES LIMITED": "JIOFIN",
+    "KOTAK MAHINDRA BANK LTD": "KOTAKBANK",
+    "KOTAK MAHINDRA BANK LIMITED": "KOTAKBANK",
+    "KWALITY WALL'S (INDIA) LIMITED": "KWIL",
+    "LARSEN & TOUBRO LTD": "LT",
+    "LARSEN AND TOUBRO LTD": "LT",
+    "MOTILAL OSWAL MOST SHARES NASDAQ100 ETF": "N100",
+    "RELIANCE INDUSTRIES LTD": "RELIANCE",
+    "RELIANCE INDUSTRIES LIMITED": "RELIANCE",
+    "SBI CARDS AND PAYMENT SERVICES LTD": "SBICARD",
+    "SBI CARDS AND PAYMENT SERVICES LIMITED": "SBICARD",
+    "SBI NIFTY 50 ETF": "SETFNIF50",
 }
 
 
@@ -52,7 +77,26 @@ def _normalise_symbol(value: Any) -> str:
     symbol = symbol.replace(".NS", "").replace(".BO", "").replace("-EQ", "")
     if symbol.endswith("EQ") and len(symbol) > 2:
         symbol = symbol[:-2]
-    return symbol
+    return resolve_symbol_base(symbol)
+
+
+def _normalise_company_name(value: Any) -> str:
+    company = str(value or "").upper().strip()
+    company = company.replace("&", "AND")
+    company = re.sub(r"[^A-Z0-9]+", " ", company)
+    return re.sub(r"\s+", " ", company).strip()
+
+
+def _resolve_broker_symbol(raw_symbol: Any, company_name: Any = None) -> str:
+    normalized_symbol = _normalise_symbol(raw_symbol)
+    if company_name:
+        normalized_company = _normalise_company_name(company_name)
+        company_symbol = BROKER_COMPANY_SYMBOL_MAP.get(normalized_company)
+        # Prefer company-name mapping when the broker export uses truncated
+        # aliases such as HDFBAN / ICIBAN instead of exchange tickers.
+        if company_symbol:
+            return resolve_symbol_base(company_symbol)
+    return normalized_symbol
 
 
 def _to_float(value: Any, default: float = 0.0) -> float:
@@ -96,7 +140,7 @@ def _extract_holdings(df: pd.DataFrame, source: str) -> list[dict[str, Any]]:
 
     holdings: list[dict[str, Any]] = []
     for _, row in df.iterrows():
-        symbol = _normalise_symbol(row.get("symbol"))
+        symbol = _resolve_broker_symbol(row.get("symbol"), row.get("company_name"))
         if not symbol or symbol == "NAN":
             continue
         holding = {
