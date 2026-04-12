@@ -4,6 +4,7 @@ import sqlite3
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -93,6 +94,32 @@ class LiveProviderTests(unittest.TestCase):
         self.assertEqual(provider.normalize_symbol("HDFBANEQ"), "HDFCBANK")
         self.assertEqual(provider.normalize_symbol("ICIBAN"), "ICICIBANK")
         self.assertEqual(provider.normalize_symbol("LARTOU"), "LT")
+
+    def test_live_provider_uses_fallback_universe_when_index_download_is_empty(self) -> None:
+        provider = LiveMarketDataProvider()
+        fallback_rows = [{"symbol": "BEL", "company_name": "Bharat Electronics", "sector": "Capital Goods"}]
+
+        with (
+            patch.object(provider, "_download_index_csv", return_value=[]),
+            patch.object(provider, "_load_stale_index_cache", return_value=[]),
+            patch.object(provider, "_combined_universe", return_value=[]),
+            patch.object(provider, "_fallback_index_members", return_value=fallback_rows),
+        ):
+            rows = provider.get_index_members("NIFTY200")
+
+        self.assertEqual(rows, fallback_rows)
+
+    def test_live_provider_raises_when_all_universes_are_unavailable(self) -> None:
+        provider = LiveMarketDataProvider()
+
+        with (
+            patch.object(provider, "_download_index_csv", return_value=[]),
+            patch.object(provider, "_load_stale_index_cache", return_value=[]),
+            patch.object(provider, "_combined_universe", return_value=[]),
+            patch.object(provider, "_fallback_index_members", return_value=[]),
+        ):
+            with self.assertRaisesRegex(ValueError, "Unable to load constituents"):
+                provider.get_index_members("NIFTY200")
 
 
 if __name__ == "__main__":

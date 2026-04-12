@@ -161,6 +161,7 @@ class LiveMarketDataProvider:
 
         # L2: disk cache with 7-day TTL.
         cache_file = _INDEX_CACHE_DIR / f"{index_name}.json"
+        stale_rows: list[dict[str, Any]] = []
         if cache_file.exists():
             age_days = (time.time() - cache_file.stat().st_mtime) / 86400
             if age_days < _INDEX_CACHE_TTL_DAYS:
@@ -190,6 +191,33 @@ class LiveMarketDataProvider:
 
         self._index_cache[index_name] = rows
         return rows
+
+    def _load_stale_index_cache(self, index_name: str) -> list[dict[str, Any]]:
+        cache_file = _INDEX_CACHE_DIR / f"{index_name}.json"
+        if not cache_file.exists():
+            return []
+        try:
+            rows = json.loads(cache_file.read_text(encoding="utf-8"))
+            return rows if isinstance(rows, list) else []
+        except Exception:
+            return []
+
+    def _fallback_index_members(self, index_name: str) -> list[dict[str, Any]]:
+        """
+        Last-resort offline universe so the buy flow can still proceed when
+        NSE archive downloads are unavailable on hosted environments.
+        """
+        from stock_platform.providers.demo import DemoMarketDataProvider
+
+        demo = DemoMarketDataProvider()
+        if index_name in demo.index_members:
+            return demo.get_index_members(index_name)
+
+        combined: dict[str, dict[str, Any]] = {}
+        for fallback_index in ("NIFTY50", "NIFTYNEXT50"):
+            for row in demo.get_index_members(fallback_index):
+                combined.setdefault(row["symbol"], row)
+        return list(combined.values())
 
     def _combined_universe(self) -> list[dict[str, Any]]:
         combined: dict[str, dict[str, Any]] = {}
@@ -404,6 +432,19 @@ class LiveMarketDataProvider:
 
     def get_index_members(self, index_name: str) -> list[dict[str, Any]]:
         members = self._download_index_csv(index_name)
+        if not members:
+            members = self._load_stale_index_cache(index_name)
+        if not members and index_name not in {"NIFTY50", "NIFTYNEXT50"}:
+            members = self._load_stale_index_cache("NIFTY50") + self._load_stale_index_cache("NIFTYNEXT50")
+        if not members and index_name not in {"NIFTY50", "NIFTYNEXT50"}:
+            members = self._combined_universe()
+        if not members:
+            members = self._fallback_index_members(index_name)
+        if not members:
+            raise ValueError(
+                f"Unable to load constituents for {index_name}. "
+                "NSE archive download returned no rows and no fallback universe was available."
+            )
         return [dict(row) for row in members]
 
     def get_stock_snapshot(self, symbol: str) -> dict[str, Any]:
