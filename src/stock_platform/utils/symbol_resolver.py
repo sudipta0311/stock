@@ -8,8 +8,17 @@ NSE_SYMBOL_MAP = {
     "TATAMOTORSDVR": "TMCV",
     "TMPV": "TMPV",
     "TMCV": "TMCV",
+    "ASIANPAINT": "ASIANPAINT",
+    "ASIPAI": "ASIANPAINT",
+    "AXITA": "AXITA",
     "HDFCBANK": "HDFCBANK",
+    "HDFBAN": "HDFCBANK",
     "ICICIBANK": "ICICIBANK",
+    "ICIBAN": "ICICIBANK",
+    "HINDUNILVR": "HINDUNILVR",
+    "HLLLTD": "HINDUNILVR",
+    "JIOFIN": "JIOFIN",
+    "KOTMAH": "KOTAKBANK",
     "BHARTIARTL": "BHARTIARTL",
     "SUNPHARMA": "SUNPHARMA",
     "DIVISLAB": "DIVISLAB",
@@ -17,8 +26,16 @@ NSE_SYMBOL_MAP = {
     "HAL": "HAL",
     "DIXON": "DIXON",
     "LT": "LT",
+    "LARTOU": "LT",
     "KOTAKBANK": "KOTAKBANK",
     "AXISBANK": "AXISBANK",
+    "KWIL": "KWIL",
+    "RELIANCE": "RELIANCE",
+    "RELIND": "RELIANCE",
+    "SBICARD": "SBICARD",
+    "N100": "N100",
+    "SETFNIF50": "SETFNIF50",
+    "SETFNIFTY": "SETFNIF50",
 }
 
 DISPLAY_NAMES = {
@@ -34,6 +51,10 @@ def normalize_input_symbol(symbol: str) -> str:
     for suffix in (".NS", ".BO", ".BSE", ".NSE"):
         if clean.endswith(suffix):
             clean = clean[: -len(suffix)]
+    if clean.endswith("-EQ"):
+        clean = clean[:-3]
+    if clean.endswith("EQ") and len(clean) > 2:
+        clean = clean[:-2]
     return clean.replace(" ", "")
 
 

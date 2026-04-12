@@ -53,6 +53,20 @@ class BrokerParserTests(unittest.TestCase):
         self.assertAlmostEqual(holdings[0]["avg_buy_price"], 47.5695)
         self.assertAlmostEqual(holdings[0]["current_price"], 24.85)
 
+    def test_broker_aliases_are_mapped_to_exchange_symbols(self) -> None:
+        with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False, encoding="utf-8") as handle:
+            handle.write("Stock Name,Company Name,CMP,Average Cost Value,Qty\n")
+            handle.write("HDFBANEQ,HDFC BANK LTD,810.30,712.2691,220\n")
+            handle.write("ICIBANEQ,ICICI BANK LTD.,1321.90,491.3543,270\n")
+            handle.write("LARTOUEQ,LARSEN & TOUBRO LTD,3959.90,1030.0501,126\n")
+            csv_path = Path(handle.name)
+        try:
+            holdings = parse_broker_csv(csv_path)
+        finally:
+            csv_path.unlink(missing_ok=True)
+
+        self.assertEqual([row["symbol"] for row in holdings], ["HDFCBANK", "ICICIBANK", "LT"])
+
 
 class TaxCalculatorTests(unittest.TestCase):
     def test_limited_upside_exit_recommendation(self) -> None:

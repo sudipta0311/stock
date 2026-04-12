@@ -90,6 +90,9 @@ class LiveProviderTests(unittest.TestCase):
         self.assertEqual(provider.normalize_symbol("bel.ns"), "BEL")
         self.assertEqual(provider.normalize_symbol(" tcs.nse "), "TCS")
         self.assertEqual(provider.normalize_symbol("TATAMOTORS"), "TMCV")
+        self.assertEqual(provider.normalize_symbol("HDFBANEQ"), "HDFCBANK")
+        self.assertEqual(provider.normalize_symbol("ICIBAN"), "ICICIBANK")
+        self.assertEqual(provider.normalize_symbol("LARTOU"), "LT")
 
 
 if __name__ == "__main__":
