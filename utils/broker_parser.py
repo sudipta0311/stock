@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import re
 import sqlite3
 from pathlib import Path
@@ -28,6 +29,7 @@ BROKER_COLUMN_ALIASES = {
     "avg_price": [
         "avg price",
         "average price",
+        "average cost value",
         "buy price",
         "cost price",
         "avg cost",
@@ -48,6 +50,8 @@ def _canonical_column(name: Any) -> str:
 def _normalise_symbol(value: Any) -> str:
     symbol = str(value or "").strip().upper()
     symbol = symbol.replace(".NS", "").replace(".BO", "").replace("-EQ", "")
+    if symbol.endswith("EQ") and len(symbol) > 2:
+        symbol = symbol[:-2]
     return symbol
 
 
@@ -113,11 +117,62 @@ def _extract_holdings(df: pd.DataFrame, source: str) -> list[dict[str, Any]]:
 
 def parse_broker_csv(file_path: str | Path) -> list[dict[str, Any]]:
     try:
-        df = pd.read_csv(file_path)
+        df = _read_broker_csv(file_path)
         return _extract_holdings(df, source="broker_csv")
     except Exception as exc:
         print(f"Broker CSV parse error: {exc}")
         return []
+
+
+def _looks_like_shifted_csv(df: pd.DataFrame) -> bool:
+    if df.empty:
+        return False
+    if "Sr. No." in df.columns:
+        first_serial = str(df.iloc[0].get("Sr. No.", "")).strip()
+        if first_serial and not re.fullmatch(r"\d+", first_serial):
+            return True
+    if "Portfolio Holdings" in df.columns:
+        first_holding = str(df.iloc[0].get("Portfolio Holdings", "")).strip().lower()
+        if first_holding and first_holding not in {"equity", "etf", "mutual fund", "mf"}:
+            # Shifted parses often place numeric invested value here.
+            return True
+    return False
+
+
+def _read_broker_csv(file_path: str | Path) -> pd.DataFrame:
+    path = Path(file_path)
+    try:
+        df = pd.read_csv(path)
+        if not _looks_like_shifted_csv(df):
+            return df
+    except Exception:
+        pass
+
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.reader(handle))
+    if not rows:
+        return pd.DataFrame()
+
+    header = rows[0]
+    body = rows[1:]
+    max_len = max((len(row) for row in body), default=len(header))
+
+    if max_len > len(header):
+        header = header + [f"extra_{i}" for i in range(1, max_len - len(header) + 1)]
+
+    normalized_rows = []
+    for row in body:
+        if not any(str(cell).strip() for cell in row):
+            continue
+        if len(row) < len(header):
+            row = row + [""] * (len(header) - len(row))
+        elif len(row) > len(header):
+            row = row[: len(header)]
+        normalized_rows.append(row)
+
+    df = pd.DataFrame(normalized_rows, columns=header)
+
+    return df
 
 
 def _table_to_frame(table: list[list[Any]]) -> pd.DataFrame:
