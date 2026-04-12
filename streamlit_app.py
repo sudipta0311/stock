@@ -589,6 +589,9 @@ def run_ingestion_workflow(engine: PlatformEngine, payload: dict[str, Any], *, s
     with st.status(f"Ingestion in progress for {source_label}...", expanded=True) as status:
         status.write("Reading holdings and refreshing portfolio context.")
         result = engine.ingest_portfolio(payload)
+        st.session_state.pop("comparison_result", None)
+        st.session_state.pop("buy_blocked_reason", None)
+        st.session_state["buy_skipped_stocks"] = []
         status.write(f"Built {len(result['normalized_exposure'])} normalized positions.")
         status.update(label="Ingestion complete", state="complete", expanded=False)
     return result
@@ -605,6 +608,7 @@ def run_buy_workflow(
             st.toast("Recommendation comparison in progress...", icon="⏳")
         with st.status("Generating recommendations from both providers...", expanded=True) as status:
             comp = engine.run_buy_analysis_comparison(buy_request)
+            engine.repo.set_state("buy_comparison_result", comp)
             status.write("Anthropic and OpenAI runs completed.")
             status.update(label="Recommendations ready", state="complete", expanded=False)
         return comp
@@ -622,6 +626,7 @@ def run_buy_workflow(
             status.update(label="Recommendations ready", state="complete", expanded=False)
     # Persist skipped stocks in session state so the display section can show them.
     st.session_state["buy_skipped_stocks"] = (result or {}).get("skipped_stocks", [])
+    engine.repo.set_state("buy_comparison_result", {})
     return {"run_summary": run_summary} if run_summary.get("blocked_reason") else None
 
 
@@ -904,6 +909,9 @@ engine = get_engine(_user_key)
 DB_PATH = engine.config.db_path
 render_pending_notice()
 snapshot = engine.get_dashboard_snapshot()
+persisted_comparison = snapshot.get("buy_comparison_result", {})
+if persisted_comparison and "comparison_result" not in st.session_state:
+    st.session_state["comparison_result"] = persisted_comparison
 portfolio = snapshot["portfolio"]
 signals = snapshot["signals"]
 recommendations = snapshot["recommendations"]
@@ -1325,6 +1333,7 @@ with tabs[2]:
         _render_skipped_stocks(comp.get("skipped_stocks", []))
         if st.button("Clear comparison view"):
             st.session_state.pop("comparison_result", None)
+            engine.repo.set_state("buy_comparison_result", {})
             st.rerun()
     else:
         _blocked = st.session_state.get("buy_blocked_reason", "")
