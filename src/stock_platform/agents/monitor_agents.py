@@ -1,29 +1,39 @@
 from __future__ import annotations
 
-import sqlite3
 from typing import Any
 from uuid import uuid4
 
 from stock_platform.config import AppConfig
+from stock_platform.data.db import database_connection
 from stock_platform.models import MonitoringAction
 from utils.tax_calculator import calculate_pnl, should_exit
 
 
-def apply_overlap_override(symbol: str, exit_rec: dict[str, Any], db_path: str) -> tuple[dict[str, Any], float]:
+def apply_overlap_override(
+    symbol: str,
+    exit_rec: dict[str, Any],
+    db_path: str,
+    *,
+    turso_database_url: str = "",
+    turso_auth_token: str = "",
+    turso_sync_interval_seconds: int | None = None,
+) -> tuple[dict[str, Any], float]:
     """
     Suppress BUY MORE when the same stock is already owned meaningfully via MFs.
     """
     overlap = 0.0
-    conn = sqlite3.connect(db_path)
-    try:
+    with database_connection(
+        db_path,
+        turso_url=turso_database_url,
+        turso_token=turso_auth_token,
+        sync_interval=turso_sync_interval_seconds,
+    ) as conn:
         row = conn.execute(
             "SELECT overlap_pct FROM overlap_scores "
             "WHERE UPPER(TRIM(symbol)) = UPPER(TRIM(?))",
             (symbol,),
         ).fetchone()
         overlap = float(row[0]) if row else 0.0
-    finally:
-        conn.close()
 
     if overlap >= 2.0 and exit_rec["exit_recommendation"] == "BUY MORE":
         exit_rec = dict(exit_rec)
@@ -406,6 +416,9 @@ class MonitoringAgents:
                     symbol=symbol,
                     exit_rec=exit_rec,
                     db_path=str(self.config.db_path),
+                    turso_database_url=self.config.turso_database_url,
+                    turso_auth_token=self.config.turso_auth_token,
+                    turso_sync_interval_seconds=self.config.turso_sync_interval_seconds,
                 )
                 urgency = exit_rec["urgency"]
 

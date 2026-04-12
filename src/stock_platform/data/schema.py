@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import sqlite3
+from typing import Any
 
 
 DDL = [
@@ -119,11 +119,19 @@ DDL = [
         added_at TEXT NOT NULL
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS cache_entries (
+        cache_key TEXT PRIMARY KEY,
+        payload_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        expires_at TEXT
+    )
+    """,
 ]
 
 
 def _ensure_column(
-    connection: sqlite3.Connection,
+    connection: Any,
     table_name: str,
     column_name: str,
     definition: str,
@@ -136,7 +144,7 @@ def _ensure_column(
         connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
 
 
-def initialize_schema(connection: sqlite3.Connection) -> None:
+def initialize_schema(connection: Any) -> None:
     cursor = connection.cursor()
     for statement in DDL:
         cursor.execute(statement)

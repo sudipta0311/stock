@@ -8,11 +8,12 @@ are dropped silently from the candidate list and logged to SQLite.
 
 from __future__ import annotations
 
-import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
+
+from stock_platform.data.db import database_connection
 
 
 class ValidationStatus(Enum):
@@ -132,47 +133,54 @@ def log_skipped_stock(
     db_path: str,
     result: ValidationResult,
     run_id: str,
+    *,
+    turso_database_url: str = "",
+    turso_auth_token: str = "",
+    turso_sync_interval_seconds: int | None = None,
 ) -> None:
     """Persist a skipped stock to the skipped_stocks table for audit transparency."""
     try:
-        conn = sqlite3.connect(db_path)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS skipped_stocks (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                run_id     TEXT    NOT NULL,
-                symbol     TEXT    NOT NULL,
-                status     TEXT    NOT NULL,
-                reason     TEXT    NOT NULL,
-                skipped_at TEXT    NOT NULL
+        with database_connection(
+            db_path,
+            turso_url=turso_database_url,
+            turso_token=turso_auth_token,
+            sync_interval=turso_sync_interval_seconds,
+        ) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS skipped_stocks (
+                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id     TEXT    NOT NULL,
+                    symbol     TEXT    NOT NULL,
+                    status     TEXT    NOT NULL,
+                    reason     TEXT    NOT NULL,
+                    skipped_at TEXT    NOT NULL
+                )
+            """)
+            conn.execute(
+                """
+                INSERT INTO skipped_stocks (run_id, symbol, status, reason, skipped_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    result.symbol,
+                    result.status.value,
+                    result.reason,
+                    datetime.now(timezone.utc).isoformat(),
+                ),
             )
-        """)
-        conn.execute(
-            """
-            INSERT INTO skipped_stocks (run_id, symbol, status, reason, skipped_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (
-                run_id,
-                result.symbol,
-                result.status.value,
-                result.reason,
-                datetime.now(timezone.utc).isoformat(),
-            ),
-        )
-        conn.commit()
     except Exception as exc:
         print(f"WARNING: could not log skipped stock {result.symbol} to DB: {exc}")
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
 
 
 def filter_valid_candidates(
     candidates: list[dict[str, Any]],
     db_path: str,
     run_id: str,
+    *,
+    turso_database_url: str = "",
+    turso_auth_token: str = "",
+    turso_sync_interval_seconds: int | None = None,
 ) -> tuple[list[dict[str, Any]], list[ValidationResult]]:
     """
     Split candidates into valid (can proceed) and skipped (blocked).
@@ -198,7 +206,14 @@ def filter_valid_candidates(
             valid.append(stock)
         else:
             skipped.append(result)
-            log_skipped_stock(db_path, result, run_id)
+            log_skipped_stock(
+                db_path,
+                result,
+                run_id,
+                turso_database_url=turso_database_url,
+                turso_auth_token=turso_auth_token,
+                turso_sync_interval_seconds=turso_sync_interval_seconds,
+            )
             print(f"SKIPPED {symbol}: {result.reason}")
 
     return valid, skipped

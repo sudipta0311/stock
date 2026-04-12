@@ -1,29 +1,39 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterator
 
+from stock_platform.data.db import database_connection
 from stock_platform.data.schema import initialize_schema
 from stock_platform.models import MonitoringAction, RecommendationRecord, SignalRecord, utc_now_iso
 
 
 class PlatformRepository:
-    def __init__(self, db_path: Path) -> None:
+    def __init__(
+        self,
+        db_path: Path,
+        *,
+        turso_database_url: str = "",
+        turso_auth_token: str = "",
+        turso_sync_interval_seconds: int | None = None,
+    ) -> None:
         self.db_path = Path(db_path)
+        self.turso_database_url = turso_database_url
+        self.turso_auth_token = turso_auth_token
+        self.turso_sync_interval_seconds = turso_sync_interval_seconds
 
     @contextmanager
-    def connect(self) -> Iterator[sqlite3.Connection]:
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(self.db_path)
-        connection.row_factory = sqlite3.Row
-        try:
+    def connect(self) -> Iterator[Any]:
+        with database_connection(
+            self.db_path,
+            turso_url=self.turso_database_url,
+            turso_token=self.turso_auth_token,
+            sync_interval=self.turso_sync_interval_seconds,
+        ) as connection:
             yield connection
-            connection.commit()
-        finally:
-            connection.close()
 
     def initialize(self) -> None:
         with self.connect() as connection:
@@ -53,6 +63,44 @@ class PlatformRepository:
         if not row:
             return default or {}
         return json.loads(row["value_json"])
+
+    def set_cache(self, cache_key: str, payload: Any, ttl_seconds: int | None = None) -> None:
+        timestamp = utc_now_iso()
+        expires_at = None
+        if ttl_seconds is not None:
+            expires_at = (
+                datetime.now(UTC) + timedelta(seconds=ttl_seconds)
+            ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO cache_entries(cache_key, payload_json, updated_at, expires_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(cache_key) DO UPDATE SET
+                    payload_json=excluded.payload_json,
+                    updated_at=excluded.updated_at,
+                    expires_at=excluded.expires_at
+                """,
+                (cache_key, json.dumps(payload), timestamp, expires_at),
+            )
+
+    def get_cache(self, cache_key: str, default: Any = None, *, allow_expired: bool = False) -> Any:
+        with self.connect() as connection:
+            row = connection.execute(
+                "SELECT payload_json, expires_at FROM cache_entries WHERE cache_key = ?",
+                (cache_key,),
+            ).fetchone()
+        if not row:
+            return default
+        expires_at = row["expires_at"]
+        if not allow_expired and expires_at:
+            try:
+                expiry = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
+                if expiry <= datetime.now(UTC):
+                    return default
+            except ValueError:
+                return default
+        return json.loads(row["payload_json"])
 
     def replace_raw_holdings(self, holding_type: str, rows: list[dict[str, Any]]) -> None:
         timestamp = utc_now_iso()

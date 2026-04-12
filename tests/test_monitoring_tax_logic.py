@@ -16,6 +16,12 @@ if str(SRC) not in sys.path:
 from stock_platform.agents.monitor_agents import MonitoringAgents
 from stock_platform.config import AppConfig
 
+LOCAL_DB_CONFIG = {
+    "turso_database_url": "",
+    "turso_auth_token": "",
+    "turso_sync_interval_seconds": 0,
+}
+
 
 class StubRepo:
     pass
@@ -36,7 +42,7 @@ class StubLLM:
 
 class MonitoringTaxLogicTests(unittest.TestCase):
     def test_wait_then_exit_when_ltcg_is_close_and_upside_is_limited(self) -> None:
-        agent = MonitoringAgents(StubRepo(), StubProvider(), AppConfig(), lambda **kwargs: None, StubLLM())
+        agent = MonitoringAgents(StubRepo(), StubProvider(), AppConfig(**LOCAL_DB_CONFIG), lambda **kwargs: None, StubLLM())
         buy_date = (date.today() - timedelta(days=340)).isoformat()
         state = {
             "portfolio_context": {
@@ -65,7 +71,7 @@ class MonitoringTaxLogicTests(unittest.TestCase):
         self.assertEqual(row["urgency"], "MEDIUM")
 
     def test_quality_stock_in_loss_switches_to_buy_more(self) -> None:
-        agent = MonitoringAgents(StubRepo(), StubProvider(), AppConfig(), lambda **kwargs: None, StubLLM())
+        agent = MonitoringAgents(StubRepo(), StubProvider(), AppConfig(**LOCAL_DB_CONFIG), lambda **kwargs: None, StubLLM())
         state = {
             "portfolio_context": {
                 "monitor_universe": [{"symbol": "ASIANPAINT", "monitor_source": "direct", "total_weight": 8.0}],
@@ -91,7 +97,7 @@ class MonitoringTaxLogicTests(unittest.TestCase):
         self.assertEqual(row["urgency"], "LOW")
 
     def test_medium_quality_stock_in_loss_switches_to_hold_review(self) -> None:
-        agent = MonitoringAgents(StubRepo(), StubProvider(), AppConfig(), lambda **kwargs: None, StubLLM())
+        agent = MonitoringAgents(StubRepo(), StubProvider(), AppConfig(**LOCAL_DB_CONFIG), lambda **kwargs: None, StubLLM())
         state = {
             "portfolio_context": {
                 "monitor_universe": [{"symbol": "SBICARD", "monitor_source": "direct", "total_weight": 8.0}],
@@ -118,7 +124,7 @@ class MonitoringTaxLogicTests(unittest.TestCase):
 
     def test_stale_provider_target_is_replaced_before_decision(self) -> None:
         provider = StubProvider(analyst_target=40.0)
-        agent = MonitoringAgents(StubRepo(), provider, AppConfig(), lambda **kwargs: None, StubLLM())
+        agent = MonitoringAgents(StubRepo(), provider, AppConfig(**LOCAL_DB_CONFIG), lambda **kwargs: None, StubLLM())
         state = {
             "portfolio_context": {
                 "monitor_universe": [{"symbol": "JIOFIN", "monitor_source": "direct", "total_weight": 8.0}],
@@ -146,7 +152,7 @@ class MonitoringTaxLogicTests(unittest.TestCase):
         self.assertEqual(row["urgency"], "LOW")
 
     def test_large_winner_with_intact_thesis_becomes_strong_winner_hold(self) -> None:
-        agent = MonitoringAgents(StubRepo(), StubProvider(), AppConfig(), lambda **kwargs: None, StubLLM())
+        agent = MonitoringAgents(StubRepo(), StubProvider(), AppConfig(**LOCAL_DB_CONFIG), lambda **kwargs: None, StubLLM())
         state = {
             "portfolio_context": {
                 "monitor_universe": [{"symbol": "ICICIBANK", "monitor_source": "direct", "total_weight": 8.0}],
@@ -197,7 +203,7 @@ class MonitoringTaxLogicTests(unittest.TestCase):
             conn.commit()
             conn.close()
 
-            config = AppConfig(db_path=db_path)
+            config = AppConfig(db_path=db_path, **LOCAL_DB_CONFIG)
             agent = MonitoringAgents(StubRepo(), StubProvider(), config, lambda **kwargs: None, StubLLM())
             state = {
                 "portfolio_context": {

@@ -295,7 +295,14 @@ class BuyAgents:
             vr = validate_stock(candidate["symbol"], live_facts, current_price)
             if not vr.can_recommend:
                 skipped.append(vr)
-                log_skipped_stock(str(self.config.db_path), vr, validation_run_id)
+                log_skipped_stock(
+                    str(self.config.db_path),
+                    vr,
+                    validation_run_id,
+                    turso_database_url=self.config.turso_database_url,
+                    turso_auth_token=self.config.turso_auth_token,
+                    turso_sync_interval_seconds=self.config.turso_sync_interval_seconds,
+                )
                 print(f"SKIPPED {candidate['symbol']}: {vr.reason}")
                 continue
 

@@ -759,3 +759,6 @@ class DemoDataProvider:
                 {"instrument_name": "Titan Company", "symbol": "TITAN", "quantity": 20, "market_value": 73600},
             ],
         }
+
+
+DemoMarketDataProvider = DemoDataProvider

@@ -22,6 +22,12 @@ from stock_platform.agents.buy_agents import (
 from stock_platform.config import AppConfig
 from stock_platform.services.llm import PlatformLLM
 
+LOCAL_DB_CONFIG = {
+    "turso_database_url": "",
+    "turso_auth_token": "",
+    "turso_sync_interval_seconds": 0,
+}
+
 
 class RecordingLLM(PlatformLLM):
     def __init__(self, config: AppConfig, provider: str) -> None:
@@ -206,7 +212,7 @@ class BuyQualityScoreTests(unittest.TestCase):
         self.assertGreater(target, 300.0)
 
     def test_qualitative_fallback_prevents_empty_shortlist(self) -> None:
-        agent = BuyAgents(StubRepo(), StubProvider(), AppConfig(), RejectingLLM())
+        agent = BuyAgents(StubRepo(), StubProvider(), AppConfig(**LOCAL_DB_CONFIG), RejectingLLM())
         state = {
             "request": {"top_n": 2},
             "shortlist": [
@@ -228,7 +234,7 @@ class BuyQualityScoreTests(unittest.TestCase):
     @patch("stock_platform.agents.buy_agents.governance_risk_blocks", return_value=(False, ""))
     def test_finalize_recommendation_backfills_after_do_not_enter(self, _gov_mock, _target_mock) -> None:
         repo = StubRepo()
-        agent = BuyAgents(repo, StubProvider(), AppConfig(), StaticLLM())
+        agent = BuyAgents(repo, StubProvider(), AppConfig(**LOCAL_DB_CONFIG), StaticLLM())
         base_item = {
             "company_name": "Demo Co",
             "sector": "Defence",
@@ -268,7 +274,11 @@ class BuyQualityScoreTests(unittest.TestCase):
 
 class BuyPromptTests(unittest.TestCase):
     def setUp(self) -> None:
-        self.config = AppConfig(anthropic_api_key="test-key", openai_api_key="test-key")
+        self.config = AppConfig(
+            anthropic_api_key="test-key",
+            openai_api_key="test-key",
+            **LOCAL_DB_CONFIG,
+        )
         self.item = {
             "company_name": "Bharat Electronics",
             "symbol": "BEL",
