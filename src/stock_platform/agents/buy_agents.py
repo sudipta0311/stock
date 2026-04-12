@@ -600,6 +600,22 @@ class BuyAgents:
             price_ctx["analyst_target"] = analyst_target
             net_return_pct = compute_net_return(current_price, analyst_target, holding_months=24)
 
+            # Hard gate: analyst target is at or below current price — never recommend.
+            if net_return_pct is None or net_return_pct <= 0:
+                print(
+                    f"EXCLUDED {item['symbol']}: net_return={net_return_pct}% "
+                    f"— target below current price"
+                )
+                gov_skipped.append({
+                    "symbol": item["symbol"],
+                    "status": "NEGATIVE_NET_RETURN",
+                    "resolved_symbol": item["symbol"],
+                    "reason": (
+                        f"net_return={net_return_pct}% — analyst target is at or below current price"
+                    ),
+                })
+                continue
+
             # Governance risk gate: Adani Group and peers need ≥10% net return.
             gov_blocked, gov_reason = governance_risk_blocks(item["symbol"], net_return_pct)
             if gov_blocked:
