@@ -32,8 +32,9 @@ class LiveMarketDataProvider:
     # All supported index CSV URLs — sourced from index_config.NSE_INDEX_CSV_URLS.
     INDEX_URLS = NSE_INDEX_CSV_URLS
 
-    def __init__(self, holdings_client: Any | None = None) -> None:
+    def __init__(self, holdings_client: Any | None = None, repo: Any | None = None) -> None:
         self.holdings_client = holdings_client
+        self.repo = repo
         self.today = date.today()
         self.session = requests.Session()
         self.session.headers.update(
@@ -154,25 +155,52 @@ class LiveMarketDataProvider:
             })
         return rows
 
+    def _index_cache_key(self, index_name: str) -> str:
+        return f"index_constituents:{index_name}"
+
+    def _load_db_index_cache(self, index_name: str, *, allow_expired: bool = False) -> list[dict[str, Any]]:
+        if self.repo is None:
+            return []
+        rows = self.repo.get_cache(
+            self._index_cache_key(index_name),
+            default=[],
+            allow_expired=allow_expired,
+        )
+        return rows if isinstance(rows, list) else []
+
+    def _persist_index_cache(self, index_name: str, rows: list[dict[str, Any]]) -> None:
+        if self.repo is not None and rows:
+            self.repo.set_cache(
+                self._index_cache_key(index_name),
+                rows,
+                ttl_seconds=_INDEX_CACHE_TTL_DAYS * 86400,
+            )
+
     def _download_index_csv(self, index_name: str) -> list[dict[str, Any]]:
         # L1: in-memory cache (per session).
         if index_name in self._index_cache:
             return self._index_cache[index_name]
 
-        # L2: disk cache with 7-day TTL.
+        # L2: DB cache - shared across app sessions and synced to Turso.
+        db_rows = self._load_db_index_cache(index_name)
+        if db_rows:
+            self._index_cache[index_name] = db_rows
+            return db_rows
+
+        # L3: disk cache with 7-day TTL.
         cache_file = _INDEX_CACHE_DIR / f"{index_name}.json"
-        stale_rows: list[dict[str, Any]] = []
         if cache_file.exists():
             age_days = (time.time() - cache_file.stat().st_mtime) / 86400
             if age_days < _INDEX_CACHE_TTL_DAYS:
                 try:
                     rows = json.loads(cache_file.read_text(encoding="utf-8"))
+                    self._persist_index_cache(index_name, rows)
                     self._index_cache[index_name] = rows
                     return rows
                 except Exception:
                     pass  # corrupt cache — fall through to fresh fetch
 
-        # L3: fetch from NSE archives.
+        # L4: fetch from NSE archives.
         url = self.INDEX_URLS.get(index_name, self.INDEX_URLS["NIFTY50"])
         rows: list[dict[str, Any]] = []
         try:
@@ -183,6 +211,7 @@ class LiveMarketDataProvider:
             rows = []
 
         if rows:
+            self._persist_index_cache(index_name, rows)
             try:
                 _INDEX_CACHE_DIR.mkdir(parents=True, exist_ok=True)
                 cache_file.write_text(json.dumps(rows), encoding="utf-8")
@@ -193,6 +222,9 @@ class LiveMarketDataProvider:
         return rows
 
     def _load_stale_index_cache(self, index_name: str) -> list[dict[str, Any]]:
+        db_rows = self._load_db_index_cache(index_name, allow_expired=True)
+        if db_rows:
+            return db_rows
         cache_file = _INDEX_CACHE_DIR / f"{index_name}.json"
         if not cache_file.exists():
             return []
@@ -207,9 +239,9 @@ class LiveMarketDataProvider:
         Last-resort offline universe so the buy flow can still proceed when
         NSE archive downloads are unavailable on hosted environments.
         """
-        from stock_platform.providers.demo import DemoMarketDataProvider
+        from stock_platform.providers.demo import DemoDataProvider
 
-        demo = DemoMarketDataProvider()
+        demo = DemoDataProvider()
         if index_name in demo.index_members:
             return demo.get_index_members(index_name)
 

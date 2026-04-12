@@ -35,6 +35,11 @@ class RepositoryTests(unittest.TestCase):
         state = self.repo.get_state("user_preferences")
         self.assertEqual(state["macro_thesis"], "Defence")
 
+    def test_cache_round_trip(self) -> None:
+        self.repo.set_cache("index_constituents:NIFTY200", [{"symbol": "BEL"}], ttl_seconds=60)
+        cached = self.repo.get_cache("index_constituents:NIFTY200")
+        self.assertEqual(cached, [{"symbol": "BEL"}])
+
     def test_normalized_exposure_round_trip(self) -> None:
         self.repo.replace_normalized_exposure(
             [

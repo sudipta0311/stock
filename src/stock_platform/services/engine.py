@@ -36,10 +36,15 @@ class PlatformEngine:
         load_app_env()
         self.config = config or AppConfig()
         ensure_data_dir(self.config)
-        self.repo = PlatformRepository(Path(self.config.db_path))
+        self.repo = PlatformRepository(
+            Path(self.config.db_path),
+            turso_database_url=self.config.turso_database_url,
+            turso_auth_token=self.config.turso_auth_token,
+            turso_sync_interval_seconds=self.config.turso_sync_interval_seconds,
+        )
         self.repo.initialize()
-        self.mf_holdings = MutualFundHoldingsClient(self.config)
-        self.provider = LiveMarketDataProvider(holdings_client=self.mf_holdings)
+        self.mf_holdings = MutualFundHoldingsClient(self.config, repo=self.repo)
+        self.provider = LiveMarketDataProvider(holdings_client=self.mf_holdings, repo=self.repo)
         # Default LLM uses Anthropic; provider-keyed buy graphs are built on demand.
         self.llm = PlatformLLM(self.config, provider="anthropic")
         self.pdf_parser = NSDLCASParser()

@@ -25,6 +25,11 @@ class AppConfig:
     root_dir: Path = field(default_factory=lambda: Path(__file__).resolve().parents[2])
     data_dir: Path = field(default_factory=lambda: Path(__file__).resolve().parents[2] / "data")
     db_path: Path = field(default_factory=lambda: Path(__file__).resolve().parents[2] / "data" / "platform.db")
+    turso_database_url: str = field(default_factory=lambda: os.getenv("TURSO_DATABASE_URL", ""))
+    turso_auth_token: str = field(default_factory=lambda: os.getenv("TURSO_AUTH_TOKEN", ""))
+    turso_sync_interval_seconds: int = field(
+        default_factory=lambda: int(os.getenv("TURSO_SYNC_INTERVAL_SECONDS", "15"))
+    )
     max_portfolio_age_days: int = 35
     max_direct_stocks: int = 4
     max_single_stock_pct: float = 30.0
@@ -70,6 +75,10 @@ class AppConfig:
     def llm_enabled(self) -> bool:
         """True if at least one provider has a configured key."""
         return self.anthropic_enabled or self.openai_enabled
+
+    @property
+    def turso_enabled(self) -> bool:
+        return bool(self.turso_database_url and self.turso_auth_token)
 
 
 def ensure_data_dir(config: AppConfig) -> None:

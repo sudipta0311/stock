@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 import time
 from typing import Any
@@ -11,14 +12,28 @@ from stock_platform.config import AppConfig
 
 
 class MutualFundHoldingsClient:
-    def __init__(self, config: AppConfig) -> None:
+    def __init__(self, config: AppConfig, repo: Any | None = None) -> None:
         self.config = config
+        self.repo = repo
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "stock-langgraph-platform/0.1"})
         self.official_resolver = OfficialAMCResolver()
         self.scheme_cache: dict[str, dict[str, Any] | None] = {}
         self.holdings_cache: dict[tuple[str, str], dict[str, float] | None] = {}
         self.source_cache: dict[tuple[str, str], str] = {}
+
+    def _cache_key(self, prefix: str, value: str) -> str:
+        digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
+        return f"{prefix}:{digest}"
+
+    def _load_repo_cache(self, key: str) -> Any:
+        if self.repo is None:
+            return None
+        return self.repo.get_cache(key, default=None)
+
+    def _persist_repo_cache(self, key: str, payload: Any, ttl_seconds: int = 86400) -> None:
+        if self.repo is not None and payload is not None:
+            self.repo.set_cache(key, payload, ttl_seconds=ttl_seconds)
 
     def resolve_holdings(self, fund_name: str, month: str | None = None) -> dict[str, float] | None:
         official = self.official_resolver.resolve(fund_name, month=month)
@@ -58,6 +73,11 @@ class MutualFundHoldingsClient:
         normalized = self._normalize_name(fund_name)
         if normalized in self.scheme_cache:
             return self.scheme_cache[normalized]
+        cache_key = self._cache_key("mf_scheme_search", normalized)
+        cached = self._load_repo_cache(cache_key)
+        if isinstance(cached, dict):
+            self.scheme_cache[normalized] = cached
+            return cached
         url = f"{self.config.mf_api_base_url.rstrip('/')}/search"
         candidates = self._request_json(url, params={"q": normalized})
         if not isinstance(candidates, list):
@@ -65,6 +85,7 @@ class MutualFundHoldingsClient:
             return None
         best = self._pick_best_match(normalized, candidates)
         self.scheme_cache[normalized] = best
+        self._persist_repo_cache(cache_key, best, ttl_seconds=43200)
         return best
 
     def fetch_scheme_details(self, scheme_code: str) -> dict[str, Any] | None:
@@ -94,6 +115,11 @@ class MutualFundHoldingsClient:
         return holdings or None
 
     def _request_json(self, url: str, params: dict[str, Any] | None = None) -> Any:
+        cache_identity = f"{url}?{repr(sorted((params or {}).items()))}"
+        cache_key = self._cache_key("mf_http", cache_identity)
+        cached = self._load_repo_cache(cache_key)
+        if cached is not None:
+            return cached
         for attempt in range(2):
             try:
                 response = self.session.get(url, params=params, timeout=self.config.mf_holdings_timeout_seconds)
@@ -102,7 +128,9 @@ class MutualFundHoldingsClient:
                     continue
                 response.raise_for_status()
                 body = response.json()
-                return body.get("data")
+                payload = body.get("data")
+                self._persist_repo_cache(cache_key, payload, ttl_seconds=86400)
+                return payload
             except Exception:
                 time.sleep(0.5 * (attempt + 1))
         return None

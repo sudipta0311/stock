@@ -25,7 +25,13 @@ class EngineMonitoringTests(unittest.TestCase):
         journal_path = self.temp_dir / "platform.db-journal"
         if journal_path.exists():
             journal_path.unlink()
-        self.config = AppConfig(data_dir=self.temp_dir, db_path=self.db_path)
+        self.config = AppConfig(
+            data_dir=self.temp_dir,
+            db_path=self.db_path,
+            turso_database_url="",
+            turso_auth_token="",
+            turso_sync_interval_seconds=0,
+        )
         try:
             self.engine = PlatformEngine(self.config)
         except sqlite3.OperationalError as exc:
