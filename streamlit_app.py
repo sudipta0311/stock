@@ -1481,7 +1481,12 @@ with tabs[3]:
                 for item in monitoring_actions
             ]
         )
-        st.dataframe(monitor_frame, use_container_width=True, hide_index=True)
+        st.dataframe(
+            monitor_frame,
+            use_container_width=True,
+            hide_index=True,
+            height=min(600, len(monitor_frame) * 35 + 38),
+        )
     else:
         render_empty_panel(
             "Monitoring has not been run for the current portfolio yet. Use the Run Monitoring button above."

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sys
+import sqlite3
+import tempfile
 import unittest
 from datetime import date, timedelta
 from pathlib import Path
@@ -169,6 +171,58 @@ class MonitoringTaxLogicTests(unittest.TestCase):
         row = result["actions"][0]
         self.assertEqual(row["action"], "HOLD - strong winner")
         self.assertEqual(row["urgency"], "LOW")
+
+    def test_overlap_suppresses_buy_more_signal(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "platform.db"
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                """
+                CREATE TABLE overlap_scores (
+                    symbol TEXT PRIMARY KEY,
+                    overlap_pct REAL NOT NULL,
+                    band TEXT NOT NULL,
+                    attribution_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO overlap_scores(symbol, overlap_pct, band, attribution_json, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                ("ASIANPAINT", 2.4, "FLAG", "[]", "2026-04-12T00:00:00Z"),
+            )
+            conn.commit()
+            conn.close()
+
+            config = AppConfig(db_path=db_path)
+            agent = MonitoringAgents(StubRepo(), StubProvider(), config, lambda **kwargs: None, StubLLM())
+            state = {
+                "portfolio_context": {
+                    "monitor_universe": [{"symbol": "ASIANPAINT", "monitor_source": "direct", "total_weight": 8.0}],
+                    "direct_equity_buy_map": {
+                        "ASIANPAINT": {
+                            "symbol": "ASIANPAINT",
+                            "quantity": 10,
+                            "avg_buy_price": 3000.0,
+                            "buy_date": "2025-01-01",
+                        }
+                    },
+                },
+                "stock_reviews": [{"symbol": "ASIANPAINT", "sentiment_score": 0.1}],
+                "thesis_reviews": [{"symbol": "ASIANPAINT", "status": "INTACT"}],
+                "drawdown_alerts": [{"symbol": "ASIANPAINT", "severity": "LOW", "current_price": 2400.0}],
+                "quant_scores": [{"symbol": "ASIANPAINT", "quant_score": 0.80}],
+            }
+
+            result = agent.decide_actions(state)
+            row = result["actions"][0]
+
+            self.assertEqual(row["action"], "HOLD - already in MFs")
+            self.assertEqual(row["urgency"], "LOW")
+            self.assertAlmostEqual(row["overlap_pct"], 2.4)
 
 
 if __name__ == "__main__":
