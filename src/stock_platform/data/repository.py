@@ -197,6 +197,17 @@ class PlatformRepository:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def list_direct_equity_holdings(self) -> list[dict[str, Any]]:
+        with self.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT symbol, quantity, avg_buy_price, current_price, buy_date, source, updated_at
+                FROM direct_equity
+                ORDER BY symbol
+                """
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def replace_signals(self, family: str, rows: list[SignalRecord | dict[str, Any]]) -> None:
         timestamp = utc_now_iso()
         normalized_rows: list[SignalRecord] = []
@@ -326,9 +337,9 @@ class PlatformRepository:
             connection.executemany(
                 """
                 INSERT INTO monitoring_actions(
-                    run_id, symbol, action, severity, rationale, payload_json, created_at
+                    run_id, symbol, action, severity, urgency, rationale, payload_json, created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -336,6 +347,7 @@ class PlatformRepository:
                         row.symbol,
                         row.action,
                         row.severity,
+                        row.urgency,
                         row.rationale,
                         json.dumps(row.payload),
                         timestamp,
@@ -348,14 +360,36 @@ class PlatformRepository:
     def list_monitoring_actions(self) -> list[dict[str, Any]]:
         run_meta = self.get_state("last_monitor_run", {})
         run_id = run_meta.get("run_id")
-        if not run_id:
-            return []
         with self.connect() as connection:
+            if not run_id:
+                row = connection.execute(
+                    "SELECT run_id FROM monitoring_actions ORDER BY created_at DESC, id DESC LIMIT 1"
+                ).fetchone()
+                if not row:
+                    return []
+                run_id = row["run_id"]
             rows = connection.execute(
                 """
-                SELECT * FROM monitoring_actions
-                WHERE run_id = ?
-                ORDER BY severity DESC, symbol
+                SELECT
+                    m.*,
+                    COALESCE(o.overlap_pct, 0) AS overlap_pct
+                FROM monitoring_actions m
+                LEFT JOIN overlap_scores o
+                    ON UPPER(TRIM(m.symbol)) = UPPER(TRIM(o.symbol))
+                WHERE m.run_id = ?
+                ORDER BY
+                    CASE m.urgency
+                        WHEN 'HIGH' THEN 1
+                        WHEN 'MEDIUM' THEN 2
+                        ELSE 3
+                    END,
+                    CASE m.severity
+                        WHEN 'CRITICAL' THEN 1
+                        WHEN 'HIGH' THEN 2
+                        WHEN 'MEDIUM' THEN 3
+                        ELSE 4
+                    END,
+                    m.symbol
                 """,
                 (run_id,),
             ).fetchall()
@@ -415,4 +449,5 @@ class PlatformRepository:
             "unified_signals": self.list_signals("unified"),
             "user_preferences": self.get_state("user_preferences", {}),
             "watchlist": self.list_watchlist(),
+            "direct_equity_holdings": self.list_direct_equity_holdings(),
         }
