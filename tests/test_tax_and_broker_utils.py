@@ -79,9 +79,87 @@ class TaxCalculatorTests(unittest.TestCase):
         )
         decision = should_exit(pnl, analyst_target=1260.0, current_price=1200.0)
 
-        self.assertEqual(decision["exit_recommendation"], "EXIT — limited upside")
+        self.assertEqual(decision["exit_recommendation"], "EXIT - limited upside")
         self.assertEqual(decision["urgency"], "MEDIUM")
-        self.assertIn("Net proceeds", decision["tax_note"])
+        self.assertIn("Net:", decision["tax_note"])
+
+    def test_quality_compounder_in_loss_returns_buy_more(self) -> None:
+        pnl = calculate_pnl(
+            symbol="ASIANPAINT",
+            avg_buy_price=3000.0,
+            current_price=2400.0,
+            quantity=10.0,
+            buy_date_str="2025-01-01",
+        )
+        decision = should_exit(
+            pnl,
+            analyst_target=3300.0,
+            current_price=2400.0,
+            thesis_status="INTACT",
+            quant_score=0.80,
+        )
+
+        self.assertEqual(decision["exit_recommendation"], "BUY MORE")
+        self.assertEqual(decision["urgency"], "LOW")
+        self.assertIn("Quality compounder", decision["reasoning"])
+
+    def test_medium_quality_stock_in_loss_returns_hold_review(self) -> None:
+        pnl = calculate_pnl(
+            symbol="SBICARD",
+            avg_buy_price=740.0,
+            current_price=677.5,
+            quantity=50.0,
+            buy_date_str="2025-01-01",
+        )
+        decision = should_exit(
+            pnl,
+            analyst_target=900.0,
+            current_price=677.5,
+            thesis_status="INTACT",
+            quant_score=0.62,
+        )
+
+        self.assertEqual(decision["exit_recommendation"], "HOLD - review next quarter")
+        self.assertEqual(decision["urgency"], "MEDIUM")
+        self.assertIn("moderate quality", decision["reasoning"])
+
+    def test_weakened_low_quality_stock_in_loss_exits(self) -> None:
+        pnl = calculate_pnl(
+            symbol="AXITA",
+            avg_buy_price=19.54,
+            current_price=8.9,
+            quantity=440.0,
+            buy_date_str="2025-01-01",
+        )
+        decision = should_exit(
+            pnl,
+            analyst_target=12.0,
+            current_price=8.9,
+            thesis_status="WEAKENED",
+            quant_score=0.29,
+        )
+
+        self.assertEqual(decision["exit_recommendation"], "EXIT - cut loss")
+        self.assertEqual(decision["urgency"], "HIGH")
+
+    def test_thesis_breached_in_loss_is_hard_exit(self) -> None:
+        pnl = calculate_pnl(
+            symbol="KWIL",
+            avg_buy_price=47.56,
+            current_price=24.85,
+            quantity=65.0,
+            buy_date_str="2025-01-01",
+        )
+        decision = should_exit(
+            pnl,
+            analyst_target=40.0,
+            current_price=24.85,
+            thesis_status="BREACHED",
+            quant_score=0.15,
+        )
+
+        self.assertEqual(decision["exit_recommendation"], "EXIT - thesis breached")
+        self.assertEqual(decision["urgency"], "CRITICAL")
 
 
 if __name__ == "__main__":

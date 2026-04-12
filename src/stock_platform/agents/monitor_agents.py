@@ -324,19 +324,25 @@ class MonitoringAgents:
                     quantity=float(buy_info.get("quantity") or 0),
                     buy_date_str=str(buy_info.get("buy_date") or "unknown"),
                 )
-                exit_rec = should_exit(pnl, analyst_target, float(current_price))
+                exit_rec = should_exit(
+                    pnl=pnl,
+                    analyst_target=analyst_target,
+                    current_price=float(current_price),
+                    thesis_status=thesis,
+                    quant_score=quant,
+                )
                 urgency = exit_rec["urgency"]
 
             if thesis == "BREACHED":
-                action = "EXIT — thesis breached"
-                urgency = "HIGH"
-                tax_note = exit_rec["tax_note"] if exit_rec else "Re-underwrite before continuing to hold"
-                exit_rec = {
-                    "exit_recommendation": action,
-                    "reasoning": "Thesis breached",
-                    "tax_note": tax_note,
-                    "urgency": urgency,
-                }
+                action = "EXIT - thesis breached"
+                urgency = exit_rec["urgency"] if exit_rec else "CRITICAL"
+                if exit_rec is None:
+                    exit_rec = {
+                        "exit_recommendation": action,
+                        "reasoning": "Thesis breached",
+                        "tax_note": "Re-underwrite before continuing to hold",
+                        "urgency": urgency,
+                    }
                 severity = "CRITICAL"
             elif exit_rec is not None:
                 action = exit_rec["exit_recommendation"]
@@ -383,7 +389,7 @@ class MonitoringAgents:
         )
         flags = []
         for action in state["actions"]:
-            if action["action"] == "SELL":
+            if action["action"] == "SELL" or str(action["action"]).startswith("EXIT"):
                 flags.append(
                     {
                         "symbol": action["symbol"],
@@ -410,7 +416,11 @@ class MonitoringAgents:
         return {"behavioural_flags": flags}
 
     def replace_feedback(self, state: dict[str, Any]) -> dict[str, Any]:
-        sell_like = [row for row in state["actions"] if row["action"] in {"SELL", "REPLACE"}]
+        sell_like = [
+            row
+            for row in state["actions"]
+            if row["action"] in {"SELL", "REPLACE"} or str(row["action"]).startswith("EXIT")
+        ]
         prompt = {
             "should_prompt": bool(sell_like),
             "message": "Portfolio gap created. Run new buy recommendation with refreshed context."
