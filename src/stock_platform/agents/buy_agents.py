@@ -13,6 +13,127 @@ from stock_platform.utils.sector_config import governance_risk_blocks
 from stock_platform.utils.stock_validator import ValidationResult, log_skipped_stock, validate_stock
 
 
+def get_top_n_with_replacement(
+    scored_candidates: list[dict[str, Any]],
+    n: int,
+    skipped_symbols: list[str],
+    db_path: str,
+) -> list[dict[str, Any]]:
+    """
+    Keep fetching the next-best validated candidates until we have N rows
+    or exhaust the candidate list.
+    """
+    from stock_platform.utils.screener_fetcher import fetch_screener_data
+
+    recommendations: list[dict[str, Any]] = []
+    attempted = {str(symbol).upper() for symbol in skipped_symbols}
+
+    sorted_candidates = sorted(
+        scored_candidates,
+        key=lambda row: row.get("selection_score", row.get("quality_score", 0)),
+        reverse=True,
+    )
+
+    for candidate in sorted_candidates:
+        if len(recommendations) >= n:
+            break
+
+        symbol = str(candidate.get("symbol", "")).upper().strip()
+        if not symbol or symbol in attempted:
+            continue
+
+        attempted.add(symbol)
+        fin_data = candidate.get("financials") or candidate.get("live_financials") or {}
+        if not fin_data:
+            fin_data = fetch_screener_data(symbol)
+        current_price = (
+            candidate.get("current_price")
+            or candidate.get("live_financials", {}).get("currentPrice")
+            or candidate.get("live_financials", {}).get("current_price")
+            or fin_data.get("current_price")
+        )
+
+        result = validate_stock(symbol, fin_data, current_price)
+        if result.can_recommend:
+            recommendations.append(
+                candidate
+                | {
+                    "financials": fin_data,
+                    "live_financials": candidate.get("live_financials") or fin_data,
+                    "current_price": current_price,
+                }
+            )
+        else:
+            print(f"Skipped {symbol}: {result.reason}")
+
+    if len(recommendations) < n:
+        print(
+            f"WARNING: Only found {len(recommendations)} valid candidates out of requested {n}. "
+            "Try a broader index like NIFTY 200."
+        )
+
+    return recommendations
+
+
+def get_fresh_analyst_target(
+    symbol: str,
+    current_price: float,
+    seed_target: float | None = None,
+    live_financials: dict[str, Any] | None = None,
+) -> float:
+    if not current_price or current_price <= 0:
+        return 0.0
+
+    def _valid_target(value: Any) -> bool:
+        try:
+            return value is not None and float(value) > current_price * 0.5
+        except (TypeError, ValueError):
+            return False
+
+    for candidate_target in (
+        seed_target,
+        (live_financials or {}).get("targetMeanPrice"),
+        (live_financials or {}).get("target_mean_price"),
+        (live_financials or {}).get("target_price"),
+    ):
+        if _valid_target(candidate_target):
+            return float(candidate_target)
+
+    try:
+        import yfinance as yf
+        from utils.symbol_resolver import resolve_nse_symbol
+
+        ticker = yf.Ticker(resolve_nse_symbol(symbol))
+        info = ticker.info or {}
+        target = info.get("targetMeanPrice")
+        if _valid_target(target):
+            return float(target)
+    except Exception:
+        pass
+
+    try:
+        from utils.screener_fetcher import fetch_screener_data
+
+        data = fetch_screener_data(symbol) or {}
+        target = data.get("target_price") or data.get("target_mean_price")
+        if _valid_target(target):
+            return float(target)
+
+        eps = data.get("eps")
+        sector_pe = data.get("sector_pe") or data.get("pe_ratio")
+        if eps and eps > 0 and sector_pe and sector_pe > 0:
+            proxy_target = float(eps) * float(sector_pe) * 1.15
+            if proxy_target > current_price * 0.5:
+                print(f"{symbol}: using PE proxy target Rs.{proxy_target:.0f}")
+                return float(proxy_target)
+    except Exception:
+        pass
+
+    fallback = current_price * 1.15
+    print(f"{symbol}: no target found - using Rs.{fallback:.0f} (15% upside assumption)")
+    return float(fallback)
+
+
 def compute_position_size(
     entry_signal: str,
     conviction_score: float,
@@ -63,12 +184,14 @@ def compute_position_size(
 
 def compute_net_return(
     current_price: float,
-    analyst_target: float,
+    analyst_target: float | None,
     holding_months: int = 24,
-) -> float | None:
+) -> float:
     """Stock-specific net return (%) after LTCG/STCG tax, based on analyst target price."""
-    if not current_price or not analyst_target or current_price == 0:
-        return None
+    if not current_price or current_price <= 0:
+        return 0.0
+    if not analyst_target or analyst_target <= 0:
+        analyst_target = current_price * 1.15
     gross_return = (analyst_target - current_price) / current_price
     tax_rate = 0.125 if holding_months >= 12 else 0.20
     return round(gross_return * (1 - tax_rate) * 100, 2)
@@ -216,7 +339,13 @@ class BuyAgents:
 
     def shortlist(self, state: dict[str, Any]) -> dict[str, Any]:
         top_n = int(state["request"]["top_n"])
-        shortlist = state["risk_filtered_candidates"][: max(top_n * 2, top_n)]
+        skipped_symbols = [result.symbol for result in state.get("skipped_candidates", [])]
+        shortlist = get_top_n_with_replacement(
+            state["risk_filtered_candidates"],
+            max(top_n * 4, top_n),
+            skipped_symbols,
+            str(self.config.db_path),
+        )
         return {"shortlist": shortlist}
 
     def validate_qualitative(self, state: dict[str, Any]) -> dict[str, Any]:
@@ -395,9 +524,21 @@ class BuyAgents:
         for item in state["allocations"]:
             if item["entry_signal"] == "DO NOT ENTER":
                 continue
-            price_ctx = item["price_context"]
-            current_price = price_ctx.get("price")
-            analyst_target = price_ctx.get("analyst_target") or item.get("live_financials", {}).get("targetMeanPrice")
+            price_ctx = dict(item["price_context"])
+            current_price = (
+                price_ctx.get("price")
+                or item.get("current_price")
+                or item.get("live_financials", {}).get("currentPrice")
+                or item.get("live_financials", {}).get("current_price")
+                or 0.0
+            )
+            analyst_target = get_fresh_analyst_target(
+                item["symbol"],
+                current_price,
+                seed_target=price_ctx.get("analyst_target"),
+                live_financials=item.get("live_financials", {}),
+            )
+            price_ctx["analyst_target"] = analyst_target
             net_return_pct = compute_net_return(current_price, analyst_target, holding_months=24)
 
             # Governance risk gate: Adani Group and peers need ≥10% net return.
@@ -435,7 +576,7 @@ class BuyAgents:
                 "quality_score": item["quality_score"],
                 "net_of_tax_return_pct": net_return_pct,
                 # Legacy key for backward compat.
-                "net_of_tax_return_projection": round(net_return_pct / 100, 4) if net_return_pct else None,
+                "net_of_tax_return_projection": round(net_return_pct / 100, 4),
                 "confidence_band": confidence_band,
                 "headline": item["news"]["headline"],
                 "validation_reasoning": item.get("validation_reasoning", ""),

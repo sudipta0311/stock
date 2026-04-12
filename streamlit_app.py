@@ -20,6 +20,7 @@ if str(SRC) not in sys.path:
 
 from stock_platform.config import AppConfig
 from stock_platform.services.engine import PlatformEngine
+from stock_platform.services.llm import PlatformLLM
 from stock_platform.utils.index_config import DEFAULT_INDEX, INDEX_UNIVERSE, SELECTABLE_INDICES
 from stock_platform.utils.sector_config import ELEVATED_GOVERNANCE_RISK
 
@@ -536,6 +537,23 @@ def get_engine(user_key: str = "local") -> PlatformEngine:
     return PlatformEngine(config=AppConfig(db_path=users_dir / f"{user_key}.db"))
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def get_openai_connection_status(
+    openai_api_key: str,
+    openai_fast_model: str,
+    openai_reasoning_model: str,
+) -> tuple[bool, str]:
+    llm = PlatformLLM(
+        AppConfig(
+            openai_api_key=openai_api_key,
+            openai_fast_model=openai_fast_model,
+            openai_reasoning_model=openai_reasoning_model,
+        ),
+        provider="openai",
+    )
+    return llm.test_openai_connection()
+
+
 def push_notice(message: str, level: str = "info") -> None:
     st.session_state["portal_notice"] = {"message": message, "level": level}
 
@@ -906,6 +924,15 @@ if llm_status["anthropic_enabled"]:
 if llm_status["openai_enabled"]:
     llm_providers_on.append("OpenAI")
 llm_display = " + ".join(llm_providers_on) if llm_providers_on else "Fallback"
+openai_ok, openai_message = get_openai_connection_status(
+    engine.config.openai_api_key,
+    engine.config.openai_fast_model,
+    engine.config.openai_reasoning_model,
+)
+if openai_ok:
+    st.sidebar.success("OpenAI ✓")
+else:
+    st.sidebar.error(f"OpenAI ✗ {openai_message}")
 holding_count = len(portfolio["raw_holdings"])
 gap_count = len(portfolio["identified_gaps"])
 recommendation_count = len(recommendations)

@@ -163,6 +163,31 @@ class PlatformLLM:
         )
         return (response.choices[0].message.content or "").strip()
 
+    def test_openai_connection(self) -> tuple[bool, str]:
+        if self.provider != "openai":
+            return False, "OpenAI provider not selected"
+        if not self.config.openai_enabled:
+            return False, "OPENAI_API_KEY missing"
+        try:
+            import openai
+        except Exception as exc:
+            return False, f"OpenAI SDK unavailable: {type(exc).__name__}"
+
+        try:
+            client = self._client_instance()
+            client.chat.completions.create(
+                model=self.config.openai_fast_model or "gpt-5.4-mini",
+                messages=[{"role": "user", "content": "Say OK"}],
+                max_tokens=5,
+            )
+            return True, "Connected"
+        except openai.AuthenticationError:
+            return False, "Invalid API key - check OPENAI_API_KEY secret"
+        except openai.RateLimitError:
+            return False, "Rate limited - wait 60 seconds"
+        except Exception as exc:
+            return False, f"Connection failed: {type(exc).__name__}"
+
     # ── FAST TIER ────────────────────────────────────────────────────────────
     # Anthropic: Haiku 4.5 (cached)   OpenAI: gpt-5.4-mini
 
@@ -225,6 +250,36 @@ class PlatformLLM:
                 "Be specific about catalysts, price targets, and timing."
             )
             user_prompt = f"{stock_line}\nIdentify the catalyst path and produce the timing verdict."
+            try:
+                import openai
+
+                client = self._client_instance()
+                response = client.chat.completions.create(
+                    model=self._fast_model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    max_tokens=220,
+                    timeout=30,
+                )
+                rationale = (response.choices[0].message.content or "").strip()
+                return rationale or "[OpenAI returned an empty rationale]"
+            except openai.RateLimitError as exc:
+                print(f"OpenAI rate limit hit for {item['symbol']}: {exc}")
+                return "[OpenAI rate limited - retry in 60s]"
+            except openai.AuthenticationError as exc:
+                print(f"OpenAI API key invalid or expired: {exc}")
+                return "[OpenAI authentication failed - check API key]"
+            except openai.APITimeoutError as exc:
+                print(f"OpenAI timeout for {item['symbol']}: {exc}")
+                return "[OpenAI timeout - server slow, retry]"
+            except Exception as exc:
+                print(
+                    f"OpenAI unexpected error for {item['symbol']}: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                return f"[OpenAI error: {type(exc).__name__}]"
 
         return self._call(
             model=self._fast_model,
