@@ -155,7 +155,7 @@ class PlatformLLM:
         response = client.chat.completions.create(
             model=model,
             temperature=temperature,
-            max_tokens=max_tokens,
+            max_completion_tokens=max_tokens,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -178,7 +178,7 @@ class PlatformLLM:
             client.chat.completions.create(
                 model=self.config.openai_fast_model or "gpt-5.4-mini",
                 messages=[{"role": "user", "content": "Say OK"}],
-                max_tokens=5,
+                max_completion_tokens=5,
             )
             return True, "Connected"
         except openai.AuthenticationError:
@@ -260,7 +260,7 @@ class PlatformLLM:
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
                     ],
-                    max_tokens=220,
+                    max_completion_tokens=220,
                     timeout=30,
                 )
                 rationale = (response.choices[0].message.content or "").strip()

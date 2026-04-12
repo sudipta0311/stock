@@ -12,7 +12,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from stock_platform.agents.quant_model import compute_quality_score
-from stock_platform.agents.buy_agents import compute_net_return, get_fresh_analyst_target, get_top_n_with_replacement
+from stock_platform.agents.buy_agents import BuyAgents, compute_net_return, get_fresh_analyst_target, get_top_n_with_replacement
 from stock_platform.config import AppConfig
 from stock_platform.services.llm import PlatformLLM
 
@@ -79,6 +79,23 @@ class FakeOpenAIChat:
 class FakeOpenAIClient:
     def __init__(self, exc: Exception | None = None) -> None:
         self.chat = types.SimpleNamespace(completions=FakeOpenAIChat(exc))
+
+
+class StubRepo:
+    def list_signals(self, family: str):
+        if family == "unified":
+            return [{"sector": "Defence", "conviction": "BUY", "score": 0.7}]
+        return []
+
+
+class StubProvider:
+    def get_stock_news(self, symbol: str):
+        return {"headline": f"{symbol} update", "sentiment_score": 0.15}
+
+
+class RejectingLLM:
+    def qualitative_analysis(self, candidate, news, signal_context):
+        return {"approved": False, "confidence": 0.2, "reasoning": "Too cautious"}
 
 
 class BuyQualityScoreTests(unittest.TestCase):
@@ -170,6 +187,21 @@ class BuyQualityScoreTests(unittest.TestCase):
         with patch.dict(sys.modules, {"yfinance": types.SimpleNamespace(Ticker=lambda *_: types.SimpleNamespace(info={}))}):
             target = get_fresh_analyst_target("BEL", 300.0)
         self.assertGreater(target, 300.0)
+
+    def test_qualitative_fallback_prevents_empty_shortlist(self) -> None:
+        agent = BuyAgents(StubRepo(), StubProvider(), AppConfig(), RejectingLLM())
+        state = {
+            "request": {"top_n": 2},
+            "shortlist": [
+                {"symbol": "BEL", "sector": "Defence", "quality_score": 0.85, "selection_score": 0.90},
+                {"symbol": "HAL", "sector": "Defence", "quality_score": 0.82, "selection_score": 0.88},
+            ],
+        }
+
+        result = agent.validate_qualitative(state)
+
+        self.assertEqual(len(result["shortlist"]), 2)
+        self.assertEqual([row["symbol"] for row in result["shortlist"]], ["BEL", "HAL"])
 
 
 class BuyPromptTests(unittest.TestCase):
@@ -263,6 +295,21 @@ class BuyPromptTests(unittest.TestCase):
 
         self.assertFalse(ok)
         self.assertIn("Rate limited", message)
+
+    def test_openai_requests_use_max_completion_tokens(self) -> None:
+        fake_openai = types.SimpleNamespace(
+            AuthenticationError=FakeOpenAIAuthenticationError,
+            RateLimitError=FakeOpenAIRateLimitError,
+            APITimeoutError=FakeOpenAITimeoutError,
+        )
+        llm = PlatformLLM(self.config, provider="openai")
+        llm._client = FakeOpenAIClient()
+
+        with patch.dict(sys.modules, {"openai": fake_openai}):
+            llm.buy_rationale(self.item, self.portfolio_context)
+            llm.test_openai_connection()
+
+        self.assertIn("max_completion_tokens", FakeOpenAIChat.last_request or {})
 
 
 if __name__ == "__main__":
