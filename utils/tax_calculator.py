@@ -50,13 +50,20 @@ def calculate_pnl(
     }
 
 
-def should_exit(pnl: dict[str, Any], analyst_target: float | None, current_price: float) -> dict[str, Any]:
+def should_exit(
+    pnl: dict[str, Any],
+    analyst_target: float | None,
+    current_price: float,
+    thesis_status: str = "INTACT",
+    quant_score: float = 0.5,
+) -> dict[str, Any]:
     gross_pnl = pnl["gross_pnl"]
     days_to_ltcg = pnl["days_to_ltcg"]
     is_ltcg = pnl["is_ltcg"]
     tax_amount = pnl["tax_amount"]
+
     remaining_upside = (
-        ((analyst_target - current_price) / current_price * 100)
+        (analyst_target - current_price) / current_price * 100
         if analyst_target and current_price > 0
         else 0
     )
@@ -69,15 +76,66 @@ def should_exit(pnl: dict[str, Any], analyst_target: float | None, current_price
         tax_saving_from_wait = 0
 
     if gross_pnl < 0:
+        if thesis_status == "BREACHED":
+            return {
+                "exit_recommendation": "EXIT - thesis breached",
+                "reasoning": (
+                    "Original investment thesis has broken. "
+                    f"Exit regardless of loss size. Current loss: "
+                    f"Rs{abs(gross_pnl):,.0f} ({pnl['pnl_pct']:.1f}%)."
+                ),
+                "tax_note": "No capital gains tax on loss",
+                "urgency": "CRITICAL",
+            }
+        if thesis_status == "WEAKENED" and quant_score < 0.40:
+            return {
+                "exit_recommendation": "EXIT - cut loss",
+                "reasoning": (
+                    f"Thesis weakening AND quality score low ({quant_score:.2f}). "
+                    f"Loss of Rs{abs(gross_pnl):,.0f} ({pnl['pnl_pct']:.1f}%). "
+                    "No recovery catalyst visible."
+                ),
+                "tax_note": "No capital gains tax on loss",
+                "urgency": "HIGH",
+            }
+        if thesis_status == "INTACT" and quant_score >= 0.65:
+            action = "BUY MORE" if quant_score >= 0.75 else "HOLD"
+            return {
+                "exit_recommendation": action,
+                "reasoning": (
+                    f"Quality compounder (quant {quant_score:.2f}) in temporary loss of "
+                    f"{pnl['pnl_pct']:.1f}%. Thesis intact - this is a potential accumulation "
+                    "opportunity, not an exit signal. Consider averaging down if conviction holds."
+                ),
+                "tax_note": (
+                    f"If exited: loss of Rs{abs(gross_pnl):,.0f} can offset other gains this FY"
+                ),
+                "urgency": "LOW",
+            }
+        if thesis_status == "INTACT" and quant_score >= 0.40:
+            return {
+                "exit_recommendation": "HOLD - review next quarter",
+                "reasoning": (
+                    f"Thesis intact with moderate quality ({quant_score:.2f}). "
+                    f"Loss of {pnl['pnl_pct']:.1f}% warrants watching but not immediate exit. "
+                    "Review after next quarterly result."
+                ),
+                "tax_note": (
+                    f"Loss of Rs{abs(gross_pnl):,.0f} available for tax harvesting if needed"
+                ),
+                "urgency": "MEDIUM",
+            }
         return {
-            "exit_recommendation": "EXIT — cut loss",
+            "exit_recommendation": "TRIM 50% - reduce exposure",
             "reasoning": (
-                f"Down Rs{abs(gross_pnl):,.0f} ({pnl['pnl_pct']:.1f}%). "
-                "No tax on losses — exit if thesis broken."
+                f"Thesis weakening with loss of {pnl['pnl_pct']:.1f}%. "
+                "Reduce position by 50% to limit downside while keeping some upside "
+                "if thesis recovers."
             ),
-            "tax_note": "No capital gains tax on loss",
-            "urgency": "HIGH",
+            "tax_note": "No tax on loss portion",
+            "urgency": "MEDIUM",
         }
+
     if remaining_upside < 10 and gross_pnl > 0:
         if days_to_ltcg > 0 and days_to_ltcg <= 30 and tax_saving_from_wait > 5000:
             return {
@@ -93,14 +151,15 @@ def should_exit(pnl: dict[str, Any], analyst_target: float | None, current_price
                 "urgency": "MEDIUM",
             }
         return {
-            "exit_recommendation": "EXIT — limited upside",
+            "exit_recommendation": "EXIT - limited upside",
             "reasoning": (
                 f"In profit Rs{gross_pnl:,.0f} ({pnl['pnl_pct']:.1f}%) but only "
                 f"{remaining_upside:.1f}% upside remaining."
             ),
-            "tax_note": f"{pnl['tax_type']}: Rs{tax_amount:,.0f}. Net proceeds: Rs{pnl['net_pnl']:,.0f}",
+            "tax_note": f"{pnl['tax_type']}: Rs{tax_amount:,.0f}. Net: Rs{pnl['net_pnl']:,.0f}",
             "urgency": "MEDIUM",
         }
+
     return {
         "exit_recommendation": "HOLD",
         "reasoning": (

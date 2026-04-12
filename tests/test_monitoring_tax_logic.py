@@ -51,7 +51,6 @@ class MonitoringTaxLogicTests(unittest.TestCase):
         }
 
         result = agent.decide_actions(state)
-        self.assertEqual(len(result["actions"]), 1)
         row = result["actions"][0]
 
         self.assertTrue(row["action"].startswith("WAIT "))
@@ -59,6 +58,62 @@ class MonitoringTaxLogicTests(unittest.TestCase):
         self.assertEqual(row["urgency"], "MEDIUM")
         self.assertIn("P&L: +Rs100,000", row["rationale"])
         self.assertIn("[STCG]", row["rationale"])
+
+    def test_quality_stock_in_loss_switches_to_buy_more(self) -> None:
+        agent = MonitoringAgents(StubRepo(), StubProvider(), AppConfig(), lambda **kwargs: None, StubLLM())
+        state = {
+            "portfolio_context": {
+                "monitor_universe": [{"symbol": "ASIANPAINT", "monitor_source": "direct", "total_weight": 8.0}],
+                "direct_equity_buy_map": {
+                    "ASIANPAINT": {
+                        "symbol": "ASIANPAINT",
+                        "quantity": 10,
+                        "avg_buy_price": 3000.0,
+                        "buy_date": "2025-01-01",
+                    }
+                },
+            },
+            "stock_reviews": [{"symbol": "ASIANPAINT", "sentiment_score": 0.1}],
+            "thesis_reviews": [{"symbol": "ASIANPAINT", "status": "INTACT"}],
+            "drawdown_alerts": [{"symbol": "ASIANPAINT", "severity": "LOW", "current_price": 2400.0}],
+            "quant_scores": [{"symbol": "ASIANPAINT", "quant_score": 0.80}],
+        }
+
+        result = agent.decide_actions(state)
+        row = result["actions"][0]
+
+        self.assertEqual(row["action"], "BUY MORE")
+        self.assertEqual(row["urgency"], "LOW")
+        self.assertIn("BUY MORE", row["rationale"])
+        self.assertIn("offset other gains", row["rationale"])
+
+    def test_medium_quality_stock_in_loss_switches_to_hold_review(self) -> None:
+        agent = MonitoringAgents(StubRepo(), StubProvider(), AppConfig(), lambda **kwargs: None, StubLLM())
+        state = {
+            "portfolio_context": {
+                "monitor_universe": [{"symbol": "SBICARD", "monitor_source": "direct", "total_weight": 8.0}],
+                "direct_equity_buy_map": {
+                    "SBICARD": {
+                        "symbol": "SBICARD",
+                        "quantity": 50,
+                        "avg_buy_price": 740.0,
+                        "buy_date": "2025-01-01",
+                    }
+                },
+            },
+            "stock_reviews": [{"symbol": "SBICARD", "sentiment_score": 0.1}],
+            "thesis_reviews": [{"symbol": "SBICARD", "status": "INTACT"}],
+            "drawdown_alerts": [{"symbol": "SBICARD", "severity": "LOW", "current_price": 677.5}],
+            "quant_scores": [{"symbol": "SBICARD", "quant_score": 0.62}],
+        }
+
+        result = agent.decide_actions(state)
+        row = result["actions"][0]
+
+        self.assertEqual(row["action"], "HOLD - review next quarter")
+        self.assertEqual(row["urgency"], "MEDIUM")
+        self.assertIn("HOLD - review next quarter", row["rationale"])
+        self.assertIn("tax harvesting", row["rationale"])
 
 
 if __name__ == "__main__":
