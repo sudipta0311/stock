@@ -1,11 +1,39 @@
 from __future__ import annotations
 
+import sqlite3
 from typing import Any
 from uuid import uuid4
 
 from stock_platform.config import AppConfig
 from stock_platform.models import MonitoringAction
 from utils.tax_calculator import calculate_pnl, should_exit
+
+
+def apply_overlap_override(symbol: str, exit_rec: dict[str, Any], db_path: str) -> tuple[dict[str, Any], float]:
+    """
+    Suppress BUY MORE when the same stock is already owned meaningfully via MFs.
+    """
+    overlap = 0.0
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT overlap_pct FROM overlap_scores WHERE symbol = ?",
+            (symbol,),
+        ).fetchone()
+        overlap = float(row[0]) if row else 0.0
+    finally:
+        conn.close()
+
+    if overlap >= 2.0 and exit_rec["exit_recommendation"] == "BUY MORE":
+        exit_rec = dict(exit_rec)
+        exit_rec["exit_recommendation"] = "HOLD - already in MFs"
+        exit_rec["reasoning"] += (
+            f" However {overlap:.1f}% already held via mutual funds - "
+            "direct purchase adds concentration not diversification."
+        )
+        exit_rec["urgency"] = "LOW"
+
+    return exit_rec, overlap
 
 
 def get_fresh_analyst_target(symbol: str, current_price: float) -> float:
@@ -348,6 +376,7 @@ class MonitoringAgents:
             pnl = None
             exit_rec = None
             urgency = "LOW"
+            overlap_pct = 0.0
 
             buy_info = buy_map.get(symbol)
             current_price = drawdown_map[symbol].get("current_price")
@@ -371,6 +400,11 @@ class MonitoringAgents:
                     current_price=float(current_price),
                     thesis_status=thesis,
                     quant_score=quant,
+                )
+                exit_rec, overlap_pct = apply_overlap_override(
+                    symbol=symbol,
+                    exit_rec=exit_rec,
+                    db_path=str(self.config.db_path),
                 )
                 urgency = exit_rec["urgency"]
 
@@ -416,6 +450,7 @@ class MonitoringAgents:
                     "severity": severity,
                     "urgency": urgency,
                     "rationale": rationale,
+                    "overlap_pct": overlap_pct,
                     "pnl": pnl,
                     "exit_recommendation": exit_rec,
                     "analyst_target": analyst_target,
@@ -496,6 +531,7 @@ class MonitoringAgents:
                         "thesis": thesis,
                         "thesis_llm_reasoning": thesis.get("llm_reasoning", ""),
                         "pnl": row.get("pnl"),
+                        "overlap_pct": row.get("overlap_pct", 0.0),
                         "exit_recommendation": row.get("exit_recommendation"),
                         "analyst_target": row.get("analyst_target"),
                         "llm_used": bool(llm_result),
