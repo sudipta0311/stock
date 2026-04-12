@@ -1301,6 +1301,8 @@ with tabs[2]:
             a_data = comp.get("anthropic", {})
             if a_data.get("error"):
                 st.warning(a_data["error"])
+            elif a_data.get("run_summary", {}).get("blocked_reason"):
+                st.warning(a_data["run_summary"]["blocked_reason"])
             elif not a_data.get("recommendations"):
                 render_empty_panel("No Anthropic recommendations were generated.")
             else:
@@ -1311,6 +1313,8 @@ with tabs[2]:
             o_data = comp.get("openai", {})
             if o_data.get("error"):
                 st.warning(o_data["error"])
+            elif o_data.get("run_summary", {}).get("blocked_reason"):
+                st.warning(o_data["run_summary"]["blocked_reason"])
             elif not o_data.get("recommendations"):
                 render_empty_panel("No OpenAI recommendations were generated.")
             else:
