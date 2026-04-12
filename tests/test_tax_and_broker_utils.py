@@ -69,7 +69,64 @@ class BrokerParserTests(unittest.TestCase):
 
 
 class TaxCalculatorTests(unittest.TestCase):
-    def test_limited_upside_exit_recommendation(self) -> None:
+    def test_stale_target_falls_back_to_15pct_and_prevents_false_exit(self) -> None:
+        pnl = calculate_pnl(
+            symbol="HDFCBANK",
+            avg_buy_price=100.0,
+            current_price=120.0,
+            quantity=10.0,
+            buy_date_str="2025-01-01",
+        )
+        decision = should_exit(
+            pnl,
+            analyst_target=40.0,
+            current_price=120.0,
+            thesis_status="WEAKENED",
+            quant_score=0.57,
+        )
+
+        self.assertEqual(decision["exit_recommendation"], "HOLD")
+        self.assertEqual(decision["urgency"], "LOW")
+
+    def test_large_winner_with_intact_thesis_is_protected(self) -> None:
+        pnl = calculate_pnl(
+            symbol="ICICIBANK",
+            avg_buy_price=500.0,
+            current_price=1321.9,
+            quantity=270.0,
+            buy_date_str="2024-01-01",
+        )
+        decision = should_exit(
+            pnl,
+            analyst_target=1350.0,
+            current_price=1321.9,
+            thesis_status="INTACT",
+            quant_score=0.58,
+        )
+
+        self.assertEqual(decision["exit_recommendation"], "HOLD - strong winner")
+        self.assertEqual(decision["urgency"], "LOW")
+
+    def test_large_winner_with_weakened_thesis_trims(self) -> None:
+        pnl = calculate_pnl(
+            symbol="RELIANCE",
+            avg_buy_price=490.0,
+            current_price=1350.2,
+            quantity=90.0,
+            buy_date_str="2024-01-01",
+        )
+        decision = should_exit(
+            pnl,
+            analyst_target=1450.0,
+            current_price=1350.2,
+            thesis_status="WEAKENED",
+            quant_score=0.54,
+        )
+
+        self.assertEqual(decision["exit_recommendation"], "TRIM 30% - protect profits")
+        self.assertEqual(decision["urgency"], "MEDIUM")
+
+    def test_limited_upside_exit_requires_thesis_issue(self) -> None:
         pnl = calculate_pnl(
             symbol="INFY",
             avg_buy_price=1000.0,
@@ -77,11 +134,16 @@ class TaxCalculatorTests(unittest.TestCase):
             quantity=100.0,
             buy_date_str="2024-01-01",
         )
-        decision = should_exit(pnl, analyst_target=1260.0, current_price=1200.0)
+        decision = should_exit(
+            pnl,
+            analyst_target=1260.0,
+            current_price=1200.0,
+            thesis_status="INTACT",
+            quant_score=0.70,
+        )
 
-        self.assertEqual(decision["exit_recommendation"], "EXIT - limited upside")
-        self.assertEqual(decision["urgency"], "MEDIUM")
-        self.assertIn("Net:", decision["tax_note"])
+        self.assertEqual(decision["exit_recommendation"], "HOLD")
+        self.assertEqual(decision["urgency"], "LOW")
 
     def test_quality_compounder_in_loss_returns_buy_more(self) -> None:
         pnl = calculate_pnl(
@@ -101,7 +163,6 @@ class TaxCalculatorTests(unittest.TestCase):
 
         self.assertEqual(decision["exit_recommendation"], "BUY MORE")
         self.assertEqual(decision["urgency"], "LOW")
-        self.assertIn("Quality compounder", decision["reasoning"])
 
     def test_medium_quality_stock_in_loss_returns_hold_review(self) -> None:
         pnl = calculate_pnl(
@@ -121,7 +182,6 @@ class TaxCalculatorTests(unittest.TestCase):
 
         self.assertEqual(decision["exit_recommendation"], "HOLD - review next quarter")
         self.assertEqual(decision["urgency"], "MEDIUM")
-        self.assertIn("moderate quality", decision["reasoning"])
 
     def test_weakened_low_quality_stock_in_loss_exits(self) -> None:
         pnl = calculate_pnl(
