@@ -29,6 +29,30 @@ class BrokerParserTests(unittest.TestCase):
         self.assertEqual(holdings[0]["quantity"], 12.0)
         self.assertEqual(holdings[0]["avg_buy_price"], 1450.5)
 
+    def test_icici_style_shifted_csv_is_realigned(self) -> None:
+        with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False, encoding="utf-8", newline="") as handle:
+            handle.write(
+                "Sr. No.,Stock Name,Company Name,CMP,Change,% Change,NAV,NAV Chg,% Chg.,"
+                "Portfolio Holdings,Invested Value,Average Cost Value,Unrealized Profit/Loss,"
+                "% Chg,Current Value,Days Profit/Loss,% Chg.,Realized Profit/Loss,% Change,"
+                "Qty,Long Term Qty,Short Term Qty,XIRR\n"
+            )
+            handle.write(
+                "1,KWILEQ,KWALITY WALL'S (INDIA) LIMITED,24.85,0.91,3.80,-,-,-,Equity,"
+                "3092.02,47.5695,-1476.77,-47.760687188310555,-,-,-,0.0,-,65.0,0.0,65.0,-,-\n"
+            )
+            csv_path = Path(handle.name)
+        try:
+            holdings = parse_broker_csv(csv_path)
+        finally:
+            csv_path.unlink(missing_ok=True)
+
+        self.assertEqual(len(holdings), 1)
+        self.assertEqual(holdings[0]["symbol"], "KWIL")
+        self.assertEqual(holdings[0]["quantity"], 65.0)
+        self.assertAlmostEqual(holdings[0]["avg_buy_price"], 47.5695)
+        self.assertAlmostEqual(holdings[0]["current_price"], 24.85)
+
 
 class TaxCalculatorTests(unittest.TestCase):
     def test_limited_upside_exit_recommendation(self) -> None:
