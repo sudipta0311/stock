@@ -111,7 +111,7 @@ If you update secrets or OAuth settings, reboot the Streamlit app before re-test
 ### Current deployment reference
 
 - Active deployment branch: `codex/streamlit-cloud-ready`
-- Latest deployment branch commit verified in this workspace: `166ffae`
+- Latest deployment branch commit verified in this workspace: `f677f3d`
 - App URL: `https://sudipta0311-stock-streamlit-app-codexstreamlit-cloud-rea-ynukc3.streamlit.app/`
 
 ### Redeploy checklist
