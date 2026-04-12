@@ -17,7 +17,8 @@ def apply_overlap_override(symbol: str, exit_rec: dict[str, Any], db_path: str) 
     conn = sqlite3.connect(db_path)
     try:
         row = conn.execute(
-            "SELECT overlap_pct FROM overlap_scores WHERE symbol = ?",
+            "SELECT overlap_pct FROM overlap_scores "
+            "WHERE UPPER(TRIM(symbol)) = UPPER(TRIM(?))",
             (symbol,),
         ).fetchone()
         overlap = float(row[0]) if row else 0.0
