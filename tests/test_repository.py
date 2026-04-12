@@ -11,6 +11,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from stock_platform.data.repository import PlatformRepository
+from stock_platform.models import MonitoringAction
 from stock_platform.providers.live import LiveMarketDataProvider
 
 
@@ -50,6 +51,37 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["symbol"], "BEL")
         self.assertAlmostEqual(rows[0]["total_weight"], 4.2)
+
+    def test_monitoring_rows_include_joined_overlap_and_urgency(self) -> None:
+        self.repo.replace_overlap_scores(
+            [
+                {
+                    "symbol": "KWIL",
+                    "overlap_pct": 2.75,
+                    "band": "FLAG",
+                    "attribution": [],
+                }
+            ]
+        )
+        self.repo.save_monitoring_actions(
+            "monitor-test",
+            [
+                MonitoringAction(
+                    symbol="KWIL",
+                    action="WAIT 25 days then EXIT",
+                    severity="MEDIUM",
+                    urgency="MEDIUM",
+                    rationale="Readable rationale",
+                    payload={},
+                )
+            ],
+        )
+
+        rows = self.repo.list_monitoring_actions()
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["urgency"], "MEDIUM")
+        self.assertAlmostEqual(rows[0]["overlap_pct"], 2.75)
 
 
 class LiveProviderTests(unittest.TestCase):

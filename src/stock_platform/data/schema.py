@@ -36,6 +36,18 @@ DDL = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS direct_equity (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        symbol TEXT UNIQUE,
+        quantity REAL,
+        avg_buy_price REAL,
+        current_price REAL,
+        buy_date TEXT,
+        source TEXT,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS overlap_scores (
         symbol TEXT PRIMARY KEY,
         overlap_pct REAL NOT NULL,
@@ -92,6 +104,7 @@ DDL = [
         symbol TEXT NOT NULL,
         action TEXT NOT NULL,
         severity TEXT NOT NULL,
+        urgency TEXT NOT NULL DEFAULT 'LOW',
         rationale TEXT NOT NULL,
         payload_json TEXT NOT NULL,
         created_at TEXT NOT NULL
@@ -109,9 +122,24 @@ DDL = [
 ]
 
 
+def _ensure_column(
+    connection: sqlite3.Connection,
+    table_name: str,
+    column_name: str,
+    definition: str,
+) -> None:
+    existing = {
+        row[1]
+        for row in connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+    }
+    if column_name not in existing:
+        connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+
+
 def initialize_schema(connection: sqlite3.Connection) -> None:
     cursor = connection.cursor()
     for statement in DDL:
         cursor.execute(statement)
+    _ensure_column(connection, "monitoring_actions", "urgency", "TEXT NOT NULL DEFAULT 'LOW'")
     connection.commit()
 

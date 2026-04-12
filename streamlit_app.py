@@ -883,6 +883,7 @@ else:
     _user_key = "local"
 
 engine = get_engine(_user_key)
+DB_PATH = engine.config.db_path
 render_pending_notice()
 snapshot = engine.get_dashboard_snapshot()
 portfolio = snapshot["portfolio"]
@@ -1031,6 +1032,78 @@ with tabs[1]:
                 push_notice(f"PDF ingestion failed: {exc}", "error")
         else:
             st.caption("This PDF is already ingested. You can upload a new file or edit the portfolio manually below.")
+
+    st.subheader("Direct Equity Holdings — Broker Statement")
+    st.caption(
+        "Upload your broker holding statement to enable profit/loss tracking and tax-aware exit "
+        "recommendations. Supported: Zerodha Console CSV, Groww Holdings CSV, ICICI Direct PDF, "
+        "or any CSV with symbol + avg price columns."
+    )
+    broker_file = st.file_uploader(
+        "Upload broker holding statement",
+        type=["csv", "pdf"],
+        key="broker_upload",
+        help="Zerodha: Console -> Holdings -> Download CSV",
+    )
+
+    if broker_file:
+        import os
+        import tempfile
+
+        suffix = ".csv" if broker_file.name.lower().endswith(".csv") else ".pdf"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(broker_file.getvalue())
+            tmp_path = tmp.name
+        try:
+            from utils.broker_parser import parse_broker_file, save_broker_holdings_to_db
+
+            holdings = parse_broker_file(tmp_path)
+        finally:
+            os.unlink(tmp_path)
+
+        if holdings:
+            saved = save_broker_holdings_to_db(holdings, DB_PATH)
+            st.success(f"Saved {saved} holdings with buying prices")
+            preview_df = pd.DataFrame(holdings)[["symbol", "quantity", "avg_buy_price", "buy_date"]]
+            preview_df.columns = ["Symbol", "Qty", "Avg Buy Rs", "Buy Date"]
+            st.dataframe(preview_df, use_container_width=True, hide_index=True)
+        else:
+            st.warning("Could not parse the broker statement. Check the detected columns below.")
+            if broker_file.name.lower().endswith(".csv"):
+                try:
+                    df_debug = pd.read_csv(io.BytesIO(broker_file.getvalue()))
+                    st.write("Columns found:", list(df_debug.columns))
+                except Exception:
+                    pass
+
+    with st.expander("Enter buying price manually for a single stock"):
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            m_symbol = st.text_input("Symbol e.g. INFY", key="manual_broker_symbol")
+        with col2:
+            m_qty = st.number_input("Quantity", min_value=1, value=1, key="manual_broker_qty")
+        with col3:
+            m_price = st.number_input("Avg buy price Rs", min_value=0.0, value=0.0, key="manual_broker_price")
+        with col4:
+            m_date = st.date_input("Buy date", key="manual_broker_date")
+        if st.button("Save holding", key="manual_broker_save"):
+            if m_symbol and m_price > 0:
+                from utils.broker_parser import save_broker_holdings_to_db
+
+                save_broker_holdings_to_db(
+                    [
+                        {
+                            "symbol": m_symbol.upper(),
+                            "quantity": m_qty,
+                            "avg_buy_price": m_price,
+                            "current_price": None,
+                            "buy_date": str(m_date),
+                            "source": "manual",
+                        }
+                    ],
+                    DB_PATH,
+                )
+                st.success(f"Saved {m_symbol.upper()} at Rs{m_price}")
 
     existing_prefs = portfolio["user_preferences"]
     default_payload = uploaded_payload or {
@@ -1394,7 +1467,6 @@ with tabs[3]:
     if monitor_provider_label:
         st.caption(f"Latest monitoring run used {monitor_provider_label}.")
     if monitoring_actions:
-        _overlap_map = {r["symbol"]: r.get("overlap_pct", 0.0) for r in snapshot["portfolio"].get("overlap_scores", [])}
         monitor_frame = pd.DataFrame(
             [
                 {
@@ -1402,7 +1474,8 @@ with tabs[3]:
                     "symbol": item["symbol"],
                     "action": item["action"],
                     "severity": item["severity"],
-                    "overlap_pct": _overlap_map.get(item["symbol"], 0.0),
+                    "urgency": item.get("urgency", "LOW"),
+                    "overlap_pct": item.get("overlap_pct", 0.0),
                     "rationale": item["rationale"],
                 }
                 for item in monitoring_actions

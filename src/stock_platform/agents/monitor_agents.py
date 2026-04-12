@@ -5,6 +5,37 @@ from uuid import uuid4
 
 from stock_platform.config import AppConfig
 from stock_platform.models import MonitoringAction
+from utils.tax_calculator import calculate_pnl, should_exit
+
+
+def format_monitoring_rationale(
+    row: dict[str, Any],
+    pnl: dict[str, Any] | None,
+    exit_rec: dict[str, Any] | None,
+) -> str:
+    parts = []
+    thesis = row.get("thesis_status", "INTACT")
+    quant = row.get("quant_score", 0.0)
+
+    if thesis == "BREACHED":
+        parts.append("THESIS BREACHED — exit regardless of price")
+    elif thesis == "WEAKENED":
+        parts.append(f"Thesis weakening (quant {quant:.2f})")
+    else:
+        parts.append(f"Thesis intact (quant {quant:.2f})")
+
+    if pnl:
+        days_held = pnl["days_held"] if pnl["days_held"] is not None else "n/a"
+        parts.append(
+            f"P&L: {'+' if pnl['gross_pnl'] > 0 else ''}"
+            f"Rs{pnl['gross_pnl']:,.0f} ({pnl['pnl_pct']:+.1f}%) "
+            f"| Held {days_held}d [{pnl['tax_type']}]"
+        )
+    if exit_rec:
+        parts.append(exit_rec["exit_recommendation"])
+        parts.append(exit_rec["tax_note"])
+
+    return " | ".join(parts)
 
 
 class MonitoringAgents:
@@ -39,7 +70,7 @@ class MonitoringAgents:
         for row in ctx["raw_holdings"]:
             if row["holding_type"] != "direct_equity":
                 continue
-            sym = (row.get("symbol") or "").upper().strip()
+            sym = self.provider.normalize_symbol(row.get("symbol") or row.get("instrument_name") or "")
             if not sym or sym in seen:
                 continue
             seen.add(sym)
@@ -53,7 +84,7 @@ class MonitoringAgents:
             monitor_universe.append(entry)
 
         for row in ctx["watchlist"]:
-            sym = row["symbol"].upper().strip()
+            sym = self.provider.normalize_symbol(row["symbol"])
             if sym in seen:
                 continue
             seen.add(sym)
@@ -66,7 +97,13 @@ class MonitoringAgents:
             entry["monitor_source"] = "watchlist"
             monitor_universe.append(entry)
 
+        broker_map = {
+            self.provider.normalize_symbol(item["symbol"]): item
+            for item in ctx.get("direct_equity_holdings", [])
+            if item.get("symbol")
+        }
         ctx["monitor_universe"] = monitor_universe
+        ctx["direct_equity_buy_map"] = broker_map
         return {"portfolio_context": ctx}
 
     def monitor_industries(self, state: dict[str, Any]) -> dict[str, Any]:
@@ -214,9 +251,12 @@ class MonitoringAgents:
         return {"thesis_reviews": thesis}
 
     def drawdown_risk(self, state: dict[str, Any]) -> dict[str, Any]:
+        buy_map = state["portfolio_context"].get("direct_equity_buy_map", {})
         alerts = []
         for holding in state["portfolio_context"]["monitor_universe"]:
-            series = self.provider.get_monitoring_price_series(holding["symbol"])
+            buy_info = buy_map.get(holding["symbol"], {})
+            entry_price = buy_info.get("avg_buy_price")
+            series = self.provider.get_monitoring_price_series(holding["symbol"], entry_price=entry_price)
             drawdown = series["drawdown_pct"]
             if drawdown <= -35:
                 severity = "CRITICAL"
@@ -237,11 +277,30 @@ class MonitoringAgents:
             )
         return {"drawdown_alerts": alerts}
 
+    @staticmethod
+    def _severity_from_context(thesis: str, drawdown: str, urgency: str) -> str:
+        if thesis == "BREACHED" or drawdown == "CRITICAL":
+            return "CRITICAL"
+        if drawdown == "HIGH" or urgency == "HIGH":
+            return "HIGH"
+        if thesis == "WEAKENED" or urgency == "MEDIUM":
+            return "MEDIUM"
+        return "LOW"
+
+    @staticmethod
+    def _fallback_urgency(action: str, severity: str) -> str:
+        if action in {"SELL", "REPLACE"} or severity in {"CRITICAL", "HIGH"}:
+            return "HIGH"
+        if action in {"TRIM", "BUY MORE"} or severity == "MEDIUM":
+            return "MEDIUM"
+        return "LOW"
+
     def decide_actions(self, state: dict[str, Any]) -> dict[str, Any]:
         stock_reviews = {row["symbol"]: row for row in state["stock_reviews"]}
         thesis_map = {row["symbol"]: row for row in state["thesis_reviews"]}
         drawdown_map = {row["symbol"]: row for row in state["drawdown_alerts"]}
         quant_map = {row["symbol"]: row["quant_score"] for row in state["quant_scores"]}
+        buy_map = state["portfolio_context"].get("direct_equity_buy_map", {})
         actions = []
         for holding in state["portfolio_context"]["monitor_universe"]:
             symbol = holding["symbol"]
@@ -249,24 +308,70 @@ class MonitoringAgents:
             drawdown = drawdown_map[symbol]["severity"]
             sentiment = stock_reviews[symbol]["sentiment_score"]
             quant = quant_map[symbol]
+            pnl = None
+            exit_rec = None
+            urgency = "LOW"
+
+            buy_info = buy_map.get(symbol)
+            analyst_target = self.provider.get_price_context(symbol).get("analyst_target")
+            current_price = drawdown_map[symbol].get("current_price")
+
+            if buy_info and current_price:
+                pnl = calculate_pnl(
+                    symbol=symbol,
+                    avg_buy_price=float(buy_info.get("avg_buy_price") or 0),
+                    current_price=float(current_price),
+                    quantity=float(buy_info.get("quantity") or 0),
+                    buy_date_str=str(buy_info.get("buy_date") or "unknown"),
+                )
+                exit_rec = should_exit(pnl, analyst_target, float(current_price))
+                urgency = exit_rec["urgency"]
+
             if thesis == "BREACHED":
-                action = "SELL"
+                action = "EXIT — thesis breached"
+                urgency = "HIGH"
+                tax_note = exit_rec["tax_note"] if exit_rec else "Re-underwrite before continuing to hold"
+                exit_rec = {
+                    "exit_recommendation": action,
+                    "reasoning": "Thesis breached",
+                    "tax_note": tax_note,
+                    "urgency": urgency,
+                }
                 severity = "CRITICAL"
-            elif drawdown == "HIGH" and quant < 0.6:
-                action = "TRIM"
-                severity = "HIGH"
-            elif sentiment > 0.5 and quant > 0.72:
-                action = "BUY MORE"
-                severity = "MEDIUM"
+            elif exit_rec is not None:
+                action = exit_rec["exit_recommendation"]
+                severity = self._severity_from_context(thesis, drawdown, urgency)
             else:
-                action = "HOLD"
-                severity = "LOW"
+                if drawdown == "HIGH" and quant < 0.6:
+                    action = "TRIM"
+                    severity = "HIGH"
+                elif sentiment > 0.5 and quant > 0.72:
+                    action = "BUY MORE"
+                    severity = "MEDIUM"
+                else:
+                    action = "HOLD"
+                    severity = "LOW"
+                urgency = self._fallback_urgency(action, severity)
+
+            rationale = format_monitoring_rationale(
+                {
+                    "symbol": symbol,
+                    "thesis_status": thesis,
+                    "quant_score": quant,
+                },
+                pnl,
+                exit_rec,
+            )
             actions.append(
                 {
                     "symbol": symbol,
                     "action": action,
                     "severity": severity,
-                    "rationale": f"Thesis {thesis.lower()}, quant {quant:.2f}, sentiment {sentiment:.2f}",
+                    "urgency": urgency,
+                    "rationale": rationale,
+                    "pnl": pnl,
+                    "exit_recommendation": exit_rec,
+                    "analyst_target": analyst_target,
                 }
             )
         return {"actions": actions}
@@ -317,17 +422,20 @@ class MonitoringAgents:
         for row in state["actions"]:
             thesis = next(item for item in state["thesis_reviews"] if item["symbol"] == row["symbol"])
             drawdown = next(item for item in state["drawdown_alerts"] if item["symbol"] == row["symbol"])
-            llm_result = self.llm.monitoring_rationale(row, thesis, drawdown)
+            llm_result = None
+            if row["action"] in {"BUY MORE", "HOLD", "TRIM", "SELL", "REPLACE"}:
+                llm_result = self.llm.monitoring_rationale(row, thesis, drawdown)
             # Use LLM-confirmed action/severity/rationale if parsing succeeded;
             # fall back to deterministic values so a JSON failure never drops a row.
             final_action = llm_result["action"] if llm_result else row["action"]
             final_severity = llm_result["severity"] if llm_result else row["severity"]
-            final_rationale = llm_result["rationale"] if llm_result else row["rationale"]
+            final_rationale = row["rationale"]
             rows.append(
                 MonitoringAction(
                     symbol=row["symbol"],
                     action=final_action,
                     severity=final_severity,
+                    urgency=row.get("urgency", "LOW"),
                     rationale=final_rationale,
                     payload={
                         "behavioural_flags": [
@@ -336,6 +444,9 @@ class MonitoringAgents:
                         "drawdown": drawdown,
                         "thesis": thesis,
                         "thesis_llm_reasoning": thesis.get("llm_reasoning", ""),
+                        "pnl": row.get("pnl"),
+                        "exit_recommendation": row.get("exit_recommendation"),
+                        "analyst_target": row.get("analyst_target"),
                         "llm_used": bool(llm_result),
                     },
                 )

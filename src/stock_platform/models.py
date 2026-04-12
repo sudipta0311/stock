@@ -55,6 +55,7 @@ class MonitoringAction:
     action: str
     severity: str
     rationale: str
+    urgency: str = "LOW"
     payload: dict[str, Any] = field(default_factory=dict)
 
 
