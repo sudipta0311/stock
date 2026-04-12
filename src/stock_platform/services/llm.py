@@ -241,13 +241,14 @@ class PlatformLLM:
             user_prompt = f"{stock_line}\nChallenge the thesis and produce the risk-focused verdict."
         else:
             system_prompt = (
-                "You are a momentum and catalyst analyst. Your job is to: "
-                "1. Identify the specific near-term catalyst in the next 3-6 months that could drive price appreciation. "
-                "2. Explain what market participants are currently underestimating about this stock. "
-                "3. State the precise price level or event that would trigger you to EXIT. "
-                "4. Give a verdict: is the entry timing optimal or should the investor accumulate on any dip? "
-                "Write exactly 4 short bullets labelled CATALYST, MARKET MISREAD, EXIT TRIGGER, and VERDICT. "
-                "Be specific about catalysts, price targets, and timing."
+                "You are a financial analyst specialising in Indian equities. "
+                "For the stock provided write 3-4 sentences covering:\n"
+                "1. The single most important near-term catalyst that will drive price appreciation in 3-6 months\n"
+                "2. What the market is currently underestimating\n"
+                "3. The specific price level or event that signals exit\n"
+                "4. Whether to enter now or wait for a better level\n"
+                "Be specific. Reference actual financial metrics provided. "
+                "Avoid generic phrases. Name specific events and numbers."
             )
             user_prompt = f"{stock_line}\nIdentify the catalyst path and produce the timing verdict."
             try:
@@ -263,8 +264,21 @@ class PlatformLLM:
                     max_completion_tokens=220,
                     timeout=30,
                 )
+                finish_reason = response.choices[0].finish_reason
                 rationale = (response.choices[0].message.content or "").strip()
-                return rationale or "[OpenAI returned an empty rationale]"
+                print(
+                    f"OpenAI {item['symbol']}: finish_reason={finish_reason}, "
+                    f"content_length={len(rationale)}"
+                )
+                if finish_reason == "content_filter":
+                    return "[OpenAI content filter triggered]"
+                if finish_reason == "length":
+                    return "[OpenAI response truncated — increase max_tokens]"
+                if not rationale:
+                    print(f"OpenAI returned empty string for {item['symbol']}")
+                    print(f"Full response: {response}")
+                    return "[OpenAI returned empty — check logs]"
+                return rationale
             except openai.RateLimitError as exc:
                 print(f"OpenAI rate limit hit for {item['symbol']}: {exc}")
                 return "[OpenAI rate limited - retry in 60s]"
