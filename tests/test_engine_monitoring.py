@@ -4,6 +4,7 @@ import sqlite3
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -64,6 +65,30 @@ class EngineMonitoringTests(unittest.TestCase):
 
         self.assertEqual(monitored_symbols, direct_symbols)
         self.assertNotIn("TITAN", monitored_symbols)
+
+    def test_snapshot_restores_persisted_buy_comparison_result(self) -> None:
+        comparison = {
+            "anthropic": {"recommendations": [{"symbol": "BEL"}]},
+            "openai": {"recommendations": [{"symbol": "HAL"}]},
+            "synthesis": {"BEL": "COMBINED VERDICT: ACCUMULATE GRADUALLY."},
+        }
+        self.engine.repo.set_state("buy_comparison_result", comparison)
+
+        snapshot = self.engine.get_dashboard_snapshot()
+
+        self.assertEqual(snapshot["buy_comparison_result"], comparison)
+
+    def test_ingest_clears_persisted_buy_comparison_result(self) -> None:
+        self.engine.repo.set_state("buy_comparison_result", {"anthropic": {"recommendations": [{"symbol": "BEL"}]}})
+        fake_graph = type("FakeGraph", (), {"invoke": lambda self, _: {"normalized_exposure": []}})()
+        with (
+            patch.object(self.engine, "run_signal_refresh", return_value={}),
+            patch.object(self.engine, "_build_portfolio_graph", return_value=fake_graph),
+        ):
+            self.engine.ingest_portfolio({"macro_thesis": ""})
+        snapshot = self.engine.get_dashboard_snapshot()
+
+        self.assertEqual(snapshot["buy_comparison_result"], {})
 
 
 if __name__ == "__main__":

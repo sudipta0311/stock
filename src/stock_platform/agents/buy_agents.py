@@ -197,6 +197,11 @@ def compute_net_return(
     return round(gross_return * (1 - tax_rate) * 100, 2)
 
 
+def buffered_top_n(top_n: int) -> int:
+    """Keep extra candidates alive so later timing/governance filters can still fill Top N."""
+    return max(top_n * 3, top_n)
+
+
 class BuyAgents:
     def __init__(self, repo: Any, provider: Any, config: AppConfig, llm: Any) -> None:
         self.repo = repo
@@ -351,6 +356,7 @@ class BuyAgents:
     def validate_qualitative(self, state: dict[str, Any]) -> dict[str, Any]:
         unified = {row["sector"]: row for row in self.repo.list_signals("unified")}
         top_n = int(state["request"]["top_n"])
+        target_pool_size = buffered_top_n(top_n)
         approved = []
         fallback_pool = []
         for candidate in state["shortlist"]:
@@ -418,11 +424,13 @@ class BuyAgents:
         if not approved:
             print("WARNING: qualitative validation approved zero candidates - buy feed will be empty.")
 
-        return {"shortlist": approved[:top_n]}
+        return {"shortlist": approved[:target_pool_size]}
 
     def differentiate_portfolio(self, state: dict[str, Any]) -> dict[str, Any]:
         overlaps = {row["symbol"]: row for row in state["portfolio_context"]["overlap_scores"]}
         gaps = {row["sector"]: row for row in state["portfolio_context"]["identified_gaps"]}
+        top_n = int(state["request"]["top_n"])
+        target_pool_size = buffered_top_n(top_n)
         differentiated = []
         for candidate in state["shortlist"]:
             overlap = overlaps.get(candidate["symbol"], {"overlap_pct": 0.0, "band": "GREEN", "attribution": []})
@@ -448,7 +456,7 @@ class BuyAgents:
                 }
             )
         differentiated.sort(key=lambda row: row["differentiation_score"], reverse=True)
-        return {"differentiated_shortlist": differentiated[: int(state["request"]["top_n"])]}
+        return {"differentiated_shortlist": differentiated[:target_pool_size]}
 
     def assess_timing(self, state: dict[str, Any]) -> dict[str, Any]:
         contrarian = {row["sector"]: row for row in self.repo.list_signals("contrarian")}
@@ -545,6 +553,7 @@ class BuyAgents:
 
     def finalize_recommendation(self, state: dict[str, Any]) -> dict[str, Any]:
         confidence_band = state["confidence"]["band"]
+        requested_top_n = int(state["request"]["top_n"])
         run_id = f"buy-{uuid4().hex[:10]}"
 
         # RED band: market signals too weak — save empty run and return early.
@@ -563,6 +572,8 @@ class BuyAgents:
         recommendations = []
         gov_skipped: list[dict] = []   # governance-blocked stocks collected during this loop
         for item in state["allocations"]:
+            if len(recommendations) >= requested_top_n:
+                break
             if item["entry_signal"] == "DO NOT ENTER":
                 continue
             price_ctx = dict(item["price_context"])
@@ -635,6 +646,11 @@ class BuyAgents:
                     rationale=rationale,
                     payload=payload,
                 )
+            )
+        if len(recommendations) < requested_top_n:
+            print(
+                f"WARNING: Final recommendation count {len(recommendations)} below requested Top N "
+                f"{requested_top_n} after timing/governance filtering."
             )
         self.repo.save_recommendations(run_id, recommendations)
         # Merge validation-gate skips (ValidationResult objects) + governance-filter skips (dicts).

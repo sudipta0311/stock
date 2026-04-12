@@ -12,7 +12,13 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from stock_platform.agents.quant_model import compute_quality_score
-from stock_platform.agents.buy_agents import BuyAgents, compute_net_return, get_fresh_analyst_target, get_top_n_with_replacement
+from stock_platform.agents.buy_agents import (
+    BuyAgents,
+    buffered_top_n,
+    compute_net_return,
+    get_fresh_analyst_target,
+    get_top_n_with_replacement,
+)
 from stock_platform.config import AppConfig
 from stock_platform.services.llm import PlatformLLM
 
@@ -82,10 +88,16 @@ class FakeOpenAIClient:
 
 
 class StubRepo:
+    def __init__(self) -> None:
+        self.saved_recommendations: list[object] = []
+
     def list_signals(self, family: str):
         if family == "unified":
             return [{"sector": "Defence", "conviction": "BUY", "score": 0.7}]
         return []
+
+    def save_recommendations(self, run_id: str, rows: list[object]) -> None:
+        self.saved_recommendations = rows
 
 
 class StubProvider:
@@ -96,6 +108,11 @@ class StubProvider:
 class RejectingLLM:
     def qualitative_analysis(self, candidate, news, signal_context):
         return {"approved": False, "confidence": 0.2, "reasoning": "Too cautious"}
+
+
+class StaticLLM:
+    def buy_rationale(self, item, portfolio_context):
+        return f"{item['symbol']} still clears the final gate."
 
 
 class BuyQualityScoreTests(unittest.TestCase):
@@ -202,6 +219,51 @@ class BuyQualityScoreTests(unittest.TestCase):
 
         self.assertEqual(len(result["shortlist"]), 2)
         self.assertEqual([row["symbol"] for row in result["shortlist"]], ["BEL", "HAL"])
+
+    def test_buffered_top_n_keeps_extra_candidates_for_late_filters(self) -> None:
+        self.assertEqual(buffered_top_n(3), 9)
+        self.assertEqual(buffered_top_n(1), 3)
+
+    @patch("stock_platform.agents.buy_agents.get_fresh_analyst_target", return_value=120.0)
+    @patch("stock_platform.agents.buy_agents.governance_risk_blocks", return_value=(False, ""))
+    def test_finalize_recommendation_backfills_after_do_not_enter(self, _gov_mock, _target_mock) -> None:
+        repo = StubRepo()
+        agent = BuyAgents(repo, StubProvider(), AppConfig(), StaticLLM())
+        base_item = {
+            "company_name": "Demo Co",
+            "sector": "Defence",
+            "quality_score": 0.8,
+            "gap_reason": "Gap fill",
+            "overlap_pct": 0.0,
+            "fund_attribution": [],
+            "initial_tranche_pct": 8.0,
+            "target_pct": 20.0,
+            "initial_amount_inr": 8000.0,
+            "target_amount_inr": 20000.0,
+            "allocation_pct": 8.0,
+            "allocation_amount": 8000.0,
+            "tranches": 3,
+            "differentiation_score": 0.8,
+            "news": {"headline": "Positive update"},
+            "price_context": {"price": 100.0, "analyst_target": 120.0},
+            "live_financials": {"currentPrice": 100.0},
+        }
+        state = {
+            "request": {"top_n": 3},
+            "confidence": {"band": "GREEN"},
+            "portfolio_context": {"normalized_exposure": []},
+            "allocations": [
+                base_item | {"symbol": "AAA", "entry_signal": "DO NOT ENTER"},
+                base_item | {"symbol": "BBB", "entry_signal": "ACCUMULATE"},
+                base_item | {"symbol": "CCC", "entry_signal": "ACCUMULATE"},
+                base_item | {"symbol": "DDD", "entry_signal": "ACCUMULATE"},
+            ],
+        }
+
+        result = agent.finalize_recommendation(state)
+
+        self.assertEqual([row["symbol"] for row in result["recommendations"]], ["BBB", "CCC", "DDD"])
+        self.assertEqual(len(repo.saved_recommendations), 3)
 
 
 class BuyPromptTests(unittest.TestCase):

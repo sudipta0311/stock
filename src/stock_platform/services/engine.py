@@ -102,6 +102,7 @@ class PlatformEngine:
         # a successful ingest so the UI cannot show stale actions from an older statement.
         self.repo.clear_recommendations()
         self.repo.clear_monitoring_actions()
+        self.repo.set_state("buy_comparison_result", {})
         return result
 
     def parse_portfolio_pdf(self, pdf_path: str | Path, password: str) -> dict[str, Any]:
@@ -239,6 +240,7 @@ class PlatformEngine:
         return {
             "portfolio": portfolio,
             "recommendations": self.repo.list_recommendations(),
+            "buy_comparison_result": self.repo.get_state("buy_comparison_result", {}),
             "monitoring_actions": self.repo.list_monitoring_actions(),
             "run_meta": {
                 "buy": self.repo.get_state("last_buy_run", {}),
