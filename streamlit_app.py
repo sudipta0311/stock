@@ -1077,6 +1077,10 @@ with tabs[1]:
                     pass
 
     with st.expander("Enter buying price manually for a single stock"):
+        st.caption(
+            "For TCS, enter `TCS` plus your actual quantity, avg buy price, and buy date, "
+            "then click Save holding."
+        )
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             m_symbol = st.text_input("Symbol e.g. INFY", key="manual_broker_symbol")
