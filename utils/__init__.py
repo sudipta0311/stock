@@ -6,12 +6,15 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from stock_platform.utils.entry_calculator import calculate_entry_levels
+from stock_platform.utils.entry_calculator import calculate_entry_levels, fetch_analyst_consensus_target
+from stock_platform.utils.signal_sources import get_tariff_signal
 from stock_platform.utils.screener_fetcher import fetch_screener_data, get_stock_fundamentals
 from stock_platform.utils.symbol_resolver import get_symbol_display_name, resolve_nse_symbol
 
 __all__ = [
     "calculate_entry_levels",
+    "fetch_analyst_consensus_target",
+    "get_tariff_signal",
     "fetch_screener_data",
     "get_stock_fundamentals",
     "get_symbol_display_name",

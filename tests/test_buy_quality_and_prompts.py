@@ -20,13 +20,19 @@ from stock_platform.agents.buy_agents import (
     buffered_top_n,
     compute_net_return,
     filter_by_risk_reward,
-    get_fresh_analyst_target,
     get_top_n_with_replacement,
 )
 from stock_platform.config import AppConfig
 from stock_platform.services.engine import _append_entry_summary
 from stock_platform.services.llm import PlatformLLM
-from stock_platform.utils.entry_calculator import calculate_entry_levels
+from stock_platform.utils.entry_calculator import (
+    apply_momentum_override,
+    calculate_entry_levels,
+    fetch_analyst_consensus_target,
+)
+from stock_platform.utils.signal_sources import get_tariff_signal
+from stock_platform.utils.screener_fetcher import fetch_recent_results
+from stock_platform.utils.stock_validator import check_recently_listed
 
 LOCAL_DB_CONFIG = {
     "turso_database_url": "",
@@ -113,8 +119,14 @@ class StubRepo:
 
 
 class StubProvider:
+    def __init__(self) -> None:
+        self.today = __import__("datetime").date(2026, 4, 13)
+
     def get_stock_news(self, symbol: str):
         return {"headline": f"{symbol} update", "sentiment_score": 0.15}
+
+    def get_price_context(self, symbol: str):
+        return {"symbol": symbol, "price": 100.0, "analyst_target": 140.0}
 
 
 class RejectingLLM:
@@ -211,10 +223,10 @@ class BuyQualityScoreTests(unittest.TestCase):
         self.assertEqual([row["symbol"] for row in picks], ["CCC", "DDD"])
 
     @patch("utils.screener_fetcher.fetch_screener_data")
-    def test_fresh_target_falls_back_to_proxy_or_price_buffer(self, fetch_mock) -> None:
-        fetch_mock.return_value = {"eps": 20.0, "sector_pe": 25.0}
+    def test_consensus_target_falls_back_to_known_targets(self, fetch_mock) -> None:
+        fetch_mock.return_value = {}
         with patch.dict(sys.modules, {"yfinance": types.SimpleNamespace(Ticker=lambda *_: types.SimpleNamespace(info={}))}):
-            target = get_fresh_analyst_target("BEL", 300.0)
+            target = fetch_analyst_consensus_target("BEL", 300.0)
         self.assertGreater(target, 300.0)
 
     def test_qualitative_fallback_prevents_empty_shortlist(self) -> None:
@@ -236,7 +248,7 @@ class BuyQualityScoreTests(unittest.TestCase):
         self.assertEqual(buffered_top_n(3), 3 * FINAL_BUFFER_MULTIPLIER)
         self.assertEqual(buffered_top_n(1), 1 * FINAL_BUFFER_MULTIPLIER)
 
-    @patch("stock_platform.agents.buy_agents.get_fresh_analyst_target", return_value=120.0)
+    @patch("stock_platform.agents.buy_agents.fetch_analyst_consensus_target", return_value=120.0)
     @patch("stock_platform.agents.buy_agents.governance_risk_blocks", return_value=(False, ""))
     def test_finalize_recommendation_backfills_after_do_not_enter(self, _gov_mock, _target_mock) -> None:
         repo = StubRepo()
@@ -282,7 +294,7 @@ class BuyQualityScoreTests(unittest.TestCase):
         self.assertEqual(first_payload["fin_data"]["currentPrice"], 100.0)
         self.assertGreaterEqual(first_payload["entry_levels"]["risk_reward"], MINIMUM_RR_RATIO)
 
-    @patch("stock_platform.agents.buy_agents.get_fresh_analyst_target", return_value=110.0)
+    @patch("stock_platform.agents.buy_agents.fetch_analyst_consensus_target", return_value=110.0)
     @patch("stock_platform.agents.buy_agents.governance_risk_blocks", return_value=(False, ""))
     def test_finalize_recommendation_excludes_low_rr_candidates(self, _gov_mock, _target_mock) -> None:
         repo = StubRepo()
@@ -359,6 +371,242 @@ class BuyQualityScoreTests(unittest.TestCase):
             )
 
         self.assertEqual(captured["n"], 4 * SHORTLIST_BUFFER_MULTIPLIER)
+
+    def test_recently_listed_check_flags_known_ipo(self) -> None:
+        result = check_recently_listed("TMCV", current_date=__import__("datetime").date(2026, 4, 13))
+
+        self.assertTrue(result["recently_listed"])
+        self.assertEqual(result["recommendation"], "WAIT - lock-in risk")
+        self.assertIn("Lock-in expiry overhang risk", result["warning"])
+
+    def test_assess_timing_caps_recent_ipo_to_wait(self) -> None:
+        agent = BuyAgents(StubRepo(), StubProvider(), AppConfig(**LOCAL_DB_CONFIG), StaticLLM())
+
+        result = agent.assess_timing(
+            {
+                "differentiated_shortlist": [{"symbol": "TMCV", "sector": "Defence", "quality_score": 0.8}],
+            }
+        )
+
+        row = result["timing_assessments"][0]
+        self.assertEqual(row["original_entry_signal"], "ACCUMULATE")
+        self.assertEqual(row["entry_signal"], "WAIT")
+        self.assertTrue(row["lock_in_check"]["recently_listed"])
+        self.assertEqual(row["lock_in_multiplier"], 0.5)
+
+    def test_apply_momentum_override_upgrades_wait_near_low(self) -> None:
+        upgraded = apply_momentum_override(
+            signal="WAIT",
+            recent_results={"revenue_yoy_growth_pct": 36.0, "momentum": "STRONG"},
+            current_price=100.0,
+            week52_low=80.0,
+        )
+
+        self.assertEqual(upgraded, "ACCUMULATE")
+
+    def test_assess_timing_upgrades_wait_when_recent_results_are_strong(self) -> None:
+        class NeutralRepo(StubRepo):
+            def list_signals(self, family: str):
+                return []
+
+        agent = BuyAgents(NeutralRepo(), StubProvider(), AppConfig(**LOCAL_DB_CONFIG), StaticLLM())
+
+        result = agent.assess_timing(
+            {
+                "differentiated_shortlist": [
+                    {
+                        "symbol": "BEL",
+                        "sector": "Defence",
+                        "quality_score": 0.8,
+                        "financials": {
+                            "recent_results": {"revenue_yoy_growth_pct": 42.0, "momentum": "STRONG"},
+                            "week52_low": 80.0,
+                        },
+                    }
+                ],
+            }
+        )
+
+        row = result["timing_assessments"][0]
+        self.assertEqual(row["original_entry_signal"], "WAIT")
+        self.assertEqual(row["entry_signal"], "ACCUMULATE")
+        self.assertTrue(row["momentum_override_applied"])
+
+    @patch("stock_platform.utils.screener_fetcher.requests.get")
+    def test_fetch_recent_results_parses_quarterly_sales(self, get_mock) -> None:
+        get_mock.return_value = types.SimpleNamespace(
+            status_code=200,
+            text="""
+            <div id="quarters">
+              <table>
+                <tr><th>Metric</th><th>Mar 2026</th><th>Mar 2025</th></tr>
+                <tr><td>Sales +</td><td>140</td><td>100</td></tr>
+              </table>
+            </div>
+            """,
+        )
+
+        result = fetch_recent_results("BEL")
+
+        self.assertEqual(result["latest_quarter_revenue"], 140.0)
+        self.assertEqual(result["prev_quarter_revenue"], 100.0)
+        self.assertEqual(result["revenue_yoy_growth_pct"], 40.0)
+        self.assertEqual(result["momentum"], "STRONG")
+
+    @patch("stock_platform.agents.buy_agents.fetch_analyst_consensus_target", return_value=140.0)
+    @patch("stock_platform.agents.buy_agents.governance_risk_blocks", return_value=(False, ""))
+    def test_finalize_recommendation_preserves_lock_in_warning(self, _gov_mock, _target_mock) -> None:
+        repo = StubRepo()
+        agent = BuyAgents(repo, StubProvider(), AppConfig(**LOCAL_DB_CONFIG), StaticLLM())
+        lock_in_check = check_recently_listed("TMCV", current_date=__import__("datetime").date(2026, 4, 13))
+        state = {
+            "request": {"top_n": 1},
+            "confidence": {"band": "GREEN"},
+            "portfolio_context": {"normalized_exposure": []},
+            "allocations": [
+                {
+                    "symbol": "TMCV",
+                    "company_name": "Demo Co",
+                    "sector": "Defence",
+                    "quality_score": 0.8,
+                    "gap_reason": "Gap fill",
+                    "overlap_pct": 0.0,
+                    "fund_attribution": [],
+                    "initial_tranche_pct": 0.0,
+                    "target_pct": 5.5,
+                    "initial_amount_inr": 0.0,
+                    "target_amount_inr": 5500.0,
+                    "allocation_pct": 0.0,
+                    "allocation_amount": 0.0,
+                    "tranches": 2,
+                    "differentiation_score": 0.8,
+                    "news": {"headline": "Positive update"},
+                    "price_context": {"price": 100.0, "analyst_target": 140.0},
+                    "live_financials": {"currentPrice": 100.0},
+                    "financials": {"currentPrice": 100.0, "week52_low": 70.0},
+                    "entry_signal": "WAIT",
+                    "original_entry_signal": "ACCUMULATE",
+                    "lock_in_check": lock_in_check,
+                    "lock_in_multiplier": 0.5,
+                }
+            ],
+        }
+
+        result = agent.finalize_recommendation(state)
+
+        self.assertEqual(len(result["recommendations"]), 1)
+        payload = result["recommendations"][0]["payload"]
+        self.assertTrue(payload["recently_listed"])
+        self.assertEqual(payload["lock_in_multiplier"], 0.5)
+        self.assertEqual(payload["entry_signal"], "WAIT")
+        self.assertEqual(payload["original_entry_signal"], "ACCUMULATE")
+        self.assertIn("Lock-in expiry overhang risk", payload["lock_in_warning"])
+
+    @patch("stock_platform.agents.buy_agents.fetch_analyst_consensus_target", return_value=140.0)
+    @patch("stock_platform.agents.buy_agents.governance_risk_blocks", return_value=(False, ""))
+    def test_finalize_recommendation_preserves_recent_results_payload(self, _gov_mock, _target_mock) -> None:
+        repo = StubRepo()
+        agent = BuyAgents(repo, StubProvider(), AppConfig(**LOCAL_DB_CONFIG), StaticLLM())
+        state = {
+            "request": {"top_n": 1},
+            "confidence": {"band": "GREEN"},
+            "portfolio_context": {"normalized_exposure": []},
+            "allocations": [
+                {
+                    "symbol": "BEL",
+                    "company_name": "Demo Co",
+                    "sector": "Defence",
+                    "quality_score": 0.8,
+                    "gap_reason": "Gap fill",
+                    "overlap_pct": 0.0,
+                    "fund_attribution": [],
+                    "initial_tranche_pct": 8.0,
+                    "target_pct": 20.0,
+                    "initial_amount_inr": 8000.0,
+                    "target_amount_inr": 20000.0,
+                    "allocation_pct": 8.0,
+                    "allocation_amount": 8000.0,
+                    "tranches": 3,
+                    "differentiation_score": 0.8,
+                    "news": {"headline": "Positive update"},
+                    "price_context": {"price": 100.0, "analyst_target": 140.0},
+                    "live_financials": {"currentPrice": 100.0},
+                    "financials": {"currentPrice": 100.0, "week52_low": 80.0},
+                    "entry_signal": "ACCUMULATE",
+                    "original_entry_signal": "WAIT",
+                    "recent_results": {"revenue_yoy_growth_pct": 42.0, "momentum": "STRONG"},
+                    "momentum_override_applied": True,
+                    "lock_in_multiplier": 1.0,
+                    "lock_in_check": {},
+                }
+            ],
+        }
+
+        result = agent.finalize_recommendation(state)
+
+        payload = result["recommendations"][0]["payload"]
+        self.assertTrue(payload["momentum_override_applied"])
+        self.assertEqual(payload["recent_results"]["momentum"], "STRONG")
+        self.assertEqual(payload["original_entry_signal"], "WAIT")
+        self.assertEqual(payload["entry_signal"], "ACCUMULATE")
+
+    def test_get_tariff_signal_returns_mapping_for_consumer_durables(self) -> None:
+        tariff = get_tariff_signal("Consumer Durables")
+
+        self.assertEqual(tariff["impact"], "NEGATIVE")
+        self.assertEqual(tariff["date"], "2026-04-02")
+        self.assertIn("US 26% tariff", tariff["reason"])
+
+    @patch("stock_platform.agents.buy_agents.fetch_analyst_consensus_target", return_value=140.0)
+    @patch("stock_platform.agents.buy_agents.governance_risk_blocks", return_value=(False, ""))
+    def test_finalize_recommendation_reduces_first_tranche_for_tariff_hit_sector(self, _gov_mock, _target_mock) -> None:
+        repo = StubRepo()
+        agent = BuyAgents(repo, StubProvider(), AppConfig(**LOCAL_DB_CONFIG), StaticLLM())
+        state = {
+            "request": {"top_n": 1},
+            "confidence": {"band": "GREEN"},
+            "portfolio_context": {"normalized_exposure": []},
+            "allocations": [
+                {
+                    "symbol": "DURABLE1",
+                    "company_name": "Demo Co",
+                    "sector": "Consumer Durables",
+                    "quality_score": 0.8,
+                    "gap_reason": "Gap fill",
+                    "overlap_pct": 0.0,
+                    "fund_attribution": [],
+                    "initial_tranche_pct": 8.0,
+                    "target_pct": 20.0,
+                    "initial_amount_inr": 8000.0,
+                    "target_amount_inr": 20000.0,
+                    "allocation_pct": 8.0,
+                    "allocation_amount": 8000.0,
+                    "tranches": 3,
+                    "differentiation_score": 0.8,
+                    "news": {"headline": "Positive update"},
+                    "price_context": {"price": 100.0, "analyst_target": 140.0},
+                    "live_financials": {"currentPrice": 100.0},
+                    "financials": {"currentPrice": 100.0},
+                    "entry_signal": "ACCUMULATE",
+                    "original_entry_signal": "ACCUMULATE",
+                    "recent_results": {},
+                    "momentum_override_applied": False,
+                    "lock_in_multiplier": 1.0,
+                    "lock_in_check": {},
+                }
+            ],
+        }
+
+        result = agent.finalize_recommendation(state)
+
+        payload = result["recommendations"][0]["payload"]
+        self.assertEqual(payload["tariff_signal"]["impact"], "NEGATIVE")
+        self.assertIn("US 26% tariff", payload["tariff_warning"])
+        self.assertEqual(payload["initial_tranche_pct"], 5.6)
+        self.assertEqual(payload["initial_amount_inr"], 5600.0)
+        self.assertEqual(payload["allocation_pct"], 5.6)
+        self.assertEqual(payload["allocation_amount"], 5600.0)
+        self.assertEqual(payload["entry_levels"]["tranche_1_pct"], 28)
 
 
 class EntryCalculatorTests(unittest.TestCase):

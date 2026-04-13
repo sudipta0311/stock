@@ -6,6 +6,7 @@ from typing import Any
 from stock_platform.models import SignalRecord
 from stock_platform.utils.rules import clamp, conviction_from_score
 from stock_platform.utils.sector_config import SECTOR_GEO_OVERRIDES
+from stock_platform.utils.signal_sources import get_tariff_penalty, get_tariff_signal
 
 
 class SignalAgents:
@@ -99,7 +100,26 @@ class SignalAgents:
             weight_used = payload["weight_used"]
             raw = payload["score"] / weight_used if weight_used > 0 else 0.0
             score = clamp(raw, 0.0, 1.0)
+            tariff = get_tariff_signal(sector)
+            tariff_impact = tariff.get("impact")
+            penalty = get_tariff_penalty(str(tariff_impact or ""))
+            if penalty > 0:
+                old_score = score
+                score = max(0.1, score - penalty)
+                print(f"Tariff penalty applied to {sector}: {old_score:.2f} -> {score:.2f}")
             primary_source = max(payload["source_weights"], key=payload["source_weights"].get)
+            detail = f"Unified signal across {', '.join(sorted(set(payload['sources'])))}"
+            if tariff.get("reason"):
+                detail = f"{detail} | Tariff: {tariff['reason']}"
+            signal_payload = {
+                "source_weights": payload["source_weights"],
+                "confidence": round(min(0.95, 0.55 + len(payload["sources"]) * 0.08), 3),
+            }
+            if tariff:
+                signal_payload["tariff_signal"] = tariff
+            if penalty > 0:
+                signal_payload["tariff_penalty"] = penalty
+                signal_payload["tariff_warning"] = tariff.get("reason")
             unified.append(
                 SignalRecord(
                     family="unified",
@@ -108,13 +128,10 @@ class SignalAgents:
                     score=round(score, 3),
                     source=primary_source,
                     horizon="blended",
-                    detail=f"Unified signal across {', '.join(sorted(set(payload['sources'])))}",
+                    detail=detail,
                     as_of_date=self.provider.today.isoformat(),
                     signal_key=f"UNIFIED_{sector.upper().replace(' ', '_')}",
-                    payload={
-                        "source_weights": payload["source_weights"],
-                        "confidence": round(min(0.95, 0.55 + len(payload["sources"]) * 0.08), 3),
-                    },
+                    payload=signal_payload,
                 )
             )
         # Inject geo overrides for sectors absent from live signal feeds.

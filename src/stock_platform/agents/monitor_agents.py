@@ -6,6 +6,7 @@ from uuid import uuid4
 from stock_platform.config import AppConfig
 from stock_platform.data.db import database_connection
 from stock_platform.models import MonitoringAction
+from stock_platform.utils.entry_calculator import fetch_analyst_consensus_target
 from utils.tax_calculator import calculate_pnl, should_exit
 
 
@@ -45,44 +46,6 @@ def apply_overlap_override(
         exit_rec["urgency"] = "LOW"
 
     return exit_rec, overlap
-
-
-def get_fresh_analyst_target(symbol: str, current_price: float) -> float:
-    """
-    Get current analyst consensus target.
-    Falls back to current_price * 1.15 when no valid target is available.
-    """
-    try:
-        import yfinance as yf
-        from utils.symbol_resolver import resolve_nse_symbol
-
-        resolved = resolve_nse_symbol(symbol)
-        ticker = yf.Ticker(resolved)
-        info = ticker.info or {}
-        target = info.get("targetMeanPrice")
-        if target and float(target) > current_price * 0.5:
-            return float(target)
-    except Exception:
-        pass
-
-    try:
-        from utils.screener_fetcher import fetch_screener_data, get_stock_fundamentals
-
-        data = fetch_screener_data(symbol) or {}
-        target = data.get("target_price") or data.get("target_mean_price")
-        if not target:
-            enriched = get_stock_fundamentals(symbol)
-            target = enriched.get("target_price") or enriched.get("target_mean_price")
-        if target and float(target) > current_price * 0.5:
-            return float(target)
-    except Exception:
-        pass
-
-    print(
-        f"WARNING: No analyst target for {symbol} - using current_price * 1.15 as fallback"
-    )
-    return current_price * 1.15
-
 
 def format_monitoring_rationale(
     row: dict[str, Any],
@@ -392,7 +355,7 @@ class MonitoringAgents:
             buy_info = buy_map.get(symbol)
             current_price = drawdown_map[symbol].get("current_price")
             analyst_target = (
-                get_fresh_analyst_target(symbol, float(current_price))
+                fetch_analyst_consensus_target(symbol, float(current_price))
                 if current_price
                 else self.provider.get_price_context(symbol).get("analyst_target")
             )

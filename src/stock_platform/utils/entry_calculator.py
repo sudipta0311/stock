@@ -3,6 +3,16 @@ from __future__ import annotations
 from typing import Any
 
 
+KNOWN_ANALYST_TARGETS = {
+    "SUZLON": 74.0,
+    "HAVELLS": 1583.0,
+    "DIXON": 12617.0,
+    "LGEINDIA": 1752.0,
+    "BEL": 488.0,
+    "HAL": 4875.0,
+}
+
+
 def _as_float(value: Any) -> float | None:
     try:
         if value is None:
@@ -18,6 +28,91 @@ def _pick_week52_low(fin_data: dict[str, Any]) -> float | None:
         if value and value > 0:
             return value
     return None
+
+
+def fetch_analyst_consensus_target(symbol: str, current_price: float) -> float:
+    """
+    Fetch a real analyst consensus target, trying multiple sources in order.
+    """
+    current_price_value = _as_float(current_price) or 0.0
+    if current_price_value <= 0:
+        return 0.0
+
+    min_valid_target = current_price_value * 0.7
+    clean_symbol = str(symbol or "").upper().strip()
+
+    try:
+        from utils.screener_fetcher import fetch_screener_data
+
+        data = fetch_screener_data(clean_symbol) or {}
+        target = data.get("target_price") or data.get("target_mean_price")
+        target_value = _as_float(target)
+        if target_value is not None and target_value > min_valid_target:
+            print(f"{clean_symbol} target from Screener: Rs.{target_value:.0f}")
+            return float(target_value)
+    except Exception:
+        pass
+
+    try:
+        import yfinance as yf
+        from utils.symbol_resolver import resolve_nse_symbol
+
+        info = yf.Ticker(resolve_nse_symbol(clean_symbol)).info or {}
+        target = info.get("targetMeanPrice")
+        target_value = _as_float(target)
+        if target_value is not None and target_value > min_valid_target:
+            print(f"{clean_symbol} target from yfinance: Rs.{target_value:.0f}")
+            return float(target_value)
+    except Exception:
+        pass
+
+    if clean_symbol in KNOWN_ANALYST_TARGETS:
+        target_value = float(KNOWN_ANALYST_TARGETS[clean_symbol])
+        print(f"{clean_symbol} target from known targets: Rs.{target_value:.0f}")
+        return target_value
+
+    fallback = current_price_value * 1.15
+    print(f"{clean_symbol}: no target found - using Rs.{fallback:.0f} (15% fallback)")
+    return float(fallback)
+
+
+def apply_momentum_override(
+    signal: str,
+    recent_results: dict[str, Any],
+    current_price: float,
+    week52_low: float | None,
+) -> str:
+    """
+    Upgrade a WAIT signal when revenue momentum is strong and the stock is still
+    trading relatively close to its 52-week low.
+    """
+    if not recent_results:
+        return signal
+
+    growth = _as_float(recent_results.get("revenue_yoy_growth_pct")) or 0.0
+    momentum = str(recent_results.get("momentum") or "").upper()
+    current_price_value = _as_float(current_price)
+    week52_low_value = _as_float(week52_low)
+
+    near_low = False
+    if (
+        current_price_value is not None
+        and current_price_value > 0
+        and week52_low_value is not None
+        and week52_low_value > 0
+    ):
+        pct_from_low = ((current_price_value - week52_low_value) / week52_low_value) * 100.0
+        near_low = pct_from_low < 30.0
+
+    signal_key = str(signal or "").strip().upper().replace("_", " ")
+    if signal_key == "WAIT" and momentum == "STRONG" and growth > 30.0 and near_low:
+        print(
+            "Momentum override: upgrading WAIT -> ACCUMULATE "
+            f"(revenue growth {growth:.1f}% + near 52w low)"
+        )
+        return "ACCUMULATE"
+
+    return signal
 
 
 def calculate_entry_levels(

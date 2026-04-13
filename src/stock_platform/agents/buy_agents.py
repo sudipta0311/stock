@@ -8,10 +8,21 @@ from uuid import uuid4
 from stock_platform.config import AppConfig
 from stock_platform.models import RecommendationRecord
 from stock_platform.agents.quant_model import compute_quality_score as compute_quality_score_v2
-from stock_platform.utils.entry_calculator import calculate_entry_levels
+from stock_platform.utils.entry_calculator import (
+    apply_momentum_override,
+    calculate_entry_levels,
+    fetch_analyst_consensus_target,
+)
 from stock_platform.utils.rules import clamp, parse_iso_datetime
+from stock_platform.utils.screener_fetcher import compute_pe_context
 from stock_platform.utils.sector_config import governance_risk_blocks
-from stock_platform.utils.stock_validator import ValidationResult, log_skipped_stock, validate_stock
+from stock_platform.utils.signal_sources import get_tariff_signal
+from stock_platform.utils.stock_validator import (
+    ValidationResult,
+    check_recently_listed,
+    log_skipped_stock,
+    validate_stock,
+)
 from stock_platform.utils.technical_signals import compute_technical_signal
 
 
@@ -82,69 +93,11 @@ def get_top_n_with_replacement(
     return recommendations
 
 
-def get_fresh_analyst_target(
-    symbol: str,
-    current_price: float,
-    seed_target: float | None = None,
-    live_financials: dict[str, Any] | None = None,
-) -> float:
-    if not current_price or current_price <= 0:
-        return 0.0
-
-    def _valid_target(value: Any) -> bool:
-        try:
-            return value is not None and float(value) > current_price * 0.5
-        except (TypeError, ValueError):
-            return False
-
-    for candidate_target in (
-        seed_target,
-        (live_financials or {}).get("targetMeanPrice"),
-        (live_financials or {}).get("target_mean_price"),
-        (live_financials or {}).get("target_price"),
-    ):
-        if _valid_target(candidate_target):
-            return float(candidate_target)
-
-    try:
-        import yfinance as yf
-        from utils.symbol_resolver import resolve_nse_symbol
-
-        ticker = yf.Ticker(resolve_nse_symbol(symbol))
-        info = ticker.info or {}
-        target = info.get("targetMeanPrice")
-        if _valid_target(target):
-            return float(target)
-    except Exception:
-        pass
-
-    try:
-        from utils.screener_fetcher import fetch_screener_data
-
-        data = fetch_screener_data(symbol) or {}
-        target = data.get("target_price") or data.get("target_mean_price")
-        if _valid_target(target):
-            return float(target)
-
-        eps = data.get("eps")
-        sector_pe = data.get("sector_pe") or data.get("pe_ratio")
-        if eps and eps > 0 and sector_pe and sector_pe > 0:
-            proxy_target = float(eps) * float(sector_pe) * 1.15
-            if proxy_target > current_price * 0.5:
-                print(f"{symbol}: using PE proxy target Rs.{proxy_target:.0f}")
-                return float(proxy_target)
-    except Exception:
-        pass
-
-    fallback = current_price * 1.15
-    print(f"{symbol}: no target found - using Rs.{fallback:.0f} (15% upside assumption)")
-    return float(fallback)
-
-
 def compute_position_size(
     entry_signal: str,
     conviction_score: float,
     direct_equity_corpus: float,
+    conviction_multiplier: float = 1.0,
 ) -> dict[str, Any]:
     """
     Returns initial_tranche_pct and target_pct separately.
@@ -168,7 +121,7 @@ def compute_position_size(
     }
     rule = sizing_rules.get(conviction_key, {"initial": 0.05, "target": 0.10})
 
-    conviction_multiplier = 0.85 + (conviction_score * 0.30)
+    conviction_multiplier = max(0.0, conviction_multiplier) * (0.85 + (conviction_score * 0.30))
 
     initial_pct = round(rule["initial"] * conviction_multiplier * 100, 1)
     target_pct  = round(rule["target"]  * conviction_multiplier * 100, 1)
@@ -518,7 +471,33 @@ class BuyAgents:
                 entry = "SMALL INITIAL"
             else:
                 entry = "WAIT"
-            timing_rows.append(candidate | {"entry_signal": entry, "price_context": price})
+            baseline_entry_signal = entry
+            fin_data = candidate.get("financials") or candidate.get("live_financials") or {}
+            recent_results = fin_data.get("recent_results") or {}
+            entry = apply_momentum_override(
+                signal=entry,
+                recent_results=recent_results,
+                current_price=price.get("price"),
+                week52_low=fin_data.get("week52_low") or fin_data.get("fiftyTwoWeekLow"),
+            )
+            lock_in_check = check_recently_listed(candidate["symbol"], current_date=self.provider.today)
+            lock_in_multiplier = 1.0
+            if lock_in_check.get("recently_listed"):
+                lock_in_multiplier = 0.5
+                if entry in {"STRONG ENTER", "ACCUMULATE", "SMALL INITIAL"}:
+                    entry = "WAIT"
+            timing_rows.append(
+                candidate
+                | {
+                    "entry_signal": entry,
+                    "original_entry_signal": baseline_entry_signal,
+                    "price_context": price,
+                    "recent_results": recent_results,
+                    "momentum_override_applied": baseline_entry_signal == "WAIT" and entry == "ACCUMULATE",
+                    "lock_in_check": lock_in_check,
+                    "lock_in_multiplier": lock_in_multiplier,
+                }
+            )
         return {"timing_assessments": timing_rows}
 
     def size_positions(self, state: dict[str, Any]) -> dict[str, Any]:
@@ -526,7 +505,12 @@ class BuyAgents:
         corpus = float(prefs.get("direct_equity_corpus", 0) or 0) or 100.0
         allocations = []
         for item in state["timing_assessments"]:
-            sizing = compute_position_size(item["entry_signal"], item["quality_score"], corpus)
+            sizing = compute_position_size(
+                item["entry_signal"],
+                item["quality_score"],
+                corpus,
+                conviction_multiplier=float(item.get("lock_in_multiplier", 1.0) or 1.0),
+            )
             allocations.append(
                 item
                 | sizing
@@ -626,12 +610,7 @@ class BuyAgents:
                 or item.get("live_financials", {}).get("current_price")
                 or 0.0
             )
-            analyst_target = get_fresh_analyst_target(
-                item["symbol"],
-                current_price,
-                seed_target=price_ctx.get("analyst_target"),
-                live_financials=item.get("live_financials", {}),
-            )
+            analyst_target = fetch_analyst_consensus_target(item["symbol"], current_price)
             price_ctx["analyst_target"] = analyst_target
             net_return_pct = compute_net_return(current_price, analyst_target, holding_months=24)
 
@@ -663,12 +642,20 @@ class BuyAgents:
                 })
                 continue
 
-            llm_rationale = self.llm.buy_rationale(item, state["portfolio_context"])
+            fin_data = dict(item.get("live_financials") or {})
+            fin_data.update({key: value for key, value in (item.get("financials") or {}).items() if value is not None})
+            pe_context = compute_pe_context(
+                symbol=item["symbol"],
+                fin_data=fin_data,
+                current_price=current_price,
+            )
+            llm_rationale = self.llm.buy_rationale(
+                item | {"pe_context": pe_context},
+                state["portfolio_context"],
+            )
             if not llm_rationale:
                 print(f"LLM rationale unavailable for {item['symbol']} — proceeding without narrative")
             rationale = llm_rationale or "[LLM analysis unavailable for this stock]"
-            fin_data = dict(item.get("live_financials") or {})
-            fin_data.update({key: value for key, value in (item.get("financials") or {}).items() if value is not None})
             entry_levels = calculate_entry_levels(
                 symbol=item["symbol"],
                 current_price=current_price,
@@ -677,6 +664,23 @@ class BuyAgents:
                 quant_score=item["quality_score"],
                 fin_data=fin_data,
             )
+            tariff_signal = get_tariff_signal(item.get("sector", ""))
+            tariff_warning = None
+            initial_tranche_pct = float(item["initial_tranche_pct"])
+            initial_amount_inr = float(item["initial_amount_inr"])
+            allocation_pct = float(item["allocation_pct"])
+            allocation_amount = float(item["allocation_amount"])
+            if tariff_signal.get("impact") in {"NEGATIVE", "HIGH_NEGATIVE"}:
+                tariff_warning = (
+                    f"{tariff_signal['reason']} - FII selling pressure may delay re-rating. "
+                    "Consider reducing first tranche size."
+                )
+                initial_tranche_pct = round(initial_tranche_pct * 0.70, 1)
+                initial_amount_inr = round(initial_amount_inr * 0.70, 0)
+                allocation_pct = initial_tranche_pct
+                allocation_amount = initial_amount_inr
+                if entry_levels.get("tranche_1_pct") is not None:
+                    entry_levels["tranche_1_pct"] = int(entry_levels["tranche_1_pct"] * 0.70)
             rr_value = float(entry_levels.get("risk_reward", 0) or 0)
             if rr_value < MINIMUM_RR_RATIO:
                 print(
@@ -691,28 +695,35 @@ class BuyAgents:
                 })
                 continue
 
+            lock_in_check = item.get("lock_in_check") or {}
             payload = {
                 "investment_thesis": f"{item['sector']} benefits from current signal stack and fills a real portfolio gap.",
                 "why_for_portfolio": item["gap_reason"],
                 "overlap_pct": item["overlap_pct"],
                 "fund_attribution": item["fund_attribution"],
                 "entry_signal": item["entry_signal"],
+                "original_entry_signal": item.get("original_entry_signal"),
+                "recent_results": item.get("recent_results") or {},
+                "momentum_override_applied": bool(item.get("momentum_override_applied")),
                 "tranche_schedule": f"{item['tranches']} tranches over 4-8 weeks",
-                # Position sizing — initial tranche (deploy now) and full target separately.
-                "initial_tranche_pct": item["initial_tranche_pct"],
+                # Position sizing - initial tranche (deploy now) and full target separately.
+                "initial_tranche_pct": initial_tranche_pct,
                 "target_pct": item["target_pct"],
-                "initial_amount_inr": item["initial_amount_inr"],
+                "initial_amount_inr": initial_amount_inr,
                 "target_amount_inr": item["target_amount_inr"],
                 "current_price": round(float(current_price), 2) if current_price else None,
                 "analyst_target": round(float(analyst_target), 2) if analyst_target else None,
                 "fin_data": fin_data,
                 "entry_levels": entry_levels,
                 # Legacy key kept for backward compatibility with stored recommendations.
-                "allocation_pct": item["allocation_pct"],
-                "allocation_amount": item["allocation_amount"],
+                "allocation_pct": allocation_pct,
+                "allocation_amount": allocation_amount,
                 "quality_score": item["quality_score"],
                 "technical_signals": item.get("technical_signals", []),
                 "technical_score": item.get("technical_score"),
+                "pe_context": pe_context,
+                "tariff_signal": tariff_signal,
+                "tariff_warning": tariff_warning,
                 "net_of_tax_return_pct": net_return_pct,
                 # Legacy key for backward compat.
                 "net_of_tax_return_projection": round(net_return_pct / 100, 4),
@@ -720,6 +731,11 @@ class BuyAgents:
                 "headline": item["news"]["headline"],
                 "validation_reasoning": item.get("validation_reasoning", ""),
                 "industry_narrative": state.get("industry_narrative", ""),
+                "recently_listed": bool(lock_in_check.get("recently_listed")),
+                "months_since_ipo": lock_in_check.get("months_since_ipo"),
+                "lock_in_warning": lock_in_check.get("warning"),
+                "lock_in_recommendation": lock_in_check.get("recommendation"),
+                "lock_in_multiplier": item.get("lock_in_multiplier", 1.0),
                 "llm_used": bool(llm_rationale),
             }
             recommendations.append(

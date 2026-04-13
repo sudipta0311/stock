@@ -9,7 +9,7 @@ are dropped silently from the candidate list and logged to SQLite.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -38,6 +38,55 @@ class ValidationResult:
 
 # Fields that must have at least 2 populated for data to be considered usable.
 _KEY_FIELDS = ("roce_pct", "eps", "debt_to_equity", "pe_ratio")
+
+RECENTLY_LISTED_STOCKS = {
+    # Symbol: IPO date (YYYY-MM-DD)
+    "LGEINDIA": "2025-10-01",
+    "TMPV": "2025-10-01",
+    "TMCV": "2025-10-01",
+}
+
+LOCK_IN_WARNING_MONTHS = 12
+
+
+def check_recently_listed(symbol: str, current_date: date | None = None) -> dict[str, Any]:
+    if current_date is None:
+        current_date = date.today()
+
+    ipo_date_str = RECENTLY_LISTED_STOCKS.get(str(symbol).upper())
+    if not ipo_date_str:
+        return {
+            "recently_listed": False,
+            "months_since_ipo": None,
+            "warning": None,
+            "recommendation": None,
+        }
+
+    ipo_date = datetime.strptime(ipo_date_str, "%Y-%m-%d").date()
+    months_since_ipo = (current_date - ipo_date).days / 30
+
+    if months_since_ipo < LOCK_IN_WARNING_MONTHS:
+        months_remaining = max(0.0, LOCK_IN_WARNING_MONTHS - months_since_ipo)
+        return {
+            "recently_listed": True,
+            "months_since_ipo": round(months_since_ipo, 1),
+            "warning": (
+                f"{symbol.upper()} listed only "
+                f"{months_since_ipo:.0f} months ago. "
+                "Lock-in expiry overhang risk - "
+                "large shareholders can now sell freely. "
+                f"Recommend waiting until {months_remaining:.0f} more months "
+                "post-IPO before building position."
+            ),
+            "recommendation": "WAIT - lock-in risk",
+        }
+
+    return {
+        "recently_listed": False,
+        "months_since_ipo": round(months_since_ipo, 1),
+        "warning": None,
+        "recommendation": None,
+    }
 
 
 def validate_stock(
