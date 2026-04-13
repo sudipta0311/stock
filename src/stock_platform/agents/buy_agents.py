@@ -14,7 +14,7 @@ from stock_platform.utils.entry_calculator import (
     fetch_analyst_consensus_target,
 )
 from stock_platform.utils.rules import clamp, parse_iso_datetime
-from stock_platform.utils.screener_fetcher import compute_pe_context
+from stock_platform.utils.pe_history_fetcher import get_pe_historical_context
 from stock_platform.utils.sector_config import governance_risk_blocks
 from stock_platform.utils.signal_sources import get_tariff_signal
 from stock_platform.utils.stock_validator import (
@@ -644,10 +644,15 @@ class BuyAgents:
 
             fin_data = dict(item.get("live_financials") or {})
             fin_data.update({key: value for key, value in (item.get("financials") or {}).items() if value is not None})
-            pe_context = compute_pe_context(
+            _current_pe = fin_data.get("pe_ratio") or (
+                current_price / fin_data["eps"]
+                if fin_data.get("eps") and float(fin_data["eps"]) > 0
+                else None
+            )
+            pe_context = get_pe_historical_context(
                 symbol=item["symbol"],
-                fin_data=fin_data,
-                current_price=current_price,
+                current_pe=_current_pe,
+                db_path=str(self.config.db_path),
             )
             llm_rationale = self.llm.buy_rationale(
                 item | {"pe_context": pe_context},
