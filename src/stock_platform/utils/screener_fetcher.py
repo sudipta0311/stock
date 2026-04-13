@@ -95,6 +95,32 @@ def _parse_ranges_table_value(
     return None
 
 
+def _parse_promoter_change(soup: BeautifulSoup | None) -> float | None:
+    """
+    Return promoter holding change in percentage points (latest quarter minus previous).
+    Positive = promoter increased stake; negative = reduced stake.
+    """
+    if soup is None:
+        return None
+    try:
+        sh_tables = soup.select(".shareholding-table")
+        if sh_tables:
+            rows = sh_tables[0].select("tr")
+            for row in rows:
+                if "promoter" in row.text.lower():
+                    cells = row.select("td")
+                    if len(cells) >= 3:
+                        try:
+                            latest = float(cells[1].text.strip().replace("%", ""))
+                            prev = float(cells[2].text.strip().replace("%", ""))
+                            return latest - prev
+                        except Exception:
+                            pass
+    except Exception:
+        pass
+    return None
+
+
 def _parse_promoter_holding(soup: BeautifulSoup | None) -> float | None:
     if soup is None:
         return None
@@ -192,9 +218,21 @@ def fetch_screener_data(nse_symbol: str) -> dict[str, Any]:
         or _parse_ranges_table_value(standalone_soup, "Compounded Sales Growth", ["5 Years", "3 Years", "TTM"])
     )
     promoter_holding = _parse_promoter_holding(consolidated_soup) or _parse_promoter_holding(standalone_soup)
+    promoter_change = (
+        _parse_promoter_change(consolidated_soup)
+        or _parse_promoter_change(standalone_soup)
+    )
     debt_to_equity = _parse_debt_to_equity(consolidated_soup)
     if debt_to_equity is None:
         debt_to_equity = _parse_debt_to_equity(standalone_soup)
+    dma_200 = (
+        _get_ratio_value(consolidated_ratios, "200 DMA", "200D MA")
+        or _get_ratio_value(standalone_ratios, "200 DMA", "200D MA")
+    )
+    dma_50 = (
+        _get_ratio_value(consolidated_ratios, "50 DMA", "50D MA")
+        or _get_ratio_value(standalone_ratios, "50 DMA", "50D MA")
+    )
 
     result = {
         "roce_pct": roce_pct,
@@ -204,6 +242,9 @@ def fetch_screener_data(nse_symbol: str) -> dict[str, Any]:
         "eps": eps,
         "revenue_growth_pct": revenue_growth_pct,
         "promoter_holding": promoter_holding,
+        "promoter_change": promoter_change,
+        "dma_200": dma_200,
+        "dma_50": dma_50,
         "current_price": current_price,
         "week52_high": week52_high,
         "week52_low": week52_low,

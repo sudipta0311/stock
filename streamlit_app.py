@@ -935,6 +935,22 @@ def render_recommendation_card(item: dict[str, Any], provider: str = "") -> None
             render_entry_details(entry)
             entry = None
 
+        tech_signals = payload.get("technical_signals", [])
+        if tech_signals:
+            st.markdown("**Technical Signals**")
+            _signal_color = {
+                "CONTRARIAN_BUY": "success",
+                "POSITIVE":       "success",
+                "WATCH":          "warning",
+                "CAUTION":        "warning",
+                "NEGATIVE":       "error",
+            }
+            for sig in tech_signals:
+                color = _signal_color.get(sig["signal"], "info")
+                getattr(st, color)(
+                    f"{sig['type']}: {sig['value']} — {sig['note']}"
+                )
+
         if entry:
             st.markdown("**Entry Details**")
             col1, col2, col3, col4 = st.columns(4)

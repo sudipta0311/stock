@@ -12,6 +12,7 @@ from stock_platform.utils.entry_calculator import calculate_entry_levels
 from stock_platform.utils.rules import clamp, parse_iso_datetime
 from stock_platform.utils.sector_config import governance_risk_blocks
 from stock_platform.utils.stock_validator import ValidationResult, log_skipped_stock, validate_stock
+from stock_platform.utils.technical_signals import compute_technical_signal
 
 
 MINIMUM_RR_RATIO = 1.5
@@ -331,14 +332,20 @@ class BuyAgents:
 
             base_score = compute_quality_score_v2(candidate["symbol"], live_facts)
 
+            # Technical timing signals — 20% blend on top of fundamental quality.
+            tech = compute_technical_signal(candidate["symbol"], live_facts, current_price or 0.0)
+            blended_quality = base_score * 0.80 + tech["technical_score"] * 0.20
+
             # Geo signal bonus — applied on top of the computed base (small additive).
             geo_bonus = 0.04 if unified.get(candidate["sector"], {}).get("conviction") in {"BUY", "STRONG_BUY"} else 0.0
             # Flow / accumulation bonus.
             flow_bonus = accumulation_bonus
-            selection_score = clamp(base_score + geo_bonus + flow_bonus, 0.0, 1.0)
+            selection_score = clamp(blended_quality + geo_bonus + flow_bonus, 0.0, 1.0)
             scored.append(candidate | {
                 "quality_score": round(base_score, 3),
                 "selection_score": round(selection_score, 3),
+                "technical_signals": tech["signals"],
+                "technical_score": tech["technical_score"],
                 "financials": live_facts,
                 "live_financials": live_facts,
             })
@@ -704,6 +711,8 @@ class BuyAgents:
                 "allocation_pct": item["allocation_pct"],
                 "allocation_amount": item["allocation_amount"],
                 "quality_score": item["quality_score"],
+                "technical_signals": item.get("technical_signals", []),
+                "technical_score": item.get("technical_score"),
                 "net_of_tax_return_pct": net_return_pct,
                 # Legacy key for backward compat.
                 "net_of_tax_return_projection": round(net_return_pct / 100, 4),
