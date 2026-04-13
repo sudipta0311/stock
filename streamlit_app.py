@@ -19,6 +19,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from stock_platform.config import AppConfig
+from stock_platform.agents.buy_agents import MINIMUM_RR_RATIO
 from stock_platform.services.engine import PlatformEngine
 from stock_platform.services.llm import PlatformLLM
 from stock_platform.utils.index_config import DEFAULT_INDEX, INDEX_UNIVERSE, SELECTABLE_INDICES
@@ -761,7 +762,7 @@ def render_recommendation_card(item: dict[str, Any], provider: str = "") -> None
     initial_pct = payload.get("initial_tranche_pct", payload.get("allocation_pct", 0))
     target_pct = payload.get("target_pct", 0)
     net_return = payload.get("net_of_tax_return_pct", payload.get("net_of_tax_return_projection", 0))
-    entry = calculate_entry_levels(
+    entry = payload.get("entry_levels") or calculate_entry_levels(
         symbol=symbol,
         current_price=payload.get("current_price"),
         analyst_target=payload.get("analyst_target"),
@@ -830,6 +831,15 @@ def render_recommendation_card(item: dict[str, Any], provider: str = "") -> None
             st.info(entry["entry_note"])
 
             if entry["risk_reward"] > 0:
+                if entry["risk_reward"] < MINIMUM_RR_RATIO:
+                    st.warning(
+                        f"âš ï¸ Risk/Reward {entry['risk_reward']}x is below minimum threshold of "
+                        f"{MINIMUM_RR_RATIO}x. Consider skipping or waiting for better entry."
+                    )
+                elif entry["risk_reward"] >= 2.0:
+                    st.success(
+                        f"âœ… Strong Risk/Reward {entry['risk_reward']}x â€” favourable setup"
+                    )
                 st.markdown(
                     f"**Risk/Reward: {entry['risk_reward']}x** | "
                     f"For every ₹1 risked, potential gain is about ₹{entry['risk_reward']:.1f}."
