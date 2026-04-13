@@ -45,20 +45,25 @@ def connect_database(
     if url and token:
         try:
             import libsql
-        except ModuleNotFoundError as exc:
-            raise RuntimeError(
-                "Turso is configured but the `libsql` package is not installed. "
-                "Install `libsql` in this environment, or disable TURSO_DATABASE_URL/TURSO_AUTH_TOKEN "
-                "to fall back to local SQLite."
-            ) from exc
-
-        kwargs: dict[str, Any] = {
-            "sync_url": url,
-            "auth_token": token,
-        }
-        if sync_interval is not None and sync_interval > 0:
-            kwargs["sync_interval"] = sync_interval
-        connection = libsql.connect(str(path), **kwargs)
+            kwargs: dict[str, Any] = {
+                "sync_url": url,
+                "auth_token": token,
+            }
+            if sync_interval is not None and sync_interval > 0:
+                kwargs["sync_interval"] = sync_interval
+            connection = libsql.connect(str(path), **kwargs)
+        except ModuleNotFoundError:
+            print(
+                "WARNING: TURSO_DATABASE_URL/TURSO_AUTH_TOKEN are set but `libsql` is not installed. "
+                "Falling back to local SQLite. Install `libsql` to enable Turso sync."
+            )
+            connection = sqlite3.connect(path)
+        except Exception as exc:
+            print(
+                f"WARNING: Turso connection failed ({exc}). "
+                "Falling back to local SQLite."
+            )
+            connection = sqlite3.connect(path)
     else:
         connection = sqlite3.connect(path)
 
