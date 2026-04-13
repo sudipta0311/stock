@@ -14,6 +14,20 @@ from stock_platform.services.pdf_parser import NSDLCASParser
 from stock_platform.utils.entry_calculator import calculate_entry_levels
 
 
+def _normalize_synthesis_rationale(rationale: str, *, fallback: str, provider_name: str) -> str:
+    text = (rationale or "").strip()
+    lowered = text.lower()
+    if (
+        not text
+        or "unavailable" in lowered
+        or text.startswith(f"[{provider_name}")
+        or "[openai" in lowered
+        or "[llm analysis unavailable" in lowered
+    ):
+        return fallback
+    return text
+
+
 def _append_entry_summary(synthesis_text: str, recommendation: dict[str, Any]) -> str:
     payload = recommendation.get("payload", {})
     entry = payload.get("entry_levels") or calculate_entry_levels(
@@ -216,27 +230,37 @@ class PlatformEngine:
                 all_skipped.setdefault(sk["symbol"], sk)
         results["skipped_stocks"] = list(all_skipped.values())
 
-        # Build per-stock synthesis when both providers returned recommendations.
+        # Build per-stock synthesis for every recommended stock, even if only one provider returned analysis.
         a_recs = results.get("anthropic", {}).get("recommendations", [])
         o_recs = results.get("openai", {}).get("recommendations", [])
         synthesis_map: dict[str, str] = {}
-        if a_recs and o_recs:
+        if a_recs or o_recs:
             a_by_symbol = {r["symbol"]: r for r in a_recs}
             o_by_symbol = {r["symbol"]: r for r in o_recs}
             synth_llm = PlatformLLM(self.config, provider="anthropic")
-            for symbol, a_rec in a_by_symbol.items():
+            for symbol in sorted(set(a_by_symbol) | set(o_by_symbol)):
+                a_rec = a_by_symbol.get(symbol)
                 o_rec = o_by_symbol.get(symbol)
-                if not o_rec:
+                base_rec = a_rec or o_rec
+                if not base_rec:
                     continue
-                a_rationale = a_rec.get("rationale", "")
-                o_rationale = o_rec.get("rationale", "")
+                a_rationale = _normalize_synthesis_rationale(
+                    str((a_rec or {}).get("rationale", "")),
+                    fallback="No risk analysis provided.",
+                    provider_name="Anthropic",
+                )
+                o_rationale = _normalize_synthesis_rationale(
+                    str((o_rec or {}).get("rationale", "")),
+                    fallback="No catalyst analysis provided.",
+                    provider_name="OpenAI",
+                )
                 synthesis = synth_llm.synthesise_comparison(
-                    stock_name=f"{a_rec.get('company_name', symbol)} ({symbol})",
+                    stock_name=f"{base_rec.get('company_name', symbol)} ({symbol})",
                     anthropic_rationale=a_rationale,
                     openai_rationale=o_rationale,
                 )
                 if synthesis:
-                    synthesis_map[symbol] = _append_entry_summary(synthesis, a_rec)
+                    synthesis_map[symbol] = _append_entry_summary(synthesis, base_rec)
         results["synthesis"] = synthesis_map
         return results
 

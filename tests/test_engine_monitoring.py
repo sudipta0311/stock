@@ -96,6 +96,87 @@ class EngineMonitoringTests(unittest.TestCase):
 
         self.assertEqual(snapshot["buy_comparison_result"], {})
 
+    def test_comparison_synthesis_runs_for_union_of_provider_symbols(self) -> None:
+        config = AppConfig(
+            data_dir=self.temp_dir,
+            db_path=self.db_path,
+            turso_database_url="",
+            turso_auth_token="",
+            turso_sync_interval_seconds=0,
+            anthropic_api_key="test-anthropic",
+            openai_api_key="test-openai",
+        )
+        engine = PlatformEngine(config)
+
+        def fake_run_buy_analysis(request: dict, llm_provider: str = "anthropic") -> dict:
+            del request
+            if llm_provider == "anthropic":
+                return {
+                    "recommendations": [
+                        {
+                            "symbol": "SUZLON",
+                            "company_name": "Suzlon Energy",
+                            "action": "BUY",
+                            "rationale": "Risk analysis available.",
+                            "payload": {
+                                "current_price": 100.0,
+                                "analyst_target": 120.0,
+                                "entry_signal": "BUY",
+                                "quality_score": 0.8,
+                                "fin_data": {},
+                            },
+                        }
+                    ],
+                    "skipped_stocks": [],
+                    "run_summary": {"recommendation_count": 1},
+                }
+            return {
+                "recommendations": [
+                    {
+                        "symbol": "BEL",
+                        "company_name": "Bharat Electronics",
+                        "action": "BUY",
+                        "rationale": "Catalyst analysis available.",
+                        "payload": {
+                            "current_price": 100.0,
+                            "analyst_target": 120.0,
+                            "entry_signal": "BUY",
+                            "quality_score": 0.8,
+                            "fin_data": {},
+                        },
+                    }
+                ],
+                "skipped_stocks": [],
+                "run_summary": {"recommendation_count": 1},
+            }
+
+        captured_calls: list[tuple[str, str, str]] = []
+
+        def fake_synthesise(*args, **kwargs) -> str:
+            stock_name = kwargs["stock_name"]
+            anthropic_rationale = kwargs["anthropic_rationale"]
+            openai_rationale = kwargs["openai_rationale"]
+            captured_calls.append((stock_name, anthropic_rationale, openai_rationale))
+            return "• COMBINED VERDICT: ACCUMULATE GRADUALLY."
+
+        with (
+            patch.object(engine.repo, "list_signals", return_value=[{"sector": "Defence"}]),
+            patch.object(engine, "run_buy_analysis", side_effect=fake_run_buy_analysis),
+            patch("stock_platform.services.engine.PlatformLLM.synthesise_comparison", side_effect=fake_synthesise),
+        ):
+            result = engine.run_buy_analysis_comparison(
+                {"index_name": "NIFTY 200", "horizon_months": 18, "risk_profile": "Aggressive", "top_n": 4}
+            )
+
+        self.assertEqual(set(result["synthesis"]), {"SUZLON", "BEL"})
+        self.assertEqual(len(captured_calls), 2)
+        suzlon_call = next(call for call in captured_calls if "SUZLON" in call[0])
+        bel_call = next(call for call in captured_calls if "BEL" in call[0])
+        self.assertEqual(suzlon_call[1], "Risk analysis available.")
+        self.assertEqual(suzlon_call[2], "No catalyst analysis provided.")
+        self.assertEqual(bel_call[1], "No risk analysis provided.")
+        self.assertEqual(bel_call[2], "Catalyst analysis available.")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -328,6 +328,7 @@ class PlatformLLM:
                 "- Where do both analysts AGREE?\n"
                 "- Where do they DISAGREE and why does that disagreement matter?\n"
                 "- COMBINED VERDICT: ENTER NOW / ACCUMULATE GRADUALLY / WAIT FOR BETTER ENTRY.\n"
+                "If one analyst has no input, say what is missing and why that matters. "
                 "Be specific. Reference the actual risk and catalyst identified."
             )
             user_prompt = (
@@ -338,6 +339,8 @@ class PlatformLLM:
                 "- Where do both analysts AGREE?\n"
                 "- Where do they DISAGREE and why does the disagreement matter?\n"
                 "- COMBINED VERDICT: ENTER NOW / ACCUMULATE GRADUALLY / WAIT FOR BETTER ENTRY?\n"
+                "Even if one analyst provided no input, synthesize what the available analysis tells us, "
+                "what is missing, and why that matters. "
                 "Be specific. Reference the actual risk and catalyst identified."
             )
             response = client.messages.create(
