@@ -539,6 +539,12 @@ def get_engine(user_key: str = "local") -> PlatformEngine:
     user_key is the full sha256 hex digest of the user's Google email,
     or 'local' for single-user / unauthenticated mode.
     """
+    # Must run before AppConfig() is constructed — AppConfig reads env vars
+    # at instantiation time (frozen dataclass), so secrets.toml must already
+    # be loaded into os.environ or NEON_DATABASE_URL will be empty.
+    from stock_platform.config import load_app_env
+    load_app_env()
+
     if user_key == "local":
         return PlatformEngine()
     users_dir = ROOT / "data" / "users"
