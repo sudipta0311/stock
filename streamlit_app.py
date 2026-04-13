@@ -748,6 +748,133 @@ def render_provider_model_box(label: str, fast_model: str, reasoning_model: str,
     )
 
 
+ENTRY_SUMMARY_MARKER = "**ENTRY SUMMARY:**"
+
+
+def render_entry_details(entry: dict[str, Any]) -> None:
+    """
+    Render entry details with custom HTML so prices never truncate.
+    """
+    if not entry:
+        return
+
+    rr_value = float(entry.get("risk_reward", 0) or 0)
+    rr_border = "#27ae60" if rr_value >= 2.0 else "#e67e22" if rr_value >= MINIMUM_RR_RATIO else "#e74c3c"
+    rr_status = "Strong setup" if rr_value >= 2.0 else "Watch threshold" if rr_value >= MINIMUM_RR_RATIO else "Below minimum threshold"
+    rr_symbol = "OK" if rr_value >= 2.0 else "Watch" if rr_value >= MINIMUM_RR_RATIO else "Skip"
+
+    html = f"""
+    <div style="
+        background:#f8f9fa;
+        border:1px solid #e0e0e0;
+        border-radius:8px;
+        padding:16px;
+        margin:8px 0;
+        font-family:sans-serif;
+    ">
+        <table style="width:100%; border-collapse:collapse; table-layout:fixed;">
+            <tr style="border-bottom:1px solid #e0e0e0;">
+                <td style="padding:8px; color:#666; font-size:12px;">Current Price</td>
+                <td style="padding:8px; color:#666; font-size:12px;">Entry Price</td>
+                <td style="padding:8px; color:#666; font-size:12px;">Stop Loss</td>
+                <td style="padding:8px; color:#666; font-size:12px;">Target</td>
+            </tr>
+            <tr>
+                <td style="padding:8px; font-size:clamp(16px, 2vw, 20px); font-weight:600; color:#1a1a1a;">
+                    &#8377;{entry['current_price']:,.0f}
+                </td>
+                <td style="padding:8px; font-size:clamp(16px, 2vw, 20px); font-weight:600; color:#1a1a1a;">
+                    &#8377;{entry['entry_price']:,.0f}<br>
+                    <span style="font-size:11px; color:#e67e22;">
+                        &#9660; {entry['discount_from_current']:.1f}% from CMP
+                    </span>
+                </td>
+                <td style="padding:8px; font-size:clamp(16px, 2vw, 20px); font-weight:600; color:#c0392b;">
+                    &#8377;{entry['stop_loss']:,.0f}<br>
+                    <span style="font-size:11px; color:#c0392b;">
+                        &#9660; {entry['stop_loss_pct']:.0f}% from entry
+                    </span>
+                </td>
+                <td style="padding:8px; font-size:clamp(16px, 2vw, 20px); font-weight:600; color:#27ae60;">
+                    &#8377;{entry['analyst_target']:,.0f}<br>
+                    <span style="font-size:11px; color:#27ae60;">
+                        &#9650; {entry['upside_from_entry']:.1f}% from entry
+                    </span>
+                </td>
+            </tr>
+        </table>
+
+        <div style="
+            margin-top:12px;
+            padding:10px;
+            background:#fff;
+            border-radius:6px;
+            border-left:4px solid {rr_border};
+        ">
+            <strong>Risk/Reward: {rr_value}x</strong>
+            - For every &#8377;1 risked, potential gain is &#8377;{rr_value:.1f}
+            <span style="color:{rr_border}; font-weight:600;">{rr_symbol}: {rr_status}</span>
+        </div>
+
+        <div style="margin-top:10px; font-size:13px; color:#555;">
+            <strong>Entry Zone:</strong> &#8377;{entry['entry_zone_low']:,.0f} - &#8377;{entry['entry_zone_high']:,.0f}
+        </div>
+
+        <div style="
+            margin-top:8px;
+            padding:10px;
+            background:#fffbf0;
+            border-radius:6px;
+            font-size:13px;
+            color:#555;
+        ">
+            {_html.escape(str(entry['entry_note']))}
+        </div>
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
+
+    if rr_value < MINIMUM_RR_RATIO:
+        st.warning(
+            f"Risk/Reward {rr_value}x is below minimum threshold of "
+            f"{MINIMUM_RR_RATIO}x. Consider skipping or waiting for better entry."
+        )
+    elif rr_value >= 2.0:
+        st.success(f"Strong Risk/Reward {rr_value}x - favourable setup")
+
+    schedule_lines = [
+        f"- **Tranche 1 ({entry['tranche_1_pct']}%):** Buy at ₹{entry['entry_price']:,.0f}"
+    ]
+    if entry.get("tranche_2_pct", 0) > 0:
+        schedule_lines.append(
+            f"- **Tranche 2 ({entry['tranche_2_pct']}%):** "
+            f"Buy at ₹{entry['tranche_2_price']:,.0f} on next dip"
+        )
+    if entry.get("tranche_3_pct", 0) > 0:
+        schedule_lines.append(
+            f"- **Tranche 3 ({entry['tranche_3_pct']}%):** "
+            f"{entry['tranche_3_trigger']}"
+        )
+    st.markdown("**Deployment Schedule**")
+    st.markdown("\n".join(schedule_lines))
+
+
+def render_synthesis_with_entry_summary(synthesis_text: str) -> None:
+    body, marker, summary = synthesis_text.partition(ENTRY_SUMMARY_MARKER)
+    if body.strip():
+        st.markdown(body.strip())
+    if not marker:
+        return
+
+    parts = [segment.strip() for segment in summary.strip().split("|") if segment.strip()]
+    cleaned_parts = [
+        part.replace("Current", "CMP", 1).replace("Enter at", "Enter", 1)
+        for part in parts
+    ]
+    if cleaned_parts:
+        st.info(f"**Entry Summary** - {' | '.join(cleaned_parts)}")
+
+
 def render_recommendation_card(item: dict[str, Any], provider: str = "") -> None:
     payload = item.get("payload", {})
     company = str(item.get("company_name", ""))
@@ -803,6 +930,10 @@ def render_recommendation_card(item: dict[str, Any], provider: str = "") -> None
             f"Net Return {net_return}%",
         ]
         st.caption(" | ".join(summary_bits))
+        if entry:
+            st.markdown("**Entry Details**")
+            render_entry_details(entry)
+            entry = None
 
         if entry:
             st.markdown("**Entry Details**")
@@ -1394,7 +1525,7 @@ with tabs[2]:
             st.caption("Contrarian risk view (Anthropic) vs. momentum catalyst view (OpenAI) — synthesised by Claude Sonnet.")
             for symbol, synthesis_text in synthesis_map.items():
                 with st.expander(f"Synthesis — {symbol}", expanded=True):
-                    st.markdown(synthesis_text)
+                    render_synthesis_with_entry_summary(synthesis_text)
                     if symbol.upper().replace(".NS", "") in ELEVATED_GOVERNANCE_RISK:
                         st.caption(
                             "⚠️ Adani Group stocks carry elevated governance risk. "
