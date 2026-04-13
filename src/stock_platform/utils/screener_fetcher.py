@@ -57,6 +57,18 @@ def _parse_top_ratios(soup: BeautifulSoup | None) -> dict[str, float]:
     return ratios
 
 
+def _get_ratio_value(ratios: dict[str, float], *aliases: str) -> float | None:
+    lowered = {key.strip().lower(): value for key, value in ratios.items()}
+    for alias in aliases:
+        value = lowered.get(alias.strip().lower())
+        if value is not None:
+            return value
+    for key, value in lowered.items():
+        if any(alias.strip().lower() in key for alias in aliases):
+            return value
+    return None
+
+
 def _parse_ranges_table_value(
     soup: BeautifulSoup | None,
     title: str,
@@ -156,6 +168,14 @@ def fetch_screener_data(nse_symbol: str) -> dict[str, Any]:
 
     current_price = consolidated_ratios.get("Current Price") or standalone_ratios.get("Current Price")
     pe_ratio = consolidated_ratios.get("Stock P/E") or standalone_ratios.get("Stock P/E")
+    week52_high = (
+        _get_ratio_value(consolidated_ratios, "52 week high", "high")
+        or _get_ratio_value(standalone_ratios, "52 week high", "high")
+    )
+    week52_low = (
+        _get_ratio_value(consolidated_ratios, "52 week low", "low")
+        or _get_ratio_value(standalone_ratios, "52 week low", "low")
+    )
     eps = None
     if current_price and pe_ratio and pe_ratio != 0:
         eps = round(current_price / pe_ratio, 2)
@@ -185,6 +205,8 @@ def fetch_screener_data(nse_symbol: str) -> dict[str, Any]:
         "revenue_growth_pct": revenue_growth_pct,
         "promoter_holding": promoter_holding,
         "current_price": current_price,
+        "week52_high": week52_high,
+        "week52_low": week52_low,
         "source": "screener.in",
         "symbol": clean_symbol,
         "resolved_symbol": resolve_nse_symbol(clean_symbol),

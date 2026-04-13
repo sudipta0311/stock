@@ -23,6 +23,7 @@ from stock_platform.services.engine import PlatformEngine
 from stock_platform.services.llm import PlatformLLM
 from stock_platform.utils.index_config import DEFAULT_INDEX, INDEX_UNIVERSE, SELECTABLE_INDICES
 from stock_platform.utils.sector_config import ELEVATED_GOVERNANCE_RISK
+from utils.entry_calculator import calculate_entry_levels
 
 
 st.set_page_config(
@@ -760,6 +761,14 @@ def render_recommendation_card(item: dict[str, Any], provider: str = "") -> None
     initial_pct = payload.get("initial_tranche_pct", payload.get("allocation_pct", 0))
     target_pct = payload.get("target_pct", 0)
     net_return = payload.get("net_of_tax_return_pct", payload.get("net_of_tax_return_projection", 0))
+    entry = calculate_entry_levels(
+        symbol=symbol,
+        current_price=payload.get("current_price"),
+        analyst_target=payload.get("analyst_target"),
+        signal=str(payload.get("entry_signal") or action),
+        quant_score=payload.get("quality_score"),
+        fin_data=payload.get("fin_data") or {},
+    )
 
     provider_label = ""
     if provider == "anthropic":
@@ -793,6 +802,54 @@ def render_recommendation_card(item: dict[str, Any], provider: str = "") -> None
             f"Net Return {net_return}%",
         ]
         st.caption(" | ".join(summary_bits))
+
+        if entry:
+            st.markdown("**Entry Details**")
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Current Price", f"₹{entry['current_price']:,.0f}")
+            with col2:
+                st.metric(
+                    "Entry Price",
+                    f"₹{entry['entry_price']:,.0f}",
+                    delta=f"-{entry['discount_from_current']:.1f}% from CMP",
+                )
+            with col3:
+                st.metric(
+                    "Stop Loss",
+                    f"₹{entry['stop_loss']:,.0f}",
+                    delta=f"-{entry['stop_loss_pct']:.0f}% from entry",
+                )
+            with col4:
+                st.metric(
+                    "Target",
+                    f"₹{entry['analyst_target']:,.0f}",
+                    delta=f"+{entry['upside_from_entry']:.1f}% from entry",
+                )
+            st.caption(f"Entry Zone: ₹{entry['entry_zone_low']:,.0f}-₹{entry['entry_zone_high']:,.0f}")
+            st.info(entry["entry_note"])
+
+            if entry["risk_reward"] > 0:
+                st.markdown(
+                    f"**Risk/Reward: {entry['risk_reward']}x** | "
+                    f"For every ₹1 risked, potential gain is about ₹{entry['risk_reward']:.1f}."
+                )
+
+            schedule_lines = [
+                f"- **Tranche 1 ({entry['tranche_1_pct']}%):** Buy at ₹{entry['entry_price']:,.0f}"
+                f"{' now' if entry['tranche_1_pct'] < 100 else ''}"
+            ]
+            if entry["tranche_2_pct"] > 0:
+                schedule_lines.append(
+                    f"- **Tranche 2 ({entry['tranche_2_pct']}%):** "
+                    f"Buy at ₹{entry['tranche_2_price']:,.0f} on the next dip"
+                )
+            if entry["tranche_3_pct"] > 0:
+                schedule_lines.append(
+                    f"- **Tranche 3 ({entry['tranche_3_pct']}%):** {entry['tranche_3_trigger']}"
+                )
+            st.markdown("**Deployment Schedule**")
+            st.markdown("\n".join(schedule_lines))
 
         if why_for_portfolio:
             st.write(why_for_portfolio)
