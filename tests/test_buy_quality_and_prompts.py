@@ -14,7 +14,9 @@ if str(SRC) not in sys.path:
 from stock_platform.agents.quant_model import compute_quality_score
 from stock_platform.agents.buy_agents import (
     BuyAgents,
+    FINAL_BUFFER_MULTIPLIER,
     MINIMUM_RR_RATIO,
+    SHORTLIST_BUFFER_MULTIPLIER,
     buffered_top_n,
     compute_net_return,
     filter_by_risk_reward,
@@ -231,8 +233,8 @@ class BuyQualityScoreTests(unittest.TestCase):
         self.assertEqual([row["symbol"] for row in result["shortlist"]], ["BEL", "HAL"])
 
     def test_buffered_top_n_keeps_extra_candidates_for_late_filters(self) -> None:
-        self.assertEqual(buffered_top_n(3), 9)
-        self.assertEqual(buffered_top_n(1), 3)
+        self.assertEqual(buffered_top_n(3), 3 * FINAL_BUFFER_MULTIPLIER)
+        self.assertEqual(buffered_top_n(1), 1 * FINAL_BUFFER_MULTIPLIER)
 
     @patch("stock_platform.agents.buy_agents.get_fresh_analyst_target", return_value=120.0)
     @patch("stock_platform.agents.buy_agents.governance_risk_blocks", return_value=(False, ""))
@@ -323,6 +325,7 @@ class BuyQualityScoreTests(unittest.TestCase):
             ["LOW_RISK_REWARD", "LOW_RISK_REWARD"],
         )
         self.assertIn("R/R", result["skipped_stocks"][0]["reason"])
+        self.assertIn("minimum risk/reward gate", result["run_summary"]["blocked_reason"])
 
     def test_filter_by_risk_reward_returns_only_valid_candidates(self) -> None:
         valid, excluded = filter_by_risk_reward(
@@ -335,6 +338,27 @@ class BuyQualityScoreTests(unittest.TestCase):
 
         self.assertEqual([row["symbol"] for row in valid], ["EDGE", "HIGH"])
         self.assertEqual(excluded, ["LOW"])
+
+    def test_shortlist_uses_larger_buffer_after_rr_gate(self) -> None:
+        repo = StubRepo()
+        agent = BuyAgents(repo, StubProvider(), AppConfig(**LOCAL_DB_CONFIG), StaticLLM())
+        captured: dict[str, int] = {}
+
+        def fake_replacement(scored_candidates, n, skipped_symbols, db_path):
+            del scored_candidates, skipped_symbols, db_path
+            captured["n"] = n
+            return []
+
+        with patch("stock_platform.agents.buy_agents.get_top_n_with_replacement", side_effect=fake_replacement):
+            agent.shortlist(
+                {
+                    "request": {"top_n": 4},
+                    "risk_filtered_candidates": [],
+                    "skipped_candidates": [],
+                }
+            )
+
+        self.assertEqual(captured["n"], 4 * SHORTLIST_BUFFER_MULTIPLIER)
 
 
 class EntryCalculatorTests(unittest.TestCase):

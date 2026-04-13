@@ -15,6 +15,8 @@ from stock_platform.utils.stock_validator import ValidationResult, log_skipped_s
 
 
 MINIMUM_RR_RATIO = 1.5
+SHORTLIST_BUFFER_MULTIPLIER = 8
+FINAL_BUFFER_MULTIPLIER = 6
 
 
 def get_top_n_with_replacement(
@@ -219,8 +221,8 @@ def filter_by_risk_reward(candidates: list[dict[str, Any]]) -> tuple[list[dict[s
 
 
 def buffered_top_n(top_n: int) -> int:
-    """Keep extra candidates alive so later timing/governance filters can still fill Top N."""
-    return max(top_n * 3, top_n)
+    """Keep extra candidates alive so strict entry/RR filters can still backfill Top N."""
+    return max(top_n * FINAL_BUFFER_MULTIPLIER, top_n)
 
 
 class BuyAgents:
@@ -375,7 +377,7 @@ class BuyAgents:
         skipped_symbols = [result.symbol for result in state.get("skipped_candidates", [])]
         shortlist = get_top_n_with_replacement(
             state["risk_filtered_candidates"],
-            max(top_n * 4, top_n),
+            max(top_n * SHORTLIST_BUFFER_MULTIPLIER, top_n),
             skipped_symbols,
             str(self.config.db_path),
         )
@@ -735,8 +737,20 @@ class BuyAgents:
             }
             for vr in validation_skipped
         ] + gov_skipped
+        blocked_reason = ""
+        if not recommendations:
+            low_rr_count = sum(1 for row in skipped_stocks if row.get("status") == "LOW_RISK_REWARD")
+            if low_rr_count:
+                blocked_reason = (
+                    f"All shortlisted candidates failed the minimum risk/reward gate of "
+                    f"{MINIMUM_RR_RATIO}x. Try a broader universe or rerun when prices/targets improve."
+                )
         return {
             "recommendations": [asdict(record) for record in recommendations],
-            "run_summary": {"run_id": run_id, "recommendation_count": len(recommendations)},
+            "run_summary": {
+                "run_id": run_id,
+                "recommendation_count": len(recommendations),
+                "blocked_reason": blocked_reason,
+            },
             "skipped_stocks": skipped_stocks,
         }
