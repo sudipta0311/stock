@@ -1312,42 +1312,47 @@ with tabs[0]:
     )
     st.info("Upload your statement in the **Portfolio** tab — your data is saved for your account. Then go to **Buy Ideas** and **Monitoring**.")
 
-    # ── DB backend status badge — probe actual connection dialect ─────────────
-    def _get_db_dialect() -> tuple[str, str]:
-        """Return (dialect, detail) by opening a real connection."""
+    # ── DB backend status badge — direct psycopg2 probe ──────────────────────
+    def _probe_neon() -> tuple[str, str]:
+        """
+        Directly test the Neon connection without going through AppConfig.
+        Returns (status, detail) where status is 'ok', 'no_url', 'no_psycopg2', or 'error'.
+        """
+        _url = (
+            (st.secrets.get("NEON_DATABASE_URL", "") if hasattr(st, "secrets") else "")
+            or _os.environ.get("NEON_DATABASE_URL", "")
+        ).strip()
+        if not _url:
+            return "no_url", ""
         try:
-            from stock_platform.data.db import connect_database
-            _probe = connect_database(
-                engine.config.db_path,
-                neon_url=engine.config.neon_database_url or None,
-            )
-            _d = getattr(_probe, "dialect", "sqlite")
-            try:
-                _probe.close()
-            except Exception:
-                pass
-            return _d, ""
-        except Exception as _e:
-            return "sqlite", str(_e)
+            import psycopg2 as _pg2
+        except ImportError as _ie:
+            return "no_psycopg2", str(_ie)
+        try:
+            _c = _pg2.connect(_url)
+            _c.close()
+            return "ok", ""
+        except Exception as _ce:
+            return "error", str(_ce)
 
-    _db_dialect, _db_err = _get_db_dialect()
-    # Check whether NEON_DATABASE_URL is visible from any source
-    _neon_in_secrets = bool(st.secrets.get("NEON_DATABASE_URL", "")) if hasattr(st, "secrets") else False
-    _neon_in_env = bool(_os.environ.get("NEON_DATABASE_URL", ""))
-    if _db_dialect == "postgresql":
+    _neon_status, _neon_detail = _probe_neon()
+    if _neon_status == "ok":
         st.success("Database: **Neon PostgreSQL** — data persists across deployments.")
-    elif _neon_in_secrets or _neon_in_env:
-        # URL visible but connection fell back to SQLite — show reason
-        _reason = _db_err or "psycopg2 import failed or connection refused"
-        st.warning(
-            f"Database: **Local SQLite** — Neon URL is set but connection failed: `{_reason}`. "
-            "Check `NEON_DATABASE_URL` in Streamlit Cloud secrets."
-        )
-    else:
+    elif _neon_status == "no_url":
         st.warning(
             "Database: **Local SQLite** (ephemeral) — "
             "`NEON_DATABASE_URL` not found in Streamlit Cloud secrets. "
             "Go to **Manage app → Settings → Secrets** and add it."
+        )
+    elif _neon_status == "no_psycopg2":
+        st.warning(
+            f"Database: **Local SQLite** — `psycopg2` not installed (`{_neon_detail}`). "
+            "Add `psycopg2-binary` to requirements.txt."
+        )
+    else:
+        st.warning(
+            f"Database: **Local SQLite** — Neon connection failed: `{_neon_detail}`. "
+            "Check the `NEON_DATABASE_URL` value in Streamlit Cloud secrets."
         )
     top_cols = st.columns([1.15, 0.85])
     with top_cols[0]:
