@@ -185,8 +185,9 @@ class PlatformEngine:
             "openai": { ... same shape ... },
           }
         """
-        if not self.repo.list_signals("unified"):
-            self.run_signal_refresh(trigger="buy-precheck")
+        # Always refresh signals before a comparison run so stale Turso data
+        # does not silently block recommendations with out-of-date sector scores.
+        self.run_signal_refresh(trigger="buy-precheck")
 
         results: dict[str, Any] = {}
         for llm_provider in ("anthropic", "openai"):

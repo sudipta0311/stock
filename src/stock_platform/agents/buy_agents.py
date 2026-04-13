@@ -462,9 +462,11 @@ class BuyAgents:
         top_n = int(state["request"]["top_n"])
         target_pool_size = buffered_top_n(top_n)
         differentiated = []
+        overlap_filtered: list[str] = []
         for candidate in state["shortlist"]:
             overlap = overlaps.get(candidate["symbol"], {"overlap_pct": 0.0, "band": "GREEN", "attribution": []})
             if overlap["overlap_pct"] > 3:
+                overlap_filtered.append(candidate["symbol"])
                 continue
             differentiation_score = round(
                 clamp(
@@ -486,7 +488,10 @@ class BuyAgents:
                 }
             )
         differentiated.sort(key=lambda row: row["differentiation_score"], reverse=True)
-        return {"differentiated_shortlist": differentiated[:target_pool_size]}
+        return {
+            "differentiated_shortlist": differentiated[:target_pool_size],
+            "overlap_filtered": overlap_filtered,
+        }
 
     def assess_timing(self, state: dict[str, Any]) -> dict[str, Any]:
         contrarian = {row["sector"]: row for row in self.repo.list_signals("contrarian")}
@@ -728,6 +733,7 @@ class BuyAgents:
         self.repo.save_recommendations(run_id, recommendations)
         # Merge validation-gate skips (ValidationResult objects) + governance-filter skips (dicts).
         validation_skipped: list[ValidationResult] = state.get("skipped_candidates", [])
+        overlap_filtered: list[str] = state.get("overlap_filtered", [])
         skipped_stocks: list[dict] = [
             {
                 "symbol": vr.symbol,
@@ -736,14 +742,45 @@ class BuyAgents:
                 "reason": vr.reason,
             }
             for vr in validation_skipped
-        ] + gov_skipped
+        ] + gov_skipped + [
+            {
+                "symbol": sym,
+                "status": "OVERLAP_FILTERED",
+                "resolved_symbol": sym,
+                "reason": "Already >3% represented in your mutual fund / ETF holdings.",
+            }
+            for sym in overlap_filtered
+        ]
         blocked_reason = ""
         if not recommendations:
             low_rr_count = sum(1 for row in skipped_stocks if row.get("status") == "LOW_RISK_REWARD")
+            overlap_count = len(overlap_filtered)
+            do_not_enter_count = sum(
+                1 for item in state.get("allocations", [])
+                if item.get("entry_signal") == "DO NOT ENTER"
+            )
             if low_rr_count:
                 blocked_reason = (
                     f"All shortlisted candidates failed the minimum risk/reward gate of "
                     f"{MINIMUM_RR_RATIO}x. Try a broader universe or rerun when prices/targets improve."
+                )
+            elif overlap_count:
+                blocked_reason = (
+                    f"{overlap_count} shortlisted stock(s) were skipped because they are already "
+                    f">3% represented in your mutual fund / ETF holdings. "
+                    "Try a broader index (e.g. NIFTY 500) or reduce top-N to allow the next-best candidates through."
+                )
+            elif do_not_enter_count:
+                blocked_reason = (
+                    f"{do_not_enter_count} candidate(s) flagged DO NOT ENTER — their sectors have "
+                    "STRONG_AVOID market signals. Rerun after a signal refresh or wait for conditions to improve."
+                )
+            else:
+                blocked_reason = (
+                    "No buy candidates survived the full pipeline. "
+                    "This can happen when qualitative validation rejects all shortlisted stocks, "
+                    "or when current market momentum is broadly negative. "
+                    "Try refreshing market signals or re-uploading your portfolio."
                 )
         return {
             "recommendations": [asdict(record) for record in recommendations],

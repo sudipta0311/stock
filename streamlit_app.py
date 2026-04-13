@@ -609,10 +609,10 @@ def run_buy_workflow(
     if provider_choice == "Compare Both":
         if hasattr(st, "toast"):
             st.toast("Recommendation comparison in progress...", icon="⏳")
-        with st.status("Generating recommendations from both providers...", expanded=True) as status:
+        with st.status("Refreshing signals and generating recommendations...", expanded=True) as status:
             comp = engine.run_buy_analysis_comparison(buy_request)
             engine.repo.set_state("buy_comparison_result", comp)
-            status.write("Anthropic and OpenAI runs completed.")
+            status.write("Signal refresh and both provider runs completed.")
             status.update(label="Recommendations ready", state="complete", expanded=False)
         return comp
 
