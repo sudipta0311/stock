@@ -16,6 +16,10 @@ import pandas as pd
 import streamlit as st
 
 ROOT = Path(__file__).resolve().parent
+
+# Module-level state for the PE-cache background thread.
+# Threads write here; Streamlit reruns read it.  Dict mutation is GIL-safe.
+_PE_CACHE_JOB: dict[str, Any] = {"running": False, "done": False, "count": 0, "error": ""}
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
@@ -1321,6 +1325,66 @@ with tabs[0]:
             "signal_rows": {key: len(value) for key, value in signals.items()},
         }
         st.json(preview)
+
+        st.markdown("#### PE History Cache")
+        st.caption(
+            "Pre-fetches PE ratio history (Screener.in → Wisesheets → yfinance) for every stock "
+            "across all indices — NIFTY50 through NIFTYMIDSMALLCAP400. "
+            "Cached for 7 days in Neon. Run once after deployment so the buy pipeline "
+            "finds warm data immediately."
+        )
+
+        if _PE_CACHE_JOB["running"]:
+            st.info(
+                f"PE cache refresh running in background — "
+                f"{_PE_CACHE_JOB['count']} symbols queued. "
+                "You can continue using the app. Reopen this section to check status."
+            )
+            if st.button("Check Status", key="pe_cache_check_btn"):
+                st.rerun()
+        elif _PE_CACHE_JOB["done"]:
+            if _PE_CACHE_JOB["error"]:
+                st.warning(f"PE cache refresh finished with error: {_PE_CACHE_JOB['error']}")
+            else:
+                st.success(
+                    f"PE cache refresh complete — "
+                    f"{_PE_CACHE_JOB['count']} unique symbols cached across all indices."
+                )
+            if st.button("Refresh Again", key="pe_cache_refresh_again_btn", use_container_width=True):
+                _PE_CACHE_JOB.update({"running": False, "done": False, "count": 0, "error": ""})
+                st.rerun()
+        else:
+            if st.button(
+                "Refresh PE Cache — All Indices",
+                key="pe_cache_refresh_btn",
+                use_container_width=True,
+                help="Fetches historical PE data for every stock in NIFTY50, NIFTY200, NIFTYMIDCAP150, sectoral indices, etc.",
+            ):
+                # Collect unique symbols across every selectable index
+                _all_symbols: set[str] = set()
+                for _idx_name, _idx_cfg in SELECTABLE_INDICES.items():
+                    try:
+                        _members = engine.provider.get_index_members(_idx_cfg["code"])
+                        _all_symbols.update(m["symbol"] for m in _members)
+                    except Exception as _exc:
+                        st.warning(f"Could not load {_idx_name}: {_exc}")
+
+                _symbol_list = sorted(_all_symbols)
+                _PE_CACHE_JOB.update({"running": True, "done": False, "count": len(_symbol_list), "error": ""})
+
+                def _run_cache_refresh(symbols: list[str], db_path: str) -> None:
+                    try:
+                        prefetch_pe_history_for_universe(symbols, db_path)
+                        _PE_CACHE_JOB.update({"running": False, "done": True})
+                    except Exception as exc:
+                        _PE_CACHE_JOB.update({"running": False, "done": True, "error": str(exc)})
+
+                threading.Thread(
+                    target=_run_cache_refresh,
+                    args=(_symbol_list, str(DB_PATH)),
+                    daemon=True,
+                ).start()
+                st.rerun()
 
 with tabs[1]:
     render_section_header(
