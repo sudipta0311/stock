@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from stock_platform.agents import BuyAgents, MonitoringAgents, PortfolioAgents, SignalAgents
+from stock_platform.agents.buy_agents import MINIMUM_RR_RATIO
 from stock_platform.config import AppConfig, ensure_data_dir, load_app_env
 from stock_platform.data.repository import PlatformRepository
 from stock_platform.providers import LiveMarketDataProvider
@@ -15,7 +16,7 @@ from stock_platform.utils.entry_calculator import calculate_entry_levels
 
 def _append_entry_summary(synthesis_text: str, recommendation: dict[str, Any]) -> str:
     payload = recommendation.get("payload", {})
-    entry = calculate_entry_levels(
+    entry = payload.get("entry_levels") or calculate_entry_levels(
         symbol=str(recommendation.get("symbol", "")),
         current_price=payload.get("current_price"),
         analyst_target=payload.get("analyst_target"),
@@ -25,13 +26,16 @@ def _append_entry_summary(synthesis_text: str, recommendation: dict[str, Any]) -
     )
     if not entry:
         return synthesis_text
+    rr_flag = ""
+    if float(entry.get("risk_reward", 0) or 0) < MINIMUM_RR_RATIO:
+        rr_flag = f" | Below minimum {MINIMUM_RR_RATIO}x"
     return (
         f"{synthesis_text}\n\n**ENTRY SUMMARY:** "
         f"Current ₹{entry['current_price']:,.0f} | "
         f"Enter at ₹{entry['entry_price']:,.0f} | "
         f"Stop ₹{entry['stop_loss']:,.0f} | "
         f"Target ₹{entry['analyst_target']:,.0f} | "
-        f"R/R {entry['risk_reward']}x"
+        f"R/R {entry['risk_reward']}x{rr_flag}"
     )
 
 

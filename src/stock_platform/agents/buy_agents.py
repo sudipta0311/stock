@@ -8,9 +8,13 @@ from uuid import uuid4
 from stock_platform.config import AppConfig
 from stock_platform.models import RecommendationRecord
 from stock_platform.agents.quant_model import compute_quality_score as compute_quality_score_v2
+from stock_platform.utils.entry_calculator import calculate_entry_levels
 from stock_platform.utils.rules import clamp, parse_iso_datetime
 from stock_platform.utils.sector_config import governance_risk_blocks
 from stock_platform.utils.stock_validator import ValidationResult, log_skipped_stock, validate_stock
+
+
+MINIMUM_RR_RATIO = 1.5
 
 
 def get_top_n_with_replacement(
@@ -195,6 +199,23 @@ def compute_net_return(
     gross_return = (analyst_target - current_price) / current_price
     tax_rate = 0.125 if holding_months >= 12 else 0.20
     return round(gross_return * (1 - tax_rate) * 100, 2)
+
+
+def filter_by_risk_reward(candidates: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
+    valid = []
+    excluded = []
+    for candidate in candidates:
+        entry = candidate.get("entry_levels", {})
+        rr = float(entry.get("risk_reward", 0) or 0)
+        if rr < MINIMUM_RR_RATIO:
+            excluded.append(candidate["symbol"])
+            print(
+                f"EXCLUDED {candidate['symbol']}: "
+                f"R/R {rr}x below minimum {MINIMUM_RR_RATIO}x"
+            )
+        else:
+            valid.append(candidate)
+    return valid, excluded
 
 
 def buffered_top_n(top_n: int) -> int:
@@ -634,6 +655,27 @@ class BuyAgents:
             rationale = llm_rationale or "[LLM analysis unavailable for this stock]"
             fin_data = dict(item.get("live_financials") or {})
             fin_data.update({key: value for key, value in (item.get("financials") or {}).items() if value is not None})
+            entry_levels = calculate_entry_levels(
+                symbol=item["symbol"],
+                current_price=current_price,
+                analyst_target=analyst_target,
+                signal=item["entry_signal"],
+                quant_score=item["quality_score"],
+                fin_data=fin_data,
+            )
+            rr_value = float(entry_levels.get("risk_reward", 0) or 0)
+            if rr_value < MINIMUM_RR_RATIO:
+                print(
+                    f"EXCLUDED {item['symbol']}: "
+                    f"R/R {rr_value}x below minimum {MINIMUM_RR_RATIO}x"
+                )
+                gov_skipped.append({
+                    "symbol": item["symbol"],
+                    "status": "LOW_RISK_REWARD",
+                    "resolved_symbol": item["symbol"],
+                    "reason": f"R/R {rr_value}x below minimum {MINIMUM_RR_RATIO}x",
+                })
+                continue
 
             payload = {
                 "investment_thesis": f"{item['sector']} benefits from current signal stack and fills a real portfolio gap.",
@@ -650,6 +692,7 @@ class BuyAgents:
                 "current_price": round(float(current_price), 2) if current_price else None,
                 "analyst_target": round(float(analyst_target), 2) if analyst_target else None,
                 "fin_data": fin_data,
+                "entry_levels": entry_levels,
                 # Legacy key kept for backward compatibility with stored recommendations.
                 "allocation_pct": item["allocation_pct"],
                 "allocation_amount": item["allocation_amount"],

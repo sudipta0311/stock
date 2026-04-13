@@ -14,8 +14,10 @@ if str(SRC) not in sys.path:
 from stock_platform.agents.quant_model import compute_quality_score
 from stock_platform.agents.buy_agents import (
     BuyAgents,
+    MINIMUM_RR_RATIO,
     buffered_top_n,
     compute_net_return,
+    filter_by_risk_reward,
     get_fresh_analyst_target,
     get_top_n_with_replacement,
 )
@@ -276,6 +278,63 @@ class BuyQualityScoreTests(unittest.TestCase):
         self.assertEqual(first_payload["current_price"], 100.0)
         self.assertEqual(first_payload["analyst_target"], 120.0)
         self.assertEqual(first_payload["fin_data"]["currentPrice"], 100.0)
+        self.assertGreaterEqual(first_payload["entry_levels"]["risk_reward"], MINIMUM_RR_RATIO)
+
+    @patch("stock_platform.agents.buy_agents.get_fresh_analyst_target", return_value=110.0)
+    @patch("stock_platform.agents.buy_agents.governance_risk_blocks", return_value=(False, ""))
+    def test_finalize_recommendation_excludes_low_rr_candidates(self, _gov_mock, _target_mock) -> None:
+        repo = StubRepo()
+        agent = BuyAgents(repo, StubProvider(), AppConfig(**LOCAL_DB_CONFIG), StaticLLM())
+        base_item = {
+            "company_name": "Demo Co",
+            "sector": "Defence",
+            "quality_score": 0.8,
+            "gap_reason": "Gap fill",
+            "overlap_pct": 0.0,
+            "fund_attribution": [],
+            "initial_tranche_pct": 8.0,
+            "target_pct": 20.0,
+            "initial_amount_inr": 8000.0,
+            "target_amount_inr": 20000.0,
+            "allocation_pct": 8.0,
+            "allocation_amount": 8000.0,
+            "tranches": 3,
+            "differentiation_score": 0.8,
+            "news": {"headline": "Positive update"},
+            "price_context": {"price": 100.0, "analyst_target": 110.0},
+            "live_financials": {"currentPrice": 100.0},
+        }
+        state = {
+            "request": {"top_n": 2},
+            "confidence": {"band": "GREEN"},
+            "portfolio_context": {"normalized_exposure": []},
+            "allocations": [
+                base_item | {"symbol": "LOWRR1", "entry_signal": "BUY"},
+                base_item | {"symbol": "LOWRR2", "entry_signal": "ACCUMULATE"},
+            ],
+        }
+
+        result = agent.finalize_recommendation(state)
+
+        self.assertEqual(result["recommendations"], [])
+        self.assertEqual(len(repo.saved_recommendations), 0)
+        self.assertEqual(
+            [row["status"] for row in result["skipped_stocks"]],
+            ["LOW_RISK_REWARD", "LOW_RISK_REWARD"],
+        )
+        self.assertIn("R/R", result["skipped_stocks"][0]["reason"])
+
+    def test_filter_by_risk_reward_returns_only_valid_candidates(self) -> None:
+        valid, excluded = filter_by_risk_reward(
+            [
+                {"symbol": "LOW", "entry_levels": {"risk_reward": 1.2}},
+                {"symbol": "EDGE", "entry_levels": {"risk_reward": 1.5}},
+                {"symbol": "HIGH", "entry_levels": {"risk_reward": 2.1}},
+            ]
+        )
+
+        self.assertEqual([row["symbol"] for row in valid], ["EDGE", "HIGH"])
+        self.assertEqual(excluded, ["LOW"])
 
 
 class EntryCalculatorTests(unittest.TestCase):
