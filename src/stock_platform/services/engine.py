@@ -10,6 +10,29 @@ from stock_platform.providers import LiveMarketDataProvider
 from stock_platform.services.llm import PlatformLLM
 from stock_platform.services.mf_lookup import MutualFundHoldingsClient
 from stock_platform.services.pdf_parser import NSDLCASParser
+from stock_platform.utils.entry_calculator import calculate_entry_levels
+
+
+def _append_entry_summary(synthesis_text: str, recommendation: dict[str, Any]) -> str:
+    payload = recommendation.get("payload", {})
+    entry = calculate_entry_levels(
+        symbol=str(recommendation.get("symbol", "")),
+        current_price=payload.get("current_price"),
+        analyst_target=payload.get("analyst_target"),
+        signal=str(payload.get("entry_signal") or recommendation.get("action", "")),
+        quant_score=payload.get("quality_score"),
+        fin_data=payload.get("fin_data") or {},
+    )
+    if not entry:
+        return synthesis_text
+    return (
+        f"{synthesis_text}\n\n**ENTRY SUMMARY:** "
+        f"Current ₹{entry['current_price']:,.0f} | "
+        f"Enter at ₹{entry['entry_price']:,.0f} | "
+        f"Stop ₹{entry['stop_loss']:,.0f} | "
+        f"Target ₹{entry['analyst_target']:,.0f} | "
+        f"R/R {entry['risk_reward']}x"
+    )
 
 
 def _sample_portfolio_payload() -> dict[str, Any]:
@@ -209,7 +232,7 @@ class PlatformEngine:
                     openai_rationale=o_rationale,
                 )
                 if synthesis:
-                    synthesis_map[symbol] = synthesis
+                    synthesis_map[symbol] = _append_entry_summary(synthesis, a_rec)
         results["synthesis"] = synthesis_map
         return results
 

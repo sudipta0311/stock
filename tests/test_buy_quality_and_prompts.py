@@ -20,7 +20,9 @@ from stock_platform.agents.buy_agents import (
     get_top_n_with_replacement,
 )
 from stock_platform.config import AppConfig
+from stock_platform.services.engine import _append_entry_summary
 from stock_platform.services.llm import PlatformLLM
+from stock_platform.utils.entry_calculator import calculate_entry_levels
 
 LOCAL_DB_CONFIG = {
     "turso_database_url": "",
@@ -270,6 +272,68 @@ class BuyQualityScoreTests(unittest.TestCase):
 
         self.assertEqual([row["symbol"] for row in result["recommendations"]], ["BBB", "CCC", "DDD"])
         self.assertEqual(len(repo.saved_recommendations), 3)
+        first_payload = repo.saved_recommendations[0].payload
+        self.assertEqual(first_payload["current_price"], 100.0)
+        self.assertEqual(first_payload["analyst_target"], 120.0)
+        self.assertEqual(first_payload["fin_data"]["currentPrice"], 100.0)
+
+
+class EntryCalculatorTests(unittest.TestCase):
+    def test_buy_signal_calculates_entry_stop_and_tranches(self) -> None:
+        entry = calculate_entry_levels(
+            symbol="BEL",
+            current_price=100.0,
+            analyst_target=120.0,
+            signal="BUY",
+            quant_score=0.8,
+            fin_data={},
+        )
+
+        self.assertEqual(entry["entry_price"], 97.0)
+        self.assertEqual(entry["entry_zone_low"], 96.0)
+        self.assertEqual(entry["entry_zone_high"], 100.0)
+        self.assertEqual(entry["stop_loss"], 82.5)
+        self.assertEqual(entry["stop_loss_pct"], 15.0)
+        self.assertEqual(entry["risk_reward"], 1.6)
+        self.assertEqual(entry["tranche_1_pct"], 40)
+        self.assertEqual(entry["tranche_2_pct"], 35)
+        self.assertEqual(entry["tranche_3_pct"], 25)
+
+    def test_wait_signal_uses_52_week_low_when_available(self) -> None:
+        entry = calculate_entry_levels(
+            symbol="WAITCO",
+            current_price=200.0,
+            analyst_target=260.0,
+            signal="WAIT",
+            quant_score=0.4,
+            fin_data={"week52_low": 120.0},
+        )
+
+        self.assertEqual(entry["entry_price"], 160.0)
+        self.assertEqual(entry["entry_zone_low"], 155.2)
+        self.assertEqual(entry["entry_zone_high"], 164.8)
+        self.assertEqual(entry["stop_loss"], 147.2)
+        self.assertIn("Wait for", entry["entry_note"])
+
+    def test_synthesis_summary_appends_entry_line(self) -> None:
+        synthesis = _append_entry_summary(
+            "• COMBINED VERDICT: ENTER NOW.",
+            {
+                "symbol": "BEL",
+                "action": "BUY",
+                "payload": {
+                    "current_price": 100.0,
+                    "analyst_target": 120.0,
+                    "entry_signal": "BUY",
+                    "quality_score": 0.8,
+                    "fin_data": {},
+                },
+            },
+        )
+
+        self.assertIn("ENTRY SUMMARY", synthesis)
+        self.assertIn("Enter at ₹97", synthesis)
+        self.assertIn("R/R 1.6x", synthesis)
 
 
 class BuyPromptTests(unittest.TestCase):

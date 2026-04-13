@@ -632,6 +632,8 @@ class BuyAgents:
             if not llm_rationale:
                 print(f"LLM rationale unavailable for {item['symbol']} — proceeding without narrative")
             rationale = llm_rationale or "[LLM analysis unavailable for this stock]"
+            fin_data = dict(item.get("live_financials") or {})
+            fin_data.update({key: value for key, value in (item.get("financials") or {}).items() if value is not None})
 
             payload = {
                 "investment_thesis": f"{item['sector']} benefits from current signal stack and fills a real portfolio gap.",
@@ -645,6 +647,9 @@ class BuyAgents:
                 "target_pct": item["target_pct"],
                 "initial_amount_inr": item["initial_amount_inr"],
                 "target_amount_inr": item["target_amount_inr"],
+                "current_price": round(float(current_price), 2) if current_price else None,
+                "analyst_target": round(float(analyst_target), 2) if analyst_target else None,
+                "fin_data": fin_data,
                 # Legacy key kept for backward compatibility with stored recommendations.
                 "allocation_pct": item["allocation_pct"],
                 "allocation_amount": item["allocation_amount"],
