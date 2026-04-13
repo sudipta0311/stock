@@ -6,6 +6,7 @@ import html as _html
 import io
 import json
 import sys
+import textwrap
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -763,75 +764,74 @@ def render_entry_details(entry: dict[str, Any]) -> None:
     rr_status = "Strong setup" if rr_value >= 2.0 else "Watch threshold" if rr_value >= MINIMUM_RR_RATIO else "Below minimum threshold"
     rr_symbol = "OK" if rr_value >= 2.0 else "Watch" if rr_value >= MINIMUM_RR_RATIO else "Skip"
 
-    html = f"""
-    <div style="
-        background:#f8f9fa;
-        border:1px solid #e0e0e0;
-        border-radius:8px;
-        padding:16px;
-        margin:8px 0;
-        font-family:sans-serif;
-    ">
-        <table style="width:100%; border-collapse:collapse; table-layout:fixed;">
-            <tr style="border-bottom:1px solid #e0e0e0;">
-                <td style="padding:8px; color:#666; font-size:12px;">Current Price</td>
-                <td style="padding:8px; color:#666; font-size:12px;">Entry Price</td>
-                <td style="padding:8px; color:#666; font-size:12px;">Stop Loss</td>
-                <td style="padding:8px; color:#666; font-size:12px;">Target</td>
-            </tr>
-            <tr>
-                <td style="padding:8px; font-size:clamp(16px, 2vw, 20px); font-weight:600; color:#1a1a1a;">
-                    &#8377;{entry['current_price']:,.0f}
-                </td>
-                <td style="padding:8px; font-size:clamp(16px, 2vw, 20px); font-weight:600; color:#1a1a1a;">
-                    &#8377;{entry['entry_price']:,.0f}<br>
-                    <span style="font-size:11px; color:#e67e22;">
-                        &#9660; {entry['discount_from_current']:.1f}% from CMP
-                    </span>
-                </td>
-                <td style="padding:8px; font-size:clamp(16px, 2vw, 20px); font-weight:600; color:#c0392b;">
-                    &#8377;{entry['stop_loss']:,.0f}<br>
-                    <span style="font-size:11px; color:#c0392b;">
-                        &#9660; {entry['stop_loss_pct']:.0f}% from entry
-                    </span>
-                </td>
-                <td style="padding:8px; font-size:clamp(16px, 2vw, 20px); font-weight:600; color:#27ae60;">
-                    &#8377;{entry['analyst_target']:,.0f}<br>
-                    <span style="font-size:11px; color:#27ae60;">
-                        &#9650; {entry['upside_from_entry']:.1f}% from entry
-                    </span>
-                </td>
-            </tr>
-        </table>
-
+    html = textwrap.dedent(
+        f"""
         <div style="
-            margin-top:12px;
-            padding:10px;
-            background:#fff;
-            border-radius:6px;
-            border-left:4px solid {rr_border};
+            background:#f8f9fa;
+            border:1px solid #e0e0e0;
+            border-radius:8px;
+            padding:16px;
+            margin:8px 0;
+            font-family:sans-serif;
         ">
-            <strong>Risk/Reward: {rr_value}x</strong>
-            - For every &#8377;1 risked, potential gain is &#8377;{rr_value:.1f}
-            <span style="color:{rr_border}; font-weight:600;">{rr_symbol}: {rr_status}</span>
+            <table style="width:100%; border-collapse:collapse; table-layout:fixed;">
+                <tr style="border-bottom:1px solid #e0e0e0;">
+                    <td style="padding:8px; color:#666; font-size:12px;">Current Price</td>
+                    <td style="padding:8px; color:#666; font-size:12px;">Entry Price</td>
+                    <td style="padding:8px; color:#666; font-size:12px;">Stop Loss</td>
+                    <td style="padding:8px; color:#666; font-size:12px;">Target</td>
+                </tr>
+                <tr>
+                    <td style="padding:8px; font-size:clamp(16px, 2vw, 20px); font-weight:600; color:#1a1a1a;">
+                        &#8377;{entry['current_price']:,.0f}
+                    </td>
+                    <td style="padding:8px; font-size:clamp(16px, 2vw, 20px); font-weight:600; color:#1a1a1a;">
+                        &#8377;{entry['entry_price']:,.0f}<br>
+                        <span style="font-size:11px; color:#e67e22;">
+                            &#9660; {entry['discount_from_current']:.1f}% from CMP
+                        </span>
+                    </td>
+                    <td style="padding:8px; font-size:clamp(16px, 2vw, 20px); font-weight:600; color:#c0392b;">
+                        &#8377;{entry['stop_loss']:,.0f}<br>
+                        <span style="font-size:11px; color:#c0392b;">
+                            &#9660; {entry['stop_loss_pct']:.0f}% from entry
+                        </span>
+                    </td>
+                    <td style="padding:8px; font-size:clamp(16px, 2vw, 20px); font-weight:600; color:#27ae60;">
+                        &#8377;{entry['analyst_target']:,.0f}<br>
+                        <span style="font-size:11px; color:#27ae60;">
+                            &#9650; {entry['upside_from_entry']:.1f}% from entry
+                        </span>
+                    </td>
+                </tr>
+            </table>
+            <div style="
+                margin-top:12px;
+                padding:10px;
+                background:#fff;
+                border-radius:6px;
+                border-left:4px solid {rr_border};
+            ">
+                <strong>Risk/Reward: {rr_value}x</strong>
+                - For every &#8377;1 risked, potential gain is &#8377;{rr_value:.1f}
+                <span style="color:{rr_border}; font-weight:600;">{rr_symbol}: {rr_status}</span>
+            </div>
+            <div style="margin-top:10px; font-size:13px; color:#555;">
+                <strong>Entry Zone:</strong> &#8377;{entry['entry_zone_low']:,.0f} - &#8377;{entry['entry_zone_high']:,.0f}
+            </div>
+            <div style="
+                margin-top:8px;
+                padding:10px;
+                background:#fffbf0;
+                border-radius:6px;
+                font-size:13px;
+                color:#555;
+            ">
+                {_html.escape(str(entry['entry_note']))}
+            </div>
         </div>
-
-        <div style="margin-top:10px; font-size:13px; color:#555;">
-            <strong>Entry Zone:</strong> &#8377;{entry['entry_zone_low']:,.0f} - &#8377;{entry['entry_zone_high']:,.0f}
-        </div>
-
-        <div style="
-            margin-top:8px;
-            padding:10px;
-            background:#fffbf0;
-            border-radius:6px;
-            font-size:13px;
-            color:#555;
-        ">
-            {_html.escape(str(entry['entry_note']))}
-        </div>
-    </div>
-    """
+        """
+    ).strip()
     st.markdown(html, unsafe_allow_html=True)
 
     if rr_value < MINIMUM_RR_RATIO:
