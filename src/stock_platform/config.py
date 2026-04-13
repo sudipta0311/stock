@@ -25,6 +25,9 @@ class AppConfig:
     root_dir: Path = field(default_factory=lambda: Path(__file__).resolve().parents[2])
     data_dir: Path = field(default_factory=lambda: Path(__file__).resolve().parents[2] / "data")
     db_path: Path = field(default_factory=lambda: Path(__file__).resolve().parents[2] / "data" / "platform.db")
+    # Neon PostgreSQL — primary cloud DB. Falls back to local SQLite when absent.
+    neon_database_url: str = field(default_factory=lambda: os.getenv("NEON_DATABASE_URL", ""))
+    # Legacy Turso fields — kept so old configs don't break; no longer used.
     turso_database_url: str = field(default_factory=lambda: os.getenv("TURSO_DATABASE_URL", ""))
     turso_auth_token: str = field(default_factory=lambda: os.getenv("TURSO_AUTH_TOKEN", ""))
     turso_sync_interval_seconds: int = field(
@@ -77,8 +80,13 @@ class AppConfig:
         return self.anthropic_enabled or self.openai_enabled
 
     @property
+    def neon_enabled(self) -> bool:
+        return bool(self.neon_database_url)
+
+    @property
     def turso_enabled(self) -> bool:
-        return bool(self.turso_database_url and self.turso_auth_token)
+        """Deprecated — kept for backward compat. Use neon_enabled instead."""
+        return False
 
 
 def ensure_data_dir(config: AppConfig) -> None:
