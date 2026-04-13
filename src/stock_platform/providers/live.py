@@ -752,6 +752,9 @@ class LiveMarketDataProvider:
             "beta": snapshot.get("beta"),
             "promoter_holding_pct": None if screener.get("promoter_holding") is None else screener["promoter_holding"] / 100.0,
             "promoter_holding": screener.get("promoter_holding"),
+            "promoter_change": screener.get("promoter_change"),
+            "dma_200": screener.get("dma_200"),
+            "dma_50": screener.get("dma_50"),
             "negative_pat_quarters": None,
         }
 

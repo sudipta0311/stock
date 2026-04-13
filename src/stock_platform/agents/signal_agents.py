@@ -5,6 +5,7 @@ from typing import Any
 
 from stock_platform.models import SignalRecord
 from stock_platform.utils.rules import clamp, conviction_from_score
+from stock_platform.utils.sector_config import SECTOR_GEO_OVERRIDES
 
 
 class SignalAgents:
@@ -116,6 +117,26 @@ class SignalAgents:
                     },
                 )
             )
+        # Inject geo overrides for sectors absent from live signal feeds.
+        # Only adds; never downgrades a sector that already has a live signal.
+        existing_sectors = {row.sector for row in unified}
+        for sector, override in SECTOR_GEO_OVERRIDES.items():
+            if sector not in existing_sectors:
+                unified.append(
+                    SignalRecord(
+                        family="unified",
+                        sector=sector,
+                        conviction=override["conviction"],
+                        score=override["score"],
+                        source=override["source"],
+                        horizon="blended",
+                        detail=override["reason"],
+                        as_of_date=self.provider.today.isoformat(),
+                        signal_key=f"UNIFIED_{sector.upper().replace(' ', '_')}",
+                        payload={"override": True, "confidence": 0.80},
+                    )
+                )
+
         unified.sort(key=lambda row: row.score, reverse=True)
         self.repo.replace_signals("unified", unified)
         return {

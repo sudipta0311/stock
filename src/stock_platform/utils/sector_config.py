@@ -41,6 +41,47 @@ def get_sector(symbol: str, data_source_sector: str) -> str:
     return SECTOR_OVERRIDES.get(symbol.upper().replace(".NS", ""), data_source_sector)
 
 
+# Maps sector name → primary signal family driving the thesis.
+# Used by the Signal Aggregator to resolve which family dominates for each sector.
+SECTOR_SIGNAL_MAP: dict[str, str] = {
+    "Defence":           "geo",   # geopolitical tailwind is primary driver
+    "Defence/Aerospace": "geo",
+    "Aerospace":         "geo",
+    "CDMO":              "geo",   # China+1 structural shift
+    "Electronics Manufacturing": "policy",  # PLI scheme driven
+    "Infrastructure":    "policy",
+    "Capital Goods":     "policy",
+    "Banking":           "flow",
+    "Financial Services": "flow",
+    "IT":                "flow",
+    "Pharma":            "geo",
+}
+
+# Hardcoded geo-driven overrides for sectors where live NSDL/MEA data does not
+# generate a signal.  Applied in SignalAgents.aggregate_signals() before the
+# unified table is written, injecting any sector that is absent from live feeds.
+SECTOR_GEO_OVERRIDES: dict[str, dict] = {
+    "Defence": {
+        "conviction": "STRONG_BUY",
+        "score": 0.88,
+        "source": "geo",
+        "reason": (
+            "India defence budget +15.2% FY27, elevated procurement post-geopolitical "
+            "escalation, BEL/HAL order book visibility"
+        ),
+    },
+    "CDMO": {
+        "conviction": "BUY",
+        "score": 0.72,
+        "source": "geo",
+        "reason": (
+            "China+1 pharma outsourcing structural shift, "
+            "India CDMO export growth 18% YoY"
+        ),
+    },
+}
+
+
 # Adani Group and other conglomerate stocks with elevated governance risk.
 # Stocks in this set need a higher net-return to justify entry.
 ELEVATED_GOVERNANCE_RISK: frozenset[str] = frozenset({

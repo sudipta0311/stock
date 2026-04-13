@@ -219,6 +219,16 @@ class PlatformLLM:
         analyst_target = price_ctx.get("analyst_target") or live_facts.get("targetMeanPrice")
         if isinstance(analyst_target, (int, float)):
             metric_bits.append(f"Target {analyst_target:.2f}")
+        tech_signals = item.get("technical_signals", [])
+        if tech_signals:
+            tech_parts = [
+                f"{s['type']}: {s['value']} ({s['signal']}) — {s['note']}"
+                for s in tech_signals
+            ]
+            tech_ctx = "Technical context: " + " | ".join(tech_parts)
+        else:
+            tech_ctx = ""
+
         stock_line = (
             f"Stock: {item['company_name']} ({item['symbol']}), sector: {item['sector']}.\n"
             f"Entry signal: {item['entry_signal']} | Quality score: {item['quality_score']:.2f}\n"
@@ -226,6 +236,7 @@ class PlatformLLM:
             f"Held via funds: {', '.join(source_names) or 'none'}\n"
             f"Portfolio size: {len(portfolio_context.get('normalized_exposure', []))} positions\n"
             f"Metrics: {' | '.join(metric_bits) if metric_bits else 'Live metrics unavailable'}"
+            + (f"\n{tech_ctx}" if tech_ctx else "")
         )
 
         if self.provider == "anthropic":
