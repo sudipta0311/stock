@@ -324,10 +324,12 @@ class PlatformLLM:
         stock_name: str,
         anthropic_rationale: str,
         openai_rationale: str,
+        agreement_type: str = "both",
     ) -> str | None:
         """
-        3-bullet synthesis of Anthropic (contrarian/risk) and OpenAI (momentum/catalyst) views.
+        Synthesis of Anthropic (contrarian/risk) and OpenAI (momentum/catalyst) views.
         Uses Anthropic Sonnet — called once per stock in Compare Both mode.
+        agreement_type: "both" | "anthropic_only" | "openai_only"
         Returns None if Anthropic is not enabled (caller must skip synthesis section).
         """
         # Synthesis always uses Anthropic Sonnet regardless of self.provider.
@@ -336,28 +338,65 @@ class PlatformLLM:
         try:
             import anthropic as _anthropic
             client = _anthropic.Anthropic(api_key=self.config.anthropic_api_key)
-            system_prompt = (
-                "Two analysts reviewed the same stock. "
-                "One is a contrarian risk analyst and the other is a momentum catalyst analyst. "
-                "Produce exactly 3 bullet points:\n"
-                "- Where do both analysts AGREE?\n"
-                "- Where do they DISAGREE and why does that disagreement matter?\n"
-                "- COMBINED VERDICT: ENTER NOW / ACCUMULATE GRADUALLY / WAIT FOR BETTER ENTRY.\n"
-                "If one analyst has no input, say what is missing and why that matters. "
-                "Be specific. Reference the actual risk and catalyst identified."
-            )
-            user_prompt = (
-                f"Two analysts reviewed {stock_name}:\n\n"
-                f"RISK ANALYST (Anthropic):\n{anthropic_rationale}\n\n"
-                f"CATALYST ANALYST (OpenAI):\n{openai_rationale}\n\n"
-                "In 3 bullet points:\n"
-                "- Where do both analysts AGREE?\n"
-                "- Where do they DISAGREE and why does the disagreement matter?\n"
-                "- COMBINED VERDICT: ENTER NOW / ACCUMULATE GRADUALLY / WAIT FOR BETTER ENTRY?\n"
-                "Even if one analyst provided no input, synthesize what the available analysis tells us, "
-                "what is missing, and why that matters. "
-                "Be specific. Reference the actual risk and catalyst identified."
-            )
+
+            if agreement_type == "anthropic_only":
+                system_prompt = (
+                    "You are a senior portfolio analyst. "
+                    "The Risk Analyst selected a stock but the Catalyst Analyst did NOT. "
+                    "Produce exactly 4 bullet points as instructed."
+                )
+                user_prompt = (
+                    f"The Risk Analyst selected {stock_name} but the Catalyst Analyst "
+                    f"did NOT include it in recommendations.\n\n"
+                    f"RISK ANALYST view:\n{anthropic_rationale}\n\n"
+                    "In 4 bullet points:\n"
+                    "- Why did the Catalyst Analyst likely exclude this stock — "
+                    "what near-term catalyst is missing?\n"
+                    "- Is the Risk Analyst's selection justified WITHOUT a catalyst confirmation?\n"
+                    "- What specific event would cause the Catalyst Analyst to also recommend this stock?\n"
+                    "- COMBINED VERDICT: Is this a genuine opportunity the catalyst lens missed, "
+                    "or a value trap the momentum lens correctly avoided?\n"
+                    "Be specific. Reference the actual risk and metrics identified."
+                )
+            elif agreement_type == "openai_only":
+                system_prompt = (
+                    "You are a senior portfolio analyst. "
+                    "The Catalyst Analyst selected a stock but the Risk Analyst did NOT. "
+                    "Produce exactly 4 bullet points as instructed."
+                )
+                user_prompt = (
+                    f"The Catalyst Analyst selected {stock_name} but the Risk Analyst "
+                    f"did NOT include it in recommendations.\n\n"
+                    f"CATALYST ANALYST view:\n{openai_rationale}\n\n"
+                    "In 4 bullet points:\n"
+                    "- Why did the Risk Analyst likely exclude this stock — "
+                    "what valuation or quality concern caused it to be filtered?\n"
+                    "- Is the Catalyst Analyst's selection justified WITHOUT risk validation?\n"
+                    "- What specific risk would the Risk Analyst flag if it had analysed this stock?\n"
+                    "- COMBINED VERDICT: Is this a genuine near-term opportunity, "
+                    "or is the missing risk analysis itself a warning signal?\n"
+                    "Be specific. Reference the actual catalyst and metrics identified."
+                )
+            else:
+                system_prompt = (
+                    "Two analysts reviewed the same stock. "
+                    "One is a contrarian risk analyst and the other is a momentum catalyst analyst. "
+                    "Produce exactly 3 bullet points:\n"
+                    "- Where do both analysts AGREE?\n"
+                    "- Where do they DISAGREE and why does that disagreement matter?\n"
+                    "- COMBINED VERDICT: ENTER NOW / ACCUMULATE GRADUALLY / WAIT FOR BETTER ENTRY.\n"
+                    "Be specific. Reference the actual risk and catalyst identified."
+                )
+                user_prompt = (
+                    f"Two analysts reviewed {stock_name}:\n\n"
+                    f"RISK ANALYST (Anthropic):\n{anthropic_rationale}\n\n"
+                    f"CATALYST ANALYST (OpenAI):\n{openai_rationale}\n\n"
+                    "In 3 bullet points:\n"
+                    "- Where do both analysts AGREE?\n"
+                    "- Where do they DISAGREE and why does the disagreement matter?\n"
+                    "- COMBINED VERDICT: ENTER NOW / ACCUMULATE GRADUALLY / WAIT FOR BETTER ENTRY?\n"
+                    "Be specific. Reference the actual risk and catalyst identified."
+                )
             response = client.messages.create(
                 model=self.config.llm_reasoning_model,
                 max_tokens=1500,

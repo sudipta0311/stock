@@ -14,6 +14,32 @@ from stock_platform.services.pdf_parser import NSDLCASParser
 from stock_platform.utils.entry_calculator import calculate_entry_levels
 
 
+def compare_model_selections(
+    anthropic_stocks: list[dict],
+    openai_stocks: list[dict],
+) -> dict:
+    """
+    Categorise stocks by model agreement level.
+    Returns sets for both_agree / anthropic_only / openai_only plus
+    a conviction-ordered list (highest conviction first).
+    """
+    anthropic_set = {s["symbol"] for s in anthropic_stocks}
+    openai_set = {s["symbol"] for s in openai_stocks}
+    both = anthropic_set & openai_set
+    a_only = anthropic_set - openai_set
+    o_only = openai_set - anthropic_set
+    return {
+        "both_agree":       both,
+        "anthropic_only":   a_only,
+        "openai_only":      o_only,
+        "conviction_order": [
+            *sorted(both),
+            *sorted(a_only),
+            *sorted(o_only),
+        ],
+    }
+
+
 def _normalize_synthesis_rationale(rationale: str, *, fallback: str, provider_name: str) -> str:
     text = (rationale or "").strip()
     lowered = text.lower()
@@ -239,17 +265,55 @@ class PlatformEngine:
         # Build per-stock synthesis for every recommended stock, even if only one provider returned analysis.
         a_recs = results.get("anthropic", {}).get("recommendations", [])
         o_recs = results.get("openai", {}).get("recommendations", [])
+
+        # Track model agreement for UI badges, conviction scoring, and synthesis prompts.
+        agreement = compare_model_selections(a_recs, o_recs)
+        results["agreement"] = agreement
+
+        # Apply conviction multiplier to single-model recommendations (65% sizing).
+        BASE_CONVICTION = {
+            "both_agree":     1.0,
+            "anthropic_only": 0.65,
+            "openai_only":    0.65,
+        }
+        for provider_key, recs in (("anthropic", a_recs), ("openai", o_recs)):
+            for rec in recs:
+                sym = rec["symbol"]
+                if sym in agreement["both_agree"]:
+                    multiplier = BASE_CONVICTION["both_agree"]
+                elif sym in agreement["anthropic_only"]:
+                    multiplier = BASE_CONVICTION["anthropic_only"]
+                else:
+                    multiplier = BASE_CONVICTION["openai_only"]
+                rec.setdefault("conviction_multiplier", multiplier)
+                if multiplier < 1.0:
+                    payload = rec.get("payload", {})
+                    entry = payload.get("entry_levels")
+                    if entry and entry.get("tranche_1_pct"):
+                        entry["tranche_1_pct"] = max(
+                            1, int(entry["tranche_1_pct"] * multiplier)
+                        )
+
         synthesis_map: dict[str, str] = {}
         if a_recs or o_recs:
             a_by_symbol = {r["symbol"]: r for r in a_recs}
             o_by_symbol = {r["symbol"]: r for r in o_recs}
             synth_llm = PlatformLLM(self.config, provider="anthropic")
-            for symbol in sorted(set(a_by_symbol) | set(o_by_symbol)):
+            # Synthesise in conviction order: both-agree first, then single-model.
+            for symbol in agreement["conviction_order"]:
                 a_rec = a_by_symbol.get(symbol)
                 o_rec = o_by_symbol.get(symbol)
                 base_rec = a_rec or o_rec
                 if not base_rec:
                     continue
+
+                if symbol in agreement["both_agree"]:
+                    agreement_type = "both"
+                elif symbol in agreement["anthropic_only"]:
+                    agreement_type = "anthropic_only"
+                else:
+                    agreement_type = "openai_only"
+
                 a_rationale = _normalize_synthesis_rationale(
                     str((a_rec or {}).get("rationale", "")),
                     fallback="No risk analysis provided.",
@@ -264,6 +328,7 @@ class PlatformEngine:
                     stock_name=f"{base_rec.get('company_name', symbol)} ({symbol})",
                     anthropic_rationale=a_rationale,
                     openai_rationale=o_rationale,
+                    agreement_type=agreement_type,
                 )
                 if synthesis:
                     synthesis_map[symbol] = _append_entry_summary(synthesis, base_rec)

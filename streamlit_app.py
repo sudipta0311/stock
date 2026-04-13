@@ -752,6 +752,16 @@ def render_provider_model_box(label: str, fast_model: str, reasoning_model: str,
 ENTRY_SUMMARY_MARKER = "**ENTRY SUMMARY:**"
 
 
+def get_agreement_badge(symbol: str, comparison_map: dict) -> tuple[str, str]:
+    """Return (badge_text, streamlit_method_name) for a symbol's model agreement level."""
+    if symbol in comparison_map.get("both_agree", set()):
+        return "BOTH MODELS AGREE", "success"
+    elif symbol in comparison_map.get("anthropic_only", set()):
+        return "RISK ANALYST ONLY", "warning"
+    else:
+        return "CATALYST ANALYST ONLY", "info"
+
+
 def render_entry_details(entry: dict[str, Any]) -> None:
     """
     Render entry details with custom HTML so prices never truncate.
@@ -875,7 +885,11 @@ def render_synthesis_with_entry_summary(synthesis_text: str) -> None:
         st.info(f"**Entry Summary** - {' | '.join(cleaned_parts)}")
 
 
-def render_recommendation_card(item: dict[str, Any], provider: str = "") -> None:
+def render_recommendation_card(
+    item: dict[str, Any],
+    provider: str = "",
+    comparison_map: dict | None = None,
+) -> None:
     payload = item.get("payload", {})
     company = str(item.get("company_name", ""))
     symbol = str(item.get("symbol", ""))
@@ -914,6 +928,10 @@ def render_recommendation_card(item: dict[str, Any], provider: str = "") -> None
                 st.caption(sector)
         with action_col:
             st.markdown(f"**{action}**")
+
+        if comparison_map:
+            badge_text, badge_type = get_agreement_badge(symbol, comparison_map)
+            getattr(st, badge_type)(f"Model consensus: {badge_text}")
 
         if rationale:
             st.write(rationale)
@@ -1509,6 +1527,20 @@ with tabs[2]:
     if "comparison_result" in st.session_state:
         st.subheader("Provider Comparison")
         comp: dict[str, Any] = st.session_state["comparison_result"]
+        agreement: dict = comp.get("agreement", {})
+
+        # Model agreement summary header
+        if agreement:
+            n_both = len(agreement.get("both_agree", set()))
+            n_a_only = len(agreement.get("anthropic_only", set()))
+            n_o_only = len(agreement.get("openai_only", set()))
+            st.info(
+                f"**Model Agreement Summary** — "
+                f"Both agree: {n_both} stocks | "
+                f"Risk analyst only: {n_a_only} stocks | "
+                f"Catalyst analyst only: {n_o_only} stocks"
+            )
+
         col_a, col_b = st.columns(2)
         with col_a:
             st.markdown('<span class="provider-badge provider-badge-anthropic">Anthropic Claude</span>', unsafe_allow_html=True)
@@ -1521,7 +1553,7 @@ with tabs[2]:
                 render_empty_panel("No Anthropic recommendations were generated.")
             else:
                 for item in a_data["recommendations"]:
-                    render_recommendation_card(item, provider="anthropic")
+                    render_recommendation_card(item, provider="anthropic", comparison_map=agreement)
         with col_b:
             st.markdown('<span class="provider-badge provider-badge-openai">OpenAI GPT</span>', unsafe_allow_html=True)
             o_data = comp.get("openai", {})
@@ -1533,14 +1565,26 @@ with tabs[2]:
                 render_empty_panel("No OpenAI recommendations were generated.")
             else:
                 for item in o_data["recommendations"]:
-                    render_recommendation_card(item, provider="openai")
+                    render_recommendation_card(item, provider="openai", comparison_map=agreement)
+
         synthesis_map: dict[str, str] = comp.get("synthesis", {})
         if synthesis_map:
             st.markdown("---")
             st.markdown("#### Analyst Synthesis")
             st.caption("Contrarian risk view (Anthropic) vs. momentum catalyst view (OpenAI) — synthesised by Claude Sonnet.")
-            for symbol, synthesis_text in synthesis_map.items():
-                with st.expander(f"Synthesis — {symbol}", expanded=True):
+            # Display in conviction order: both-agree first, then single-model.
+            conviction_order = agreement.get("conviction_order", list(synthesis_map.keys()))
+            for symbol in conviction_order:
+                synthesis_text = synthesis_map.get(symbol)
+                if not synthesis_text:
+                    continue
+                if symbol in agreement.get("both_agree", set()):
+                    label = f"Synthesis — {symbol} (Both Models)"
+                elif symbol in agreement.get("anthropic_only", set()):
+                    label = f"Synthesis — {symbol} (Risk Analyst Only)"
+                else:
+                    label = f"Synthesis — {symbol} (Catalyst Analyst Only)"
+                with st.expander(label, expanded=True):
                     render_synthesis_with_entry_summary(synthesis_text)
                     if symbol.upper().replace(".NS", "") in ELEVATED_GOVERNANCE_RISK:
                         st.caption(
