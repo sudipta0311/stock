@@ -137,6 +137,11 @@ class PlatformEngine:
         return {"payload": payload, "ingestion": ingestion}
 
     def run_signal_refresh(self, trigger: str = "manual", macro_thesis: str | None = None) -> dict[str, Any]:
+        # Clear per-instance provider caches so every refresh fetches fresh market data.
+        # Without this, _sector_overview (once set to {}) is never rebuilt for the session.
+        self.provider._sector_overview = None
+        self.provider._index_cache.pop("NIFTY50", None)
+        self.provider._index_cache.pop("NIFTYNEXT50", None)
         graph = self._build_signal_graph()
         return graph.invoke({"trigger": trigger, "macro_thesis": macro_thesis or ""})
 
