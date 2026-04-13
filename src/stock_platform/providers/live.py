@@ -217,6 +217,16 @@ class LiveMarketDataProvider:
                 cache_file.write_text(json.dumps(rows), encoding="utf-8")
             except Exception:
                 pass  # disk write failure is non-fatal
+        else:
+            # L5: stale DB/disk cache (ignore TTL) — better than nothing.
+            rows = self._load_stale_index_cache(index_name)
+            if rows:
+                print(f"[index_cache] Using stale cache for {index_name} — NSE fetch failed")
+            else:
+                # L6: hardcoded demo universe — last resort for hosted environments.
+                rows = self._fallback_index_members(index_name)
+                if rows:
+                    print(f"[index_cache] Using demo fallback for {index_name} — all caches empty")
 
         self._index_cache[index_name] = rows
         return rows
