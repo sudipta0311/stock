@@ -1326,29 +1326,29 @@ with tabs[0]:
         }
         st.json(preview)
 
-        st.markdown("#### PE History Cache")
+    # ── PE History Cache refresh — top-level expander so it is easy to find ──
+    with st.expander("PE History Cache — Refresh All Indices", expanded=False):
         st.caption(
-            "Pre-fetches PE ratio history (Screener.in → Wisesheets → yfinance) for every stock "
-            "across all indices — NIFTY50 through NIFTYMIDSMALLCAP400. "
+            "Pre-fetches historical PE ratio data (Screener.in → Wisesheets → yfinance) "
+            "for every stock across all indices — NIFTY50 through NIFTYMIDSMALLCAP400. "
             "Cached for 7 days in Neon. Run once after deployment so the buy pipeline "
-            "finds warm data immediately."
+            "finds warm PE data immediately."
         )
 
         if _PE_CACHE_JOB["running"]:
             st.info(
-                f"PE cache refresh running in background — "
-                f"{_PE_CACHE_JOB['count']} symbols queued. "
-                "You can continue using the app. Reopen this section to check status."
+                f"Refresh running in background — {_PE_CACHE_JOB['count']} symbols queued. "
+                "You can continue using the app."
             )
             if st.button("Check Status", key="pe_cache_check_btn"):
                 st.rerun()
         elif _PE_CACHE_JOB["done"]:
             if _PE_CACHE_JOB["error"]:
-                st.warning(f"PE cache refresh finished with error: {_PE_CACHE_JOB['error']}")
+                st.warning(f"Refresh finished with error: {_PE_CACHE_JOB['error']}")
             else:
                 st.success(
-                    f"PE cache refresh complete — "
-                    f"{_PE_CACHE_JOB['count']} unique symbols cached across all indices."
+                    f"Refresh complete — {_PE_CACHE_JOB['count']} unique symbols "
+                    "cached across all indices."
                 )
             if st.button("Refresh Again", key="pe_cache_refresh_again_btn", use_container_width=True):
                 _PE_CACHE_JOB.update({"running": False, "done": False, "count": 0, "error": ""})
@@ -1358,9 +1358,8 @@ with tabs[0]:
                 "Refresh PE Cache — All Indices",
                 key="pe_cache_refresh_btn",
                 use_container_width=True,
-                help="Fetches historical PE data for every stock in NIFTY50, NIFTY200, NIFTYMIDCAP150, sectoral indices, etc.",
+                help="Fetches historical PE data for every stock in all selectable indices.",
             ):
-                # Collect unique symbols across every selectable index
                 _all_symbols: set[str] = set()
                 for _idx_name, _idx_cfg in SELECTABLE_INDICES.items():
                     try:
