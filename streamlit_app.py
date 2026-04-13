@@ -17,6 +17,19 @@ import streamlit as st
 
 ROOT = Path(__file__).resolve().parent
 
+# ── Push st.secrets into os.environ at module load time ──────────────────────
+# Must happen BEFORE any AppConfig is constructed (frozen dataclass reads env
+# vars once at instantiation).  st.secrets is Streamlit Cloud's authoritative
+# secret store — .streamlit/secrets.toml on disk may not be present in cloud.
+import os as _os
+try:
+    for _sk, _sv in st.secrets.items():
+        if isinstance(_sv, str) and _sk not in _os.environ:
+            _os.environ[_sk] = _sv
+except Exception:
+    pass  # local dev: st.secrets may not exist; load_app_env() handles it
+# ─────────────────────────────────────────────────────────────────────────────
+
 # Module-level state for the PE-cache background thread.
 # Threads write here; Streamlit reruns read it.  Dict mutation is GIL-safe.
 _PE_CACHE_JOB: dict[str, Any] = {"running": False, "done": False, "count": 0, "error": ""}
@@ -539,21 +552,10 @@ def get_engine(user_key: str = "local") -> PlatformEngine:
     user_key is the full sha256 hex digest of the user's Google email,
     or 'local' for single-user / unauthenticated mode.
     """
-    # Push ALL st.secrets into os.environ BEFORE AppConfig is constructed.
-    # AppConfig is a frozen dataclass — its fields read os.getenv() exactly
-    # once at instantiation time.  load_app_env() reads secrets.toml from disk,
-    # but st.secrets is the authoritative store on Streamlit Cloud and is
-    # always populated before any Python code runs.
-    import os as _os
-    try:
-        for _k, _v in st.secrets.items():
-            if isinstance(_v, str) and _k not in _os.environ:
-                _os.environ[_k] = _v
-    except Exception:
-        pass  # local dev without st.secrets configured — fall through to load_app_env
-
+    # os.environ already populated from st.secrets at module load time.
+    # load_app_env() handles local .env / secrets.toml for dev environments.
     from stock_platform.config import load_app_env
-    load_app_env()  # picks up .env file and any remaining secrets from disk
+    load_app_env()
 
     if user_key == "local":
         return PlatformEngine()
