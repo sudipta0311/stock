@@ -1331,10 +1331,13 @@ with tabs[0]:
             return "sqlite", str(_e)
 
     _db_dialect, _db_err = _get_db_dialect()
+    # Check whether NEON_DATABASE_URL is visible from any source
+    _neon_in_secrets = bool(st.secrets.get("NEON_DATABASE_URL", "")) if hasattr(st, "secrets") else False
+    _neon_in_env = bool(_os.environ.get("NEON_DATABASE_URL", ""))
     if _db_dialect == "postgresql":
         st.success("Database: **Neon PostgreSQL** — data persists across deployments.")
-    elif engine.config.neon_database_url:
-        # URL set but connection fell back to SQLite — show reason
+    elif _neon_in_secrets or _neon_in_env:
+        # URL visible but connection fell back to SQLite — show reason
         _reason = _db_err or "psycopg2 import failed or connection refused"
         st.warning(
             f"Database: **Local SQLite** — Neon URL is set but connection failed: `{_reason}`. "
@@ -1343,7 +1346,8 @@ with tabs[0]:
     else:
         st.warning(
             "Database: **Local SQLite** (ephemeral) — "
-            "add `NEON_DATABASE_URL` to Streamlit Cloud secrets to persist data."
+            "`NEON_DATABASE_URL` not found in Streamlit Cloud secrets. "
+            "Go to **Manage app → Settings → Secrets** and add it."
         )
     top_cols = st.columns([1.15, 0.85])
     with top_cols[0]:
