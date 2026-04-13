@@ -20,8 +20,8 @@ def compare_model_selections(
 ) -> dict:
     """
     Categorise stocks by model agreement level.
-    Returns sets for both_agree / anthropic_only / openai_only plus
-    a conviction-ordered list (highest conviction first).
+    Returns sorted lists (JSON-serialisable) for both_agree / anthropic_only /
+    openai_only plus a conviction-ordered list (highest conviction first).
     """
     anthropic_set = {s["symbol"] for s in anthropic_stocks}
     openai_set = {s["symbol"] for s in openai_stocks}
@@ -29,9 +29,9 @@ def compare_model_selections(
     a_only = anthropic_set - openai_set
     o_only = openai_set - anthropic_set
     return {
-        "both_agree":       both,
-        "anthropic_only":   a_only,
-        "openai_only":      o_only,
+        "both_agree":       sorted(both),
+        "anthropic_only":   sorted(a_only),
+        "openai_only":      sorted(o_only),
         "conviction_order": [
             *sorted(both),
             *sorted(a_only),
