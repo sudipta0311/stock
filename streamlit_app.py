@@ -17,17 +17,31 @@ import streamlit as st
 
 ROOT = Path(__file__).resolve().parent
 
-# ── Push st.secrets into os.environ at module load time ──────────────────────
-# Must happen BEFORE any AppConfig is constructed (frozen dataclass reads env
-# vars once at instantiation).  st.secrets is Streamlit Cloud's authoritative
-# secret store — .streamlit/secrets.toml on disk may not be present in cloud.
-import os as _os
+# ── Push secrets into os.environ at module load time ─────────────────────────
+# Two-pass approach: (1) st.secrets (Streamlit Cloud dashboard), then
+# (2) .streamlit/secrets.toml on disk (committed to repo, always present).
+# AppConfig is a frozen dataclass — reads os.getenv() once at construction.
+import os as _os, tomllib as _tomllib
+
+# Pass 1: Streamlit Cloud dashboard secrets
 try:
     for _sk, _sv in st.secrets.items():
         if isinstance(_sv, str) and _sk not in _os.environ:
             _os.environ[_sk] = _sv
 except Exception:
-    pass  # local dev: st.secrets may not exist; load_app_env() handles it
+    pass
+
+# Pass 2: Read .streamlit/secrets.toml directly (bypasses st.secrets parsing)
+try:
+    _secrets_toml = ROOT / ".streamlit" / "secrets.toml"
+    if _secrets_toml.exists():
+        with _secrets_toml.open("rb") as _sf:
+            _toml_data = _tomllib.load(_sf)
+        for _sk, _sv in _toml_data.items():
+            if isinstance(_sv, str) and _sk not in _os.environ:
+                _os.environ[_sk] = _sv
+except Exception:
+    pass
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Module-level state for the PE-cache background thread.
@@ -1318,10 +1332,23 @@ with tabs[0]:
         Directly test the Neon connection without going through AppConfig.
         Returns (status, detail) where status is 'ok', 'no_url', 'no_psycopg2', or 'error'.
         """
-        _url = (
-            (st.secrets.get("NEON_DATABASE_URL", "") if hasattr(st, "secrets") else "")
-            or _os.environ.get("NEON_DATABASE_URL", "")
-        ).strip()
+        # Try all secret sources in priority order
+        _url = ""
+        try:
+            _url = st.secrets.get("NEON_DATABASE_URL", "") or ""
+        except Exception:
+            pass
+        if not _url:
+            _url = _os.environ.get("NEON_DATABASE_URL", "") or ""
+        if not _url:
+            try:
+                _p = ROOT / ".streamlit" / "secrets.toml"
+                if _p.exists():
+                    with _p.open("rb") as _f:
+                        _url = _tomllib.load(_f).get("NEON_DATABASE_URL", "") or ""
+            except Exception:
+                pass
+        _url = _url.strip()
         if not _url:
             return "no_url", ""
         try:
