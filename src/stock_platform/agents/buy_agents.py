@@ -754,12 +754,20 @@ class BuyAgents:
         blocked_reason = ""
         if not recommendations:
             low_rr_count = sum(1 for row in skipped_stocks if row.get("status") == "LOW_RISK_REWARD")
+            negative_return_count = sum(1 for row in skipped_stocks if row.get("status") == "NEGATIVE_NET_RETURN")
             overlap_count = len(overlap_filtered)
             do_not_enter_count = sum(
                 1 for item in state.get("allocations", [])
                 if item.get("entry_signal") == "DO NOT ENTER"
             )
-            if low_rr_count:
+            if negative_return_count:
+                blocked_reason = (
+                    f"{negative_return_count} shortlisted stock(s) were excluded because the analyst "
+                    "target price is at or below the current market price — no positive net-of-tax return. "
+                    "Prices may have run ahead of targets. Try refreshing market signals, using a broader "
+                    "index universe, or waiting for a better entry point."
+                )
+            elif low_rr_count:
                 blocked_reason = (
                     f"All shortlisted candidates failed the minimum risk/reward gate of "
                     f"{MINIMUM_RR_RATIO}x. Try a broader universe or rerun when prices/targets improve."
