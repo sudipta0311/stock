@@ -73,6 +73,42 @@ class _NeonCursor:
         return [_NeonRow(dict(r)) for r in (self._cur.fetchall() or [])]
 
 
+class SQLiteWrapper:
+    """
+    Thin wrapper around sqlite3.Connection that adds a .dialect class
+    attribute. Python 3.14 disallows setattr on C extension types, so we
+    cannot write conn.dialect = "sqlite" directly on the raw connection.
+    All calls are forwarded to the underlying sqlite3.Connection unchanged.
+    """
+
+    dialect: str = "sqlite"
+    row_factory: Any = sqlite3.Row  # mirrors what we set on the raw conn
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self._conn = conn
+
+    def execute(self, sql: str, params: tuple | list = ()) -> Any:
+        return self._conn.execute(sql, params)
+
+    def executemany(self, sql: str, params_list: Any) -> Any:
+        return self._conn.executemany(sql, params_list)
+
+    def cursor(self) -> Any:
+        return self._conn.cursor()
+
+    def commit(self) -> None:
+        self._conn.commit()
+
+    def close(self) -> None:
+        self._conn.close()
+
+    def rollback(self) -> None:
+        try:
+            self._conn.rollback()
+        except Exception:
+            pass
+
+
 class NeonWrapper:
     """
     Wraps a psycopg2 connection to present the same interface as sqlite3.
@@ -165,11 +201,10 @@ def connect_database(
     # ── SQLite fallback ──────────────────────────────────────────────────────
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path))
-    conn.row_factory = sqlite3.Row
-    conn.dialect = "sqlite"  # type: ignore[attr-defined]
+    raw = sqlite3.connect(str(path))
+    raw.row_factory = sqlite3.Row
     print(f"DB: using local SQLite at {path}")
-    return conn
+    return SQLiteWrapper(raw)
 
 
 def sync_database(connection: Any) -> None:
