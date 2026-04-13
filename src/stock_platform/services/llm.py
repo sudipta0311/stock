@@ -229,6 +229,18 @@ class PlatformLLM:
         else:
             tech_ctx = ""
 
+        pe_ctx = item.get("pe_context") or {}
+        pe_block = ""
+        if pe_ctx.get("pe_current") is not None:
+            pe_block = (
+                f"\nVERIFIED PE DATA (use these exact numbers, do not estimate PE from other fields):\n"
+                f"Current PE:    {pe_ctx['pe_current']:.1f}x\n"
+                f"5-Year Median: {pe_ctx['pe_5yr_median']:.1f}x\n" if pe_ctx.get("pe_5yr_median") else
+                f"\nVERIFIED PE DATA (use these exact numbers, do not estimate PE from other fields):\n"
+                f"Current PE:    {pe_ctx['pe_current']:.1f}x\n"
+                f"5-Year Median: N/A\n"
+            ) + f"PE Assessment: {pe_ctx['pe_assessment']}\nPE Signal:     {pe_ctx['pe_signal']}"
+
         stock_line = (
             f"Stock: {item['company_name']} ({item['symbol']}), sector: {item['sector']}.\n"
             f"Entry signal: {item['entry_signal']} | Quality score: {item['quality_score']:.2f}\n"
@@ -237,7 +249,16 @@ class PlatformLLM:
             f"Portfolio size: {len(portfolio_context.get('normalized_exposure', []))} positions\n"
             f"Metrics: {' | '.join(metric_bits) if metric_bits else 'Live metrics unavailable'}"
             + (f"\n{tech_ctx}" if tech_ctx else "")
+            + (pe_block if pe_block else "")
         )
+
+        pe_instruction = (
+            "IMPORTANT: Use ONLY the verified PE data provided above. "
+            "Do NOT estimate or calculate PE yourself. "
+            "If PE Assessment says CHEAP_VS_HISTORY, your analysis must acknowledge this — "
+            "a cheap-vs-history PE changes the risk framing significantly. "
+            "If PE Assessment says EXPENSIVE_VS_HISTORY, that is a key risk to surface."
+        ) if pe_block else ""
 
         if self.provider == "anthropic":
             system_prompt = (
@@ -249,7 +270,11 @@ class PlatformLLM:
                 "Write exactly 4 short bullets labelled RISK, WE ARE WRONG IF, VERDICT, and SUPPORTING METRIC. "
                 "Be direct and specific. Reference actual financial metrics, not generalities."
             )
-            user_prompt = f"{stock_line}\nChallenge the thesis and produce the risk-focused verdict."
+            user_prompt = (
+                f"{stock_line}\n"
+                + (f"\n{pe_instruction}\n" if pe_instruction else "")
+                + "Challenge the thesis and produce the risk-focused verdict."
+            )
         else:
             system_prompt = (
                 "You are a financial analyst specialising in Indian equities. "
@@ -261,7 +286,11 @@ class PlatformLLM:
                 "Be specific. Reference actual financial metrics provided. "
                 "Avoid generic phrases. Name specific events and numbers."
             )
-            user_prompt = f"{stock_line}\nIdentify the catalyst path and produce the timing verdict."
+            user_prompt = (
+                f"{stock_line}\n"
+                + (f"\n{pe_instruction}\n" if pe_instruction else "")
+                + "Identify the catalyst path and produce the timing verdict."
+            )
             try:
                 import openai
 
@@ -314,7 +343,7 @@ class PlatformLLM:
             model=self._fast_model,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            max_tokens=220,
+            max_tokens=300,
             temperature=0.35,
             cache_system=True,
         )
