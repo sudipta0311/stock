@@ -7,6 +7,7 @@ import io
 import json
 import sys
 import textwrap
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,7 @@ from stock_platform.agents.buy_agents import MINIMUM_RR_RATIO
 from stock_platform.services.engine import PlatformEngine
 from stock_platform.services.llm import PlatformLLM
 from stock_platform.utils.index_config import DEFAULT_INDEX, INDEX_UNIVERSE, SELECTABLE_INDICES
+from stock_platform.utils.pe_history_fetcher import prefetch_pe_history_for_universe
 from stock_platform.utils.sector_config import ELEVATED_GOVERNANCE_RISK
 from utils.entry_calculator import calculate_entry_levels
 
@@ -1180,6 +1182,17 @@ else:
 
 engine = get_engine(_user_key)
 DB_PATH = engine.config.db_path
+
+if not st.session_state.get("pe_prefetch_done"):
+    _universe_members = engine.provider.get_index_members("NIFTY200")
+    _universe_symbols = [m["symbol"] for m in _universe_members]
+    threading.Thread(
+        target=prefetch_pe_history_for_universe,
+        args=(_universe_symbols, str(DB_PATH)),
+        daemon=True,
+    ).start()
+    st.session_state["pe_prefetch_done"] = True
+
 render_pending_notice()
 snapshot = engine.get_dashboard_snapshot()
 persisted_comparison = snapshot.get("buy_comparison_result", {})
