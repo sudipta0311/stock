@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import json
 import re
-import sqlite3
 import time
 from datetime import date, datetime
 from typing import Any
 
 import requests
 from bs4 import BeautifulSoup
+
+from stock_platform.data.db import connect_database
 
 
 CACHE_TTL_DAYS = 7  # refresh PE history weekly
@@ -252,7 +253,7 @@ def _compute_stats(pe_values: list[float], source: str) -> dict[str, Any]:
 def _get_from_cache(symbol: str, db_path: str) -> dict[str, Any] | None:
     """Return cached PE history if still fresh (within CACHE_TTL_DAYS)."""
     try:
-        conn = sqlite3.connect(db_path)
+        conn = connect_database(db_path)
         row = conn.execute(
             "SELECT data, fetched_at FROM pe_history_cache WHERE symbol = ?",
             (symbol,),
@@ -262,34 +263,28 @@ def _get_from_cache(symbol: str, db_path: str) -> dict[str, Any] | None:
         if not row:
             return None
 
-        fetched = datetime.strptime(row[1], "%Y-%m-%d").date()
+        fetched = datetime.strptime(row["fetched_at"], "%Y-%m-%d").date()
         if (date.today() - fetched).days > CACHE_TTL_DAYS:
             print(f"PE cache stale for {symbol} ({(date.today() - fetched).days}d) — refreshing")
             return None
 
-        return json.loads(row[0])
+        return json.loads(row["data"])
 
     except Exception:
         return None
 
 
 def _save_to_cache(symbol: str, data: dict[str, Any], db_path: str) -> None:
-    """Upsert PE history into SQLite cache table."""
+    """Upsert PE history into the pe_history_cache table."""
     try:
-        conn = sqlite3.connect(db_path)
+        conn = connect_database(db_path)
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS pe_history_cache (
-                symbol     TEXT PRIMARY KEY,
-                data       TEXT,
-                fetched_at TEXT
-            )
-            """
-        )
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO pe_history_cache (symbol, data, fetched_at)
+            INSERT INTO pe_history_cache (symbol, data, fetched_at)
             VALUES (?, ?, ?)
+            ON CONFLICT(symbol) DO UPDATE SET
+                data       = excluded.data,
+                fetched_at = excluded.fetched_at
             """,
             (symbol, json.dumps(data), date.today().isoformat()),
         )

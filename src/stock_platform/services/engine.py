@@ -105,9 +105,7 @@ class PlatformEngine:
         ensure_data_dir(self.config)
         self.repo = PlatformRepository(
             Path(self.config.db_path),
-            turso_database_url=self.config.turso_database_url,
-            turso_auth_token=self.config.turso_auth_token,
-            turso_sync_interval_seconds=self.config.turso_sync_interval_seconds,
+            neon_database_url=self.config.neon_database_url,
         )
         self.repo.initialize()
         self.mf_holdings = MutualFundHoldingsClient(self.config, repo=self.repo)

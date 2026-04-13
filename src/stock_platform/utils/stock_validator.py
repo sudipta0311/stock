@@ -183,6 +183,8 @@ def log_skipped_stock(
     result: ValidationResult,
     run_id: str,
     *,
+    neon_database_url: str = "",
+    # Legacy Turso params — accepted for backward compat, not used.
     turso_database_url: str = "",
     turso_auth_token: str = "",
     turso_sync_interval_seconds: int | None = None,
@@ -191,20 +193,8 @@ def log_skipped_stock(
     try:
         with database_connection(
             db_path,
-            turso_url=turso_database_url,
-            turso_token=turso_auth_token,
-            sync_interval=turso_sync_interval_seconds,
+            neon_url=neon_database_url or None,
         ) as conn:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS skipped_stocks (
-                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                    run_id     TEXT    NOT NULL,
-                    symbol     TEXT    NOT NULL,
-                    status     TEXT    NOT NULL,
-                    reason     TEXT    NOT NULL,
-                    skipped_at TEXT    NOT NULL
-                )
-            """)
             conn.execute(
                 """
                 INSERT INTO skipped_stocks (run_id, symbol, status, reason, skipped_at)
@@ -227,6 +217,8 @@ def filter_valid_candidates(
     db_path: str,
     run_id: str,
     *,
+    neon_database_url: str = "",
+    # Legacy Turso params — accepted for backward compat, not used.
     turso_database_url: str = "",
     turso_auth_token: str = "",
     turso_sync_interval_seconds: int | None = None,
@@ -259,9 +251,7 @@ def filter_valid_candidates(
                 db_path,
                 result,
                 run_id,
-                turso_database_url=turso_database_url,
-                turso_auth_token=turso_auth_token,
-                turso_sync_interval_seconds=turso_sync_interval_seconds,
+                neon_database_url=neon_database_url,
             )
             print(f"SKIPPED {symbol}: {result.reason}")
 

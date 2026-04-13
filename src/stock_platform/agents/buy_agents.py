@@ -276,9 +276,7 @@ class BuyAgents:
                     str(self.config.db_path),
                     vr,
                     validation_run_id,
-                    turso_database_url=self.config.turso_database_url,
-                    turso_auth_token=self.config.turso_auth_token,
-                    turso_sync_interval_seconds=self.config.turso_sync_interval_seconds,
+                    neon_database_url=self.config.neon_database_url,
                 )
                 print(f"SKIPPED {candidate['symbol']}: {vr.reason}")
                 continue

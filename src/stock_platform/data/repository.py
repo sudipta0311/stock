@@ -16,22 +16,20 @@ class PlatformRepository:
         self,
         db_path: Path,
         *,
+        neon_database_url: str = "",
+        # Legacy Turso params — accepted for backward compat, not used.
         turso_database_url: str = "",
         turso_auth_token: str = "",
         turso_sync_interval_seconds: int | None = None,
     ) -> None:
         self.db_path = Path(db_path)
-        self.turso_database_url = turso_database_url
-        self.turso_auth_token = turso_auth_token
-        self.turso_sync_interval_seconds = turso_sync_interval_seconds
+        self.neon_database_url = neon_database_url
 
     @contextmanager
     def connect(self) -> Iterator[Any]:
         with database_connection(
             self.db_path,
-            turso_url=self.turso_database_url,
-            turso_token=self.turso_auth_token,
-            sync_interval=self.turso_sync_interval_seconds,
+            neon_url=self.neon_database_url or None,
         ) as connection:
             yield connection
 
