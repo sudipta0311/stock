@@ -34,6 +34,7 @@ class BuyState(TypedDict, total=False):
     scored_candidates: list[dict[str, Any]]
     risk_filtered_candidates: list[dict[str, Any]]
     shortlist: list[dict[str, Any]]
+    overlap_filtered: list[str]
     differentiated_shortlist: list[dict[str, Any]]
     timing_assessments: list[dict[str, Any]]
     allocations: list[dict[str, Any]]
