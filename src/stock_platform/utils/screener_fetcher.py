@@ -177,6 +177,74 @@ def _parse_debt_to_equity(soup: BeautifulSoup | None) -> float | None:
     return borrowings / equity
 
 
+def _parse_recent_results_from_soup(soup: BeautifulSoup | None) -> dict[str, Any]:
+    if soup is None:
+        return {}
+
+    quarters = soup.select("#quarters table tr")
+    if len(quarters) < 2:
+        return {}
+
+    header_cells = quarters[0].select("th, td")
+    quarter_names = [cell.get_text(" ", strip=True) for cell in header_cells[1:3]]
+    if len(quarter_names) < 2:
+        quarter_names = []
+
+    sales_row = None
+    for row in quarters[1:]:
+        first_cell = row.select_one("th, td")
+        label = first_cell.get_text(" ", strip=True).lower() if first_cell else ""
+        if "sales" in label or "revenue" in label:
+            sales_row = row
+            break
+
+    if sales_row is None:
+        return {}
+
+    cells = sales_row.select("td, th")
+    if len(cells) < 3:
+        return {}
+
+    latest = _clean_number(cells[1].get_text(" ", strip=True))
+    prev = _clean_number(cells[2].get_text(" ", strip=True))
+    if latest is None or prev is None:
+        return {}
+
+    growth = ((latest - prev) / prev * 100.0) if prev > 0 else 0.0
+    if growth > 30:
+        momentum = "STRONG"
+    elif growth > 15:
+        momentum = "GOOD"
+    elif growth > 5:
+        momentum = "MODERATE"
+    else:
+        momentum = "WEAK"
+
+    return {
+        "latest_quarter_revenue": latest,
+        "prev_quarter_revenue": prev,
+        "revenue_yoy_growth_pct": round(growth, 1),
+        "quarter_names": quarter_names,
+        "momentum": momentum,
+    }
+
+
+def fetch_recent_results(symbol: str) -> dict[str, Any]:
+    """
+    Fetch latest quarterly revenue trend so timing can override overly
+    conservative WAIT signals when momentum is clearly improving.
+    """
+    clean_symbol = resolve_symbol_base(normalize_input_symbol(symbol))
+    try:
+        soup = _fetch_soup(clean_symbol, consolidated=True)
+        if soup is None:
+            soup = _fetch_soup(clean_symbol, consolidated=False)
+        return _parse_recent_results_from_soup(soup)
+    except Exception as exc:
+        print(f"Recent results fetch error for {clean_symbol}: {exc}")
+        return {}
+
+
 def fetch_screener_data(nse_symbol: str) -> dict[str, Any]:
     """
     Fetch standardized Indian-equity fundamentals from Screener.in.
@@ -233,12 +301,23 @@ def fetch_screener_data(nse_symbol: str) -> dict[str, Any]:
         _get_ratio_value(consolidated_ratios, "50 DMA", "50D MA")
         or _get_ratio_value(standalone_ratios, "50 DMA", "50D MA")
     )
+    pe_5yr_median = (
+        _get_ratio_value(consolidated_ratios, "median pe", "p/e median", "pe median")
+        or _get_ratio_value(standalone_ratios, "median pe", "p/e median", "pe median")
+    )
+    pb_ratio = (
+        _get_ratio_value(consolidated_ratios, "price to book value", "p/b", "pb")
+        or _get_ratio_value(standalone_ratios, "price to book value", "p/b", "pb")
+    )
+    recent_results = _parse_recent_results_from_soup(consolidated_soup) or _parse_recent_results_from_soup(standalone_soup)
 
     result = {
         "roce_pct": roce_pct,
         "roe_pct": roe_pct,
         "debt_to_equity": debt_to_equity,
         "pe_ratio": pe_ratio,
+        "pe_5yr_median": pe_5yr_median,
+        "pb_ratio": pb_ratio,
         "eps": eps,
         "revenue_growth_pct": revenue_growth_pct,
         "promoter_holding": promoter_holding,
@@ -248,6 +327,7 @@ def fetch_screener_data(nse_symbol: str) -> dict[str, Any]:
         "current_price": current_price,
         "week52_high": week52_high,
         "week52_low": week52_low,
+        "recent_results": recent_results,
         "source": "screener.in",
         "symbol": clean_symbol,
         "resolved_symbol": resolve_nse_symbol(clean_symbol),
@@ -256,9 +336,84 @@ def fetch_screener_data(nse_symbol: str) -> dict[str, Any]:
     }
     print(
         f"Screener.in {clean_symbol}: ROCE={result['roce_pct']}%, "
-        f"D/E={result['debt_to_equity']}, PE={result['pe_ratio']}, EPS={result['eps']}"
+        f"D/E={result['debt_to_equity']}, PE={result['pe_ratio']}, "
+        f"PE5yrMedian={result['pe_5yr_median']}, EPS={result['eps']}"
     )
     return {key: value for key, value in result.items() if value is not None}
+
+
+def compute_pe_context(
+    symbol: str,
+    fin_data: dict[str, Any],
+    current_price: float,
+) -> dict[str, Any]:
+    """
+    Compute verified PE context from real screener data.
+    Prevents the LLM from estimating PE incorrectly.
+    Returns a dict with pe_current, pe_5yr_median, pe_assessment, pe_signal.
+    """
+    pe_current = fin_data.get("pe_ratio") or fin_data.get("Stock P/E")
+    pe_5yr_med = fin_data.get("pe_5yr_median")
+    eps = fin_data.get("eps") or fin_data.get("trailingEps")
+
+    # Derive PE from price/EPS if the ratio wasn't fetched directly
+    if not pe_current and eps and float(eps) > 0 and current_price and current_price > 0:
+        pe_current = round(float(current_price) / float(eps), 1)
+
+    if not pe_current:
+        return {
+            "pe_current": None,
+            "pe_5yr_median": None,
+            "pe_vs_median_pct": None,
+            "pe_assessment": "PE data unavailable",
+            "pe_signal": "NEUTRAL",
+        }
+
+    pe_current = float(pe_current)
+
+    if pe_5yr_med and float(pe_5yr_med) > 0:
+        pe_5yr_med = float(pe_5yr_med)
+        pe_vs_median_pct = round((pe_current - pe_5yr_med) / pe_5yr_med * 100, 1)
+    else:
+        pe_5yr_med = None
+        pe_vs_median_pct = None
+
+    if pe_vs_median_pct is not None:
+        if pe_vs_median_pct < -20:
+            pe_signal = "CHEAP_VS_HISTORY"
+            assessment = (
+                f"PE {pe_current:.1f}x is {abs(pe_vs_median_pct):.0f}% BELOW "
+                f"5-year median {pe_5yr_med:.1f}x — stock is CHEAP relative to own history"
+            )
+        elif pe_vs_median_pct < 0:
+            pe_signal = "FAIR_VS_HISTORY"
+            assessment = (
+                f"PE {pe_current:.1f}x is {abs(pe_vs_median_pct):.0f}% below "
+                f"5-year median {pe_5yr_med:.1f}x — fair value relative to own history"
+            )
+        elif pe_vs_median_pct < 20:
+            pe_signal = "SLIGHT_PREMIUM"
+            assessment = (
+                f"PE {pe_current:.1f}x is {pe_vs_median_pct:.0f}% above "
+                f"5-year median {pe_5yr_med:.1f}x — slight premium to own history"
+            )
+        else:
+            pe_signal = "EXPENSIVE_VS_HISTORY"
+            assessment = (
+                f"PE {pe_current:.1f}x is {pe_vs_median_pct:.0f}% ABOVE "
+                f"5-year median {pe_5yr_med:.1f}x — expensive relative to own history"
+            )
+    else:
+        pe_signal = "NEUTRAL"
+        assessment = f"PE {pe_current:.1f}x — no historical median available for comparison"
+
+    return {
+        "pe_current": pe_current,
+        "pe_5yr_median": pe_5yr_med,
+        "pe_vs_median_pct": pe_vs_median_pct,
+        "pe_assessment": assessment,
+        "pe_signal": pe_signal,
+    }
 
 
 def get_stock_fundamentals(symbol: str) -> dict[str, Any]:

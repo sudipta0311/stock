@@ -62,7 +62,7 @@ class MonitoringTaxLogicTests(unittest.TestCase):
             "quant_scores": [{"symbol": "KWIL", "quant_score": 0.84}],
         }
 
-        with patch("stock_platform.agents.monitor_agents.get_fresh_analyst_target", return_value=270.0):
+        with patch("stock_platform.agents.monitor_agents.fetch_analyst_consensus_target", return_value=270.0):
             result = agent.decide_actions(state)
         row = result["actions"][0]
 
@@ -143,7 +143,7 @@ class MonitoringTaxLogicTests(unittest.TestCase):
             "quant_scores": [{"symbol": "JIOFIN", "quant_score": 0.43}],
         }
 
-        with patch("stock_platform.agents.monitor_agents.get_fresh_analyst_target", return_value=138.0) as fresh:
+        with patch("stock_platform.agents.monitor_agents.fetch_analyst_consensus_target", return_value=138.0) as fresh:
             result = agent.decide_actions(state)
 
         row = result["actions"][0]
@@ -171,7 +171,7 @@ class MonitoringTaxLogicTests(unittest.TestCase):
             "quant_scores": [{"symbol": "ICICIBANK", "quant_score": 0.58}],
         }
 
-        with patch("stock_platform.agents.monitor_agents.get_fresh_analyst_target", return_value=1400.0):
+        with patch("stock_platform.agents.monitor_agents.fetch_analyst_consensus_target", return_value=1400.0):
             result = agent.decide_actions(state)
 
         row = result["actions"][0]

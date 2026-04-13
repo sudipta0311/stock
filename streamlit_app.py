@@ -948,10 +948,51 @@ def render_recommendation_card(
             f"Net Return {net_return}%",
         ]
         st.caption(" | ".join(summary_bits))
+        lock_in_warning = str(payload.get("lock_in_warning") or "")
+        if lock_in_warning:
+            st.error(f"Recently listed stock - {lock_in_warning}")
+        tariff_warning = str(payload.get("tariff_warning") or "")
+        if tariff_warning:
+            st.warning(f"US tariff risk: {tariff_warning}")
+        recent_results = payload.get("recent_results") or {}
+        momentum = str(recent_results.get("momentum") or "")
+        growth = recent_results.get("revenue_yoy_growth_pct")
+        if momentum:
+            momentum_level = {
+                "STRONG": "success",
+                "GOOD": "success",
+                "MODERATE": "warning",
+                "WEAK": "error",
+            }.get(momentum, "info")
+            message = (
+                f"Revenue momentum: {momentum}"
+                + (
+                    f" - {float(growth):.1f}% YoY growth (latest quarter)"
+                    if growth is not None
+                    else ""
+                )
+            )
+            getattr(st, momentum_level)(message)
+        if payload.get("momentum_override_applied"):
+            st.success(
+                f"Momentum override applied: base signal {payload.get('original_entry_signal', 'WAIT')} -> "
+                f"{payload.get('entry_signal', 'ACCUMULATE')}"
+            )
         if entry:
             st.markdown("**Entry Details**")
             render_entry_details(entry)
             entry = None
+
+        pe_ctx = payload.get("pe_context") or {}
+        if pe_ctx.get("pe_current") is not None:
+            _pe_color = {
+                "CHEAP_VS_HISTORY":     "success",
+                "FAIR_VS_HISTORY":      "success",
+                "SLIGHT_PREMIUM":       "warning",
+                "EXPENSIVE_VS_HISTORY": "error",
+                "NEUTRAL":              "info",
+            }.get(pe_ctx.get("pe_signal", "NEUTRAL"), "info")
+            getattr(st, _pe_color)(f"PE Context: {pe_ctx['pe_assessment']}")
 
         tech_signals = payload.get("technical_signals", [])
         if tech_signals:
