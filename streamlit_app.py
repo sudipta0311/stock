@@ -1293,6 +1293,23 @@ with tabs[0]:
         "See the current portfolio shape, sector gaps, and pipeline readiness before you drill into each workflow.",
     )
     st.info("Upload your statement in the **Portfolio** tab — your data is saved for your account. Then go to **Buy Ideas** and **Monitoring**.")
+
+    # ── DB backend status badge ───────────────────────────────────────────────
+    _neon_url_set = bool(engine.config.neon_database_url)
+    if _neon_url_set:
+        try:
+            import psycopg2 as _pg2  # noqa: F401
+            st.success("Database: **Neon PostgreSQL** — data persists across deployments.")
+        except ImportError:
+            st.warning(
+                "Database: **Local SQLite** — `psycopg2` not installed. "
+                "Add `psycopg2-binary` to requirements.txt to enable Neon."
+            )
+    else:
+        st.warning(
+            "Database: **Local SQLite** (ephemeral) — "
+            "add `NEON_DATABASE_URL` to Streamlit Cloud secrets to persist data."
+        )
     top_cols = st.columns([1.15, 0.85])
     with top_cols[0]:
         st.subheader("Portfolio Exposure")
