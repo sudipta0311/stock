@@ -15,7 +15,7 @@ import pandas as pd
 import requests
 import yfinance as yf
 
-from stock_platform.utils.index_config import NSE_INDEX_CSV_URLS
+from stock_platform.utils.index_config import NSE_INDEX_CSV_URLS, STATIC_INDEX_MEMBERS
 from stock_platform.utils.rules import clamp
 from stock_platform.utils.screener_fetcher import get_stock_fundamentals
 from stock_platform.utils.sector_config import get_sector
@@ -246,19 +246,33 @@ class LiveMarketDataProvider:
 
     def _fallback_index_members(self, index_name: str) -> list[dict[str, Any]]:
         """
-        Last-resort offline universe so the buy flow can still proceed when
-        NSE archive downloads are unavailable on hosted environments.
+        Last-resort offline universe — used when NSE archive downloads are
+        unavailable (e.g. Streamlit Cloud IP restrictions) and all caches are cold.
+
+        Uses STATIC_INDEX_MEMBERS (100 NIFTY50+NIFTYNEXT50 stocks with sectors)
+        so yfinance can still fetch real-time prices and compute live sector signals.
+        The member list is the only thing sourced from static data; all price data
+        comes from yfinance and is therefore real-time.
         """
-        from stock_platform.providers.demo import DemoDataProvider
-
-        demo = DemoDataProvider()
-        if index_name in demo.index_members:
-            return demo.get_index_members(index_name)
-
+        if index_name in STATIC_INDEX_MEMBERS:
+            return [
+                {
+                    "symbol": self.normalize_symbol(row["symbol"]),
+                    "company_name": row["company_name"],
+                    "sector": row["sector"],
+                }
+                for row in STATIC_INDEX_MEMBERS[index_name]
+            ]
+        # For broader indices (NIFTY100, NIFTY200, etc.) combine both base lists.
         combined: dict[str, dict[str, Any]] = {}
-        for fallback_index in ("NIFTY50", "NIFTYNEXT50"):
-            for row in demo.get_index_members(fallback_index):
-                combined.setdefault(row["symbol"], row)
+        for base in ("NIFTY50", "NIFTYNEXT50"):
+            for row in STATIC_INDEX_MEMBERS.get(base, []):
+                sym = self.normalize_symbol(row["symbol"])
+                combined.setdefault(sym, {
+                    "symbol": sym,
+                    "company_name": row["company_name"],
+                    "sector": row["sector"],
+                })
         return list(combined.values())
 
     def _combined_universe(self) -> list[dict[str, Any]]:
