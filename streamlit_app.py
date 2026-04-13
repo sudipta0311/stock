@@ -539,11 +539,21 @@ def get_engine(user_key: str = "local") -> PlatformEngine:
     user_key is the full sha256 hex digest of the user's Google email,
     or 'local' for single-user / unauthenticated mode.
     """
-    # Must run before AppConfig() is constructed — AppConfig reads env vars
-    # at instantiation time (frozen dataclass), so secrets.toml must already
-    # be loaded into os.environ or NEON_DATABASE_URL will be empty.
+    # Push ALL st.secrets into os.environ BEFORE AppConfig is constructed.
+    # AppConfig is a frozen dataclass — its fields read os.getenv() exactly
+    # once at instantiation time.  load_app_env() reads secrets.toml from disk,
+    # but st.secrets is the authoritative store on Streamlit Cloud and is
+    # always populated before any Python code runs.
+    import os as _os
+    try:
+        for _k, _v in st.secrets.items():
+            if isinstance(_v, str) and _k not in _os.environ:
+                _os.environ[_k] = _v
+    except Exception:
+        pass  # local dev without st.secrets configured — fall through to load_app_env
+
     from stock_platform.config import load_app_env
-    load_app_env()
+    load_app_env()  # picks up .env file and any remaining secrets from disk
 
     if user_key == "local":
         return PlatformEngine()
@@ -1300,17 +1310,34 @@ with tabs[0]:
     )
     st.info("Upload your statement in the **Portfolio** tab — your data is saved for your account. Then go to **Buy Ideas** and **Monitoring**.")
 
-    # ── DB backend status badge ───────────────────────────────────────────────
-    _neon_url_set = bool(engine.config.neon_database_url)
-    if _neon_url_set:
+    # ── DB backend status badge — probe actual connection dialect ─────────────
+    def _get_db_dialect() -> tuple[str, str]:
+        """Return (dialect, detail) by opening a real connection."""
         try:
-            import psycopg2 as _pg2  # noqa: F401
-            st.success("Database: **Neon PostgreSQL** — data persists across deployments.")
-        except ImportError:
-            st.warning(
-                "Database: **Local SQLite** — `psycopg2` not installed. "
-                "Add `psycopg2-binary` to requirements.txt to enable Neon."
+            from stock_platform.data.db import connect_database
+            _probe = connect_database(
+                engine.config.db_path,
+                neon_url=engine.config.neon_database_url or None,
             )
+            _d = getattr(_probe, "dialect", "sqlite")
+            try:
+                _probe.close()
+            except Exception:
+                pass
+            return _d, ""
+        except Exception as _e:
+            return "sqlite", str(_e)
+
+    _db_dialect, _db_err = _get_db_dialect()
+    if _db_dialect == "postgresql":
+        st.success("Database: **Neon PostgreSQL** — data persists across deployments.")
+    elif engine.config.neon_database_url:
+        # URL set but connection fell back to SQLite — show reason
+        _reason = _db_err or "psycopg2 import failed or connection refused"
+        st.warning(
+            f"Database: **Local SQLite** — Neon URL is set but connection failed: `{_reason}`. "
+            "Check `NEON_DATABASE_URL` in Streamlit Cloud secrets."
+        )
     else:
         st.warning(
             "Database: **Local SQLite** (ephemeral) — "
