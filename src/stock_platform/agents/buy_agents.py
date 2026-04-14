@@ -392,7 +392,7 @@ class BuyAgents:
                     "validation_reasoning": llm_result["reasoning"] if llm_result else "",
                 }
             )
-        if len(approved) < top_n and fallback_pool:
+        if len(approved) < target_pool_size and fallback_pool:
             used_symbols = {row["symbol"] for row in approved}
             fallback_pool.sort(
                 key=lambda row: (
@@ -402,7 +402,7 @@ class BuyAgents:
                 reverse=True,
             )
             for candidate in fallback_pool:
-                if len(approved) >= top_n:
+                if len(approved) >= target_pool_size:
                     break
                 if candidate["symbol"] in used_symbols:
                     continue
@@ -651,6 +651,7 @@ class BuyAgents:
                 symbol=item["symbol"],
                 current_pe=_current_pe,
                 db_path=str(self.config.db_path),
+                neon_database_url=self.config.neon_database_url,
             )
             llm_rationale = self.llm.buy_rationale(
                 item | {"pe_context": pe_context},
