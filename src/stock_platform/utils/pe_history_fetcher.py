@@ -350,6 +350,7 @@ def get_pe_historical_context(
     symbol: str,
     current_pe: float | None,
     db_path: str,
+    neon_database_url: str = "",
 ) -> dict[str, Any]:
     """
     Complete PE context computation with real-time history fetch.
@@ -365,7 +366,7 @@ def get_pe_historical_context(
             "pe_assessment": "PE data unavailable",
         }
 
-    history = get_pe_history(symbol, db_path, current_pe)
+    history = get_pe_history(symbol, db_path, current_pe, neon_database_url=neon_database_url)
 
     if not history or not history.get("median_5yr"):
         return {
