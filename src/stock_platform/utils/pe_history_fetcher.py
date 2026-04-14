@@ -253,26 +253,40 @@ def _compute_stats(pe_values: list[float], source: str) -> dict[str, Any]:
 
 def _get_from_cache(symbol: str, db_path: str, neon_database_url: str = "") -> dict[str, Any] | None:
     """Return cached PE history if still fresh (within CACHE_TTL_DAYS)."""
+    conn = None
     try:
         conn = connect_database(db_path, neon_url=neon_database_url or None)
         row = conn.execute(
             "SELECT data, fetched_at FROM pe_history_cache WHERE symbol = ?",
             (symbol,),
         ).fetchone()
-        conn.close()
 
         if not row:
             return None
 
-        fetched = datetime.strptime(row["fetched_at"], "%Y-%m-%d").date()
+        raw_date = row["fetched_at"]
+        if isinstance(raw_date, str):
+            fetched = datetime.strptime(raw_date, "%Y-%m-%d").date()
+        else:
+            fetched = raw_date  # psycopg2 may return a date object
+
         if (date.today() - fetched).days > CACHE_TTL_DAYS:
             print(f"PE cache stale for {symbol} ({(date.today() - fetched).days}d) - refreshing")
             return None
 
-        return json.loads(row["data"])
+        data = json.loads(row["data"])
+        print(f"PE cache hit for {symbol} (source: {data.get('source', '?')})")
+        return data
 
-    except Exception:
+    except Exception as exc:
+        print(f"PE cache read error for {symbol}: {exc!r}")
         return None
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def _save_to_cache(symbol: str, data: dict[str, Any], db_path: str, neon_database_url: str = "") -> None:
