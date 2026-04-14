@@ -21,6 +21,7 @@ def get_pe_history(
     symbol: str,
     db_path: str,
     current_pe: float | None = None,
+    neon_database_url: str = "",
 ) -> dict[str, Any]:
     """
     Fetch historical PE data for a stock.
@@ -32,7 +33,7 @@ def get_pe_history(
     """
     clean = symbol.upper().replace(".NS", "").replace(".BO", "")
 
-    cached = _get_from_cache(clean, db_path)
+    cached = _get_from_cache(clean, db_path, neon_database_url)
     if cached:
         return cached
 
@@ -43,7 +44,7 @@ def get_pe_history(
     )
 
     if result:
-        _save_to_cache(clean, result, db_path)
+        _save_to_cache(clean, result, db_path, neon_database_url)
         return result
 
     print(f"PE history: all sources failed for {clean}")
@@ -145,13 +146,13 @@ def _fetch_from_wisesheets(symbol: str) -> dict[str, Any]:
         )
 
         if mean_match:
-            result["median_10yr"] = float(mean_match.group(1))
+            result["median_10yr"] = float(mean_match.group(1).rstrip('.'))
         if median_match:
-            result["median_5yr"] = float(median_match.group(1))
+            result["median_5yr"] = float(median_match.group(1).rstrip('.'))
         if low_match:
-            result["pe_low"] = float(low_match.group(1))
+            result["pe_low"] = float(low_match.group(1).rstrip('.'))
         if high_match:
-            result["pe_high"] = float(high_match.group(1))
+            result["pe_high"] = float(high_match.group(1).rstrip('.'))
 
         if result.get("median_10yr") or result.get("median_5yr"):
             result["source"] = "wisesheets.io"
@@ -250,10 +251,10 @@ def _compute_stats(pe_values: list[float], source: str) -> dict[str, Any]:
 # SQLite CACHE
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _get_from_cache(symbol: str, db_path: str) -> dict[str, Any] | None:
+def _get_from_cache(symbol: str, db_path: str, neon_database_url: str = "") -> dict[str, Any] | None:
     """Return cached PE history if still fresh (within CACHE_TTL_DAYS)."""
     try:
-        conn = connect_database(db_path)
+        conn = connect_database(db_path, neon_url=neon_database_url or None)
         row = conn.execute(
             "SELECT data, fetched_at FROM pe_history_cache WHERE symbol = ?",
             (symbol,),
@@ -265,7 +266,7 @@ def _get_from_cache(symbol: str, db_path: str) -> dict[str, Any] | None:
 
         fetched = datetime.strptime(row["fetched_at"], "%Y-%m-%d").date()
         if (date.today() - fetched).days > CACHE_TTL_DAYS:
-            print(f"PE cache stale for {symbol} ({(date.today() - fetched).days}d) — refreshing")
+            print(f"PE cache stale for {symbol} ({(date.today() - fetched).days}d) - refreshing")
             return None
 
         return json.loads(row["data"])
@@ -274,10 +275,10 @@ def _get_from_cache(symbol: str, db_path: str) -> dict[str, Any] | None:
         return None
 
 
-def _save_to_cache(symbol: str, data: dict[str, Any], db_path: str) -> None:
+def _save_to_cache(symbol: str, data: dict[str, Any], db_path: str, neon_database_url: str = "") -> None:
     """Upsert PE history into the pe_history_cache table."""
     try:
-        conn = connect_database(db_path)
+        conn = connect_database(db_path, neon_url=neon_database_url or None)
         conn.execute(
             """
             INSERT INTO pe_history_cache (symbol, data, fetched_at)
@@ -301,24 +302,44 @@ def _save_to_cache(symbol: str, data: dict[str, Any], db_path: str) -> None:
 def prefetch_pe_history_for_universe(
     symbols: list[str],
     db_path: str,
-) -> None:
+    neon_database_url: str = "",
+) -> dict[str, int]:
     """
     Pre-fetch PE history for a list of stock symbols.
     Skips symbols that are already cached and fresh.
     Uses 500 ms inter-request delay to be polite to upstream servers.
-    Intended to run in a background thread on app startup.
+    Intended to run in a background thread.
+
+    Returns {"saved": N, "skipped": N, "failed": N} so callers can surface
+    the outcome — particularly to distinguish "all sources returned empty"
+    (network/scraping block) from actual successes.
     """
     print(f"Pre-fetching PE history for {len(symbols)} stocks...")
-    fetched = 0
+    saved = 0
+    skipped = 0
+    failed = 0
     for i, symbol in enumerate(symbols):
-        if _get_from_cache(symbol.upper().replace(".NS", "").replace(".BO", ""), db_path):
+        clean_symbol = symbol.upper().replace(".NS", "").replace(".BO", "")
+        if _get_from_cache(clean_symbol, db_path, neon_database_url):
+            skipped += 1
             continue
-        get_pe_history(symbol, db_path)
-        fetched += 1
-        if fetched % 10 == 0:
-            print(f"  PE pre-fetch: {fetched} fetched ({i + 1}/{len(symbols)} processed)")
+        result = get_pe_history(symbol, db_path, neon_database_url=neon_database_url)
+        if result:
+            saved += 1
+        else:
+            failed += 1
+        attempted = saved + failed
+        if attempted % 10 == 0:
+            print(
+                f"  PE pre-fetch: {saved} saved, {failed} failed "
+                f"({i + 1}/{len(symbols)} processed)"
+            )
         time.sleep(0.5)
-    print(f"PE history pre-fetch complete — {fetched} stocks fetched / {len(symbols)} total")
+    print(
+        f"PE history pre-fetch complete — "
+        f"{saved} saved / {failed} failed / {skipped} already cached / {len(symbols)} total"
+    )
+    return {"saved": saved, "skipped": skipped, "failed": failed}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
