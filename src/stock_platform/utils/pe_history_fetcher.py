@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 from datetime import date, datetime
@@ -10,6 +11,8 @@ import requests
 from bs4 import BeautifulSoup
 
 from stock_platform.data.db import connect_database
+
+_log = logging.getLogger(__name__)
 
 
 CACHE_TTL_DAYS = 7  # refresh PE history weekly
@@ -32,6 +35,7 @@ def get_pe_history(
     fetched_at — or empty dict if all sources fail.
     """
     clean = symbol.upper().replace(".NS", "").replace(".BO", "")
+    _log.warning("PE history lookup: symbol=%s neon=%s", clean, "YES" if neon_database_url else "NO")
 
     cached = _get_from_cache(clean, db_path, neon_database_url)
     if cached:
@@ -271,15 +275,15 @@ def _get_from_cache(symbol: str, db_path: str, neon_database_url: str = "") -> d
             fetched = raw_date  # psycopg2 may return a date object
 
         if (date.today() - fetched).days > CACHE_TTL_DAYS:
-            print(f"PE cache stale for {symbol} ({(date.today() - fetched).days}d) - refreshing")
+            _log.warning("PE cache stale for %s (%dd) - refreshing", symbol, (date.today() - fetched).days)
             return None
 
         data = json.loads(row["data"])
-        print(f"PE cache hit for {symbol} (source: {data.get('source', '?')})")
+        _log.warning("PE cache HIT for %s (source: %s, median_5yr: %s)", symbol, data.get("source", "?"), data.get("median_5yr"))
         return data
 
     except Exception as exc:
-        print(f"PE cache read error for {symbol}: {exc!r}")
+        _log.warning("PE cache READ ERROR for %s: %r", symbol, exc)
         return None
     finally:
         if conn is not None:
