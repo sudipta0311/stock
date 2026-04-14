@@ -46,7 +46,15 @@ except Exception:
 
 # Module-level state for the PE-cache background thread.
 # Threads write here; Streamlit reruns read it.  Dict mutation is GIL-safe.
-_PE_CACHE_JOB: dict[str, Any] = {"running": False, "done": False, "count": 0, "error": ""}
+# Guard: Streamlit re-executes the script on every rerun in the SAME globals
+# namespace.  Without the guard this line would reset the dict on every rerun,
+# losing the "running" state that the button handler just wrote.
+if "_PE_CACHE_JOB" not in globals():
+    _PE_CACHE_JOB: dict[str, Any] = {
+        "running": False, "done": False,
+        "count": 0, "saved": 0, "skipped": 0, "failed": 0,
+        "error": "",
+    }
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
@@ -1224,7 +1232,7 @@ if not st.session_state.get("pe_prefetch_done"):
     _universe_symbols = [m["symbol"] for m in _universe_members]
     threading.Thread(
         target=prefetch_pe_history_for_universe,
-        args=(_universe_symbols, str(DB_PATH)),
+        args=(_universe_symbols, str(DB_PATH), engine.config.neon_database_url),
         daemon=True,
     ).start()
     st.session_state["pe_prefetch_done"] = True
@@ -1434,12 +1442,28 @@ with tabs[0]:
             if _PE_CACHE_JOB["error"]:
                 st.warning(f"Refresh finished with error: {_PE_CACHE_JOB['error']}")
             else:
-                st.success(
-                    f"Refresh complete — {_PE_CACHE_JOB['count']} unique symbols "
-                    "cached across all indices."
-                )
+                _saved = _PE_CACHE_JOB.get("saved", 0)
+                _skipped = _PE_CACHE_JOB.get("skipped", 0)
+                _failed = _PE_CACHE_JOB.get("failed", 0)
+                if _saved == 0 and _failed > 0:
+                    st.warning(
+                        f"Refresh complete but **0 symbols were saved** — "
+                        f"{_failed} fetch attempts returned no data (all sources failed). "
+                        f"{_skipped} were already cached. "
+                        "Check Streamlit logs for per-symbol errors."
+                    )
+                else:
+                    st.success(
+                        f"Refresh complete — {_saved} saved, "
+                        f"{_skipped} already cached, {_failed} failed "
+                        f"(out of {_PE_CACHE_JOB['count']} unique symbols)."
+                    )
             if st.button("Refresh Again", key="pe_cache_refresh_again_btn", use_container_width=True):
-                _PE_CACHE_JOB.update({"running": False, "done": False, "count": 0, "error": ""})
+                _PE_CACHE_JOB.update({
+                    "running": False, "done": False,
+                    "count": 0, "saved": 0, "skipped": 0, "failed": 0,
+                    "error": "",
+                })
                 st.rerun()
         else:
             if st.button(
@@ -1459,16 +1483,21 @@ with tabs[0]:
                 _symbol_list = sorted(_all_symbols)
                 _PE_CACHE_JOB.update({"running": True, "done": False, "count": len(_symbol_list), "error": ""})
 
-                def _run_cache_refresh(symbols: list[str], db_path: str) -> None:
+                def _run_cache_refresh(symbols: list[str], db_path: str, neon_database_url: str) -> None:
                     try:
-                        prefetch_pe_history_for_universe(symbols, db_path)
-                        _PE_CACHE_JOB.update({"running": False, "done": True})
+                        stats = prefetch_pe_history_for_universe(symbols, db_path, neon_database_url)
+                        _PE_CACHE_JOB.update({
+                            "running": False, "done": True,
+                            "saved": stats["saved"],
+                            "skipped": stats["skipped"],
+                            "failed": stats["failed"],
+                        })
                     except Exception as exc:
                         _PE_CACHE_JOB.update({"running": False, "done": True, "error": str(exc)})
 
                 threading.Thread(
                     target=_run_cache_refresh,
-                    args=(_symbol_list, str(DB_PATH)),
+                    args=(_symbol_list, str(DB_PATH), engine.config.neon_database_url),
                     daemon=True,
                 ).start()
                 st.rerun()
