@@ -35,7 +35,6 @@ def get_pe_history(
     fetched_at — or empty dict if all sources fail.
     """
     clean = symbol.upper().replace(".NS", "").replace(".BO", "")
-    _log.warning("PE history lookup: symbol=%s neon=%s", clean, "YES" if neon_database_url else "NO")
 
     cached = _get_from_cache(clean, db_path, neon_database_url)
     if cached:
@@ -279,7 +278,6 @@ def _get_from_cache(symbol: str, db_path: str, neon_database_url: str = "") -> d
             return None
 
         data = json.loads(row["data"])
-        _log.warning("PE cache HIT for %s (source: %s, median_5yr: %s)", symbol, data.get("source", "?"), data.get("median_5yr"))
         return data
 
     except Exception as exc:
@@ -386,7 +384,10 @@ def get_pe_historical_context(
 
     history = get_pe_history(symbol, db_path, current_pe, neon_database_url=neon_database_url)
 
-    if not history or not history.get("median_5yr"):
+    # Use median_5yr if available, fall back to median_10yr (Wisesheets often only has the mean)
+    _median_val = history.get("median_5yr") or history.get("median_10yr") if history else None
+
+    if not history or not _median_val:
         return {
             "pe_current": current_pe,
             "pe_5yr_median": None,
@@ -401,7 +402,7 @@ def get_pe_historical_context(
             ),
         }
 
-    median = float(history["median_5yr"])
+    median = float(_median_val)
     pe_low = history.get("pe_low")
     pe_high = history.get("pe_high")
     source = history.get("source", "")
