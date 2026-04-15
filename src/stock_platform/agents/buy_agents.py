@@ -29,7 +29,7 @@ from stock_platform.utils.stock_validator import (
 from stock_platform.utils.technical_signals import compute_technical_signal
 
 
-MINIMUM_RR_RATIO = 1.5
+MINIMUM_RR_RATIO = 1.2
 SHORTLIST_BUFFER_MULTIPLIER = 8
 FINAL_BUFFER_MULTIPLIER = 6
 

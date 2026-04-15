@@ -38,8 +38,13 @@ def fetch_analyst_consensus_target(symbol: str, current_price: float) -> float:
     if current_price_value <= 0:
         return 0.0
 
-    min_valid_target = current_price_value * 0.7
+    # Require analyst target to be above current price — stale targets (below current
+    # after a market correction) fall through to the 15% fallback.
+    min_valid_target = current_price_value
     clean_symbol = str(symbol or "").upper().strip()
+
+    import logging
+    _log = logging.getLogger(__name__)
 
     try:
         from utils.screener_fetcher import fetch_screener_data
@@ -48,7 +53,7 @@ def fetch_analyst_consensus_target(symbol: str, current_price: float) -> float:
         target = data.get("target_price") or data.get("target_mean_price")
         target_value = _as_float(target)
         if target_value is not None and target_value > min_valid_target:
-            print(f"{clean_symbol} target from Screener: Rs.{target_value:.0f}")
+            _log.info("%s target from Screener: Rs.%.0f", clean_symbol, target_value)
             return float(target_value)
     except Exception:
         pass
@@ -61,18 +66,19 @@ def fetch_analyst_consensus_target(symbol: str, current_price: float) -> float:
         target = info.get("targetMeanPrice")
         target_value = _as_float(target)
         if target_value is not None and target_value > min_valid_target:
-            print(f"{clean_symbol} target from yfinance: Rs.{target_value:.0f}")
+            _log.info("%s target from yfinance: Rs.%.0f", clean_symbol, target_value)
             return float(target_value)
     except Exception:
         pass
 
     if clean_symbol in KNOWN_ANALYST_TARGETS:
         target_value = float(KNOWN_ANALYST_TARGETS[clean_symbol])
-        print(f"{clean_symbol} target from known targets: Rs.{target_value:.0f}")
-        return target_value
+        if target_value > min_valid_target:
+            _log.info("%s target from known targets: Rs.%.0f", clean_symbol, target_value)
+            return target_value
 
     fallback = current_price_value * 1.15
-    print(f"{clean_symbol}: no target found - using Rs.{fallback:.0f} (15% fallback)")
+    _log.info("%s: no valid target above current price - using Rs.%.0f (15%% fallback)", clean_symbol, fallback)
     return float(fallback)
 
 
