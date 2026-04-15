@@ -50,7 +50,7 @@ def get_pe_history(
         _save_to_cache(clean, result, db_path, neon_database_url)
         return result
 
-    print(f"PE history: all sources failed for {clean}")
+    _log.error("PE history: all sources failed for %s", clean)
     return {}
 
 
@@ -112,7 +112,7 @@ def _fetch_from_screener(symbol: str) -> dict[str, Any]:
         return {}
 
     except Exception as exc:
-        print(f"Screener PE history error for {symbol}: {exc}")
+        _log.error("Screener PE history error for %s: %r", symbol, exc)
         return {}
 
 
@@ -165,7 +165,7 @@ def _fetch_from_wisesheets(symbol: str) -> dict[str, Any]:
         return {}
 
     except Exception as exc:
-        print(f"Wisesheets PE error for {symbol}: {exc}")
+        _log.error("Wisesheets PE error for %s: %r", symbol, exc)
         return {}
 
 
@@ -175,8 +175,8 @@ def _fetch_from_wisesheets(symbol: str) -> dict[str, Any]:
 
 def _fetch_from_yfinance(symbol: str) -> dict[str, Any]:
     """
-    Compute historical PE from yfinance 5-year price history and quarterly earnings.
-    Less accurate than Screener but always available.
+    Compute historical PE from yfinance 5-year price history and quarterly income statement.
+    Uses income_stmt (Net Income + sharesOutstanding) instead of deprecated quarterly_earnings.
     """
     try:
         import yfinance as yf
@@ -185,23 +185,48 @@ def _fetch_from_yfinance(symbol: str) -> dict[str, Any]:
 
         hist = ticker.history(period="5y")
         if hist.empty:
+            _log.warning("yfinance PE: no price history for %s", symbol)
             return {}
 
-        earnings = ticker.quarterly_earnings
-        if earnings is None or earnings.empty:
+        # Use quarterly_income_stmt (Net Income row) — quarterly_earnings is deprecated
+        income = None
+        try:
+            income = ticker.quarterly_income_stmt
+        except Exception:
+            pass
+        if income is None or income.empty or "Net Income" not in income.index:
+            _log.warning("yfinance PE: no quarterly income stmt for %s", symbol)
             return {}
+
+        info = ticker.info or {}
+        shares = (
+            info.get("sharesOutstanding")
+            or info.get("impliedSharesOutstanding")
+            or info.get("floatShares")
+        )
+        if not shares or float(shares) <= 0:
+            _log.warning("yfinance PE: no shares outstanding for %s", symbol)
+            return {}
+
+        import pandas as pd
+
+        shares = float(shares)
+        net_income_series = income.loc["Net Income"]
 
         pe_values: list[float] = []
-        for idx, row in earnings.iterrows():
+        for dt, net_income in net_income_series.items():
             try:
-                eps_annual = float(row.get("Earnings", 0)) * 4
-                if eps_annual <= 0:
+                if pd.isna(net_income) or float(net_income) <= 0:
                     continue
-                date_str = str(idx)[:10]
+                annualized_ni = float(net_income) * 4
+                eps = annualized_ni / shares
+                if eps <= 0:
+                    continue
+                date_str = str(dt)[:10]
                 nearby = hist[hist.index.strftime("%Y-%m-%d") >= date_str].head(1)
                 if not nearby.empty:
                     price = float(nearby["Close"].iloc[0])
-                    pe = price / eps_annual
+                    pe = price / eps
                     if 0 < pe < 500:
                         pe_values.append(pe)
             except Exception:
@@ -210,10 +235,11 @@ def _fetch_from_yfinance(symbol: str) -> dict[str, Any]:
         if len(pe_values) >= 4:
             return _compute_stats(pe_values, "yfinance computed")
 
+        _log.warning("yfinance PE: insufficient PE data points (%d) for %s", len(pe_values), symbol)
         return {}
 
     except Exception as exc:
-        print(f"yfinance PE history error for {symbol}: {exc}")
+        _log.error("yfinance PE history error for %s: %r", symbol, exc)
         return {}
 
 
@@ -308,7 +334,7 @@ def _save_to_cache(symbol: str, data: dict[str, Any], db_path: str, neon_databas
         conn.commit()
         conn.close()
     except Exception as exc:
-        print(f"PE cache save error for {symbol}: {exc}")
+        _log.error("PE cache save error for %s: %r", symbol, exc)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -330,7 +356,7 @@ def prefetch_pe_history_for_universe(
     the outcome — particularly to distinguish "all sources returned empty"
     (network/scraping block) from actual successes.
     """
-    print(f"Pre-fetching PE history for {len(symbols)} stocks...")
+    _log.info("Pre-fetching PE history for %d stocks...", len(symbols))
     saved = 0
     skipped = 0
     failed = 0
@@ -346,14 +372,14 @@ def prefetch_pe_history_for_universe(
             failed += 1
         attempted = saved + failed
         if attempted % 10 == 0:
-            print(
-                f"  PE pre-fetch: {saved} saved, {failed} failed "
-                f"({i + 1}/{len(symbols)} processed)"
+            _log.info(
+                "PE pre-fetch: %d saved, %d failed (%d/%d processed)",
+                saved, failed, i + 1, len(symbols),
             )
         time.sleep(0.5)
-    print(
-        f"PE history pre-fetch complete — "
-        f"{saved} saved / {failed} failed / {skipped} already cached / {len(symbols)} total"
+    _log.info(
+        "PE history pre-fetch complete — %d saved / %d failed / %d already cached / %d total",
+        saved, failed, skipped, len(symbols),
     )
     return {"saved": saved, "skipped": skipped, "failed": failed}
 
