@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict
 from datetime import timedelta
 from typing import Any
 from uuid import uuid4
+
+_log = logging.getLogger(__name__)
 
 from stock_platform.config import AppConfig
 from stock_platform.models import RecommendationRecord
@@ -595,10 +598,15 @@ class BuyAgents:
 
         recommendations = []
         gov_skipped: list[dict] = []   # governance-blocked stocks collected during this loop
+        _log.info(
+            "finalize_recommendation: processing %d allocations for top_n=%d (band=%s)",
+            len(state["allocations"]), requested_top_n, confidence_band,
+        )
         for item in state["allocations"]:
             if len(recommendations) >= requested_top_n:
                 break
             if item["entry_signal"] == "DO NOT ENTER":
+                _log.info("SKIPPED %s: entry_signal=DO NOT ENTER", item["symbol"])
                 continue
             price_ctx = dict(item["price_context"])
             current_price = (
@@ -608,15 +616,27 @@ class BuyAgents:
                 or item.get("live_financials", {}).get("current_price")
                 or 0.0
             )
+            if not current_price or float(current_price) <= 0:
+                _log.warning(
+                    "SKIPPED %s: current_price=0 or missing — price_ctx=%s",
+                    item["symbol"], price_ctx,
+                )
+                gov_skipped.append({
+                    "symbol": item["symbol"],
+                    "status": "NO_PRICE",
+                    "resolved_symbol": item["symbol"],
+                    "reason": "current_price unavailable",
+                })
+                continue
             analyst_target = fetch_analyst_consensus_target(item["symbol"], current_price)
             price_ctx["analyst_target"] = analyst_target
             net_return_pct = compute_net_return(current_price, analyst_target, holding_months=24)
 
             # Hard gate: analyst target is at or below current price — never recommend.
             if net_return_pct is None or net_return_pct <= 0:
-                print(
-                    f"EXCLUDED {item['symbol']}: net_return={net_return_pct}% "
-                    f"— target below current price"
+                _log.warning(
+                    "EXCLUDED %s: net_return=%.1f%% — target=%.1f below current=%.1f",
+                    item["symbol"], net_return_pct or 0, analyst_target or 0, current_price,
                 )
                 gov_skipped.append({
                     "symbol": item["symbol"],
@@ -631,7 +651,7 @@ class BuyAgents:
             # Governance risk gate: Adani Group and peers need ≥10% net return.
             gov_blocked, gov_reason = governance_risk_blocks(item["symbol"], net_return_pct)
             if gov_blocked:
-                print(f"GOVERNANCE FILTER: {item['symbol']} excluded — {gov_reason}")
+                _log.warning("GOVERNANCE FILTER: %s excluded — %s", item["symbol"], gov_reason)
                 gov_skipped.append({
                     "symbol": item["symbol"],
                     "status": "GOVERNANCE_RISK",
@@ -658,7 +678,7 @@ class BuyAgents:
                 state["portfolio_context"],
             )
             if not llm_rationale:
-                print(f"LLM rationale unavailable for {item['symbol']} — proceeding without narrative")
+                _log.warning("LLM rationale unavailable for %s — proceeding without narrative", item["symbol"])
             rationale = llm_rationale or "[LLM analysis unavailable for this stock]"
             entry_levels = calculate_entry_levels(
                 symbol=item["symbol"],
@@ -686,10 +706,16 @@ class BuyAgents:
                 if entry_levels.get("tranche_1_pct") is not None:
                     entry_levels["tranche_1_pct"] = int(entry_levels["tranche_1_pct"] * 0.70)
             rr_value = float(entry_levels.get("risk_reward", 0) or 0)
+            _log.info(
+                "%s: signal=%s price=%.1f target=%.1f net_return=%.1f%% rr=%.1fx",
+                item["symbol"], item["entry_signal"], float(current_price),
+                float(analyst_target or 0), net_return_pct, rr_value,
+            )
             if rr_value < MINIMUM_RR_RATIO:
-                print(
-                    f"EXCLUDED {item['symbol']}: "
-                    f"R/R {rr_value}x below minimum {MINIMUM_RR_RATIO}x"
+                _log.warning(
+                    "EXCLUDED %s: R/R %.1fx below minimum %.1fx (price=%.1f target=%.1f signal=%s)",
+                    item["symbol"], rr_value, MINIMUM_RR_RATIO,
+                    float(current_price), float(analyst_target or 0), item["entry_signal"],
                 )
                 gov_skipped.append({
                     "symbol": item["symbol"],
@@ -755,9 +781,9 @@ class BuyAgents:
                 )
             )
         if len(recommendations) < requested_top_n:
-            print(
-                f"WARNING: Final recommendation count {len(recommendations)} below requested Top N "
-                f"{requested_top_n} after timing/governance filtering."
+            _log.warning(
+                "Final recommendation count %d below requested Top N %d after filtering.",
+                len(recommendations), requested_top_n,
             )
         self.repo.save_recommendations(run_id, recommendations)
         # Merge validation-gate skips (ValidationResult objects) + governance-filter skips (dicts).
