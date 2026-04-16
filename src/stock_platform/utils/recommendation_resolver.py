@@ -190,15 +190,18 @@ def run_consistency_checks(
             ),
         })
 
-    # 3. Impossible 52W price range
+    # 3. Impossible 52W price range (keys: week52_low / week52_high — no underscore between digits)
     try:
-        low_52w  = float(fin_data.get("week_52_low")  or 0)
-        high_52w = float(fin_data.get("week_52_high") or 0)
+        low_52w  = float(fin_data.get("week52_low")  or fin_data.get("fiftyTwoWeekLow")  or 0)
+        high_52w = float(fin_data.get("week52_high") or fin_data.get("fiftyTwoWeekHigh") or 0)
         if low_52w > 0 and high_52w > 0 and low_52w >= high_52w:
             failures.append({
                 "check": "impossible_52w_range",
                 "severity": "WARNING",
-                "message": f"52W low (₹{low_52w:,.0f}) ≥ 52W high (₹{high_52w:,.0f}) — data error.",
+                "message": (
+                    f"52W low (₹{low_52w:,.0f}) ≥ 52W high (₹{high_52w:,.0f}) — data corrupt. "
+                    "52W range signals suppressed."
+                ),
             })
     except (TypeError, ValueError):
         pass
