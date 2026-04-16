@@ -777,6 +777,9 @@ class LiveMarketDataProvider:
             "promoter_holding_pct": None if screener.get("promoter_holding") is None else screener["promoter_holding"] / 100.0,
             "promoter_holding": screener.get("promoter_holding"),
             "promoter_change": screener.get("promoter_change"),
+            "pledge_pct": screener.get("pledge_pct"),
+            "pledge_trend": screener.get("pledge_trend"),
+            "pledge_history": screener.get("pledge_history") or [],
             "dma_200": screener.get("dma_200"),
             "dma_50": screener.get("dma_50"),
             "negative_pat_quarters": None,
@@ -788,11 +791,15 @@ class LiveMarketDataProvider:
 
     def get_risk_metrics(self, symbol: str) -> dict[str, Any]:
         snapshot = self.get_stock_snapshot(symbol)
+        fin = self.get_financial_data(symbol)
         return {
             "symbol": snapshot["symbol"],
             "avg_daily_value_cr": snapshot.get("avg_daily_value_cr"),
             "beta": snapshot.get("beta"),
-            "promoter_pledge_pct": snapshot.get("promoter_pledge_pct"),
+            "promoter_pledge_pct": fin.get("pledge_pct"),
+            "pledge_pct": fin.get("pledge_pct"),
+            "pledge_trend": fin.get("pledge_trend"),
+            "pledge_history": fin.get("pledge_history") or [],
             "sebi_flag": snapshot.get("sebi_flag", False),
         }
 

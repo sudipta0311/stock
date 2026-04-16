@@ -682,6 +682,9 @@ class DemoDataProvider:
             "avg_daily_value_cr": info["avg_daily_value_cr"],
             "beta": info["beta"],
             "promoter_pledge_pct": info["promoter_pledge_pct"],
+            "pledge_pct": info["promoter_pledge_pct"],
+            "pledge_trend": "STABLE",
+            "pledge_history": [],
             "sebi_flag": info["sebi_flag"],
         }
 
