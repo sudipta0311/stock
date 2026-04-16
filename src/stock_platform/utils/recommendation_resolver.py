@@ -141,6 +141,93 @@ def extract_synthesis_verdict(synthesis_text: str) -> tuple[str, str]:
     return canonical, confidence
 
 
+# ── Signal reconciliation ────────────────────────────────────────────────────
+
+def reconcile_signals(quant_canonical: str, llm_canonical: str) -> dict[str, str | None]:
+    """
+    Compare quant canonical state vs the best available LLM canonical state
+    (synthesis > risk analyst > catalyst analyst, whichever was present).
+
+    Both inputs must already be mapped to the canonical order space.
+    Returns a dict used directly by the UI — no further computation needed.
+
+    status values:
+      ALIGNED           — gap == 0
+      MINOR_DIVERGENCE  — gap == 1 (one tier apart)
+      CONFLICT          — gap >= 2 (material disagreement)
+      NO_SYNTHESIS      — llm_canonical absent; nothing to compare
+      UNKNOWN           — unmapped state; skip display
+    """
+    if not llm_canonical:
+        return {"status": "NO_SYNTHESIS", "message": "", "badge_type": "info", "override": None}
+
+    q_rank = _CANONICAL_RANK.get(quant_canonical, 99)
+    l_rank = _CANONICAL_RANK.get(llm_canonical, 99)
+
+    if q_rank == 99 or l_rank == 99:
+        return {"status": "UNKNOWN", "message": "", "badge_type": "info", "override": None}
+
+    gap = abs(q_rank - l_rank)
+
+    if gap == 0:
+        return {
+            "status":     "ALIGNED",
+            "message":    f"Quant and LLM analysis agree: {quant_canonical}",
+            "badge_type": "success",
+            "override":   None,
+        }
+
+    if gap == 1:
+        if q_rank > l_rank:
+            return {
+                "status":     "MINOR_DIVERGENCE",
+                "message":    (
+                    f"Quant: {quant_canonical} | LLM: {llm_canonical} — "
+                    "minor gap. LLM adds qualitative caution; LLM verdict governs."
+                ),
+                "badge_type": "info",
+                "override":   "LLM_DEFERRED",
+            }
+        else:
+            return {
+                "status":     "MINOR_DIVERGENCE",
+                "message":    (
+                    f"Quant: {quant_canonical} | LLM: {llm_canonical} — "
+                    "minor gap. Quant factor scores are cautious; quant conservatism governs."
+                ),
+                "badge_type": "info",
+                "override":   "QUANT_DEFERRED",
+            }
+
+    # gap >= 2 — material conflict
+    if q_rank > l_rank:
+        return {
+            "status":     "CONFLICT",
+            "direction":  "QUANT_BULLISH_LLM_CAUTIOUS",
+            "message":    (
+                f"Quant: {quant_canonical} (factor scores) vs "
+                f"LLM: {llm_canonical} (qualitative analysis) — "
+                f"{gap}-tier gap. LLM identifies risks that downgrade the idea. "
+                "LLM verdict governs entry decision."
+            ),
+            "badge_type": "warning",
+            "override":   "LLM_VERDICT",
+        }
+    else:
+        return {
+            "status":     "CONFLICT",
+            "direction":  "LLM_BULLISH_QUANT_CAUTIOUS",
+            "message":    (
+                f"Quant: {quant_canonical} (factor scores) vs "
+                f"LLM: {llm_canonical} (qualitative analysis) — "
+                f"{gap}-tier gap. Factor scores are weak despite positive LLM view. "
+                "Quant conservatism governs."
+            ),
+            "badge_type": "warning",
+            "override":   "QUANT_VERDICT",
+        }
+
+
 # ── Consistency checks ────────────────────────────────────────────────────────
 
 def run_consistency_checks(
@@ -206,21 +293,9 @@ def run_consistency_checks(
     except (TypeError, ValueError):
         pass
 
-    # 4. Verdict mismatch — quant says bullish but synthesis says avoid/watchlist
-    quant_canon = _QUANT_ACTION_MAP.get(quant_action.upper(), "")
-    quant_rank  = _CANONICAL_RANK.get(quant_canon, 99)
-    synth_rank  = _CANONICAL_RANK.get(synthesis_canonical, 99)
-    if quant_rank >= _CANONICAL_RANK.get("ACCUMULATE GRADUALLY", 4) and synth_rank <= _CANONICAL_RANK.get("WATCHLIST", 1):
-        failures.append({
-            "check": "verdict_mismatch",
-            "severity": "WARNING",
-            "message": (
-                f"Quant signal is '{quant_action}' but synthesis says "
-                f"'{synthesis_canonical}' — narratives conflict."
-            ),
-        })
+    # (verdict_mismatch check removed — replaced by reconcile_signals() in resolver return)
 
-    # 5. Valuation reliability failure
+    # 4. Valuation reliability failure
     val_rel = (payload.get("val_reliability") or {}).get("label", "")
     if val_rel == "LOW":
         failures.append({
@@ -229,7 +304,7 @@ def run_consistency_checks(
             "message": "Valuation reliability is LOW — PE/target comparisons are unreliable for this sector.",
         })
 
-    # 6. Missing execution data
+    # 5. Missing execution data
     entry = payload.get("entry_levels") or {}
     if not entry or not entry.get("entry_price"):
         failures.append({
@@ -374,7 +449,13 @@ def resolve_final_recommendation(
     # ── 8. Upgrade trigger ───────────────────────────────────────────────────
     upgrade_trigger = _upgrade_trigger(canonical_state, consistency_failures, payload)
 
-    # ── 9. UI flags — derived from resolved state, drive renderer decisions ──
+    # ── 9. Signal reconciliation — quant vs best available LLM verdict ───────
+    # Compare against synthesis first; fall back to single-analyst verdict.
+    # Deliberately NOT compared against canonical_state (that's already the merged result).
+    _llm_for_reconcile = synthesis_canon or risk_canon or catalyst_canon or ""
+    reconciliation = reconcile_signals(quant_canon, _llm_for_reconcile)
+
+    # ── 10. UI flags — derived from resolved state, drive renderer decisions ──
     ui_flags = {
         "show_trade_plan":       actionability != "NON_ACTIONABLE",
         "show_target_table":     actionability != "NON_ACTIONABLE",
@@ -386,6 +467,13 @@ def resolve_final_recommendation(
             data_status == "STALE" and (confidence_level or "").upper() == "LOW"
         ),
     }
+
+    # final_verdict: the signal that governs the entry decision per reconciliation rules
+    _override = reconciliation.get("override")
+    if _override in (None, "LLM_DEFERRED", "LLM_VERDICT"):
+        final_verdict = _llm_for_reconcile or canonical_state
+    else:
+        final_verdict = quant_canon or canonical_state
 
     return {
         "canonical_state":       canonical_state,
@@ -399,6 +487,8 @@ def resolve_final_recommendation(
         "synthesis_stance":      synthesis_canon,
         "risk_verdict":          risk_canon,
         "catalyst_verdict":      catalyst_canon,
+        "reconciliation":        reconciliation,
+        "final_verdict":         final_verdict,
         "ui_flags":              ui_flags,
     }
 
@@ -418,8 +508,6 @@ def _upgrade_trigger(
             triggers.append("fresh financial data (< 30 days)")
         if "target_below_cmp" in fail_checks:
             triggers.append("analyst target above CMP")
-        if "verdict_mismatch" in fail_checks:
-            triggers.append("LLM analyst alignment")
         triggers.append("earnings catalyst or price dip to entry zone")
         return "Moves to ACCUMULATE ON DIPS when: " + "; ".join(triggers) + "."
     if canonical_state == "BUY ONLY AFTER CONFIRMATION":
