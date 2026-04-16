@@ -31,6 +31,7 @@ from stock_platform.utils.technical_signals import compute_technical_signal
 from stock_platform.utils.fii_dii_fetcher import fetch_fii_dii_sector_flow
 from stock_platform.utils.valuation_reliability import get_valuation_reliability
 from stock_platform.utils.evidence_scoring import compute_evidence_strength
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from stock_platform.utils.stock_context import (
     build_factual_snapshot,
     format_snapshot_for_prompt,
@@ -275,6 +276,15 @@ class BuyAgents:
         validation_run_id = f"val-{uuid4().hex[:8]}"
         scored: list[dict[str, Any]] = []
         skipped: list[ValidationResult] = []
+        # Parallel pre-fetch: warm the provider's in-memory financial cache before the serial scoring loop.
+        _all_syms = [c["symbol"] for c in state["candidates"]]
+        with ThreadPoolExecutor(max_workers=8) as _pex:
+            _pfuts = {_pex.submit(self.provider.get_financials, s): s for s in _all_syms}
+            for _pf in as_completed(_pfuts):
+                try:
+                    _pf.result()
+                except Exception as _pe:
+                    _log.debug("pre-fetch financials %s: %s", _pfuts[_pf], _pe)
         for candidate in state["candidates"]:
             live_facts = self.provider.get_financials(candidate["symbol"])
             current_price = live_facts.get("currentPrice") or live_facts.get("current_price")
@@ -627,14 +637,49 @@ class BuyAgents:
             _log.warning("FII/DII fetch failed: %s", _fii_exc)
 
         recommendations = []
-        gov_skipped: list[dict] = []   # governance-blocked stocks collected during this loop
+        gov_skipped: list[dict] = []
         _log.info(
             "finalize_recommendation: processing %d allocations for top_n=%d (band=%s)",
             len(state["allocations"]), requested_top_n, confidence_band,
         )
+
+        # ── Parallel pre-fetch: analyst consensus targets ─────────────────────
+        def _safe_item_price(it: dict[str, Any]) -> float:
+            pc = dict(it.get("price_context") or {})
+            return float(
+                pc.get("price") or it.get("current_price")
+                or it.get("live_financials", {}).get("currentPrice")
+                or it.get("live_financials", {}).get("current_price")
+                or 0.0
+            )
+
+        _analyst_cache: dict[str, float] = {}
+        _prefetch_items = [
+            (it["symbol"], _safe_item_price(it))
+            for it in state["allocations"]
+            if it.get("entry_signal") != "DO NOT ENTER"
+        ]
+        with ThreadPoolExecutor(max_workers=8) as _aex:
+            _afuts = {
+                _aex.submit(fetch_analyst_consensus_target, sym, price): sym
+                for sym, price in _prefetch_items if price > 0
+            }
+            for _af in as_completed(_afuts):
+                _asym = _afuts[_af]
+                try:
+                    _analyst_cache[_asym] = _af.result()
+                except Exception as _ae:
+                    _log.warning("analyst target pre-fetch %s: %s", _asym, _ae)
+
+        gaps_by_sector = {
+            g["sector"]: g
+            for g in state["portfolio_context"].get("identified_gaps", [])
+        }
+
+        # ── Phase 1: serial gate checks + context prep (no LLM calls) ─────────
+        _prepared: list[dict[str, Any]] = []
+
         for item in state["allocations"]:
-            if len(recommendations) >= requested_top_n:
-                break
             if item["entry_signal"] == "DO NOT ENTER":
                 _log.info("SKIPPED %s: entry_signal=DO NOT ENTER", item["symbol"])
                 continue
@@ -658,11 +703,10 @@ class BuyAgents:
                     "reason": "current_price unavailable",
                 })
                 continue
-            analyst_target = fetch_analyst_consensus_target(item["symbol"], current_price)
+            analyst_target = _analyst_cache.get(item["symbol"]) or fetch_analyst_consensus_target(item["symbol"], current_price)
             price_ctx["analyst_target"] = analyst_target
             net_return_pct = compute_net_return(current_price, analyst_target, holding_months=24)
 
-            # Hard gate: analyst target is at or below current price — never recommend.
             if net_return_pct is None or net_return_pct <= 0:
                 _log.warning(
                     "EXCLUDED %s: net_return=%.1f%% — target=%.1f below current=%.1f",
@@ -672,13 +716,10 @@ class BuyAgents:
                     "symbol": item["symbol"],
                     "status": "NEGATIVE_NET_RETURN",
                     "resolved_symbol": item["symbol"],
-                    "reason": (
-                        f"net_return={net_return_pct}% — analyst target is at or below current price"
-                    ),
+                    "reason": f"net_return={net_return_pct}% — analyst target is at or below current price",
                 })
                 continue
 
-            # Governance risk gate: Adani Group and peers need ≥10% net return.
             gov_blocked, gov_reason = governance_risk_blocks(item["symbol"], net_return_pct)
             if gov_blocked:
                 _log.warning("GOVERNANCE FILTER: %s excluded — %s", item["symbol"], gov_reason)
@@ -703,8 +744,6 @@ class BuyAgents:
                 db_path=str(self.config.db_path),
                 neon_database_url=self.config.neon_database_url,
             )
-
-            # ── Valuation reliability ────────────────────────────────────────
             val_reliability = get_valuation_reliability(
                 symbol=item["symbol"],
                 sector=item.get("sector", ""),
@@ -713,7 +752,6 @@ class BuyAgents:
                 years_listed=int(fin_data.get("years_listed") or 5),
             )
 
-            # ── Tech signals dict for snapshot / evidence ────────────────────
             _w52_low = fin_data.get("week52_low") or fin_data.get("fiftyTwoWeekLow")
             _pct_from_low: float | None = None
             try:
@@ -733,10 +771,7 @@ class BuyAgents:
             except (TypeError, ValueError):
                 pass
 
-            # ── Sector signal for evidence scoring ───────────────────────────
             sector_signal_row = unified_by_sector.get(item.get("sector", ""), {})
-
-            # ── Evidence strength ────────────────────────────────────────────
             evidence = compute_evidence_strength(
                 fin_data=fin_data,
                 pe_context=pe_context,
@@ -758,11 +793,6 @@ class BuyAgents:
                 })
                 continue
 
-            # ── Factual snapshot ─────────────────────────────────────────────
-            gaps_by_sector = {
-                g["sector"]: g
-                for g in state["portfolio_context"].get("identified_gaps", [])
-            }
             sector_gap_row = gaps_by_sector.get(item.get("sector", ""), {})
             _snap = build_factual_snapshot(
                 symbol=item["symbol"],
@@ -778,9 +808,6 @@ class BuyAgents:
             _snap["val_reliability_flags"] = val_reliability["flags"]
             snapshot_text = format_snapshot_for_prompt(_snap)
 
-            # ── Target source label ──────────────────────────────────────────
-            # Determine whether analyst_target came from a real source or the
-            # 15% flat fallback.  Used for UI display caveat in improvement 6.
             _is_fallback = (
                 analyst_target > 0
                 and current_price > 0
@@ -794,21 +821,7 @@ class BuyAgents:
             else:
                 target_source_label = "screener/broker data"
 
-            llm_rationale = self.llm.buy_rationale(
-                item | {
-                    "pe_context":           pe_context,
-                    "val_reliability":      val_reliability,
-                    "evidence":             evidence,
-                    "factual_snapshot_text": snapshot_text,
-                    "target_source_label":  target_source_label,
-                    "analyst_target":       analyst_target,
-                    "macro_flow":           macro_flow,
-                },
-                state["portfolio_context"],
-            )
-            if not llm_rationale:
-                _log.warning("LLM rationale unavailable for %s — proceeding without narrative", item["symbol"])
-            rationale = llm_rationale or "[LLM analysis unavailable for this stock]"
+            # Compute entry levels and R/R before LLM to avoid wasted LLM calls.
             entry_levels = calculate_entry_levels(
                 symbol=item["symbol"],
                 current_price=current_price,
@@ -854,6 +867,65 @@ class BuyAgents:
                 })
                 continue
 
+            _prepared.append({
+                "item": item,
+                "current_price": current_price,
+                "analyst_target": analyst_target,
+                "net_return_pct": net_return_pct,
+                "fin_data": fin_data,
+                "pe_context": pe_context,
+                "val_reliability": val_reliability,
+                "evidence": evidence,
+                "snapshot_text": snapshot_text,
+                "target_source_label": target_source_label,
+                "entry_levels": entry_levels,
+                "tariff_signal": tariff_signal,
+                "tariff_warning": tariff_warning,
+                "initial_tranche_pct": initial_tranche_pct,
+                "initial_amount_inr": initial_amount_inr,
+                "allocation_pct": allocation_pct,
+                "allocation_amount": allocation_amount,
+                "rr_value": rr_value,
+            })
+
+        # ── Phase 2: parallel LLM calls ───────────────────────────────────────
+        def _call_rationale(prep: dict[str, Any]) -> str | None:
+            it = prep["item"]
+            return self.llm.buy_rationale(
+                it | {
+                    "pe_context":            prep["pe_context"],
+                    "val_reliability":       prep["val_reliability"],
+                    "evidence":              prep["evidence"],
+                    "factual_snapshot_text": prep["snapshot_text"],
+                    "target_source_label":   prep["target_source_label"],
+                    "analyst_target":        prep["analyst_target"],
+                    "macro_flow":            macro_flow,
+                },
+                state["portfolio_context"],
+            )
+
+        _llm_results: list[str | None] = [None] * len(_prepared)
+        if _prepared:
+            with ThreadPoolExecutor(max_workers=min(4, len(_prepared))) as _lex:
+                _lfuts = {_lex.submit(_call_rationale, p): i for i, p in enumerate(_prepared)}
+                for _lf in as_completed(_lfuts):
+                    _lidx = _lfuts[_lf]
+                    try:
+                        _llm_results[_lidx] = _lf.result()
+                    except Exception as _le:
+                        _log.warning(
+                            "LLM rationale error for %s: %s",
+                            _prepared[_lidx]["item"]["symbol"], _le,
+                        )
+
+        # ── Phase 3: serial assembly ───────────────────────────────────────────
+        for prep, llm_rationale in zip(_prepared, _llm_results):
+            if len(recommendations) >= requested_top_n:
+                break
+            item = prep["item"]
+            if not llm_rationale:
+                _log.warning("LLM rationale unavailable for %s — proceeding without narrative", item["symbol"])
+            rationale = llm_rationale or "[LLM analysis unavailable for this stock]"
             lock_in_check = item.get("lock_in_check") or {}
             payload = {
                 "investment_thesis": f"{item['sector']} benefits from current signal stack and fills a real portfolio gap.",
@@ -865,27 +937,26 @@ class BuyAgents:
                 "recent_results": item.get("recent_results") or {},
                 "momentum_override_applied": bool(item.get("momentum_override_applied")),
                 "tranche_schedule": f"{item['tranches']} tranches over 4-8 weeks",
-                # Position sizing - initial tranche (deploy now) and full target separately.
-                "initial_tranche_pct": initial_tranche_pct,
+                "initial_tranche_pct": prep["initial_tranche_pct"],
                 "target_pct": item["target_pct"],
-                "initial_amount_inr": initial_amount_inr,
+                "initial_amount_inr": prep["initial_amount_inr"],
                 "target_amount_inr": item["target_amount_inr"],
-                "current_price": round(float(current_price), 2) if current_price else None,
-                "analyst_target": round(float(analyst_target), 2) if analyst_target else None,
-                "fin_data": fin_data,
-                "entry_levels": entry_levels,
+                "current_price": round(float(prep["current_price"]), 2) if prep["current_price"] else None,
+                "analyst_target": round(float(prep["analyst_target"]), 2) if prep["analyst_target"] else None,
+                "fin_data": prep["fin_data"],
+                "entry_levels": prep["entry_levels"],
                 # Legacy key kept for backward compatibility with stored recommendations.
-                "allocation_pct": allocation_pct,
-                "allocation_amount": allocation_amount,
+                "allocation_pct": prep["allocation_pct"],
+                "allocation_amount": prep["allocation_amount"],
                 "quality_score": item["quality_score"],
                 "technical_signals": item.get("technical_signals", []),
                 "technical_score": item.get("technical_score"),
-                "pe_context": pe_context,
-                "tariff_signal": tariff_signal,
-                "tariff_warning": tariff_warning,
-                "net_of_tax_return_pct": net_return_pct,
+                "pe_context": prep["pe_context"],
+                "tariff_signal": prep["tariff_signal"],
+                "tariff_warning": prep["tariff_warning"],
+                "net_of_tax_return_pct": prep["net_return_pct"],
                 # Legacy key for backward compat.
-                "net_of_tax_return_projection": round(net_return_pct / 100, 4),
+                "net_of_tax_return_projection": round(prep["net_return_pct"] / 100, 4),
                 "confidence_band": confidence_band,
                 "headline": item["news"]["headline"],
                 "validation_reasoning": item.get("validation_reasoning", ""),
@@ -896,11 +967,10 @@ class BuyAgents:
                 "lock_in_recommendation": lock_in_check.get("recommendation"),
                 "lock_in_multiplier": item.get("lock_in_multiplier", 1.0),
                 "llm_used": bool(llm_rationale),
-                # ── Improvement 4-6 additions ──────────────────────────────
-                "val_reliability":       val_reliability,
-                "evidence":              evidence,
-                "factual_snapshot_text": snapshot_text,
-                "target_source_label":   target_source_label,
+                "val_reliability":       prep["val_reliability"],
+                "evidence":              prep["evidence"],
+                "factual_snapshot_text": prep["snapshot_text"],
+                "target_source_label":   prep["target_source_label"],
                 "macro_flow":            macro_flow,
             }
             recommendations.append(
