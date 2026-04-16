@@ -342,6 +342,7 @@ class PlatformEngine:
                     agreement_type=agreement_type,
                     factual_snapshot=_payload.get("factual_snapshot_text", ""),
                     entry_data=_entry_data,
+                    macro_flow=_payload.get("macro_flow"),
                 )
                 if synthesis:
                     synthesis_map[symbol] = _append_entry_summary(synthesis, base_rec)

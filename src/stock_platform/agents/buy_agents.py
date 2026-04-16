@@ -28,6 +28,7 @@ from stock_platform.utils.stock_validator import (
     validate_stock,
 )
 from stock_platform.utils.technical_signals import compute_technical_signal
+from stock_platform.utils.fii_dii_fetcher import fetch_fii_dii_sector_flow
 from stock_platform.utils.valuation_reliability import get_valuation_reliability
 from stock_platform.utils.evidence_scoring import compute_evidence_strength
 from stock_platform.utils.stock_context import (
@@ -611,6 +612,18 @@ class BuyAgents:
                 },
             }
 
+        # Fetch FII/DII macro flow once per run — cached for 24h in SQLite.
+        try:
+            macro_flow = fetch_fii_dii_sector_flow()
+            _log.info(
+                "FII/DII macro flow: signal=%s FII=%.0fCr DII=%.0fCr (source=%s)",
+                macro_flow.get("flow_signal"), macro_flow.get("fii_net_5d_cr") or 0,
+                macro_flow.get("dii_net_5d_cr") or 0, macro_flow.get("source"),
+            )
+        except Exception as _fii_exc:
+            macro_flow = {"flow_signal": "UNKNOWN", "source": "unavailable", "error": str(_fii_exc)}
+            _log.warning("FII/DII fetch failed: %s", _fii_exc)
+
         recommendations = []
         gov_skipped: list[dict] = []   # governance-blocked stocks collected during this loop
         _log.info(
@@ -787,6 +800,7 @@ class BuyAgents:
                     "factual_snapshot_text": snapshot_text,
                     "target_source_label":  target_source_label,
                     "analyst_target":       analyst_target,
+                    "macro_flow":           macro_flow,
                 },
                 state["portfolio_context"],
             )
@@ -885,6 +899,7 @@ class BuyAgents:
                 "evidence":              evidence,
                 "factual_snapshot_text": snapshot_text,
                 "target_source_label":   target_source_label,
+                "macro_flow":            macro_flow,
             }
             recommendations.append(
                 RecommendationRecord(
