@@ -2083,15 +2083,21 @@ with tabs[2]:
                     agree_tag = "Catalyst analyst only — risk analyst disagrees"
                     agree_color = "#8e44ad"
                 _conf_tag = f" · {synth_conf} confidence" if synth_conf else ""
-                label = (
-                    f"**{symbol}** — "
+                # st.expander doesn't support HTML — render the styled header
+                # with unsafe_allow_html, then put content in a plain expander.
+                st.markdown(
+                    f'<div style="margin:6px 0 2px 0;">'
+                    f'<strong>{_html.escape(symbol)}</strong>'
+                    f' &mdash; '
                     f'<span style="background:{_sv_color};color:#fff;padding:2px 8px;'
                     f'border-radius:3px;font-size:12px;font-weight:600;">'
-                    f'{synth_canon or "—"}</span> '
-                    f'<span style="color:{agree_color};font-size:12px;">'
-                    f'{agree_tag}{_conf_tag}</span>'
+                    f'{_html.escape(synth_canon or "-")}</span>'
+                    f'&ensp;<span style="color:{agree_color};font-size:12px;">'
+                    f'{_html.escape(agree_tag)}{_html.escape(_conf_tag)}</span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
                 )
-                with st.expander(label, expanded=True):
+                with st.expander("Show full synthesis", expanded=True):
                     render_synthesis_with_entry_summary(synthesis_text)
                     if symbol.upper().replace(".NS", "") in ELEVATED_GOVERNANCE_RISK:
                         st.caption(
