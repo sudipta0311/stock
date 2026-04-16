@@ -43,26 +43,45 @@ SHORTLIST_BUFFER_MULTIPLIER = 8
 FINAL_BUFFER_MULTIPLIER = 6
 
 
+def _quality_sort_key(candidate: dict[str, Any]) -> float:
+    """Quality-focused sort for the Anthropic (bear-biased risk analyst) candidate pool.
+    Prioritises ROCE, low leverage, and overall fundamental quality score."""
+    fin = candidate.get("financials") or candidate.get("live_financials") or {}
+    roce = float(fin.get("roce_pct") or 0)
+    debt = max(float(fin.get("debt_to_equity") or fin.get("debtToEquity") or 1), 0.01)
+    qs   = float(candidate.get("quality_score") or 0)
+    return roce * 0.40 + qs * 0.30 + (1.0 / debt) * 0.30
+
+
+def _momentum_sort_key(candidate: dict[str, Any]) -> float:
+    """Momentum/catalyst-focused sort for the OpenAI (bull-biased catalyst analyst) pool.
+    Prioritises revenue growth, technical momentum score, and entry timing."""
+    fin        = candidate.get("financials") or candidate.get("live_financials") or {}
+    rev_growth = float(fin.get("revenue_growth_pct") or 0)
+    tech_score = float(candidate.get("technical_score") or 0)
+    sel_score  = float(candidate.get("selection_score") or 0)
+    return rev_growth * 0.40 + tech_score * 0.35 + sel_score * 0.25
+
+
 def get_top_n_with_replacement(
     scored_candidates: list[dict[str, Any]],
     n: int,
     skipped_symbols: list[str],
     db_path: str,
+    sort_key=None,
 ) -> list[dict[str, Any]]:
     """
     Keep fetching the next-best validated candidates until we have N rows
     or exhaust the candidate list.
+    sort_key: optional callable(candidate)->float; defaults to selection_score.
     """
     from stock_platform.utils.screener_fetcher import fetch_screener_data
 
     recommendations: list[dict[str, Any]] = []
     attempted = {str(symbol).upper() for symbol in skipped_symbols}
 
-    sorted_candidates = sorted(
-        scored_candidates,
-        key=lambda row: row.get("selection_score", row.get("quality_score", 0)),
-        reverse=True,
-    )
+    _key = sort_key or (lambda row: row.get("selection_score", row.get("quality_score", 0)))
+    sorted_candidates = sorted(scored_candidates, key=_key, reverse=True)
 
     for candidate in sorted_candidates:
         if len(recommendations) >= n:
@@ -360,11 +379,18 @@ class BuyAgents:
     def shortlist(self, state: dict[str, Any]) -> dict[str, Any]:
         top_n = int(state["request"]["top_n"])
         skipped_symbols = [result.symbol for result in state.get("skipped_candidates", [])]
+        # Each model gets a pool ordered by its own analytical lens so genuine
+        # divergence can surface: Anthropic (risk/quality) vs OpenAI (momentum/catalyst).
+        sort_key = (
+            _momentum_sort_key if self.llm.provider == "openai"
+            else _quality_sort_key
+        )
         shortlist = get_top_n_with_replacement(
             state["risk_filtered_candidates"],
             max(top_n * SHORTLIST_BUFFER_MULTIPLIER, top_n),
             skipped_symbols,
             str(self.config.db_path),
+            sort_key=sort_key,
         )
         return {"shortlist": shortlist}
 
