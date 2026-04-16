@@ -6,7 +6,7 @@ import io
 import json
 import time
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from statistics import median
 from typing import Any
@@ -24,6 +24,45 @@ from stock_platform.utils.symbol_resolver import get_symbol_display_name, resolv
 # Disk-cache directory for index constituents (7-day TTL — indices rebalance monthly).
 _INDEX_CACHE_DIR = Path(__file__).resolve().parents[3] / "data" / "index_constituents"
 _INDEX_CACHE_TTL_DAYS = 7
+
+
+def _fetch_last_result_date(symbol: str) -> dict[str, Any]:
+    """
+    Three-source fallback to resolve the most recent quarterly result date for NSE stocks.
+    yfinance mostRecentQuarter -> quarterly_financials columns -> quarterly_income_stmt columns.
+    Returns {"result_date": "YYYY-MM-DD", "source": "<name>"} or result_date=None on full failure.
+    """
+    ticker_sym = f"{symbol}.NS"
+    t = yf.Ticker(ticker_sym)
+
+    # Source 1: mostRecentQuarter (Unix timestamp in ticker.info)
+    try:
+        mrq = t.info.get("mostRecentQuarter")
+        if mrq and int(mrq) > 0:
+            dt = datetime.fromtimestamp(int(mrq)).strftime("%Y-%m-%d")
+            return {"result_date": dt, "source": "yfinance_mrq"}
+    except Exception:
+        pass
+
+    # Source 2: quarterly_financials column index (most recent = columns[0])
+    try:
+        qf = t.quarterly_financials
+        if qf is not None and not qf.empty:
+            dt = pd.Timestamp(qf.columns[0]).strftime("%Y-%m-%d")
+            return {"result_date": dt, "source": "yfinance_quarterly"}
+    except Exception:
+        pass
+
+    # Source 3: quarterly_income_stmt column index
+    try:
+        qi = t.quarterly_income_stmt
+        if qi is not None and not qi.empty:
+            dt = pd.Timestamp(qi.columns[0]).strftime("%Y-%m-%d")
+            return {"result_date": dt, "source": "yfinance_income_stmt"}
+    except Exception:
+        pass
+
+    return {"result_date": None, "source": "unavailable"}
 
 
 class LiveMarketDataProvider:
@@ -784,6 +823,21 @@ class LiveMarketDataProvider:
             "dma_50": screener.get("dma_50"),
             "negative_pat_quarters": None,
         }
+
+        # Populate last_result_date via three-source yfinance fallback.
+        _rdate_info = _fetch_last_result_date(normalized)
+        _rdate = _rdate_info.get("result_date")
+        result["last_result_date"] = _rdate
+        result["result_date_source"] = _rdate_info.get("source")
+        if _rdate:
+            _days_stale = (date.today() - datetime.strptime(_rdate, "%Y-%m-%d").date()).days
+            result["result_days_stale"] = _days_stale
+            result["result_freshness"] = (
+                "FRESH"      if _days_stale <= 45  else
+                "RECENT"     if _days_stale <= 90  else
+                "STALE"      if _days_stale <= 180 else
+                "VERY_STALE"
+            )
 
         filtered = {key: value for key, value in result.items() if value is not None}
         self._financial_cache[normalized] = filtered
