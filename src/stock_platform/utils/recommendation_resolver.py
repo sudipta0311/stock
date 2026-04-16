@@ -8,6 +8,7 @@ the UI.  No LLM calls — pure deterministic logic.
 from __future__ import annotations
 
 import re
+from datetime import date as _date
 from typing import Any
 
 
@@ -228,6 +229,47 @@ def reconcile_signals(quant_canonical: str, llm_canonical: str) -> dict[str, str
         }
 
 
+# ── Data freshness scoring ────────────────────────────────────────────────────
+
+def compute_data_freshness_score(
+    last_result_date: str,
+    snapshot_date: str | None = None,
+) -> dict[str, Any]:
+    """
+    Returns a freshness multiplier (0.0-1.0) that scales confidence.
+    Plugs into final confidence calculation in resolve_final_recommendation().
+
+    snapshot_date defaults to today when omitted.
+    """
+    today_str = snapshot_date or _date.today().strftime("%Y-%m-%d")
+
+    if not last_result_date or str(last_result_date).lower() in ("none", "unknown", ""):
+        return {
+            "freshness_score": 0.0,
+            "days_stale": None,
+            "label": "NO_RESULT_DATE",
+            "confidence_cap": "LOW",
+        }
+
+    try:
+        from datetime import datetime
+        result_dt   = datetime.strptime(str(last_result_date), "%Y-%m-%d")
+        snapshot_dt = datetime.strptime(today_str, "%Y-%m-%d")
+        days_stale  = (snapshot_dt - result_dt).days
+    except Exception:
+        return {"freshness_score": 0.3, "days_stale": None, "label": "PARSE_ERROR", "confidence_cap": "LOW"}
+
+    if days_stale <= 30:
+        return {"freshness_score": 1.0,  "days_stale": days_stale, "label": "FRESH",      "confidence_cap": "HIGH"}
+    elif days_stale <= 60:
+        return {"freshness_score": 0.75, "days_stale": days_stale, "label": "ACCEPTABLE",  "confidence_cap": "MEDIUM"}
+    elif days_stale <= 90:
+        return {"freshness_score": 0.5,  "days_stale": days_stale, "label": "STALE",       "confidence_cap": "LOW"}
+    else:
+        return {"freshness_score": 0.2,  "days_stale": days_stale, "label": "VERY_STALE",  "confidence_cap": "LOW",
+                "force_watchlist": True}
+
+
 # ── Consistency checks ────────────────────────────────────────────────────────
 
 def run_consistency_checks(
@@ -381,20 +423,43 @@ def resolve_final_recommendation(
         if _rank(canonical_state) > _rank("WATCHLIST"):
             canonical_state = "WATCHLIST"
 
-    # ── 4. Data status ───────────────────────────────────────────────────────
+    # ── 4. Data freshness scoring + confidence cap ───────────────────────────
     fin_data = payload.get("fin_data") or {}
-    raw_age  = fin_data.get("data_age_days")
-    try:
-        age_int = int(raw_age) if raw_age is not None else None
-    except (TypeError, ValueError):
-        age_int = None
+    freshness_score = compute_data_freshness_score(
+        fin_data.get("last_result_date") or "",
+    )
 
-    if age_int is None or age_int == 99:
-        data_status = "UNKNOWN"
-    elif age_int > 60:
+    # force_watchlist: VERY_STALE data (>90 days) cannot support an actionable thesis
+    if freshness_score.get("force_watchlist"):
+        if _rank(canonical_state) > _rank("WATCHLIST"):
+            canonical_state = "WATCHLIST"
+
+    # confidence_cap: stale/missing data caps LLM confidence regardless of its output
+    _cap = freshness_score.get("confidence_cap", "HIGH")
+    if _cap == "LOW" and (confidence_level or "").upper() not in ("LOW", ""):
+        confidence_level = "LOW"
+    elif _cap == "MEDIUM" and (confidence_level or "").upper() == "HIGH":
+        confidence_level = "MODERATE"
+
+    # data_status: map freshness label to legacy OK/STALE/UNKNOWN for actionability gate
+    _fl = freshness_score.get("label", "")
+    if _fl in ("FRESH", "ACCEPTABLE"):
+        data_status = "OK"
+    elif _fl in ("STALE", "VERY_STALE"):
         data_status = "STALE"
     else:
-        data_status = "OK"
+        # NO_RESULT_DATE / PARSE_ERROR — use data_age_days sentinel fallback
+        raw_age = fin_data.get("data_age_days")
+        try:
+            age_int = int(raw_age) if raw_age is not None else None
+        except (TypeError, ValueError):
+            age_int = None
+        if age_int is None or age_int == 99:
+            data_status = "UNKNOWN"
+        elif age_int > 60:
+            data_status = "STALE"
+        else:
+            data_status = "OK"
 
     # ── 5. Actionability gate ────────────────────────────────────────────────
     evidence_label  = (payload.get("evidence") or {}).get("label", "")
@@ -489,6 +554,7 @@ def resolve_final_recommendation(
         "catalyst_verdict":      catalyst_canon,
         "reconciliation":        reconciliation,
         "final_verdict":         final_verdict,
+        "freshness_score":       freshness_score,
         "ui_flags":              ui_flags,
     }
 

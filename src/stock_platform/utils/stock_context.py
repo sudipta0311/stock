@@ -131,11 +131,31 @@ def format_snapshot_for_prompt(snapshot: dict) -> str:
     except (TypeError, ValueError):
         age = 99
 
-    freshness = (
-        "FRESH (<7 days)"                         if age < 7  else
-        "RECENT (7-30 days)"                      if age < 30 else
-        "STALE (>30 days — treat with caution)"
-    )
+    # Build structured freshness label using data_age_days as days_stale proxy
+    # (last_result_date → data_age_days is computed upstream by the provider)
+    if age == 99:
+        freshness_label = "NO_RESULT_DATE"
+        freshness_days_str = "unknown"
+        freshness_prompt = "Data freshness: UNKNOWN - no result date available. Do NOT make conviction calls on timing."
+    elif age <= 30:
+        freshness_label = "FRESH"
+        freshness_days_str = f"{age} days ago"
+        freshness_prompt = f"Data freshness: FRESH - last quarterly result {age} days ago. Conviction calls permitted."
+    elif age <= 60:
+        freshness_label = "ACCEPTABLE"
+        freshness_days_str = f"{age} days ago"
+        freshness_prompt = f"Data freshness: ACCEPTABLE - last quarterly result {age} days ago. Reduce conviction slightly."
+    elif age <= 90:
+        freshness_label = "STALE"
+        freshness_days_str = f"{age} days ago"
+        freshness_prompt = f"Data freshness: STALE - last quarterly result {age} days ago. Flag this. Lower conviction."
+    else:
+        freshness_label = "VERY_STALE"
+        freshness_days_str = f"{age} days ago"
+        freshness_prompt = f"Data freshness: VERY_STALE - last quarterly result {age} days ago. Do NOT recommend entry. Downgrade to WATCHLIST."
+
+    # Legacy single-line label kept for non-LLM display paths
+    freshness = f"{freshness_label} ({freshness_days_str})"
 
     price    = s.get("price") or 0
     eps      = s.get("eps_ttm") or 0
@@ -228,5 +248,7 @@ def format_snapshot_for_prompt(snapshot: dict) -> str:
         f"  Source:           {s.get('data_source', 'unknown')}\n"
         f"  Last Result:      {s.get('last_result_date', 'unknown')}\n"
         f"  Freshness:        {freshness}\n"
+        f"  {freshness_prompt}\n"
+        "  Adjust conviction accordingly.\n"
         "═════════════════════════════════\n"
     )
