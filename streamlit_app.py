@@ -1117,6 +1117,21 @@ def render_recommendation_card(
                 unsafe_allow_html=True,
             )
 
+        # Signal reconciliation badge — quant vs LLM verdict
+        _rec = gov.get("reconciliation", {})
+        _rec_status = _rec.get("status", "UNKNOWN")
+        _rec_msg = _rec.get("message", "")
+        _final_verdict = gov.get("final_verdict", "")
+        if _rec_status == "ALIGNED":
+            st.success(f"\u2705 {_rec_msg}")
+        elif _rec_status == "MINOR_DIVERGENCE":
+            st.info(f"\u2139\ufe0f {_rec_msg}")
+        elif _rec_status == "CONFLICT":
+            st.warning(f"\u26a0\ufe0f Signal conflict: {_rec_msg}")
+            if _final_verdict:
+                st.caption(f"Governing verdict: **{_final_verdict}**")
+        # UNKNOWN / NO_SYNTHESIS — show nothing
+
         if comparison_map:
             badge_text, badge_type = get_agreement_badge(symbol, comparison_map)
             getattr(st, badge_type)(f"Model consensus: {badge_text}")
