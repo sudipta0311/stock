@@ -791,7 +791,7 @@ class LiveMarketDataProvider:
 
     def get_risk_metrics(self, symbol: str) -> dict[str, Any]:
         snapshot = self.get_stock_snapshot(symbol)
-        fin = self.get_financial_data(symbol)
+        fin = self.get_financials(symbol)
         return {
             "symbol": snapshot["symbol"],
             "avg_daily_value_cr": snapshot.get("avg_daily_value_cr"),
