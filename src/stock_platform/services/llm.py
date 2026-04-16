@@ -193,160 +193,251 @@ class PlatformLLM:
 
     def buy_rationale(self, item: dict[str, Any], portfolio_context: dict[str, Any]) -> str | None:
         """
-        2-3 sentence portfolio-personalised buy rationale.
+        Structured analyst rationale using verified factual snapshot.
         Each provider uses a distinct analytical lens so Compare Both surfaces real disagreement.
-          Anthropic — contrarian / risk analyst: challenges the score, surfaces the key bear case.
+          Anthropic — skeptical institutional risk analyst: stress-tests the thesis, surfaces bear case.
           OpenAI    — momentum / catalyst analyst: surfaces near-term catalysts and entry timing.
         Called once per recommendation (~3-4/session).
         System prompt cached on Anthropic to minimise repeated-call cost.
         """
-        source_names = [e.get("instrument_name", "") for e in item.get("fund_attribution", [])][:4]
+        # ── Build tech-signals dict for snapshot ────────────────────────────
         live_facts = item.get("live_financials", {}) or {}
-        price_ctx = item.get("price_context", {}) or {}
-        metric_bits: list[str] = []
-        roce = live_facts.get("roce_ttm") or live_facts.get("returnOnCapitalEmployed")
-        if isinstance(roce, (int, float)):
-            metric_bits.append(f"ROCE {roce * 100:.1f}%")
-        revenue_growth = live_facts.get("revenueGrowth") or live_facts.get("revenue_growth")
-        if isinstance(revenue_growth, (int, float)):
-            metric_bits.append(f"Revenue growth {revenue_growth * 100:.1f}%")
-        debt_to_equity = live_facts.get("debtToEquity") or live_facts.get("debt_to_equity")
-        if isinstance(debt_to_equity, (int, float)):
-            metric_bits.append(f"D/E {debt_to_equity:.2f}")
-        eps = live_facts.get("trailingEps")
-        if isinstance(eps, (int, float)):
-            metric_bits.append(f"EPS {eps:.2f}")
-        analyst_target = price_ctx.get("analyst_target") or live_facts.get("targetMeanPrice")
-        if isinstance(analyst_target, (int, float)):
-            metric_bits.append(f"Target {analyst_target:.2f}")
-        tech_signals = item.get("technical_signals", [])
-        if tech_signals:
-            tech_parts = [
-                f"{s['type']}: {s['value']} ({s['signal']}) — {s['note']}"
-                for s in tech_signals
-            ]
-            tech_ctx = "Technical context: " + " | ".join(tech_parts)
-        else:
-            tech_ctx = ""
-
-        pe_ctx = item.get("pe_context") or {}
-        pe_block = ""
-        if pe_ctx.get("pe_current") is not None:
-            pe_block = (
-                f"\nVERIFIED PE DATA (use these exact numbers, do not estimate PE from other fields):\n"
-                f"Current PE:    {pe_ctx['pe_current']:.1f}x\n"
-                f"5-Year Median: {pe_ctx['pe_5yr_median']:.1f}x\n" if pe_ctx.get("pe_5yr_median") else
-                f"\nVERIFIED PE DATA (use these exact numbers, do not estimate PE from other fields):\n"
-                f"Current PE:    {pe_ctx['pe_current']:.1f}x\n"
-                f"5-Year Median: N/A\n"
-            ) + f"PE Assessment: {pe_ctx['pe_assessment']}\nPE Signal:     {pe_ctx['pe_signal']}"
-
-        stock_line = (
-            f"Stock: {item['company_name']} ({item['symbol']}), sector: {item['sector']}.\n"
-            f"Entry signal: {item['entry_signal']} | Quality score: {item['quality_score']:.2f}\n"
-            f"Overlap: {item['overlap_pct']:.1f}% | Gap reason: {item['gap_reason']}\n"
-            f"Held via funds: {', '.join(source_names) or 'none'}\n"
-            f"Portfolio size: {len(portfolio_context.get('normalized_exposure', []))} positions\n"
-            f"Metrics: {' | '.join(metric_bits) if metric_bits else 'Live metrics unavailable'}"
-            + (f"\n{tech_ctx}" if tech_ctx else "")
-            + (pe_block if pe_block else "")
+        price_ctx  = item.get("price_context", {}) or {}
+        current_price_val = (
+            price_ctx.get("price")
+            or item.get("current_price")
+            or live_facts.get("currentPrice")
+            or live_facts.get("current_price")
+            or 0.0
         )
+        tech_signals_dict: dict[str, Any] = {}
+        try:
+            w52_low = float(live_facts.get("week52_low") or live_facts.get("fiftyTwoWeekLow") or 0)
+            if w52_low > 0 and current_price_val:
+                tech_signals_dict["pct_from_52w_low"] = round(
+                    (float(current_price_val) - w52_low) / w52_low * 100, 1
+                )
+        except (TypeError, ValueError, ZeroDivisionError):
+            pass
+        try:
+            dma_200 = float(live_facts.get("dma_200") or 0)
+            if dma_200 > 0 and current_price_val:
+                tech_signals_dict["above_200dma"] = float(current_price_val) > dma_200
+        except (TypeError, ValueError):
+            pass
 
-        pe_instruction = (
-            "IMPORTANT: Use ONLY the verified PE data provided above. "
-            "Do NOT estimate or calculate PE yourself. "
-            "If PE Assessment says CHEAP_VS_HISTORY, your analysis must acknowledge this — "
-            "a cheap-vs-history PE changes the risk framing significantly. "
-            "If PE Assessment says EXPENSIVE_VS_HISTORY, that is a key risk to surface."
-        ) if pe_block else ""
+        # ── Sector gap for snapshot ──────────────────────────────────────────
+        sector = item.get("sector", "")
+        gaps = {g["sector"]: g for g in portfolio_context.get("identified_gaps", [])}
+        sector_gap = gaps.get(sector, {})
 
+        # ── Valuation reliability (pre-computed upstream or absent) ──────────
+        val_reliability = item.get("val_reliability") or {}
+
+        # ── Factual snapshot ─────────────────────────────────────────────────
+        # Prefer pre-formatted text already placed on item by finalize_recommendation().
+        # Fall back to building it here if called from a different path.
+        snapshot_text = item.get("factual_snapshot_text") or ""
+        if not snapshot_text:
+            from stock_platform.utils.stock_context import (
+                build_factual_snapshot,
+                format_snapshot_for_prompt,
+            )
+            pe_ctx = item.get("pe_context") or {}
+            snap = build_factual_snapshot(
+                symbol=item.get("symbol", ""),
+                fin_data=live_facts,
+                current_price=float(current_price_val),
+                pe_context=pe_ctx,
+                tech_signals=tech_signals_dict,
+                portfolio_overlap=float(item.get("overlap_pct", 0)),
+                sector_gap=sector_gap,
+            )
+            if val_reliability:
+                snap["val_reliability"]       = val_reliability.get("label", "")
+                snap["val_reliability_note"]  = val_reliability.get("note", "")
+                snap["val_reliability_flags"] = val_reliability.get("flags", [])
+            snapshot_text = format_snapshot_for_prompt(snap)
+
+        # ── Analyst target for prompt ────────────────────────────────────────
+        analyst_target = (
+            price_ctx.get("analyst_target")
+            or live_facts.get("targetMeanPrice")
+            or item.get("analyst_target")
+            or 0.0
+        )
+        try:
+            analyst_target = float(analyst_target)
+        except (TypeError, ValueError):
+            analyst_target = 0.0
+
+        quality_score = item.get("quality_score", 0.0)
+        entry_signal  = item.get("entry_signal", "")
+        symbol        = item.get("symbol", "")
+        target_line   = f"₹{analyst_target:,.0f}" if analyst_target > 0 else "N/A"
+
+        # ── Low-reliability warning (added to both prompts when triggered) ───
+        low_val_warning = ""
+        if val_reliability.get("label") == "LOW":
+            low_val_warning = (
+                "\nIMPORTANT: Valuation reliability is LOW for this stock. "
+                "Do NOT build your thesis primarily on PE comparison. "
+                "Use order book, margin trends, earnings durability, "
+                "and cash conversion instead.\n"
+            )
+
+        # ════════════════════════════════════════════════════════════════════
+        # ANTHROPIC — Skeptical institutional risk analyst
+        # ════════════════════════════════════════════════════════════════════
         if self.provider == "anthropic":
             system_prompt = (
-                "You are a contrarian portfolio analyst. Your job is to: "
-                "1. Challenge the quantitative recommendation and find weaknesses the score misses. "
-                "2. Identify the single most important RISK that could invalidate this thesis. "
-                "3. State clearly what would make you WRONG about this recommendation. "
-                "4. Give a verdict: does the risk/reward justify entry NOW or should the investor wait for a better entry point? "
-                "Write exactly 4 short bullets labelled RISK, WE ARE WRONG IF, VERDICT, and SUPPORTING METRIC. "
-                "Be direct and specific. Reference actual financial metrics, not generalities."
+                "You are a skeptical institutional risk analyst reviewing Indian equity recommendations. "
+                "Your job is to stress-test ideas, not endorse them. "
+                "You are NOT a general assistant. "
+                "You focus on:\n"
+                "- structural business risk\n"
+                "- valuation traps and distortion\n"
+                "- policy and regulatory dependency\n"
+                "- earnings durability under adverse scenarios\n"
+                "- whether margin of safety actually exists\n"
+                "- cyclicality and mean reversion risk\n"
+                "- governance and execution fragility\n\n"
+                "RULES YOU MUST FOLLOW:\n"
+                "1. Start from the factual snapshot only. Do not invent or estimate numbers.\n"
+                "2. Clearly label: FACT / DERIVED / MY INFERENCE\n"
+                "3. Do not praise quality metrics without stress-testing them.\n"
+                "4. For PE comparison: ONLY use it if the PE signal is CHEAP_VS_HISTORY or "
+                "EXPENSIVE_VS_HISTORY. If signal is NO_HISTORY or FAIR_VS_HISTORY, do NOT build "
+                "a thesis on PE alone.\n"
+                "5. Never say 'this is a bargain' without explaining what happens if the thesis is wrong.\n"
+                "6. End with a specific INVALIDATION CONDITION — the single most likely event that "
+                "would make you wrong.\n\n"
+                "OUTPUT STRUCTURE:\n"
+                "## RISK VERDICT: [AVOID / WAIT / ACCUMULATE WITH CONDITIONS / BUY]\n\n"
+                "### What the facts show\n"
+                "[2-3 sentences citing only measured data from snapshot]\n\n"
+                "### Structural concerns\n"
+                "[The real risks: policy, cyclicality, governance, earnings quality, debt, fragility]\n\n"
+                "### Valuation assessment\n"
+                "[Only if PE signal is clear — otherwise say "
+                "'valuation unreliable, insufficient PE history']\n\n"
+                "### What would make me wrong\n"
+                "[Single most important invalidation condition]\n\n"
+                "### Risk conclusion\n"
+                "[One sentence stance]"
             )
             user_prompt = (
-                f"{stock_line}\n"
-                + (f"\n{pe_instruction}\n" if pe_instruction else "")
-                + "Challenge the thesis and produce the risk-focused verdict."
+                f"STOCK: {symbol} ({item.get('company_name', '')}) | SECTOR: {sector}\n"
+                f"QUALITY SCORE: {quality_score:.2f} | ENTRY SIGNAL: {entry_signal}\n"
+                f"ANALYST TARGET: {target_line}\n"
+                f"{low_val_warning}"
+                f"\n{snapshot_text}\n"
+                "Stress-test this recommendation and produce the risk-focused verdict."
             )
-        else:
-            system_prompt = (
-                "You are a financial analyst specialising in Indian equities. "
-                "For the stock provided write 3-4 sentences covering:\n"
-                "1. The single most important near-term catalyst that will drive price appreciation in 3-6 months\n"
-                "2. What the market is currently underestimating\n"
-                "3. The specific price level or event that signals exit\n"
-                "4. Whether to enter now or wait for a better level\n"
-                "Be specific. Reference actual financial metrics provided. "
-                "Avoid generic phrases. Name specific events and numbers."
+            return self._call(
+                model=self._fast_model,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                max_tokens=700,
+                temperature=0.35,
+                cache_system=True,
             )
-            user_prompt = (
-                f"{stock_line}\n"
-                + (f"\n{pe_instruction}\n" if pe_instruction else "")
-                + "Identify the catalyst path and produce the timing verdict."
-            )
-            try:
-                import openai
 
-                client = self._client_instance()
-                response = client.chat.completions.create(
-                    model=self._fast_model,
-                    messages=[
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    max_completion_tokens=800,
-                    timeout=30,
-                )
-                finish_reason = response.choices[0].finish_reason
-                rationale = (response.choices[0].message.content or "").strip()
-                print(
-                    f"OpenAI {item['symbol']}: finish_reason={finish_reason}, "
-                    f"content_length={len(rationale)}"
-                )
-                if finish_reason == "content_filter":
-                    return "[OpenAI content filter triggered]"
-                if finish_reason == "length":
-                    return "[OpenAI response truncated — increase max_tokens]"
-                if len(rationale.strip()) < 100:
-                    print(f"WARNING: OpenAI short response for {item['symbol']}: "
-                          f"'{rationale[:50]}...' finish={finish_reason}")
-                    rationale = f"[OpenAI returned short response: {rationale}]"
-                if not rationale:
-                    print(f"OpenAI returned empty string for {item['symbol']}")
-                    print(f"Full response: {response}")
-                    return "[OpenAI returned empty — check logs]"
-                return rationale
-            except openai.RateLimitError as exc:
-                print(f"OpenAI rate limit hit for {item['symbol']}: {exc}")
-                return "[OpenAI rate limited - retry in 60s]"
-            except openai.AuthenticationError as exc:
-                print(f"OpenAI API key invalid or expired: {exc}")
-                return "[OpenAI authentication failed - check API key]"
-            except openai.APITimeoutError as exc:
-                print(f"OpenAI timeout for {item['symbol']}: {exc}")
-                return "[OpenAI timeout - server slow, retry]"
-            except Exception as exc:
-                print(
-                    f"OpenAI unexpected error for {item['symbol']}: "
-                    f"{type(exc).__name__}: {exc}"
-                )
-                return f"[OpenAI error: {type(exc).__name__}]"
-
-        return self._call(
-            model=self._fast_model,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            max_tokens=300,
-            temperature=0.35,
-            cache_system=True,
+        # ════════════════════════════════════════════════════════════════════
+        # OPENAI — Momentum / catalyst analyst
+        # ════════════════════════════════════════════════════════════════════
+        system_prompt = (
+            "You are a momentum and catalyst-focused analyst reviewing Indian equity recommendations. "
+            "Your job is to identify what could drive the stock higher in the next 3-12 months. "
+            "You are NOT a general assistant. "
+            "You focus on:\n"
+            "- specific near-term catalysts\n"
+            "- earnings momentum and acceleration\n"
+            "- order book conversion and execution evidence\n"
+            "- what the market is underpricing right now\n"
+            "- operating leverage and margin expansion\n"
+            "- sector tailwinds with concrete timing\n"
+            "- sentiment and positioning gaps\n\n"
+            "RULES YOU MUST FOLLOW:\n"
+            "1. Start from the factual snapshot only. Do not invent or estimate numbers.\n"
+            "2. Clearly label: FACT / DERIVED / MY INFERENCE\n"
+            "3. Name a SPECIFIC catalyst with a time window. "
+            "Do NOT say 'continued growth momentum' — that is not a catalyst.\n"
+            "4. Identify what the market is specifically underestimating, with evidence.\n"
+            "5. State your exit signal clearly — what observable event would make you exit.\n"
+            "6. Do NOT build a thesis on PE rerating alone unless there is confirmed earnings acceleration.\n\n"
+            "OUTPUT STRUCTURE:\n"
+            "## CATALYST VERDICT: [AVOID / WATCHLIST / ACCUMULATE / BUY NOW]\n\n"
+            "### What the facts show\n"
+            "[2-3 sentences citing only measured data]\n\n"
+            "### Primary catalyst\n"
+            "[Specific event, named, with expected timing]\n\n"
+            "### What the market is underestimating\n"
+            "[Specific, evidence-backed observation]\n\n"
+            "### Operating leverage / earnings path\n"
+            "[How catalyst converts to earnings, with numbers]\n\n"
+            "### Exit signal\n"
+            "[Observable event that breaks the thesis]\n\n"
+            "### Catalyst conclusion\n"
+            "[One sentence stance]"
         )
+        user_prompt = (
+            f"STOCK: {symbol} ({item.get('company_name', '')}) | SECTOR: {sector}\n"
+            f"QUALITY SCORE: {quality_score:.2f} | ENTRY SIGNAL: {entry_signal}\n"
+            f"ANALYST TARGET: {target_line}\n"
+            f"{low_val_warning}"
+            f"\n{snapshot_text}\n"
+            "Identify the catalyst path and produce the timing verdict."
+        )
+        try:
+            import openai
+
+            client = self._client_instance()
+            response = client.chat.completions.create(
+                model=self._fast_model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                max_completion_tokens=800,
+                timeout=30,
+            )
+            finish_reason = response.choices[0].finish_reason
+            rationale = (response.choices[0].message.content or "").strip()
+            print(
+                f"OpenAI {symbol}: finish_reason={finish_reason}, "
+                f"content_length={len(rationale)}"
+            )
+            if finish_reason == "content_filter":
+                return "[OpenAI content filter triggered]"
+            if finish_reason == "length":
+                return "[OpenAI response truncated — increase max_tokens]"
+            if len(rationale.strip()) < 100:
+                print(
+                    f"WARNING: OpenAI short response for {symbol}: "
+                    f"'{rationale[:50]}...' finish={finish_reason}"
+                )
+                rationale = f"[OpenAI returned short response: {rationale}]"
+            if not rationale:
+                print(f"OpenAI returned empty string for {symbol}")
+                print(f"Full response: {response}")
+                return "[OpenAI returned empty — check logs]"
+            return rationale
+        except openai.RateLimitError as exc:
+            print(f"OpenAI rate limit hit for {symbol}: {exc}")
+            return "[OpenAI rate limited - retry in 60s]"
+        except openai.AuthenticationError as exc:
+            print(f"OpenAI API key invalid or expired: {exc}")
+            return "[OpenAI authentication failed - check API key]"
+        except openai.APITimeoutError as exc:
+            print(f"OpenAI timeout for {symbol}: {exc}")
+            return "[OpenAI timeout - server slow, retry]"
+        except Exception as exc:
+            print(
+                f"OpenAI unexpected error for {symbol}: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            return f"[OpenAI error: {type(exc).__name__}]"
 
     def synthesise_comparison(
         self,
@@ -354,9 +445,11 @@ class PlatformLLM:
         anthropic_rationale: str,
         openai_rationale: str,
         agreement_type: str = "both",
+        factual_snapshot: str = "",
+        entry_data: dict[str, Any] | None = None,
     ) -> str | None:
         """
-        Synthesis of Anthropic (contrarian/risk) and OpenAI (momentum/catalyst) views.
+        Synthesis of Anthropic (risk) and OpenAI (catalyst) views.
         Uses Anthropic Sonnet — called once per stock in Compare Both mode.
         agreement_type: "both" | "anthropic_only" | "openai_only"
         Returns None if Anthropic is not enabled (caller must skip synthesis section).
@@ -368,64 +461,103 @@ class PlatformLLM:
             import anthropic as _anthropic
             client = _anthropic.Anthropic(api_key=self.config.anthropic_api_key)
 
-            if agreement_type == "anthropic_only":
-                system_prompt = (
-                    "You are a senior portfolio analyst. "
-                    "The Risk Analyst selected a stock but the Catalyst Analyst did NOT. "
-                    "Produce exactly 4 bullet points as instructed."
+            # ── Shared system prompt ─────────────────────────────────────────
+            system_prompt = (
+                "You are a senior portfolio manager synthesising two analyst views on an Indian equity. "
+                "Your job is to produce a clean, honest verdict — not a merger of both texts.\n\n"
+                "SYNTHESIS RULES:\n"
+                "1. First identify whether disagreement is about:\n"
+                "   - FACTS (one analyst has wrong data)\n"
+                "   - TIME HORIZON (both right, different windows)\n"
+                "   - VALUATION vs EXECUTION (classic divergence)\n"
+                "   - POLICY RISK vs GROWTH OPTIMISM\n"
+                "   - STALE ASSUMPTIONS (one using outdated framing)\n"
+                "2. Do not average the views. Resolve the disagreement or acknowledge it "
+                "cannot be resolved with current data.\n"
+                "3. Do not repeat what both analysts said. Only state what the synthesis ADDS.\n"
+                "4. End with ONE of these exact stances:\n"
+                "   AVOID | WATCHLIST | BUY AFTER CONFIRMATION |\n"
+                "   ACCUMULATE ON DIPS | ACCUMULATE GRADUALLY | STRONG BUY\n"
+                "5. State confidence: HIGH / MEDIUM / LOW and the specific reason for that level.\n"
+                "6. State the single most important condition that would change your stance.\n\n"
+                "OUTPUT STRUCTURE:\n"
+                "## SYNTHESIS VERDICT: [STANCE] | Confidence: [LEVEL]\n\n"
+                "### Where analysts agree\n"
+                "[Facts both accept as true]\n\n"
+                "### Nature of disagreement\n"
+                "[LABEL from rule 1 + one sentence explanation]\n\n"
+                "### Resolution\n"
+                "[Which view is better supported by current evidence and why — "
+                "or why it cannot be resolved]\n\n"
+                "### Portfolio fit\n"
+                "[Why this stock specifically for this portfolio — gap it fills, risk it adds]\n\n"
+                "### Confidence explanation\n"
+                "[Why HIGH/MEDIUM/LOW — specific to evidence quality]\n\n"
+                "### Stance-changing condition\n"
+                "[The single event that would move stance up or down]"
+            )
+
+            # ── Build entry guidance block (provided verbatim for accuracy) ─
+            entry_guidance = ""
+            if entry_data:
+                cmp    = float(entry_data.get("cmp", 0) or 0)
+                ep     = float(entry_data.get("entry", 0) or 0)
+                stop   = float(entry_data.get("stop", 0) or 0)
+                target = float(entry_data.get("target", 0) or 0)
+                rr     = entry_data.get("rr", 0)
+                t_src  = str(entry_data.get("target_source_label", "model estimate") or "")
+                is_model_target = "model" in t_src.lower()
+                target_caveat = (
+                    "\nTarget is MODEL-DERIVED — treat as indicative, not precise."
+                    if is_model_target else ""
                 )
+                if cmp > 0:
+                    entry_guidance = (
+                        f"\n\n### Entry guidance\n"
+                        f"CMP: ₹{cmp:,.0f} | Enter: ₹{ep:,.0f} | Stop: ₹{stop:,.0f}\n"
+                        f"Target: ₹{target:,.0f} | R/R: {rr}x"
+                        f"{target_caveat}"
+                    )
+
+            # ── Build user prompt — vary only the analyst section ────────────
+            snapshot_section = f"\nFACTUAL SNAPSHOT:\n{factual_snapshot}\n" if factual_snapshot else ""
+
+            if agreement_type == "anthropic_only":
                 user_prompt = (
                     f"The Risk Analyst selected {stock_name} but the Catalyst Analyst "
                     f"did NOT include it in recommendations.\n\n"
                     f"RISK ANALYST view:\n{anthropic_rationale}\n\n"
-                    "In 4 bullet points:\n"
-                    "- Why did the Catalyst Analyst likely exclude this stock — "
-                    "what near-term catalyst is missing?\n"
-                    "- Is the Risk Analyst's selection justified WITHOUT a catalyst confirmation?\n"
-                    "- What specific event would cause the Catalyst Analyst to also recommend this stock?\n"
-                    "- COMBINED VERDICT: Is this a genuine opportunity the catalyst lens missed, "
-                    "or a value trap the momentum lens correctly avoided?\n"
-                    "Be specific. Reference the actual risk and metrics identified."
+                    f"CATALYST ANALYST view: [did not select this stock]\n"
+                    f"{snapshot_section}"
+                    "Apply the synthesis rules. The 'Nature of disagreement' should explain "
+                    "why the catalyst lens likely excluded this stock.\n"
+                    "The 'Resolution' should state whether the risk analyst's case stands "
+                    "without catalyst confirmation."
+                    + entry_guidance
                 )
             elif agreement_type == "openai_only":
-                system_prompt = (
-                    "You are a senior portfolio analyst. "
-                    "The Catalyst Analyst selected a stock but the Risk Analyst did NOT. "
-                    "Produce exactly 4 bullet points as instructed."
-                )
                 user_prompt = (
                     f"The Catalyst Analyst selected {stock_name} but the Risk Analyst "
                     f"did NOT include it in recommendations.\n\n"
-                    f"CATALYST ANALYST view:\n{openai_rationale}\n\n"
-                    "In 4 bullet points:\n"
-                    "- Why did the Risk Analyst likely exclude this stock — "
-                    "what valuation or quality concern caused it to be filtered?\n"
-                    "- Is the Catalyst Analyst's selection justified WITHOUT risk validation?\n"
-                    "- What specific risk would the Risk Analyst flag if it had analysed this stock?\n"
-                    "- COMBINED VERDICT: Is this a genuine near-term opportunity, "
-                    "or is the missing risk analysis itself a warning signal?\n"
-                    "Be specific. Reference the actual catalyst and metrics identified."
+                    f"RISK ANALYST view: [did not select this stock]\n\n"
+                    f"CATALYST ANALYST view:\n{openai_rationale}\n"
+                    f"{snapshot_section}"
+                    "Apply the synthesis rules. The 'Nature of disagreement' should explain "
+                    "what valuation or governance concern the risk lens likely flagged.\n"
+                    "The 'Resolution' should state whether the catalyst case stands "
+                    "without risk validation."
+                    + entry_guidance
                 )
             else:
-                system_prompt = (
-                    "Two analysts reviewed the same stock. "
-                    "One is a contrarian risk analyst and the other is a momentum catalyst analyst. "
-                    "Produce exactly 3 bullet points:\n"
-                    "- Where do both analysts AGREE?\n"
-                    "- Where do they DISAGREE and why does that disagreement matter?\n"
-                    "- COMBINED VERDICT: ENTER NOW / ACCUMULATE GRADUALLY / WAIT FOR BETTER ENTRY.\n"
-                    "Be specific. Reference the actual risk and catalyst identified."
-                )
                 user_prompt = (
                     f"Two analysts reviewed {stock_name}:\n\n"
                     f"RISK ANALYST (Anthropic):\n{anthropic_rationale}\n\n"
-                    f"CATALYST ANALYST (OpenAI):\n{openai_rationale}\n\n"
-                    "In 3 bullet points:\n"
-                    "- Where do both analysts AGREE?\n"
-                    "- Where do they DISAGREE and why does the disagreement matter?\n"
-                    "- COMBINED VERDICT: ENTER NOW / ACCUMULATE GRADUALLY / WAIT FOR BETTER ENTRY?\n"
-                    "Be specific. Reference the actual risk and catalyst identified."
+                    f"CATALYST ANALYST (OpenAI):\n{openai_rationale}\n"
+                    f"{snapshot_section}"
+                    "Apply the synthesis rules above and produce the structured verdict."
+                    + entry_guidance
                 )
+
             response = client.messages.create(
                 model=self.config.llm_reasoning_model,
                 max_tokens=1500,
@@ -439,10 +571,10 @@ class PlatformLLM:
                 print(f"WARNING: synthesis truncated for {stock_name}")
             if not synthesis_text:
                 return None
-            if "COMBINED VERDICT" not in synthesis_text:
+            if "SYNTHESIS VERDICT" not in synthesis_text:
                 synthesis_text += (
-                    "\n\n• COMBINED VERDICT: Synthesis incomplete — "
-                    "re-run Compare Both to regenerate."
+                    "\n\n## SYNTHESIS VERDICT: WATCHLIST | Confidence: LOW\n"
+                    "Synthesis incomplete — re-run Compare Both to regenerate."
                 )
             return synthesis_text
         except Exception:

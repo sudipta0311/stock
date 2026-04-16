@@ -12,6 +12,7 @@ from stock_platform.config import AppConfig
 from stock_platform.models import RecommendationRecord
 from stock_platform.agents.quant_model import compute_quality_score as compute_quality_score_v2
 from stock_platform.utils.entry_calculator import (
+    KNOWN_ANALYST_TARGETS,
     apply_momentum_override,
     calculate_entry_levels,
     fetch_analyst_consensus_target,
@@ -27,6 +28,12 @@ from stock_platform.utils.stock_validator import (
     validate_stock,
 )
 from stock_platform.utils.technical_signals import compute_technical_signal
+from stock_platform.utils.valuation_reliability import get_valuation_reliability
+from stock_platform.utils.evidence_scoring import compute_evidence_strength
+from stock_platform.utils.stock_context import (
+    build_factual_snapshot,
+    format_snapshot_for_prompt,
+)
 
 
 MINIMUM_RR_RATIO = 1.2
@@ -582,6 +589,8 @@ class BuyAgents:
         confidence_band = state["confidence"]["band"]
         requested_top_n = int(state["request"]["top_n"])
         run_id = f"buy-{uuid4().hex[:10]}"
+        # Pre-load unified signals once for the whole loop (used by evidence scoring).
+        unified_by_sector = {row["sector"]: row for row in self.repo.list_signals("unified")}
 
         # RED band: market signals too weak — save empty run and return early.
         if confidence_band == "RED":
@@ -673,8 +682,106 @@ class BuyAgents:
                 db_path=str(self.config.db_path),
                 neon_database_url=self.config.neon_database_url,
             )
+
+            # ── Valuation reliability ────────────────────────────────────────
+            val_reliability = get_valuation_reliability(
+                symbol=item["symbol"],
+                sector=item.get("sector", ""),
+                fin_data=fin_data,
+                pe_context=pe_context,
+                years_listed=int(fin_data.get("years_listed") or 5),
+            )
+
+            # ── Tech signals dict for snapshot / evidence ────────────────────
+            _w52_low = fin_data.get("week52_low") or fin_data.get("fiftyTwoWeekLow")
+            _pct_from_low: float | None = None
+            try:
+                if _w52_low and float(_w52_low) > 0 and current_price:
+                    _pct_from_low = round(
+                        (float(current_price) - float(_w52_low)) / float(_w52_low) * 100, 1
+                    )
+            except (TypeError, ValueError, ZeroDivisionError):
+                pass
+            tech_signals_dict: dict[str, Any] = {}
+            if _pct_from_low is not None:
+                tech_signals_dict["pct_from_52w_low"] = _pct_from_low
+            try:
+                _dma = float(fin_data.get("dma_200") or 0)
+                if _dma > 0 and current_price:
+                    tech_signals_dict["above_200dma"] = float(current_price) > _dma
+            except (TypeError, ValueError):
+                pass
+
+            # ── Sector signal for evidence scoring ───────────────────────────
+            sector_signal_row = unified_by_sector.get(item.get("sector", ""), {})
+
+            # ── Evidence strength ────────────────────────────────────────────
+            evidence = compute_evidence_strength(
+                fin_data=fin_data,
+                pe_context=pe_context,
+                val_reliability=val_reliability,
+                tech_signals=tech_signals_dict,
+                sector_signal=sector_signal_row,
+                news_sentiment=float((item.get("news") or {}).get("sentiment_score", 0.0)),
+            )
+            if evidence["label"] == "VERY WEAK":
+                _log.warning(
+                    "REJECTED %s: evidence too weak (%.2f) — %s",
+                    item["symbol"], evidence["score"], evidence["note"],
+                )
+                gov_skipped.append({
+                    "symbol": item["symbol"],
+                    "status": "WEAK_EVIDENCE",
+                    "resolved_symbol": item["symbol"],
+                    "reason": f"Evidence too weak ({evidence['score']:.2f}) — {evidence['note']}",
+                })
+                continue
+
+            # ── Factual snapshot ─────────────────────────────────────────────
+            gaps_by_sector = {
+                g["sector"]: g
+                for g in state["portfolio_context"].get("identified_gaps", [])
+            }
+            sector_gap_row = gaps_by_sector.get(item.get("sector", ""), {})
+            _snap = build_factual_snapshot(
+                symbol=item["symbol"],
+                fin_data=fin_data,
+                current_price=float(current_price),
+                pe_context=pe_context,
+                tech_signals=tech_signals_dict,
+                portfolio_overlap=float(item.get("overlap_pct", 0)),
+                sector_gap=sector_gap_row,
+            )
+            _snap["val_reliability"]       = val_reliability["label"]
+            _snap["val_reliability_note"]  = val_reliability["note"]
+            _snap["val_reliability_flags"] = val_reliability["flags"]
+            snapshot_text = format_snapshot_for_prompt(_snap)
+
+            # ── Target source label ──────────────────────────────────────────
+            # Determine whether analyst_target came from a real source or the
+            # 15% flat fallback.  Used for UI display caveat in improvement 6.
+            _is_fallback = (
+                analyst_target > 0
+                and current_price > 0
+                and abs(analyst_target - float(current_price) * 1.15) < float(current_price) * 0.005
+                and item["symbol"] not in KNOWN_ANALYST_TARGETS
+            )
+            if _is_fallback:
+                target_source_label = "model estimate — treat as indicative"
+            elif item["symbol"] in KNOWN_ANALYST_TARGETS:
+                target_source_label = "known analyst target"
+            else:
+                target_source_label = "screener/broker data"
+
             llm_rationale = self.llm.buy_rationale(
-                item | {"pe_context": pe_context},
+                item | {
+                    "pe_context":           pe_context,
+                    "val_reliability":      val_reliability,
+                    "evidence":             evidence,
+                    "factual_snapshot_text": snapshot_text,
+                    "target_source_label":  target_source_label,
+                    "analyst_target":       analyst_target,
+                },
                 state["portfolio_context"],
             )
             if not llm_rationale:
@@ -767,6 +874,11 @@ class BuyAgents:
                 "lock_in_recommendation": lock_in_check.get("recommendation"),
                 "lock_in_multiplier": item.get("lock_in_multiplier", 1.0),
                 "llm_used": bool(llm_rationale),
+                # ── Improvement 4-6 additions ──────────────────────────────
+                "val_reliability":       val_reliability,
+                "evidence":              evidence,
+                "factual_snapshot_text": snapshot_text,
+                "target_source_label":   target_source_label,
             }
             recommendations.append(
                 RecommendationRecord(

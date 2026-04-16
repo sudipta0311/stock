@@ -808,17 +808,31 @@ def get_agreement_badge(symbol: str, comparison_map: dict) -> tuple[str, str]:
         return "CATALYST ANALYST ONLY", "info"
 
 
-def render_entry_details(entry: dict[str, Any]) -> None:
+def render_entry_details(
+    entry: dict[str, Any],
+    target_source_label: str = "",
+) -> None:
     """
     Render entry details with custom HTML so prices never truncate.
+    target_source_label: forwarded from payload for R/R caveat (improvement 6E).
     """
     if not entry:
         return
 
-    rr_value = float(entry.get("risk_reward", 0) or 0)
+    rr_value  = float(entry.get("risk_reward", 0) or 0)
     rr_border = "#27ae60" if rr_value >= 2.0 else "#e67e22" if rr_value >= MINIMUM_RR_RATIO else "#e74c3c"
     rr_status = "Strong setup" if rr_value >= 2.0 else "Watch threshold" if rr_value >= MINIMUM_RR_RATIO else "Below minimum threshold"
     rr_symbol = "OK" if rr_value >= 2.0 else "Watch" if rr_value >= MINIMUM_RR_RATIO else "Skip"
+
+    # ── Improvement 6D: stop loss "(model-derived)" label ───────────────────
+    stop_label = "model-derived"
+
+    # ── Improvement 6E: R/R caveat based on target source ───────────────────
+    _t_src_lower = (target_source_label or "").lower()
+    if "model" in _t_src_lower or not target_source_label:
+        rr_caveat = " <span style='color:#999;font-size:11px;'>(indicative — model target)</span>"
+    else:
+        rr_caveat = " <span style='color:#999;font-size:11px;'>(broker/screener target)</span>"
 
     html = textwrap.dedent(
         f"""
@@ -851,6 +865,7 @@ def render_entry_details(entry: dict[str, Any]) -> None:
                         &#8377;{entry['stop_loss']:,.0f}<br>
                         <span style="font-size:11px; color:#c0392b;">
                             &#9660; {entry['stop_loss_pct']:.0f}% from entry
+                            ({stop_label})
                         </span>
                     </td>
                     <td style="padding:8px; font-size:clamp(16px, 2vw, 20px); font-weight:600; color:#27ae60;">
@@ -868,8 +883,8 @@ def render_entry_details(entry: dict[str, Any]) -> None:
                 border-radius:6px;
                 border-left:4px solid {rr_border};
             ">
-                <strong>Risk/Reward: {rr_value}x</strong>
-                - For every &#8377;1 risked, potential gain is &#8377;{rr_value:.1f}
+                <strong>Risk/Reward: {rr_value}x</strong>{rr_caveat}
+                — For every &#8377;1 risked, potential gain is &#8377;{rr_value:.1f}
                 <span style="color:{rr_border}; font-weight:600;">{rr_symbol}: {rr_status}</span>
             </div>
             <div style="margin-top:10px; font-size:13px; color:#555;">
@@ -982,18 +997,47 @@ def render_recommendation_card(
         if rationale:
             st.write(rationale)
 
+        # ── Improvement 6A: remove false decimal precision from deploy% ──────
+        initial_pct_display = f"~{round(float(initial_pct or 0))}%"
+
+        # ── Improvement 6B: target label with source caveat ──────────────────
+        target_source_label = str(payload.get("target_source_label") or "model estimate")
+        analyst_target_val  = payload.get("analyst_target") or (entry or {}).get("analyst_target", 0)
+        upside_from_entry   = (entry or {}).get("upside_from_entry", 0)
+        if analyst_target_val and float(analyst_target_val) > 0:
+            target_display = (
+                f"Analyst target: ₹{float(analyst_target_val):,.0f}"
+                f" (~{float(upside_from_entry or 0):.0f}% from entry)"
+                f" [{target_source_label}]"
+            )
+        else:
+            target_display = f"Target: {target_pct}%" if target_pct else ""
+
+        # ── Improvement 6C: replace binary confidence band with evidence label
+        evidence_label = (
+            payload.get("evidence", {}).get("label")
+            if payload.get("evidence")
+            else ""
+        )
+        confidence_display = (
+            f"{evidence_label} evidence" if evidence_label
+            else f"Confidence {confidence_band}"
+        )
+
         sizing_label = (
-            f"Deploy now: {initial_pct}% | Target: {target_pct}% over 3 months"
-            if target_pct
-            else f"Allocation {initial_pct}%"
+            f"Position size guide: {initial_pct_display} | {target_display}"
+            if target_display
+            else f"Position size guide: {initial_pct_display}"
         )
         summary_bits = [
             f"Overlap {overlap}%",
             sizing_label,
-            f"Confidence {confidence_band}",
+            confidence_display,
             f"Net Return {net_return}%",
         ]
         st.caption(" | ".join(summary_bits))
+        # Sub-caption: sizing caveat (improvement 6A)
+        st.caption("_(Position size is model-derived — adjust to your risk tolerance)_")
         lock_in_warning = str(payload.get("lock_in_warning") or "")
         if lock_in_warning:
             st.error(f"Recently listed stock - {lock_in_warning}")
@@ -1026,7 +1070,10 @@ def render_recommendation_card(
             )
         if entry:
             st.markdown("**Entry Details**")
-            render_entry_details(entry)
+            render_entry_details(
+                entry,
+                target_source_label=str(payload.get("target_source_label") or ""),
+            )
             entry = None
 
         pe_ctx = payload.get("pe_context") or {}
@@ -1069,7 +1116,7 @@ def render_recommendation_card(
                 )
             with col3:
                 st.metric(
-                    "Stop Loss",
+                    "Stop Loss (model-derived)",
                     f"₹{entry['stop_loss']:,.0f}",
                     delta=f"-{entry['stop_loss_pct']:.0f}% from entry",
                 )
@@ -1085,15 +1132,21 @@ def render_recommendation_card(
             if entry["risk_reward"] > 0:
                 if entry["risk_reward"] < MINIMUM_RR_RATIO:
                     st.warning(
-                        f"âš ï¸ Risk/Reward {entry['risk_reward']}x is below minimum threshold of "
+                        f"Risk/Reward {entry['risk_reward']}x is below minimum threshold of "
                         f"{MINIMUM_RR_RATIO}x. Consider skipping or waiting for better entry."
                     )
                 elif entry["risk_reward"] >= 2.0:
                     st.success(
-                        f"âœ… Strong Risk/Reward {entry['risk_reward']}x â€” favourable setup"
+                        f"Strong Risk/Reward {entry['risk_reward']}x — favourable setup"
                     )
+                _rr_src = str(payload.get("target_source_label") or "")
+                _rr_caveat = (
+                    " _(indicative — model target)_"
+                    if "model" in _rr_src.lower() or not _rr_src
+                    else " _(broker/screener target)_"
+                )
                 st.markdown(
-                    f"**Risk/Reward: {entry['risk_reward']}x** | "
+                    f"**Risk/Reward: {entry['risk_reward']}x**{_rr_caveat} | "
                     f"For every ₹1 risked, potential gain is about ₹{entry['risk_reward']:.1f}."
                 )
 
