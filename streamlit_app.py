@@ -65,6 +65,10 @@ from stock_platform.services.engine import PlatformEngine
 from stock_platform.services.llm import PlatformLLM
 from stock_platform.utils.index_config import DEFAULT_INDEX, INDEX_UNIVERSE, SELECTABLE_INDICES
 from stock_platform.utils.pe_history_fetcher import prefetch_pe_history_for_universe
+from stock_platform.utils.recommendation_resolver import (
+    extract_synthesis_verdict,
+    resolve_final_recommendation,
+)
 from stock_platform.utils.sector_config import ELEVATED_GOVERNANCE_RISK
 from utils.entry_calculator import calculate_entry_levels
 
@@ -811,6 +815,7 @@ def get_agreement_badge(symbol: str, comparison_map: dict) -> tuple[str, str]:
 def render_entry_details(
     entry: dict[str, Any],
     target_source_label: str = "",
+    is_degraded: bool = False,
 ) -> None:
     """
     Render entry details with custom HTML so prices never truncate.
@@ -821,8 +826,12 @@ def render_entry_details(
 
     rr_value  = float(entry.get("risk_reward", 0) or 0)
     rr_border = "#27ae60" if rr_value >= 2.0 else "#e67e22" if rr_value >= MINIMUM_RR_RATIO else "#e74c3c"
-    rr_status = "Strong setup" if rr_value >= 2.0 else "Watch threshold" if rr_value >= MINIMUM_RR_RATIO else "Below minimum threshold"
-    rr_symbol = "OK" if rr_value >= 2.0 else "Watch" if rr_value >= MINIMUM_RR_RATIO else "Skip"
+    if is_degraded:
+        rr_status = "Indicative — not trade-ready"
+        rr_symbol = "Model estimate"
+    else:
+        rr_status = "Strong setup" if rr_value >= 2.0 else "Watch threshold" if rr_value >= MINIMUM_RR_RATIO else "Below minimum threshold"
+        rr_symbol = "OK" if rr_value >= 2.0 else "Watch" if rr_value >= MINIMUM_RR_RATIO else "Skip"
 
     # ── Improvement 6D: stop loss "(model-derived)" label ───────────────────
     stop_label = "model-derived"
@@ -905,7 +914,12 @@ def render_entry_details(
     ).strip()
     st.markdown(html, unsafe_allow_html=True)
 
-    if rr_value < MINIMUM_RR_RATIO:
+    if is_degraded:
+        st.warning(
+            f"Risk/Reward {rr_value}x — indicative only · model-derived · "
+            "not trade-ready · do not treat as execution guidance"
+        )
+    elif rr_value < MINIMUM_RR_RATIO:
         st.warning(
             f"Risk/Reward {rr_value}x is below minimum threshold of "
             f"{MINIMUM_RR_RATIO}x. Consider skipping or waiting for better entry."
@@ -950,6 +964,7 @@ def render_recommendation_card(
     item: dict[str, Any],
     provider: str = "",
     comparison_map: dict | None = None,
+    synthesis_text: str = "",
 ) -> None:
     payload = item.get("payload", {})
     company = str(item.get("company_name", ""))
@@ -979,7 +994,39 @@ def render_recommendation_card(
     elif provider == "openai":
         provider_label = "OpenAI GPT"
 
+    # ── Governance: resolve final canonical state ─────────────────────────────
+    gov = resolve_final_recommendation(
+        quant_action=action,
+        anthropic_rationale=str(payload.get("anthropic_rationale") or rationale) if provider == "anthropic" else rationale,
+        openai_rationale=str(payload.get("openai_rationale") or rationale) if provider == "openai" else rationale,
+        synthesis_text=synthesis_text,
+        payload=payload,
+        provider=provider,
+    )
+    canonical_state  = gov["canonical_state"]
+    actionability    = gov["actionability"]   # ACTIONABLE | NON_ACTIONABLE | DEGRADED
+    show_trade_plan  = actionability != "NON_ACTIONABLE"
+    is_degraded      = actionability == "DEGRADED"
+
+    # Badge colours for canonical state
+    _state_badge_color: dict[str, str] = {
+        "AVOID":                      "#c0392b",
+        "WATCHLIST":                  "#e67e22",
+        "BUY ONLY AFTER CONFIRMATION":"#8e44ad",
+        "ACCUMULATE ON DIPS":         "#2980b9",
+        "ACCUMULATE GRADUALLY":       "#27ae60",
+        "ACTIONABLE BUY":             "#1a7a1a",
+    }
+    _badge_color = _state_badge_color.get(canonical_state, "#555")
+
     with st.container(border=True):
+        # ── Verdict stripe — colored top bar gives instant visual signal ──────
+        _stripe_alpha = "1.0" if actionability == "ACTIONABLE" else "0.55"
+        st.markdown(
+            f'<div style="height:4px;background:{_badge_color};opacity:{_stripe_alpha};'
+            f'border-radius:2px;margin-bottom:6px;"></div>',
+            unsafe_allow_html=True,
+        )
         head_col, action_col = st.columns([4, 1])
         with head_col:
             if provider_label:
@@ -987,15 +1034,89 @@ def render_recommendation_card(
             st.markdown(f"#### {company} ({symbol})")
             if sector:
                 st.caption(sector)
+            # ── Confidence / data-status warning badges ───────────────────────
+            _conf_badge_color = {"HIGH": "#27ae60", "MODERATE": "#e67e22", "LOW": "#c0392b"}
+            _data_badge_color = {"STALE": "#c0392b", "INCONSISTENT": "#c0392b", "UNKNOWN": "#888"}
+            _hdr_badges: list[str] = []
+            _hdr_cl = gov.get("confidence_level", "")
+            _hdr_ds = gov.get("data_status", "")
+            if _hdr_cl and _hdr_cl not in ("HIGH", "UNKNOWN"):
+                _bc = _conf_badge_color.get(_hdr_cl, "#888")
+                _hdr_badges.append(
+                    f'<span style="background:{_bc};color:#fff;padding:2px 6px;'
+                    f'border-radius:3px;font-size:11px;font-weight:600;">{_hdr_cl} CONFIDENCE</span>'
+                )
+            if _hdr_ds and _hdr_ds != "OK":
+                _dc = _data_badge_color.get(_hdr_ds, "#888")
+                _hdr_badges.append(
+                    f'<span style="background:{_dc};color:#fff;padding:2px 6px;'
+                    f'border-radius:3px;font-size:11px;font-weight:600;">DATA {_hdr_ds}</span>'
+                )
+            if _hdr_badges:
+                st.markdown(" &nbsp; ".join(_hdr_badges), unsafe_allow_html=True)
         with action_col:
-            st.markdown(f"**{action}**")
+            # Verdict badge — block-level, muted when non-actionable
+            _badge_opacity = "1.0" if actionability == "ACTIONABLE" else "0.72"
+            st.markdown(
+                f'<div style="background:{_badge_color};color:#fff;opacity:{_badge_opacity};'
+                f'padding:6px 8px;border-radius:5px;font-size:13px;font-weight:700;'
+                f'text-align:center;line-height:1.25;">'
+                f'{canonical_state}</div>',
+                unsafe_allow_html=True,
+            )
+
+        # ── Governance strip — compact annotation, no verdict echo (badge shows it)
+        _act_color = {"ACTIONABLE": "#27ae60", "DEGRADED": "#e67e22", "NON_ACTIONABLE": "#c0392b"}
+        _act_label = {"ACTIONABLE": "Actionable", "DEGRADED": "Indicative", "NON_ACTIONABLE": "Not actionable"}
+        _conf_reason = gov["confidence_reason"]
+        st.markdown(
+            f'<div style="border-left:3px solid {_act_color.get(actionability,"#ccc")};'
+            f'padding:4px 10px;margin:4px 0 6px 0;font-size:11.5px;color:#666;">'
+            f'<span style="color:{_act_color.get(actionability,"#999")};font-weight:600;">'
+            f'{_act_label.get(actionability, actionability)}</span>'
+            f'&ensp;·&ensp;{_html.escape(_conf_reason)}'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        # Consistency failure warnings
+        for _fail in gov["consistency_failures"]:
+            if _fail["severity"] == "CRITICAL":
+                st.error(f"Data integrity: {_fail['message']}")
+            else:
+                st.warning(f"Note: {_fail['message']}")
+
+        # Non-actionable verdict block — styled with reason + upgrade trigger
+        if not show_trade_plan:
+            _reasons_text = " · ".join(
+                gov.get("suppressed_reasons") or ["No actionable trade plan"]
+            )
+            _upgrade = gov.get("upgrade_trigger", "")
+            st.markdown(
+                f'<div style="background:#fff8f0;border-left:4px solid #e67e22;'
+                f'padding:10px 14px;border-radius:6px;margin:8px 0;font-size:13px;">'
+                f'<strong>No actionable trade plan</strong><br>'
+                f'<span style="color:#555;">{_html.escape(_reasons_text)}</span>'
+                + (
+                    f'<br><em style="color:#888;font-size:12px;">'
+                    f'Upgrade trigger: {_html.escape(_upgrade)}</em>'
+                    if _upgrade else ""
+                )
+                + "</div>",
+                unsafe_allow_html=True,
+            )
 
         if comparison_map:
             badge_text, badge_type = get_agreement_badge(symbol, comparison_map)
             getattr(st, badge_type)(f"Model consensus: {badge_text}")
 
         if rationale:
-            st.write(rationale)
+            if not show_trade_plan:
+                # Collapsed on NON_ACTIONABLE — verdict block above already explains the decision
+                with st.expander("Analyst reasoning", expanded=False):
+                    st.write(rationale)
+            else:
+                st.write(rationale)
 
         # ── Improvement 6A: remove false decimal precision from deploy% ──────
         initial_pct_display = f"~{round(float(initial_pct or 0))}%"
@@ -1024,86 +1145,117 @@ def render_recommendation_card(
             else f"Confidence {confidence_band}"
         )
 
-        sizing_label = (
-            f"Position size guide: {initial_pct_display} | {target_display}"
-            if target_display
-            else f"Position size guide: {initial_pct_display}"
-        )
-        summary_bits = [
-            f"Overlap {overlap}%",
-            sizing_label,
-            confidence_display,
-            f"Net Return {net_return}%",
-        ]
-        st.caption(" | ".join(summary_bits))
-        # Sub-caption: sizing caveat (improvement 6A)
-        st.caption("_(Position size is model-derived — adjust to your risk tolerance)_")
+        if show_trade_plan:
+            sizing_label = (
+                f"Position size guide: {initial_pct_display} | {target_display}"
+                if target_display
+                else f"Position size guide: {initial_pct_display}"
+            )
+            summary_bits = [
+                f"Overlap {overlap}%",
+                sizing_label,
+                confidence_display,
+                f"Net Return {net_return}%",
+            ]
+            st.caption(" | ".join(summary_bits))
+            st.caption("_(Position size is model-derived — adjust to your risk tolerance)_")
+        else:
+            # Non-actionable: only overlap is meaningful — sizing/target/return don't apply
+            if overlap:
+                st.caption(f"Portfolio overlap: {overlap}%")
         lock_in_warning = str(payload.get("lock_in_warning") or "")
         if lock_in_warning:
             st.error(f"Recently listed stock - {lock_in_warning}")
         tariff_warning = str(payload.get("tariff_warning") or "")
         if tariff_warning:
             st.warning(f"US tariff risk: {tariff_warning}")
-        recent_results = payload.get("recent_results") or {}
-        momentum = str(recent_results.get("momentum") or "")
-        growth = recent_results.get("revenue_yoy_growth_pct")
-        if momentum:
-            momentum_level = {
-                "STRONG": "success",
-                "GOOD": "success",
-                "MODERATE": "warning",
-                "WEAK": "error",
-            }.get(momentum, "info")
-            message = (
-                f"Revenue momentum: {momentum}"
-                + (
-                    f" - {float(growth):.1f}% YoY growth (latest quarter)"
-                    if growth is not None
-                    else ""
+        # Momentum signals and override notice — only meaningful when a trade is actionable
+        if show_trade_plan:
+            recent_results = payload.get("recent_results") or {}
+            momentum = str(recent_results.get("momentum") or "")
+            growth = recent_results.get("revenue_yoy_growth_pct")
+            if momentum:
+                momentum_level = {
+                    "STRONG": "success",
+                    "GOOD": "success",
+                    "MODERATE": "warning",
+                    "WEAK": "error",
+                }.get(momentum, "info")
+                message = (
+                    f"Revenue momentum: {momentum}"
+                    + (
+                        f" - {float(growth):.1f}% YoY growth (latest quarter)"
+                        if growth is not None
+                        else ""
+                    )
                 )
-            )
-            getattr(st, momentum_level)(message)
-        if payload.get("momentum_override_applied"):
-            st.success(
-                f"Momentum override applied: base signal {payload.get('original_entry_signal', 'WAIT')} -> "
-                f"{payload.get('entry_signal', 'ACCUMULATE')}"
-            )
-        if entry:
+                getattr(st, momentum_level)(message)
+            if payload.get("momentum_override_applied"):
+                st.info(
+                    f"Momentum note: base signal {payload.get('original_entry_signal', 'WAIT')} "
+                    f"adjusted to {payload.get('entry_signal', 'ACCUMULATE')}"
+                )
+
+        # ── Trade mechanics: conditional on actionability ─────────────────────
+        if show_trade_plan and entry:
+            if is_degraded:
+                st.markdown(
+                    '<div style="background:#fffbf0;border:1px solid #f0c040;border-radius:6px;'
+                    'padding:6px 12px;font-size:12px;color:#7a5c00;margin:4px 0;">'
+                    '<strong>Indicative only</strong> · Model-derived · Not trade-ready · '
+                    'Do not treat as execution guidance</div>',
+                    unsafe_allow_html=True,
+                )
             st.markdown("**Entry Details**")
             render_entry_details(
                 entry,
                 target_source_label=str(payload.get("target_source_label") or ""),
+                is_degraded=is_degraded,
             )
             entry = None
+        elif not show_trade_plan:
+            entry = None  # suppress fallback metrics block too
 
-        pe_ctx = payload.get("pe_context") or {}
-        if pe_ctx.get("pe_current") is not None:
-            _pe_color = {
-                "CHEAP_VS_HISTORY":     "success",
-                "FAIR_VS_HISTORY":      "success",
-                "SLIGHT_PREMIUM":       "warning",
-                "EXPENSIVE_VS_HISTORY": "error",
-                "NEUTRAL":              "info",
-            }.get(pe_ctx.get("pe_signal", "NEUTRAL"), "info")
-            getattr(st, _pe_color)(f"PE Context: {pe_ctx['pe_assessment']}")
+        # PE context and technical signals — input signals, not relevant when not trading
+        if show_trade_plan:
+            pe_ctx = payload.get("pe_context") or {}
+            if pe_ctx.get("pe_current") is not None:
+                _pe_color = {
+                    "CHEAP_VS_HISTORY":     "success",
+                    "FAIR_VS_HISTORY":      "success",
+                    "SLIGHT_PREMIUM":       "warning",
+                    "EXPENSIVE_VS_HISTORY": "error",
+                    "NEUTRAL":              "info",
+                }.get(pe_ctx.get("pe_signal", "NEUTRAL"), "info")
+                getattr(st, _pe_color)(f"PE Context: {pe_ctx['pe_assessment']}")
 
-        tech_signals = payload.get("technical_signals", [])
-        if tech_signals:
-            st.markdown("**Technical Signals**")
-            _signal_color = {
-                "CONTRARIAN_BUY": "success",
-                "POSITIVE":       "success",
-                "WATCH":          "warning",
-                "CAUTION":        "warning",
-                "NEGATIVE":       "error",
-            }
-            for sig in tech_signals:
-                color = _signal_color.get(sig["signal"], "info")
-                getattr(st, color)(
-                    f"{sig['type']}: {sig['value']} — {sig['note']}"
+            tech_signals = payload.get("technical_signals", [])
+            if tech_signals:
+                st.markdown("**Technical Signals**")
+                _signal_color = {
+                    "CONTRARIAN_BUY": "success",
+                    "POSITIVE":       "success",
+                    "WATCH":          "warning",
+                    "CAUTION":        "warning",
+                    "NEGATIVE":       "error",
+                }
+                for sig in tech_signals:
+                    color = _signal_color.get(sig["signal"], "info")
+                    getattr(st, color)(
+                        f"{sig['type']}: {sig['value']} — {sig['note']}"
+                    )
+
+        # Fallback metrics block (only shown when primary render_entry_details was skipped
+        # AND trade plan is allowed — i.e. entry_levels was absent but actionability permits it)
+        if entry and show_trade_plan:
+            if is_degraded:
+                st.markdown(
+                    '<div style="background:#fffbf0;border:1px solid #f0c040;border-radius:6px;'
+                    'padding:6px 12px;font-size:12px;color:#7a5c00;margin:4px 0;">'
+                    '<strong>Indicative only</strong> · Model-derived · Not trade-ready · '
+                    'Do not treat as execution guidance</div>',
+                    unsafe_allow_html=True,
                 )
-
-        if entry:
             st.markdown("**Entry Details**")
             col1, col2, col3, col4 = st.columns(4)
             with col1:
@@ -1130,7 +1282,12 @@ def render_recommendation_card(
             st.info(entry["entry_note"])
 
             if entry["risk_reward"] > 0:
-                if entry["risk_reward"] < MINIMUM_RR_RATIO:
+                if is_degraded:
+                    st.warning(
+                        f"Risk/Reward {entry['risk_reward']}x — indicative only · "
+                        "model-derived · not trade-ready · do not treat as execution guidance"
+                    )
+                elif entry["risk_reward"] < MINIMUM_RR_RATIO:
                     st.warning(
                         f"Risk/Reward {entry['risk_reward']}x is below minimum threshold of "
                         f"{MINIMUM_RR_RATIO}x. Consider skipping or waiting for better entry."
@@ -1169,7 +1326,8 @@ def render_recommendation_card(
         if why_for_portfolio:
             st.write(why_for_portfolio)
 
-        if validation_reasoning:
+        # Quant model detail — only shown when trade is being actively considered
+        if show_trade_plan and validation_reasoning:
             st.caption(validation_reasoning)
 
 
@@ -1816,18 +1974,74 @@ with tabs[2]:
         comp: dict[str, Any] = st.session_state["comparison_result"]
         agreement: dict = comp.get("agreement", {})
 
-        # Model agreement summary header
+        # Hoist synthesis_map so card renderers can receive synthesis_text per symbol
+        synthesis_map: dict[str, str] = comp.get("synthesis", {})
+
+        # ── SYNTHESIS FIRST — final resolved verdicts dominate the view ──────
+        if synthesis_map:
+            st.markdown("#### Final Synthesis")
+            st.caption(
+                "Contrarian risk view (Anthropic) vs. momentum catalyst view (OpenAI) — "
+                "synthesised by Claude Sonnet. This section reflects the final resolved verdict."
+            )
+            _synth_state_colors: dict[str, str] = {
+                "AVOID":                      "#c0392b",
+                "WATCHLIST":                  "#e67e22",
+                "BUY ONLY AFTER CONFIRMATION":"#8e44ad",
+                "ACCUMULATE ON DIPS":         "#2980b9",
+                "ACCUMULATE GRADUALLY":       "#27ae60",
+                "ACTIONABLE BUY":             "#1a7a1a",
+            }
+            conviction_order = agreement.get("conviction_order", list(synthesis_map.keys()))
+            for symbol in conviction_order:
+                synthesis_text = synthesis_map.get(symbol)
+                if not synthesis_text:
+                    continue
+                synth_canon, synth_conf = extract_synthesis_verdict(synthesis_text)
+                _sv_color = _synth_state_colors.get(synth_canon, "#555")
+                if symbol in agreement.get("both_agree", set()):
+                    agree_tag = "Both analysts agree"
+                    agree_color = "#27ae60"
+                elif symbol in agreement.get("anthropic_only", set()):
+                    agree_tag = "Risk analyst only — catalyst analyst disagrees"
+                    agree_color = "#e67e22"
+                else:
+                    agree_tag = "Catalyst analyst only — risk analyst disagrees"
+                    agree_color = "#8e44ad"
+                _conf_tag = f" · {synth_conf} confidence" if synth_conf else ""
+                label = (
+                    f"**{symbol}** — "
+                    f'<span style="background:{_sv_color};color:#fff;padding:2px 8px;'
+                    f'border-radius:3px;font-size:12px;font-weight:600;">'
+                    f'{synth_canon or "—"}</span> '
+                    f'<span style="color:{agree_color};font-size:12px;">'
+                    f'{agree_tag}{_conf_tag}</span>'
+                )
+                with st.expander(label, expanded=True):
+                    render_synthesis_with_entry_summary(synthesis_text)
+                    if symbol.upper().replace(".NS", "") in ELEVATED_GOVERNANCE_RISK:
+                        st.caption(
+                            "⚠️ Adani Group stocks carry elevated governance risk. "
+                            "This recommendation requires your independent judgment "
+                            "on group-level political and regulatory exposure."
+                        )
+            st.markdown("---")
+
+        # ── Model agreement summary ───────────────────────────────────────────
         if agreement:
             n_both = len(agreement.get("both_agree", set()))
             n_a_only = len(agreement.get("anthropic_only", set()))
             n_o_only = len(agreement.get("openai_only", set()))
             st.info(
-                f"**Model Agreement Summary** — "
+                f"**Model Agreement** — "
                 f"Both agree: {n_both} stocks | "
                 f"Risk analyst only: {n_a_only} stocks | "
                 f"Catalyst analyst only: {n_o_only} stocks"
             )
 
+        # ── Analyst detail view — inputs, not final truth ─────────────────────
+        st.markdown("#### Analyst Detail View")
+        st.caption("Individual analyst inputs — synthesis above reflects the final resolved verdict.")
         col_a, col_b = st.columns(2)
         with col_a:
             st.markdown('<span class="provider-badge provider-badge-anthropic">Anthropic Claude</span>', unsafe_allow_html=True)
@@ -1840,7 +2054,10 @@ with tabs[2]:
                 render_empty_panel("No Anthropic recommendations were generated.")
             else:
                 for item in a_data["recommendations"]:
-                    render_recommendation_card(item, provider="anthropic", comparison_map=agreement)
+                    render_recommendation_card(
+                        item, provider="anthropic", comparison_map=agreement,
+                        synthesis_text=synthesis_map.get(item.get("symbol", ""), ""),
+                    )
         with col_b:
             st.markdown('<span class="provider-badge provider-badge-openai">OpenAI GPT</span>', unsafe_allow_html=True)
             o_data = comp.get("openai", {})
@@ -1852,33 +2069,10 @@ with tabs[2]:
                 render_empty_panel("No OpenAI recommendations were generated.")
             else:
                 for item in o_data["recommendations"]:
-                    render_recommendation_card(item, provider="openai", comparison_map=agreement)
-
-        synthesis_map: dict[str, str] = comp.get("synthesis", {})
-        if synthesis_map:
-            st.markdown("---")
-            st.markdown("#### Analyst Synthesis")
-            st.caption("Contrarian risk view (Anthropic) vs. momentum catalyst view (OpenAI) — synthesised by Claude Sonnet.")
-            # Display in conviction order: both-agree first, then single-model.
-            conviction_order = agreement.get("conviction_order", list(synthesis_map.keys()))
-            for symbol in conviction_order:
-                synthesis_text = synthesis_map.get(symbol)
-                if not synthesis_text:
-                    continue
-                if symbol in agreement.get("both_agree", set()):
-                    label = f"Synthesis — {symbol} (Both Models)"
-                elif symbol in agreement.get("anthropic_only", set()):
-                    label = f"Synthesis — {symbol} (Risk Analyst Only)"
-                else:
-                    label = f"Synthesis — {symbol} (Catalyst Analyst Only)"
-                with st.expander(label, expanded=True):
-                    render_synthesis_with_entry_summary(synthesis_text)
-                    if symbol.upper().replace(".NS", "") in ELEVATED_GOVERNANCE_RISK:
-                        st.caption(
-                            "⚠️ Adani Group stocks carry elevated governance risk. "
-                            "This recommendation requires your independent judgment "
-                            "on group-level political and regulatory exposure."
-                        )
+                    render_recommendation_card(
+                        item, provider="openai", comparison_map=agreement,
+                        synthesis_text=synthesis_map.get(item.get("symbol", ""), ""),
+                    )
         _render_skipped_stocks(comp.get("skipped_stocks", []))
         if st.button("Clear comparison view"):
             st.session_state.pop("comparison_result", None)
