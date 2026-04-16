@@ -802,6 +802,43 @@ def render_provider_model_box(label: str, fast_model: str, reasoning_model: str,
 ENTRY_SUMMARY_MARKER = "**ENTRY SUMMARY:**"
 
 
+def compute_data_badge(fin_data: dict) -> dict:
+    """
+    Three-state data quality badge based on actual fundamental availability.
+    DATA UNKNOWN fires only when core ratios are missing, not merely when
+    the result date is absent.
+    """
+    has_pe     = fin_data.get("pe_ratio") not in (None, 0) or fin_data.get("pe_trailing") not in (None, 0)
+    has_roce   = fin_data.get("roce_pct") not in (None, 0) or fin_data.get("roce") not in (None, 0)
+    has_rev    = (
+        fin_data.get("revenue_growth_pct") not in (None, 0)
+        or fin_data.get("revenueGrowth") not in (None, 0)
+        or fin_data.get("revenue_growth") not in (None, 0)
+    )
+    has_result = fin_data.get("last_result_date") not in (None, "None", "")
+
+    core_data_present = has_pe and has_roce and has_rev
+
+    if not core_data_present:
+        return {
+            "badge":   "DATA UNKNOWN",
+            "color":   "#888",
+            "tooltip": "Core fundamental ratios unavailable",
+        }
+    elif not has_result:
+        return {
+            "badge":   "RESULT DATE UNKNOWN",
+            "color":   "#e67e22",
+            "tooltip": "Fundamentals present but earnings date unconfirmed - staleness risk",
+        }
+    else:
+        return {
+            "badge":   "DATA VERIFIED",
+            "color":   "#27ae60",
+            "tooltip": f"Last result: {fin_data['last_result_date']}",
+        }
+
+
 def get_agreement_badge(symbol: str, comparison_map: dict) -> tuple[str, str]:
     """Return (badge_text, streamlit_method_name) for a symbol's model agreement level."""
     if symbol in comparison_map.get("both_agree", set()):
@@ -1047,11 +1084,22 @@ def render_recommendation_card(
                     f'border-radius:3px;font-size:11px;font-weight:600;">{_hdr_cl} CONFIDENCE</span>'
                 )
             if _hdr_ds and _hdr_ds != "OK":
-                _dc = _data_badge_color.get(_hdr_ds, "#888")
-                _hdr_badges.append(
-                    f'<span style="background:{_dc};color:#fff;padding:2px 6px;'
-                    f'border-radius:3px;font-size:11px;font-weight:600;">DATA {_hdr_ds}</span>'
-                )
+                if _hdr_ds == "UNKNOWN":
+                    # Three-state: only show badge when fundamentals are actually missing
+                    # or result date is absent — not as a catch-all for missing dates.
+                    _db = compute_data_badge(payload.get("fin_data") or {})
+                    if _db["badge"] != "DATA VERIFIED":
+                        _hdr_badges.append(
+                            f'<span style="background:{_db["color"]};color:#fff;padding:2px 6px;'
+                            f'border-radius:3px;font-size:11px;font-weight:600;"'
+                            f' title="{_db["tooltip"]}">{_db["badge"]}</span>'
+                        )
+                else:
+                    _dc = _data_badge_color.get(_hdr_ds, "#888")
+                    _hdr_badges.append(
+                        f'<span style="background:{_dc};color:#fff;padding:2px 6px;'
+                        f'border-radius:3px;font-size:11px;font-weight:600;">DATA {_hdr_ds}</span>'
+                    )
             if _hdr_badges:
                 st.markdown(" &nbsp; ".join(_hdr_badges), unsafe_allow_html=True)
         with action_col:
