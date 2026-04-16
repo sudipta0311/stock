@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from stock_platform.utils.risk_profiles import get_risk_config
 from stock_platform.utils.rules import clamp
 
 
@@ -90,11 +91,26 @@ def compute_quality_score(symbol: str, fin_data: dict[str, Any], _unused: dict[s
 _BULLISH_ENTRY_SIGNALS = {"STRONG ENTER", "ACCUMULATE", "SMALL INITIAL"}
 _SOFTEN_MAP = {"STRONG ENTER": "ACCUMULATE", "ACCUMULATE": "SMALL INITIAL"}
 
+# Rank for quant signals — higher = more bullish. Used to cap downward only.
+_QUANT_RANK = {
+    "STRONG ENTER":  4,
+    "ACCUMULATE":    3,
+    "SMALL INITIAL": 2,
+    "WAIT":          1,
+    "DO NOT ENTER":  0,
+}
 
-def apply_freshness_cap(entry_signal: str, fin_data: dict[str, Any]) -> str:
+
+def apply_freshness_cap(
+    entry_signal: str,
+    fin_data: dict[str, Any],
+    risk_profile: str = "Balanced",
+) -> str:
     """
-    Caps quant entry signal based on data freshness.
-    Prevents overly bullish calls when earnings data is absent or price data is corrupt.
+    Caps quant entry signal based on data freshness and the investor's risk profile.
+
+    Conservative/Balanced: no result date -> WAIT (hard stop).
+    Aggressive: no result date -> SMALL INITIAL (data uncertainty tolerated).
 
     entry_signal uses assess_timing() vocabulary:
         STRONG ENTER | ACCUMULATE | SMALL INITIAL | WAIT | DO NOT ENTER
@@ -102,22 +118,40 @@ def apply_freshness_cap(entry_signal: str, fin_data: dict[str, Any]) -> str:
     if entry_signal not in _BULLISH_ENTRY_SIGNALS:
         return entry_signal
 
+    config      = get_risk_config(risk_profile)
     result_date = fin_data.get("last_result_date")
+    days_stale  = fin_data.get("result_days_stale", 999)
     w52_quality = fin_data.get("52w_data_quality", "")
 
-    # No earnings anchor — cannot sustain bullish call
+    # No earnings anchor — apply profile cap (may still allow SMALL INITIAL for Aggressive)
     if not result_date or str(result_date).lower() in ("none", ""):
-        print(
-            f"Freshness cap: no result date - capping '{entry_signal}' to 'WAIT'"
-        )
-        return "WAIT"
+        cap_signal = config.get("quant_cap_no_result_signal", "WAIT")
+        if _QUANT_RANK.get(entry_signal, 0) > _QUANT_RANK.get(cap_signal, 0):
+            print(
+                f"Freshness cap [{risk_profile}]: no result date"
+                f" - capping '{entry_signal}' to '{cap_signal}'"
+            )
+            return cap_signal
+        return entry_signal
 
-    # Corrupt price data — soften but don't zero out
+    # Staleness cap: result is too old for this profile -> soften one tier
+    staleness_cap = int(config.get("staleness_cap_days", 90))
+    if isinstance(days_stale, (int, float)) and days_stale > staleness_cap:
+        softened = _SOFTEN_MAP.get(entry_signal, entry_signal)
+        if softened != entry_signal:
+            print(
+                f"Freshness cap [{risk_profile}]: {days_stale}d > {staleness_cap}d"
+                f" - softening '{entry_signal}' to '{softened}'"
+            )
+        return softened
+
+    # Corrupt price data — soften one tier regardless of profile
     if w52_quality in ("DATA_CORRUPT", "UNAVAILABLE"):
         softened = _SOFTEN_MAP.get(entry_signal, entry_signal)
         if softened != entry_signal:
             print(
-                f"Freshness cap: 52W {w52_quality} - softening '{entry_signal}' to '{softened}'"
+                f"Freshness cap: 52W {w52_quality}"
+                f" - softening '{entry_signal}' to '{softened}'"
             )
         return softened
 

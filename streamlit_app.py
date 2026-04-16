@@ -2003,7 +2003,7 @@ with tabs[2]:
             _sel_cfg = SELECTABLE_INDICES[selected_display]
             st.caption(f"{_sel_cfg['description']} · {_sel_cfg['count']} stocks in universe")
         with c2:
-            risk_profile = st.selectbox("Risk", ["Balanced", "Moderate", "Aggressive"])
+            risk_profile = st.selectbox("Risk Profile", ["Conservative", "Balanced", "Aggressive"])
         c3, c4 = st.columns(2)
         with c3:
             horizon_months = st.slider("Horizon (months)", 6, 36, 18)
