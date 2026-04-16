@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from stock_platform.config import AppConfig
+from stock_platform.utils.risk_profiles import RISK_PROMPT_HINTS, get_risk_config
 
 # Display names and model labels exposed for UI consumption.
 PROVIDER_LABELS: dict[str, str] = {
@@ -291,6 +292,16 @@ class PlatformLLM:
         _macro_flow = item.get("macro_flow") or {}
         macro_flow_block = format_macro_flow_for_prompt(_macro_flow)
 
+        # ── Risk profile instruction block ───────────────────────────────────
+        risk_profile      = item.get("risk_profile", "Balanced")
+        _risk_cfg         = get_risk_config(risk_profile)
+        risk_profile_hint = RISK_PROMPT_HINTS.get(risk_profile, RISK_PROMPT_HINTS["Balanced"])
+        risk_profile_block = (
+            f"\n\nINVESTOR RISK PROFILE INSTRUCTION:\n{risk_profile_hint}\n"
+            f"R/R minimum for this profile: {_risk_cfg['min_rr_ratio']}x | "
+            f"Staleness cap: {_risk_cfg['staleness_cap_days']} days"
+        )
+
         # ════════════════════════════════════════════════════════════════════
         # ANTHROPIC — Bear-biased risk analyst (quality candidate pool)
         # ════════════════════════════════════════════════════════════════════
@@ -338,6 +349,7 @@ class PlatformLLM:
                 f"QUALITY SCORE: {quality_score:.2f} | ENTRY SIGNAL: {entry_signal}\n"
                 f"ANALYST TARGET: {target_line}\n"
                 f"{low_val_warning}"
+                f"{risk_profile_block}"
                 f"{macro_flow_block}"
                 f"\n{snapshot_text}\n"
                 "Stress-test this recommendation and produce the risk-focused verdict."
@@ -395,6 +407,7 @@ class PlatformLLM:
             f"QUALITY SCORE: {quality_score:.2f} | ENTRY SIGNAL: {entry_signal}\n"
             f"ANALYST TARGET: {target_line}\n"
             f"{low_val_warning}"
+            f"{risk_profile_block}"
             f"{macro_flow_block}"
             f"\n{snapshot_text}\n"
             "Identify the catalyst path and produce the timing verdict."
@@ -458,6 +471,7 @@ class PlatformLLM:
         factual_snapshot: str = "",
         entry_data: dict[str, Any] | None = None,
         macro_flow: dict[str, Any] | None = None,
+        risk_profile: str = "Balanced",
     ) -> str | None:
         """
         Synthesis of Anthropic (risk) and OpenAI (catalyst) views.
@@ -473,9 +487,21 @@ class PlatformLLM:
             client = _anthropic.Anthropic(api_key=self.config.anthropic_api_key)
 
             # ── Shared system prompt ─────────────────────────────────────────
+            _synth_risk_cfg  = get_risk_config(risk_profile)
+            _synth_min_rr    = _synth_risk_cfg["min_rr_ratio"]
+            _synth_stale_cap = _synth_risk_cfg["staleness_cap_days"]
+            _synth_hint      = RISK_PROMPT_HINTS.get(risk_profile, RISK_PROMPT_HINTS["Balanced"])
             system_prompt = (
                 "You are a senior portfolio manager synthesising two analyst views on an Indian equity. "
                 "Your job is to produce a clean, honest verdict — not a merger of both texts.\n\n"
+                f"INVESTOR RISK PROFILE: {risk_profile}\n"
+                f"{_synth_hint}\n"
+                f"The minimum acceptable R/R for this profile is {_synth_min_rr}x. "
+                f"Data up to {_synth_stale_cap} days stale is tolerated for this profile. "
+                "If either analyst's entry plan meets the R/R threshold AND business quality is "
+                "confirmed, the synthesis MUST consider ACCUMULATE GRADUALLY as a valid verdict "
+                "-- do not default to WATCHLIST purely on data staleness grounds when the risk "
+                "profile explicitly tolerates it.\n\n"
                 "SYNTHESIS RULES:\n"
                 "1. First identify whether disagreement is about:\n"
                 "   - FACTS (one analyst has wrong data)\n"

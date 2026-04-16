@@ -11,6 +11,7 @@ _log = logging.getLogger(__name__)
 from stock_platform.config import AppConfig
 from stock_platform.models import RecommendationRecord
 from stock_platform.agents.quant_model import apply_freshness_cap, compute_quality_score as compute_quality_score_v2
+from stock_platform.utils.risk_profiles import get_risk_config
 from stock_platform.utils.entry_calculator import (
     KNOWN_ANALYST_TARGETS,
     apply_momentum_override,
@@ -505,6 +506,7 @@ class BuyAgents:
         }
 
     def assess_timing(self, state: dict[str, Any]) -> dict[str, Any]:
+        risk_profile = state["request"].get("risk_profile", "Balanced")
         contrarian = {row["sector"]: row for row in self.repo.list_signals("contrarian")}
         unified = {row["sector"]: row for row in self.repo.list_signals("unified")}
         timing_rows = []
@@ -537,8 +539,8 @@ class BuyAgents:
                 lock_in_multiplier = 0.5
                 if entry in {"STRONG ENTER", "ACCUMULATE", "SMALL INITIAL"}:
                     entry = "WAIT"
-            # Freshness cap: no result date → WAIT; corrupt 52W data → soften one tier
-            entry = apply_freshness_cap(entry, fin_data)
+            # Freshness cap: thresholds driven by risk_profile
+            entry = apply_freshness_cap(entry, fin_data, risk_profile)
             timing_rows.append(
                 candidate
                 | {
@@ -633,6 +635,9 @@ class BuyAgents:
     def finalize_recommendation(self, state: dict[str, Any]) -> dict[str, Any]:
         confidence_band = state["confidence"]["band"]
         requested_top_n = int(state["request"]["top_n"])
+        risk_profile    = state["request"].get("risk_profile", "Balanced")
+        _risk_cfg       = get_risk_config(risk_profile)
+        _min_rr         = float(_risk_cfg["min_rr_ratio"])
         run_id = f"buy-{uuid4().hex[:10]}"
         # Pre-load unified signals once for the whole loop (used by evidence scoring).
         unified_by_sector = {row["sector"]: row for row in self.repo.list_signals("unified")}
@@ -879,22 +884,23 @@ class BuyAgents:
                 item["symbol"], item["entry_signal"], float(current_price),
                 float(analyst_target or 0), net_return_pct, rr_value,
             )
-            if rr_value < MINIMUM_RR_RATIO:
+            if rr_value < _min_rr:
                 _log.warning(
-                    "EXCLUDED %s: R/R %.1fx below minimum %.1fx (price=%.1f target=%.1f signal=%s)",
-                    item["symbol"], rr_value, MINIMUM_RR_RATIO,
+                    "EXCLUDED %s: R/R %.1fx below %s minimum %.1fx (price=%.1f target=%.1f signal=%s)",
+                    item["symbol"], rr_value, risk_profile, _min_rr,
                     float(current_price), float(analyst_target or 0), item["entry_signal"],
                 )
                 gov_skipped.append({
                     "symbol": item["symbol"],
                     "status": "LOW_RISK_REWARD",
                     "resolved_symbol": item["symbol"],
-                    "reason": f"R/R {rr_value}x below minimum {MINIMUM_RR_RATIO}x",
+                    "reason": f"R/R {rr_value}x below {risk_profile} minimum {_min_rr}x",
                 })
                 continue
 
             _prepared.append({
                 "item": item,
+                "risk_profile": risk_profile,
                 "current_price": current_price,
                 "analyst_target": analyst_target,
                 "net_return_pct": net_return_pct,
@@ -926,6 +932,7 @@ class BuyAgents:
                     "target_source_label":   prep["target_source_label"],
                     "analyst_target":        prep["analyst_target"],
                     "macro_flow":            macro_flow,
+                    "risk_profile":          prep["risk_profile"],
                 },
                 state["portfolio_context"],
             )
@@ -1056,7 +1063,7 @@ class BuyAgents:
             elif low_rr_count:
                 blocked_reason = (
                     f"All shortlisted candidates failed the minimum risk/reward gate of "
-                    f"{MINIMUM_RR_RATIO}x. Try a broader universe or rerun when prices/targets improve."
+                    f"{_min_rr}x ({risk_profile} profile). Try a broader universe or rerun when prices/targets improve."
                 )
             elif overlap_count:
                 blocked_reason = (

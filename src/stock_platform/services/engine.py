@@ -261,6 +261,7 @@ class PlatformEngine:
         results["skipped_stocks"] = list(all_skipped.values())
 
         # Build per-stock synthesis for every recommended stock, even if only one provider returned analysis.
+        risk_profile = request.get("risk_profile", "Balanced")
         a_recs = results.get("anthropic", {}).get("recommendations", [])
         o_recs = results.get("openai", {}).get("recommendations", [])
 
@@ -343,6 +344,7 @@ class PlatformEngine:
                     factual_snapshot=_payload.get("factual_snapshot_text", ""),
                     entry_data=_entry_data,
                     macro_flow=_payload.get("macro_flow"),
+                    risk_profile=risk_profile,
                 )
                 if synthesis:
                     synthesis_map[symbol] = _append_entry_summary(synthesis, base_rec)
