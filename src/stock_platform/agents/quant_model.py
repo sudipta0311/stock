@@ -84,3 +84,41 @@ def compute_quality_score(symbol: str, fin_data: dict[str, Any], _unused: dict[s
         print(f"{symbol}: mapped to {fin_data.get('symbol')} with sparse post-demerger metrics - capped quality at 0.45")
 
     return round(final_score, 2)
+
+
+# ── Entry signal vocabulary used in assess_timing() ──────────────────────────
+_BULLISH_ENTRY_SIGNALS = {"STRONG ENTER", "ACCUMULATE", "SMALL INITIAL"}
+_SOFTEN_MAP = {"STRONG ENTER": "ACCUMULATE", "ACCUMULATE": "SMALL INITIAL"}
+
+
+def apply_freshness_cap(entry_signal: str, fin_data: dict[str, Any]) -> str:
+    """
+    Caps quant entry signal based on data freshness.
+    Prevents overly bullish calls when earnings data is absent or price data is corrupt.
+
+    entry_signal uses assess_timing() vocabulary:
+        STRONG ENTER | ACCUMULATE | SMALL INITIAL | WAIT | DO NOT ENTER
+    """
+    if entry_signal not in _BULLISH_ENTRY_SIGNALS:
+        return entry_signal
+
+    result_date = fin_data.get("last_result_date")
+    w52_quality = fin_data.get("52w_data_quality", "")
+
+    # No earnings anchor — cannot sustain bullish call
+    if not result_date or str(result_date).lower() in ("none", ""):
+        print(
+            f"Freshness cap: no result date - capping '{entry_signal}' to 'WAIT'"
+        )
+        return "WAIT"
+
+    # Corrupt price data — soften but don't zero out
+    if w52_quality in ("DATA_CORRUPT", "UNAVAILABLE"):
+        softened = _SOFTEN_MAP.get(entry_signal, entry_signal)
+        if softened != entry_signal:
+            print(
+                f"Freshness cap: 52W {w52_quality} - softening '{entry_signal}' to '{softened}'"
+            )
+        return softened
+
+    return entry_signal

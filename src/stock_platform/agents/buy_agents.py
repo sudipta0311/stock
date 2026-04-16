@@ -10,7 +10,7 @@ _log = logging.getLogger(__name__)
 
 from stock_platform.config import AppConfig
 from stock_platform.models import RecommendationRecord
-from stock_platform.agents.quant_model import compute_quality_score as compute_quality_score_v2
+from stock_platform.agents.quant_model import apply_freshness_cap, compute_quality_score as compute_quality_score_v2
 from stock_platform.utils.entry_calculator import (
     KNOWN_ANALYST_TARGETS,
     apply_momentum_override,
@@ -501,6 +501,8 @@ class BuyAgents:
                 lock_in_multiplier = 0.5
                 if entry in {"STRONG ENTER", "ACCUMULATE", "SMALL INITIAL"}:
                     entry = "WAIT"
+            # Freshness cap: no result date → WAIT; corrupt 52W data → soften one tier
+            entry = apply_freshness_cap(entry, fin_data)
             timing_rows.append(
                 candidate
                 | {
