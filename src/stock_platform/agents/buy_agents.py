@@ -329,7 +329,13 @@ class BuyAgents:
                 continue
             if risk.get("beta") is not None and risk["beta"] > 2.0:
                 continue
-            if risk.get("promoter_pledge_pct") is not None and risk["promoter_pledge_pct"] > 50:
+            pledge = risk.get("pledge_pct") or risk.get("promoter_pledge_pct")
+            if pledge is not None and pledge > 30:
+                candidate["hard_exclude"] = True
+                candidate["exclude_reason"] = (
+                    f"Promoter pledge {pledge:.1f}% exceeds 30% threshold — "
+                    f"margin call risk creates forced selling overhang"
+                )
                 continue
             if risk.get("sebi_flag"):
                 continue

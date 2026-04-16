@@ -80,6 +80,11 @@ def build_factual_snapshot(
         "sector_gap":        sector_gap.get("conviction", ""),
         "gap_target_pct":    sector_gap.get("target_pct", 0),
 
+        # GOVERNANCE
+        "pledge_pct":        fin_data.get("pledge_pct"),
+        "pledge_trend":      fin_data.get("pledge_trend"),
+        "promoter_holding":  fin_data.get("promoter_holding"),
+
         # DATA FRESHNESS
         "data_source":       fin_data.get("source", "screener"),
         "last_result_date":  fin_data.get("last_result_date"),
@@ -95,6 +100,23 @@ def _n(val: Any, fmt: str, fallback: str = "N/A") -> str:
         return format(float(val), fmt)
     except (TypeError, ValueError):
         return fallback
+
+
+def _format_pledge_block(s: dict) -> str:
+    pledge_pct = s.get("pledge_pct")
+    pledge_trend = s.get("pledge_trend")
+    promoter_holding = s.get("promoter_holding")
+    if pledge_pct is None and promoter_holding is None:
+        return ""
+    lines = ["\nGOVERNANCE:\n"]
+    if promoter_holding is not None:
+        lines.append(f"  Promoter Holding: {float(promoter_holding):.1f}%\n")
+    if pledge_pct is not None:
+        risk_flag = " [HIGH - margin call overhang risk]" if pledge_pct > 30 else ""
+        lines.append(f"  Promoter Pledge:  {float(pledge_pct):.1f}%{risk_flag}\n")
+        if pledge_trend:
+            lines.append(f"  Pledge Trend:     {pledge_trend}\n")
+    return "".join(lines)
 
 
 def format_snapshot_for_prompt(snapshot: dict) -> str:
@@ -200,7 +222,8 @@ def format_snapshot_for_prompt(snapshot: dict) -> str:
         f"  Existing Overlap: {float(s.get('overlap_pct', 0)):.1f}%\n"
         f"  Sector Gap:       {s.get('sector_gap', '')}\n"
         f"  Gap Target:       {float(s.get('gap_target_pct', 0)):.1f}%\n"
-        "\n"
+        + _format_pledge_block(s)
+        + "\n"
         "DATA QUALITY:\n"
         f"  Source:           {s.get('data_source', 'unknown')}\n"
         f"  Last Result:      {s.get('last_result_date', 'unknown')}\n"

@@ -139,6 +139,50 @@ def _parse_promoter_holding(soup: BeautifulSoup | None) -> float | None:
     return None
 
 
+def _parse_pledge_data(soup: BeautifulSoup | None) -> dict[str, Any]:
+    """
+    Parse promoter pledge % from the quarterly shareholding table on Screener.in.
+    Returns pledge_pct (latest), pledge_history (up to 4 quarters), and
+    pledge_trend (RISING/STABLE/FALLING) derived from the quarterly series.
+    """
+    if soup is None:
+        return {"pledge_pct": None, "pledge_history": [], "pledge_trend": None}
+
+    history: list[float] = []
+    for table in soup.select("#quarterly-shp table, #yearly-shp table"):
+        for row in table.select("tbody tr"):
+            cells = row.select("td")
+            if len(cells) < 2:
+                continue
+            label = cells[0].get_text(" ", strip=True).lower()
+            if "pledge" not in label:
+                continue
+            for cell in cells[1:5]:  # up to 4 quarters
+                val = _clean_number(cell.get_text(" ", strip=True))
+                if val is not None:
+                    history.append(val)
+            break  # found the pledge row
+
+    if not history:
+        return {"pledge_pct": None, "pledge_history": [], "pledge_trend": None}
+
+    pledge_pct = history[0]  # most recent quarter first on Screener
+
+    # Trend: compare latest vs oldest of the available quarters
+    if len(history) >= 2:
+        delta = history[0] - history[-1]
+        if delta > 2.0:
+            trend = "RISING"
+        elif delta < -2.0:
+            trend = "FALLING"
+        else:
+            trend = "STABLE"
+    else:
+        trend = "STABLE"
+
+    return {"pledge_pct": pledge_pct, "pledge_history": history, "pledge_trend": trend}
+
+
 def _parse_balance_sheet_value(soup: BeautifulSoup | None, row_label: str) -> float | None:
     if soup is None:
         return None
@@ -310,6 +354,7 @@ def fetch_screener_data(nse_symbol: str) -> dict[str, Any]:
         or _get_ratio_value(standalone_ratios, "price to book value", "p/b", "pb")
     )
     recent_results = _parse_recent_results_from_soup(consolidated_soup) or _parse_recent_results_from_soup(standalone_soup)
+    pledge_data = _parse_pledge_data(consolidated_soup) or _parse_pledge_data(standalone_soup)
 
     result = {
         "roce_pct": roce_pct,
@@ -322,6 +367,9 @@ def fetch_screener_data(nse_symbol: str) -> dict[str, Any]:
         "revenue_growth_pct": revenue_growth_pct,
         "promoter_holding": promoter_holding,
         "promoter_change": promoter_change,
+        "pledge_pct": pledge_data.get("pledge_pct"),
+        "pledge_trend": pledge_data.get("pledge_trend"),
+        "pledge_history": pledge_data.get("pledge_history") or [],
         "dma_200": dma_200,
         "dma_50": dma_50,
         "current_price": current_price,
