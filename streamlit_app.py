@@ -1086,6 +1086,17 @@ def render_recommendation_card(
             else:
                 st.warning(f"Note: {_fail['message']}")
 
+        # 52W data quality banner — driven by validate_52w_range() result stored in fin_data
+        _w52q = (payload.get("fin_data") or {}).get("52w_data_quality", "")
+        if _w52q == "DATA_CORRUPT":
+            st.warning("52W range data corrupted — technical entry signals suppressed")
+        elif _w52q == "COMPUTED_FROM_HISTORY":
+            st.info("52W range computed from 1Y price history (screener fallback via yfinance)")
+        elif _w52q == "RANGE_MISMATCH":
+            st.warning("Current price is outside stated 52W range — verify data before acting on range signals")
+        elif _w52q == "UNAVAILABLE":
+            st.warning("52W range data unavailable — range-relative signals omitted")
+
         # Non-actionable verdict block — styled with reason + upgrade trigger
         if not show_trade_plan:
             _reasons_text = " · ".join(

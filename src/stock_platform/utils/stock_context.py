@@ -65,6 +65,7 @@ def build_factual_snapshot(
         "debt_to_equity":    de,
         "week52_low":        fin_data.get("week52_low") or fin_data.get("fiftyTwoWeekLow"),
         "week52_high":       fin_data.get("week52_high") or fin_data.get("fiftyTwoWeekHigh"),
+        "52w_data_quality":  fin_data.get("52w_data_quality", "UNKNOWN"),
         "latest_qtr_growth": qtr_rev,
 
         # DERIVED — computed from measured data
@@ -120,8 +121,9 @@ def format_snapshot_for_prompt(snapshot: dict) -> str:
     rev      = s.get("revenue_growth")
     roce     = s.get("roce")
     de       = s.get("debt_to_equity") or 0
-    w52_low  = s.get("week52_low") or 0
-    w52_high = s.get("week52_high") or 0
+    w52_low    = s.get("week52_low") or 0
+    w52_high   = s.get("week52_high") or 0
+    w52_quality = s.get("52w_data_quality", "UNKNOWN")
 
     qtr_growth = s.get("latest_qtr_growth")
     latest_qtr = f"{float(qtr_growth):.1f}% YoY" if qtr_growth is not None else "not available"
@@ -135,6 +137,25 @@ def format_snapshot_for_prompt(snapshot: dict) -> str:
 
     pct_low   = s.get("pct_from_52w_low")
     pct_low_l = f"{float(pct_low):.1f}% above 52W Low" if pct_low is not None else "N/A"
+
+    # Build 52W range lines — suppress or warn based on data quality
+    _bad_52w = w52_quality in ("DATA_CORRUPT", "UNAVAILABLE", "RANGE_MISMATCH")
+    if _bad_52w:
+        _w52_block = (
+            f"  52W Low:          DATA {w52_quality} — do NOT use price-range-relative signals\n"
+            f"  52W High:         DATA {w52_quality} — omit all 52W high/low references from entry rationale\n"
+        )
+        pct_low_l = f"SUPPRESSED (52W data {w52_quality})"
+    elif w52_quality == "COMPUTED_FROM_HISTORY":
+        _w52_block = (
+            f"  52W Low:          ₹{float(w52_low):,.0f} [computed from 1Y history]\n"
+            f"  52W High:         ₹{float(w52_high):,.0f} [computed from 1Y history]\n"
+        )
+    else:
+        _w52_block = (
+            f"  52W Low:          ₹{float(w52_low):,.0f}\n"
+            f"  52W High:         ₹{float(w52_high):,.0f}\n"
+        )
 
     above_200   = s.get("above_200dma")
     above_200_l = ("Yes" if above_200 else "No") if above_200 is not None else "N/A"
@@ -165,9 +186,8 @@ def format_snapshot_for_prompt(snapshot: dict) -> str:
         f"  Latest Qtr Rev:   {latest_qtr}\n"
         f"  ROCE:             {roce_line}\n"
         f"  D/E Ratio:        {float(de):.2f}\n"
-        f"  52W Low:          ₹{float(w52_low):,.0f}\n"
-        f"  52W High:         ₹{float(w52_high):,.0f}\n"
-        "\n"
+        + _w52_block
+        + "\n"
         "DERIVED (computed from above):\n"
         f"  PE vs 5yr Median: {pe_vs_l}\n"
         f"  PE Signal:        {s.get('pe_signal', 'UNKNOWN')}\n"
