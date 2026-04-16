@@ -322,11 +322,26 @@ class PlatformEngine:
                     fallback="No catalyst analysis provided.",
                     provider_name="OpenAI",
                 )
+                # Build entry data for the synthesis entry-guidance block.
+                _payload     = (base_rec or {}).get("payload", {})
+                _entry_lvls  = _payload.get("entry_levels") or {}
+                _entry_data  = {
+                    "cmp":                 _payload.get("current_price", 0),
+                    "entry":               _entry_lvls.get("entry_price", 0),
+                    "stop":                _entry_lvls.get("stop_loss", 0),
+                    "target":              _payload.get("analyst_target", 0),
+                    "rr":                  _entry_lvls.get("risk_reward", 0),
+                    "target_source_label": _payload.get(
+                        "target_source_label", "model estimate"
+                    ),
+                }
                 synthesis = synth_llm.synthesise_comparison(
                     stock_name=f"{base_rec.get('company_name', symbol)} ({symbol})",
                     anthropic_rationale=a_rationale,
                     openai_rationale=o_rationale,
                     agreement_type=agreement_type,
+                    factual_snapshot=_payload.get("factual_snapshot_text", ""),
+                    entry_data=_entry_data,
                 )
                 if synthesis:
                     synthesis_map[symbol] = _append_entry_summary(synthesis, base_rec)
