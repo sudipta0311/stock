@@ -286,6 +286,11 @@ class PlatformLLM:
                 "and cash conversion instead.\n"
             )
 
+        # ── Macro flow block (FII/DII — injected if available) ──────────────
+        from stock_platform.utils.fii_dii_fetcher import format_macro_flow_for_prompt
+        _macro_flow = item.get("macro_flow") or {}
+        macro_flow_block = format_macro_flow_for_prompt(_macro_flow)
+
         # ════════════════════════════════════════════════════════════════════
         # ANTHROPIC — Skeptical institutional risk analyst
         # ════════════════════════════════════════════════════════════════════
@@ -331,6 +336,7 @@ class PlatformLLM:
                 f"QUALITY SCORE: {quality_score:.2f} | ENTRY SIGNAL: {entry_signal}\n"
                 f"ANALYST TARGET: {target_line}\n"
                 f"{low_val_warning}"
+                f"{macro_flow_block}"
                 f"\n{snapshot_text}\n"
                 "Stress-test this recommendation and produce the risk-focused verdict."
             )
@@ -386,6 +392,7 @@ class PlatformLLM:
             f"QUALITY SCORE: {quality_score:.2f} | ENTRY SIGNAL: {entry_signal}\n"
             f"ANALYST TARGET: {target_line}\n"
             f"{low_val_warning}"
+            f"{macro_flow_block}"
             f"\n{snapshot_text}\n"
             "Identify the catalyst path and produce the timing verdict."
         )
@@ -447,6 +454,7 @@ class PlatformLLM:
         agreement_type: str = "both",
         factual_snapshot: str = "",
         entry_data: dict[str, Any] | None = None,
+        macro_flow: dict[str, Any] | None = None,
     ) -> str | None:
         """
         Synthesis of Anthropic (risk) and OpenAI (catalyst) views.
@@ -521,6 +529,9 @@ class PlatformLLM:
 
             # ── Build user prompt — vary only the analyst section ────────────
             snapshot_section = f"\nFACTUAL SNAPSHOT:\n{factual_snapshot}\n" if factual_snapshot else ""
+            from stock_platform.utils.fii_dii_fetcher import format_macro_flow_for_prompt
+            _macro_block_synth = format_macro_flow_for_prompt(macro_flow or {})
+            macro_section = f"\n{_macro_block_synth}" if _macro_block_synth else ""
 
             if agreement_type == "anthropic_only":
                 user_prompt = (
@@ -529,6 +540,7 @@ class PlatformLLM:
                     f"RISK ANALYST view:\n{anthropic_rationale}\n\n"
                     f"CATALYST ANALYST view: [did not select this stock]\n"
                     f"{snapshot_section}"
+                    f"{macro_section}"
                     "Apply the synthesis rules. The 'Nature of disagreement' should explain "
                     "why the catalyst lens likely excluded this stock.\n"
                     "The 'Resolution' should state whether the risk analyst's case stands "
@@ -542,6 +554,7 @@ class PlatformLLM:
                     f"RISK ANALYST view: [did not select this stock]\n\n"
                     f"CATALYST ANALYST view:\n{openai_rationale}\n"
                     f"{snapshot_section}"
+                    f"{macro_section}"
                     "Apply the synthesis rules. The 'Nature of disagreement' should explain "
                     "what valuation or governance concern the risk lens likely flagged.\n"
                     "The 'Resolution' should state whether the catalyst case stands "
@@ -554,6 +567,7 @@ class PlatformLLM:
                     f"RISK ANALYST (Anthropic):\n{anthropic_rationale}\n\n"
                     f"CATALYST ANALYST (OpenAI):\n{openai_rationale}\n"
                     f"{snapshot_section}"
+                    f"{macro_section}"
                     "Apply the synthesis rules above and produce the structured verdict."
                     + entry_guidance
                 )
