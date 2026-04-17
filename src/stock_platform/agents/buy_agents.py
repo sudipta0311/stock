@@ -1070,6 +1070,18 @@ class BuyAgents:
                 "rr_value": rr_value,
             })
 
+        # ── Phase 1b: fetch recent news context (one web_search per stock) ──────
+        # Done serially before the parallel LLM phase so both analyst paths
+        # (Anthropic + OpenAI) share the same cached headline text.
+        for _prep in _prepared:
+            _sym = _prep["item"].get("symbol", "")
+            _co  = _prep["item"].get("company_name", "")
+            try:
+                _prep["news_context"] = self.llm.fetch_stock_news_context(_sym, _co)
+            except Exception as _ne:
+                _log.warning("News fetch failed for %s: %s", _sym, _ne)
+                _prep["news_context"] = ""
+
         # ── Phase 2: parallel LLM calls ───────────────────────────────────────
         def _call_rationale(prep: dict[str, Any]) -> str | None:
             it = prep["item"]
@@ -1083,6 +1095,7 @@ class BuyAgents:
                     "analyst_target":        prep["analyst_target"],
                     "macro_flow":            macro_flow,
                     "risk_profile":          prep["risk_profile"],
+                    "news_context":          prep.get("news_context", ""),
                 },
                 state["portfolio_context"],
             )
