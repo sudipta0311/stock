@@ -3,6 +3,25 @@ from __future__ import annotations
 from typing import Any
 
 
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def _normalise_pct(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        raw = float(value)
+    except (TypeError, ValueError):
+        return None
+    if raw != 0 and abs(raw) < 2.0:
+        return round(raw * 100, 1)
+    return round(raw, 1)
+
+
 def build_factual_snapshot(
         symbol: str,
         fin_data: dict,
@@ -15,27 +34,26 @@ def build_factual_snapshot(
     Build verified factual snapshot passed to both analysts.
     Clearly marks what is measured vs derived vs inferred.
     """
-    # EPS — prefer explicit eps_ttm, fall back to generic eps / trailingEps
+    del symbol
+
     eps = fin_data.get("eps_ttm") or fin_data.get("eps") or fin_data.get("trailingEps") or 0
 
-    # Revenue growth — screener returns %, yfinance returns fraction
-    revenue = (
-        fin_data.get("revenue_growth_pct")
-        or fin_data.get("revenueGrowth")
-        or fin_data.get("revenue_growth")
+    recent_results = fin_data.get("recent_results") or {}
+    revenue_ttm = _normalise_pct(_first_present(
+        fin_data.get("revenue_growth_ttm"),
+        fin_data.get("revenue_growth_pct"),
+        fin_data.get("revenueGrowth"),
+        fin_data.get("revenue_growth"),
+    ))
+    revenue_latest_qtr = _normalise_pct(_first_present(
+        fin_data.get("revenue_growth_latest_qtr"),
+        recent_results.get("revenue_yoy_growth_pct"),
+    ))
+    revenue_latest_qtr_label = _first_present(
+        fin_data.get("revenue_growth_latest_qtr_label"),
+        recent_results.get("comparison_label"),
     )
-    if revenue is not None:
-        try:
-            rv = float(revenue)
-            # fraction → percentage when |val| < 2.0 and val != 0
-            if rv != 0 and abs(rv) < 2.0:
-                revenue = round(rv * 100, 1)
-            else:
-                revenue = round(rv, 1)
-        except (TypeError, ValueError):
-            revenue = None
 
-    # ROCE — screener %, yfinance fraction
     roce = (
         fin_data.get("roce_pct")
         or fin_data.get("roce_ttm")
@@ -53,42 +71,35 @@ def build_factual_snapshot(
             roce = None
 
     de = fin_data.get("debt_to_equity") or 0
-    qtr_rev = (fin_data.get("recent_results") or {}).get("revenue_yoy_growth_pct")
 
     return {
-        # MEASURED — from latest filing/price
-        "price":             current_price,
-        "eps_ttm":           eps,
-        "pe_current":        pe_context.get("pe_current"),
-        "revenue_growth":    revenue,
-        "roce":              roce,
-        "debt_to_equity":    de,
-        "week52_low":        fin_data.get("week52_low") or fin_data.get("fiftyTwoWeekLow"),
-        "week52_high":       fin_data.get("week52_high") or fin_data.get("fiftyTwoWeekHigh"),
-        "52w_data_quality":  fin_data.get("52w_data_quality", "UNKNOWN"),
-        "latest_qtr_growth": qtr_rev,
-
-        # DERIVED — computed from measured data
-        "pe_vs_history":     pe_context.get("pe_vs_median_pct"),
-        "pe_signal":         pe_context.get("pe_signal"),
-        "pe_assessment":     pe_context.get("pe_assessment"),
-        "pct_from_52w_low":  tech_signals.get("pct_from_52w_low"),
-        "above_200dma":      tech_signals.get("above_200dma"),
-
-        # PORTFOLIO CONTEXT
-        "overlap_pct":       portfolio_overlap,
-        "sector_gap":        sector_gap.get("conviction", ""),
-        "gap_target_pct":    sector_gap.get("target_pct", 0),
-
-        # GOVERNANCE
-        "pledge_pct":        fin_data.get("pledge_pct"),
-        "pledge_trend":      fin_data.get("pledge_trend"),
-        "promoter_holding":  fin_data.get("promoter_holding"),
-
-        # DATA FRESHNESS
-        "data_source":       fin_data.get("source", "screener"),
-        "last_result_date":  fin_data.get("last_result_date"),
-        "data_age_days":     fin_data.get("data_age_days", 99),
+        "price": current_price,
+        "eps_ttm": eps,
+        "pe_current": pe_context.get("pe_current"),
+        "revenue_growth": revenue_ttm,
+        "revenue_growth_ttm": revenue_ttm,
+        "revenue_growth_latest_qtr": revenue_latest_qtr,
+        "latest_qtr_growth": revenue_latest_qtr,
+        "latest_qtr_comparison_label": revenue_latest_qtr_label,
+        "roce": roce,
+        "debt_to_equity": de,
+        "week52_low": fin_data.get("week52_low") or fin_data.get("fiftyTwoWeekLow"),
+        "week52_high": fin_data.get("week52_high") or fin_data.get("fiftyTwoWeekHigh"),
+        "52w_data_quality": fin_data.get("52w_data_quality", "UNKNOWN"),
+        "pe_vs_history": pe_context.get("pe_vs_median_pct"),
+        "pe_signal": pe_context.get("pe_signal"),
+        "pe_assessment": pe_context.get("pe_assessment"),
+        "pct_from_52w_low": tech_signals.get("pct_from_52w_low"),
+        "above_200dma": tech_signals.get("above_200dma"),
+        "overlap_pct": portfolio_overlap,
+        "sector_gap": sector_gap.get("conviction", ""),
+        "gap_target_pct": sector_gap.get("target_pct", 0),
+        "pledge_pct": fin_data.get("pledge_pct"),
+        "pledge_trend": fin_data.get("pledge_trend"),
+        "promoter_holding": fin_data.get("promoter_holding"),
+        "data_source": fin_data.get("source", "screener"),
+        "last_result_date": fin_data.get("last_result_date"),
+        "data_age_days": fin_data.get("data_age_days", 99),
     }
 
 
@@ -131,8 +142,6 @@ def format_snapshot_for_prompt(snapshot: dict) -> str:
     except (TypeError, ValueError):
         age = 99
 
-    # Build structured freshness label using data_age_days as days_stale proxy
-    # (last_result_date → data_age_days is computed upstream by the provider)
     if age == 99:
         freshness_label = "NO_RESULT_DATE"
         freshness_days_str = "unknown"
@@ -154,55 +163,54 @@ def format_snapshot_for_prompt(snapshot: dict) -> str:
         freshness_days_str = f"{age} days ago"
         freshness_prompt = f"Data freshness: VERY_STALE - last quarterly result {age} days ago. Do NOT recommend entry. Downgrade to WATCHLIST."
 
-    # Legacy single-line label kept for non-LLM display paths
     freshness = f"{freshness_label} ({freshness_days_str})"
 
-    price    = s.get("price") or 0
-    eps      = s.get("eps_ttm") or 0
-    pe       = s.get("pe_current")
-    rev      = s.get("revenue_growth")
-    roce     = s.get("roce")
-    de       = s.get("debt_to_equity") or 0
-    w52_low    = s.get("week52_low") or 0
-    w52_high   = s.get("week52_high") or 0
+    price = s.get("price") or 0
+    eps = s.get("eps_ttm") or 0
+    pe = s.get("pe_current")
+    rev_ttm = _first_present(s.get("revenue_growth_ttm"), s.get("revenue_growth"))
+    roce = s.get("roce")
+    de = s.get("debt_to_equity") or 0
+    w52_low = s.get("week52_low") or 0
+    w52_high = s.get("week52_high") or 0
     w52_quality = s.get("52w_data_quality", "UNKNOWN")
 
-    qtr_growth = s.get("latest_qtr_growth")
-    latest_qtr = f"{float(qtr_growth):.1f}% YoY" if qtr_growth is not None else "not available"
+    qtr_growth = _first_present(s.get("revenue_growth_latest_qtr"), s.get("latest_qtr_growth"))
+    qtr_label = s.get("latest_qtr_comparison_label") or "latest quarter vs same quarter last year"
 
-    pe_line   = f"{float(pe):.1f}x"  if pe  is not None else "N/A"
-    rev_line  = f"{float(rev):.1f}% YoY" if rev is not None else "N/A"
+    pe_line = f"{float(pe):.1f}x" if pe is not None else "N/A"
+    rev_line = f"{float(rev_ttm):.1f}%" if rev_ttm is not None else "N/A"
+    qtr_line = f"{float(qtr_growth):.1f}%" if qtr_growth is not None else "N/A"
     roce_line = f"{float(roce):.1f}%" if roce is not None else "N/A"
 
-    pe_vs   = s.get("pe_vs_history")
+    pe_vs = s.get("pe_vs_history")
     pe_vs_l = f"{float(pe_vs):+.0f}% vs 5yr median" if pe_vs is not None else "N/A"
 
-    pct_low   = s.get("pct_from_52w_low")
+    pct_low = s.get("pct_from_52w_low")
     pct_low_l = f"{float(pct_low):.1f}% above 52W Low" if pct_low is not None else "N/A"
 
-    # Build 52W range lines — suppress or warn based on data quality
-    _bad_52w = w52_quality in ("DATA_CORRUPT", "UNAVAILABLE", "RANGE_MISMATCH")
-    if _bad_52w:
-        _w52_block = (
-            f"  52W Low:          DATA {w52_quality} — do NOT use price-range-relative signals\n"
-            f"  52W High:         DATA {w52_quality} — omit all 52W high/low references from entry rationale\n"
+    bad_52w = w52_quality in ("DATA_CORRUPT", "UNAVAILABLE", "RANGE_MISMATCH")
+    if bad_52w:
+        w52_block = (
+            f"  52W Low:          DATA {w52_quality} - do NOT use price-range-relative signals\n"
+            f"  52W High:         DATA {w52_quality} - omit all 52W high/low references from entry rationale\n"
         )
         pct_low_l = f"SUPPRESSED (52W data {w52_quality})"
     elif w52_quality == "COMPUTED_FROM_HISTORY":
-        _w52_block = (
-            f"  52W Low:          ₹{float(w52_low):,.0f} [computed from 1Y history]\n"
-            f"  52W High:         ₹{float(w52_high):,.0f} [computed from 1Y history]\n"
+        w52_block = (
+            f"  52W Low:          Rs.{float(w52_low):,.0f} [computed from 1Y history]\n"
+            f"  52W High:         Rs.{float(w52_high):,.0f} [computed from 1Y history]\n"
         )
     else:
-        _w52_block = (
-            f"  52W Low:          ₹{float(w52_low):,.0f}\n"
-            f"  52W High:         ₹{float(w52_high):,.0f}\n"
+        w52_block = (
+            f"  52W Low:          Rs.{float(w52_low):,.0f}\n"
+            f"  52W High:         Rs.{float(w52_high):,.0f}\n"
         )
 
-    above_200   = s.get("above_200dma")
+    above_200 = s.get("above_200dma")
     above_200_l = ("Yes" if above_200 else "No") if above_200 is not None else "N/A"
 
-    val_rel  = s.get("val_reliability", "")
+    val_rel = s.get("val_reliability", "")
     val_note = s.get("val_reliability_note", "")
     val_flags = s.get("val_reliability_flags", [])
     val_section = ""
@@ -215,20 +223,21 @@ def format_snapshot_for_prompt(snapshot: dict) -> str:
             val_section += "  Flags: " + "; ".join(val_flags) + "\n"
 
     return (
-        "\n═══ VERIFIED FACTUAL SNAPSHOT ═══\n"
+        "\n=== VERIFIED FACTUAL SNAPSHOT ===\n"
         "(Both analysts must reference these same facts.\n"
         " Do NOT use other numbers unless clearly labelled\n"
         " as your own estimate.)\n"
         "\n"
         "MEASURED (from filings/prices):\n"
-        f"  Current Price:    ₹{float(price):,.0f}\n"
-        f"  EPS (TTM):        ₹{float(eps):.2f}\n"
+        f"  Current Price:    Rs.{float(price):,.0f}\n"
+        f"  EPS (TTM):        Rs.{float(eps):.2f}\n"
         f"  Current PE:       {pe_line}\n"
-        f"  Revenue Growth:   {rev_line}\n"
-        f"  Latest Qtr Rev:   {latest_qtr}\n"
+        f"  Revenue growth (TTM YoY): {rev_line}\n"
+        f"  Revenue growth ({qtr_label}): {qtr_line}\n"
+        "  Use quarterly figure for momentum assessment, TTM figure for trend assessment.\n"
         f"  ROCE:             {roce_line}\n"
         f"  D/E Ratio:        {float(de):.2f}\n"
-        + _w52_block
+        + w52_block
         + "\n"
         "DERIVED (computed from above):\n"
         f"  PE vs 5yr Median: {pe_vs_l}\n"
@@ -250,5 +259,5 @@ def format_snapshot_for_prompt(snapshot: dict) -> str:
         f"  Freshness:        {freshness}\n"
         f"  {freshness_prompt}\n"
         "  Adjust conviction accordingly.\n"
-        "═════════════════════════════════\n"
+        "=================================\n"
     )
