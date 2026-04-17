@@ -561,16 +561,13 @@ def resolve_final_recommendation(
         confidence_parts.append(f"{val_label} valuation reliability")
     confidence_reason = " · ".join(confidence_parts) if confidence_parts else "Confidence not assessed"
 
-    # ── 8. Upgrade trigger ───────────────────────────────────────────────────
-    upgrade_trigger = _upgrade_trigger(canonical_state, consistency_failures, payload)
-
-    # ── 9. Signal reconciliation — quant vs best available LLM verdict ───────
+    # ── 8. Signal reconciliation — quant vs best available LLM verdict ───────
     # Compare against synthesis first; fall back to single-analyst verdict.
     # Deliberately NOT compared against canonical_state (that's already the merged result).
     _llm_for_reconcile = synthesis_canon or risk_canon or catalyst_canon or ""
     reconciliation = reconcile_signals(quant_canon, _llm_for_reconcile, risk_profile)
 
-    # ── 10. UI flags — derived from resolved state, drive renderer decisions ──
+    # ── 9. UI flags — derived from resolved state, drive renderer decisions ──
     ui_flags = {
         "show_trade_plan":       actionability != "NON_ACTIONABLE",
         "show_target_table":     actionability != "NON_ACTIONABLE",
@@ -589,6 +586,10 @@ def resolve_final_recommendation(
         final_verdict = _llm_for_reconcile or canonical_state
     else:
         final_verdict = quant_canon or canonical_state
+
+    # ── 10. Upgrade trigger — keyed off final_verdict so WATCHLIST shows WATCHLIST
+    # trigger text even when canonical_state was AVOID before reconciliation ──
+    upgrade_trigger = _upgrade_trigger(final_verdict, consistency_failures, payload)
 
     return {
         "canonical_state":       canonical_state,

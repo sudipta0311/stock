@@ -1359,64 +1359,64 @@ def render_recommendation_card(
         tariff_warning = str(payload.get("tariff_warning") or "")
         if tariff_warning:
             st.warning(f"US tariff risk: {tariff_warning}")
-        # Momentum signals and override notice — only meaningful when a trade is actionable
-        if show_trade_plan:
-            revenue_momentum = payload.get("revenue_momentum") or payload.get("recent_results") or {}
-            momentum = str(
-                revenue_momentum.get("momentum")
-                or revenue_momentum.get("revenue_momentum")
-                or ""
+        # Momentum signals — always show; staleness is shown separately via DATA STALE badge.
+        # Hiding momentum when data is stale defeats the purpose: momentum IS the freshness indicator.
+        revenue_momentum = payload.get("revenue_momentum") or payload.get("recent_results") or {}
+        momentum = str(
+            revenue_momentum.get("momentum")
+            or revenue_momentum.get("revenue_momentum")
+            or ""
+        )
+        growth = revenue_momentum.get("growth_pct")
+        if growth is None:
+            growth = revenue_momentum.get("revenue_yoy_growth_pct")
+        period = str(
+            revenue_momentum.get("period")
+            or revenue_momentum.get("comparison_label")
+            or "latest quarter vs same quarter last year"
+        )
+        if momentum:
+            momentum_level = {
+                "STRONG": "success",
+                "GOOD": "success",
+                "MODERATE": "info",
+                "WEAK": "warning",
+                "DECLINING": "error",
+            }.get(momentum, "info")
+            message = (
+                f"Revenue momentum: {momentum}"
+                + (
+                    f" - {float(growth):+.1f}% YoY ({period})"
+                    if growth is not None
+                    else ""
+                )
             )
-            growth = revenue_momentum.get("growth_pct")
-            if growth is None:
-                growth = revenue_momentum.get("revenue_yoy_growth_pct")
-            period = str(
-                revenue_momentum.get("period")
-                or revenue_momentum.get("comparison_label")
-                or "latest quarter vs same quarter last year"
+            getattr(st, momentum_level)(message)
+        pat_momentum = payload.get("pat_momentum") or {}
+        pat_signal = str(pat_momentum.get("pat_momentum") or "")
+        pat_growth = pat_momentum.get("pat_growth_pct")
+        pat_period = str(pat_momentum.get("period") or period)
+        if pat_signal and pat_growth is not None:
+            pat_level = {
+                "STRONG": "success",
+                "MODERATE": "info",
+                "FLAT": "info",
+                "DECLINING": "warning",
+                "COLLAPSING": "error",
+            }.get(pat_signal, "info")
+            getattr(st, pat_level)(
+                f"PAT momentum: {pat_signal} - {float(pat_growth):+.1f}% YoY ({pat_period})"
             )
-            if momentum:
-                momentum_level = {
-                    "STRONG": "success",
-                    "GOOD": "success",
-                    "MODERATE": "info",
-                    "WEAK": "warning",
-                    "DECLINING": "error",
-                }.get(momentum, "info")
-                message = (
-                    f"Revenue momentum: {momentum}"
-                    + (
-                        f" - {float(growth):+.1f}% YoY ({period})"
-                        if growth is not None
-                        else ""
-                    )
-                )
-                getattr(st, momentum_level)(message)
-            pat_momentum = payload.get("pat_momentum") or {}
-            pat_signal = str(pat_momentum.get("pat_momentum") or "")
-            pat_growth = pat_momentum.get("pat_growth_pct")
-            pat_period = str(pat_momentum.get("period") or period)
-            if pat_signal and pat_growth is not None:
-                pat_level = {
-                    "STRONG": "success",
-                    "MODERATE": "info",
-                    "FLAT": "info",
-                    "DECLINING": "warning",
-                    "COLLAPSING": "error",
-                }.get(pat_signal, "info")
-                getattr(st, pat_level)(
-                    f"PAT momentum: {pat_signal} - {float(pat_growth):+.1f}% YoY ({pat_period})"
-                )
-            if pat_momentum.get("rev_pat_divergence"):
-                st.warning(
-                    "Critical divergence: revenue is growing but PAT is falling. "
-                    "Check for one-time charges, margin compression, or accounting changes before accumulating."
-                )
-            if payload.get("momentum_override_applied"):
-                st.info(
-                    f"Momentum note: base signal {payload.get('original_entry_signal', 'WAIT')} "
-                    f"adjusted to {payload.get('entry_signal', 'ACCUMULATE')}"
-                )
+        if pat_momentum.get("rev_pat_divergence"):
+            st.warning(
+                "Critical divergence: revenue is growing but PAT is falling. "
+                "Check for one-time charges, margin compression, or accounting changes before accumulating."
+            )
+        if show_trade_plan and payload.get("momentum_override_applied"):
+            st.info(
+                f"Momentum note: base signal {payload.get('original_entry_signal', 'WAIT')} "
+                f"adjusted to {payload.get('entry_signal', 'ACCUMULATE')}"
+            )
 
         # ── Trade mechanics: conditional on actionability ─────────────────────
         if show_trade_plan and entry:
