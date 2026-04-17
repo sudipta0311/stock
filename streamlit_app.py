@@ -61,6 +61,7 @@ if str(SRC) not in sys.path:
 
 from stock_platform.config import AppConfig
 from stock_platform.agents.buy_agents import MINIMUM_RR_RATIO
+from stock_platform.agents.quant_model import apply_freshness_cap
 from stock_platform.services.engine import PlatformEngine
 from stock_platform.services.llm import PlatformLLM
 from stock_platform.utils.index_config import DEFAULT_INDEX, INDEX_UNIVERSE, SELECTABLE_INDICES
@@ -802,6 +803,37 @@ def render_provider_model_box(label: str, fast_model: str, reasoning_model: str,
 ENTRY_SUMMARY_MARKER = "**ENTRY SUMMARY:**"
 
 
+def should_show_entry_plan(fin_data: dict, risk_profile: str = "Balanced") -> dict:
+    """Return whether to show entry plan given staleness and risk profile.
+
+    Hard suppress cutoffs (days stale): Conservative=45, Balanced=90, Aggressive=150.
+    Returns {"show": bool, "warning": str}.
+    """
+    _cutoffs = {"Conservative": 45, "Balanced": 90, "Aggressive": 150}
+    cutoff = _cutoffs.get(risk_profile, 90)
+    days_stale = fin_data.get("result_days_stale")
+    result_date = fin_data.get("last_result_date")
+
+    if not result_date or str(result_date).lower() in ("none", ""):
+        return {"show": False, "warning": ""}
+
+    try:
+        days = int(days_stale) if days_stale is not None else 999
+    except (TypeError, ValueError):
+        days = 999
+
+    if days > cutoff:
+        return {"show": False, "warning": ""}
+
+    warning = ""
+    if days > 45:
+        warning = (
+            f"Note: Last result date is {days} days old. "
+            f"Entry plan shown because {risk_profile} profile tolerates up to {cutoff} days of data staleness."
+        )
+    return {"show": True, "warning": warning}
+
+
 def compute_data_badge(fin_data: dict) -> dict:
     """
     Three-state data quality badge based on actual fundamental availability.
@@ -1032,18 +1064,40 @@ def render_recommendation_card(
         provider_label = "OpenAI GPT"
 
     # ── Governance: resolve final canonical state ─────────────────────────────
+    _rec_risk_profile = payload.get("risk_profile", "Balanced")
+    # Re-apply freshness cap with the current UI risk profile so that the
+    # reconciliation badge compares the profile-correct quant signal, not
+    # the signal that was capped during the original run (which may have used
+    # a different profile).
+    _original_entry = payload.get("original_entry_signal") or action
+    _fin_data_for_cap = payload.get("fin_data") or {}
+    _recapped_action = apply_freshness_cap(
+        _original_entry, _fin_data_for_cap, _rec_risk_profile
+    )
     gov = resolve_final_recommendation(
-        quant_action=action,
+        quant_action=_recapped_action,
         anthropic_rationale=str(payload.get("anthropic_rationale") or rationale) if provider == "anthropic" else rationale,
         openai_rationale=str(payload.get("openai_rationale") or rationale) if provider == "openai" else rationale,
         synthesis_text=synthesis_text,
         payload=payload,
         provider=provider,
+        risk_profile=_rec_risk_profile,
     )
     canonical_state  = gov["canonical_state"]
     actionability    = gov["actionability"]   # ACTIONABLE | NON_ACTIONABLE | DEGRADED
     show_trade_plan  = actionability != "NON_ACTIONABLE"
     is_degraded      = actionability == "DEGRADED"
+
+    # ── Profile-aware entry plan visibility override ──────────────────────────
+    # Only apply staleness override when canonical_state itself is actionable
+    # (i.e. suppression is purely staleness-driven, not a hard AVOID/WATCHLIST/CONFIRMATION).
+    _NON_ENTRY_STATES = {"AVOID", "WATCHLIST", "BUY ONLY AFTER CONFIRMATION"}
+    _stale_warning = ""
+    if not show_trade_plan and canonical_state not in _NON_ENTRY_STATES:
+        _ep_result = should_show_entry_plan(payload.get("fin_data") or {}, _rec_risk_profile)
+        if _ep_result["show"]:
+            show_trade_plan = True
+            _stale_warning = _ep_result.get("warning", "")
 
     # Badge colours for canonical state
     _state_badge_color: dict[str, str] = {
@@ -1218,6 +1272,9 @@ def render_recommendation_card(
             f"{evidence_label} evidence" if evidence_label
             else f"Confidence {confidence_band}"
         )
+
+        if _stale_warning:
+            st.warning(_stale_warning)
 
         if show_trade_plan:
             sizing_label = (
