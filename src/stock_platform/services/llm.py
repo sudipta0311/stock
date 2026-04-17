@@ -192,6 +192,70 @@ class PlatformLLM:
     # ── FAST TIER ────────────────────────────────────────────────────────────
     # Anthropic: Haiku 4.5 (cached)   OpenAI: gpt-5.4-mini
 
+    def fetch_stock_news_context(self, symbol: str, company_name: str) -> str:
+        """
+        Fetch top 3 recent news headlines using Anthropic's web_search tool.
+
+        Always uses the Anthropic client regardless of self.provider — web_search
+        is Anthropic-only, so both analyst paths (Anthropic + OpenAI) share one
+        cached news fetch per stock per session.
+
+        Returns a formatted bullet-point string; "" on failure.
+        Results are cached per-instance to avoid repeat API calls within a run.
+        """
+        if not hasattr(self, "_news_cache"):
+            self._news_cache: dict[str, str] = {}
+        cache_key = symbol.upper()
+        if cache_key in self._news_cache:
+            return self._news_cache[cache_key]
+        if not self.config.anthropic_enabled:
+            self._news_cache[cache_key] = ""
+            return ""
+        try:
+            import anthropic as _anthropic
+            # Use existing client when provider is anthropic; create a dedicated
+            # one for OpenAI provider so no state leaks between the two.
+            client = (
+                self._client_instance()
+                if self.provider == "anthropic"
+                else _anthropic.Anthropic(api_key=self.config.anthropic_api_key)
+            )
+            news_prompt = (
+                f"Search for the 3 most important news headlines about "
+                f"{company_name} ({symbol} NSE India) from the last 30 days.\n\n"
+                "Focus on:\n"
+                "- Earnings results or guidance updates\n"
+                "- Order wins or contract announcements\n"
+                "- Management changes or analyst rating changes\n"
+                "- Regulatory or legal developments\n"
+                "- Capacity, expansion, or partnership announcements\n\n"
+                "Return ONLY a brief 3-bullet summary:\n"
+                "• [Date if known] Headline\n"
+                "• [Date if known] Headline\n"
+                "• [Date if known] Headline\n\n"
+                "If no significant news found in the last 30 days, "
+                "return exactly: No material news in last 30 days."
+            )
+            response = client.messages.create(
+                model=self.config.llm_fast_model,  # Haiku — cheap and fast for news
+                max_tokens=300,
+                tools=[{"type": "web_search_20250305", "name": "web_search"}],
+                messages=[{"role": "user", "content": news_prompt}],
+            )
+            # Extract text blocks only — skip internal tool_use / tool_result blocks
+            text_parts = [
+                b.text for b in response.content
+                if hasattr(b, "text") and b.text
+            ]
+            result = "\n".join(text_parts).strip() or "No material news in last 30 days."
+            print(f"News context [{symbol}]: {result[:100]}...")
+            self._news_cache[cache_key] = result
+            return result
+        except Exception as exc:
+            print(f"fetch_stock_news_context failed for {symbol}: {exc}")
+            self._news_cache[cache_key] = ""
+            return ""
+
     def buy_rationale(self, item: dict[str, Any], portfolio_context: dict[str, Any]) -> str | None:
         """
         Structured analyst rationale using verified factual snapshot.
@@ -292,6 +356,18 @@ class PlatformLLM:
         _macro_flow = item.get("macro_flow") or {}
         macro_flow_block = format_macro_flow_for_prompt(_macro_flow)
 
+        # ── Recent news context (web_search — fetched once per stock per run) ─
+        _news_ctx = item.get("news_context", "")
+        news_block = (
+            f"\n\nRECENT NEWS (last 30 days):\n{_news_ctx}\n"
+            if _news_ctx and _news_ctx != "No material news in last 30 days."
+            else (
+                "\n\nRECENT NEWS: No material news in last 30 days.\n"
+                if _news_ctx
+                else ""
+            )
+        )
+
         # ── Risk profile instruction block ───────────────────────────────────
         risk_profile      = item.get("risk_profile", "Balanced")
         _risk_cfg         = get_risk_config(risk_profile)
@@ -366,6 +442,7 @@ class PlatformLLM:
                 f"{low_val_warning}"
                 f"{risk_profile_block}"
                 f"{macro_flow_block}"
+                f"{news_block}"
                 f"\n{snapshot_text}\n"
                 "Stress-test this recommendation and produce the risk-focused verdict."
             )
@@ -424,6 +501,7 @@ class PlatformLLM:
             f"{low_val_warning}"
             f"{risk_profile_block}"
             f"{macro_flow_block}"
+            f"{news_block}"
             f"\n{snapshot_text}\n"
             "Identify the catalyst path and produce the timing verdict."
         )
