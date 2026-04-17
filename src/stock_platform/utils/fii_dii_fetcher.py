@@ -78,7 +78,7 @@ def _save_cache(conn: sqlite3.Connection, key: str, data: dict[str, Any]) -> Non
 def _parse_flow(data: list[dict]) -> dict[str, Any]:
     """
     Aggregate net equity flow by category across all rows returned by the API.
-    NSE returns rows per trading date; we sum across the last 5 sessions.
+    NSE fiidiiTradeReact returns one row per category per day with field netValue.
     """
     fii_net = 0.0
     dii_net = 0.0
@@ -86,16 +86,17 @@ def _parse_flow(data: list[dict]) -> dict[str, Any]:
 
     for row in data:
         category = str(row.get("category") or row.get("Category") or "")
-        # net equity value — field names vary slightly by NSE API version
+        # NSE uses "netValue"; older API versions used other names — try all.
         net_val = (
-            row.get("netVal")
+            row.get("netValue")
+            or row.get("netVal")
             or row.get("net_val")
             or row.get("NET")
             or row.get("netPurchSale")
             or 0.0
         )
         try:
-            net_val = float(net_val)
+            net_val = float(str(net_val).replace(",", ""))
         except (TypeError, ValueError):
             net_val = 0.0
 
@@ -106,25 +107,70 @@ def _parse_flow(data: list[dict]) -> dict[str, Any]:
             dii_net += net_val
             rows_seen += 1
 
-    # NSE reports in crores directly (some endpoints) or in lakhs — normalise
-    # The fiidiiTradeReact endpoint returns values already in crores.
+    # fiidiiTradeReact returns values already in ₹ Crore.
     fii_cr = round(fii_net, 0)
     dii_cr = round(dii_net, 0)
 
-    if fii_cr > 5000:
+    # Flow signal — labels used in prompts
+    if fii_cr > 3000:
         flow_signal = "STRONG_TAILWIND"
-    elif fii_cr > 0:
+        fii_context = (
+            "FIIs aggressively buying Indian equities — strong tailwind "
+            "for large-cap valuations. Normal entry bar applies."
+        )
+    elif fii_cr > 500:
         flow_signal = "MILD_TAILWIND"
-    elif fii_cr > -5000:
+        fii_context = (
+            "FIIs net buyers — mild positive flow supporting market sentiment. "
+            "Entry bar unchanged."
+        )
+    elif fii_cr > -500:
+        flow_signal = "NEUTRAL"
+        fii_context = (
+            "FII flow neutral — no strong directional bias from foreign investors."
+        )
+    elif fii_cr > -3000:
         flow_signal = "MILD_HEADWIND"
+        fii_context = (
+            "FIIs net sellers — mild headwind. Slightly higher entry conviction required."
+        )
     else:
         flow_signal = "STRONG_HEADWIND"
+        fii_context = (
+            "FIIs aggressively selling Indian equities — significant headwind. "
+            "Raise entry bar, widen stops, reduce position sizes."
+        )
 
+    # DII support signal
+    if dii_cr > 2000:
+        dii_signal = "STRONG_SUPPORT"
+    elif dii_cr > 0:
+        dii_signal = "MILD_SUPPORT"
+    else:
+        dii_signal = "WITHDRAWING"
+
+    # Combined market signal for UI badge
+    if flow_signal in ("STRONG_TAILWIND", "MILD_TAILWIND") and dii_signal in ("STRONG_SUPPORT", "MILD_SUPPORT"):
+        market_signal = "RISK_ON"
+    elif flow_signal in ("STRONG_TAILWIND", "MILD_TAILWIND"):
+        market_signal = "RISK_ON"
+    elif flow_signal == "STRONG_HEADWIND" and dii_signal == "WITHDRAWING":
+        market_signal = "RISK_OFF"
+    elif flow_signal in ("STRONG_HEADWIND", "MILD_HEADWIND"):
+        market_signal = "CAUTIOUS"
+    else:
+        market_signal = "NEUTRAL"
+
+    from datetime import date as _date
     return {
         "fii_net_5d_cr": fii_cr,
         "dii_net_5d_cr": dii_cr,
         "flow_signal":   flow_signal,
+        "dii_signal":    dii_signal,
+        "market_signal": market_signal,
+        "fii_context":   fii_context,
         "rows_parsed":   rows_seen,
+        "as_of":         _date.today().isoformat(),
     }
 
 
@@ -192,10 +238,15 @@ def fetch_fii_dii_sector_flow(
 
 
 def _unavailable(reason: str) -> dict[str, Any]:
+    from datetime import date as _date
     return {
         "fii_net_5d_cr": None,
         "dii_net_5d_cr": None,
         "flow_signal":   "UNKNOWN",
+        "dii_signal":    "UNKNOWN",
+        "market_signal": "UNKNOWN",
+        "fii_context":   "FII/DII flow data unavailable today — treat as neutral.",
+        "as_of":         _date.today().isoformat(),
         "source":        "unavailable",
         "error":         reason,
     }
@@ -209,24 +260,27 @@ def format_macro_flow_for_prompt(flow: dict[str, Any]) -> str:
     if flow.get("source") == "unavailable" or flow.get("fii_net_5d_cr") is None:
         return ""
 
-    fii = flow["fii_net_5d_cr"]
-    dii = flow["dii_net_5d_cr"]
-    signal = flow["flow_signal"]
+    fii = float(flow["fii_net_5d_cr"])
+    dii = float(flow.get("dii_net_5d_cr") or 0)
+    flow_signal = flow.get("flow_signal", "UNKNOWN")
+    market_signal = flow.get("market_signal", "UNKNOWN")
+    fii_context = flow.get("fii_context", "")
+    as_of = flow.get("as_of", "")
 
-    fii_str = f"+Rs.{abs(fii):.0f}Cr" if fii >= 0 else f"-Rs.{abs(fii):.0f}Cr"
-    dii_str = f"+Rs.{abs(dii):.0f}Cr" if dii >= 0 else f"-Rs.{abs(dii):.0f}Cr"
+    fii_str = f"+₹{abs(fii):,.0f}Cr" if fii >= 0 else f"-₹{abs(fii):,.0f}Cr"
+    dii_str = f"+₹{abs(dii):,.0f}Cr" if dii >= 0 else f"-₹{abs(dii):,.0f}Cr"
 
-    instruction = {
-        "STRONG_TAILWIND": "FII buying is strong - sector re-ratings are more likely. Normal entry bar applies.",
-        "MILD_TAILWIND":   "FII net buyers - mild macro support. Entry bar unchanged.",
-        "MILD_HEADWIND":   "FII net sellers - mild headwind. Slightly higher entry conviction required.",
-        "STRONG_HEADWIND": "FII STRONG_HEADWIND - even quality stocks face selling pressure. Raise entry bar. Prefer ACCUMULATE ON DIPS over immediate entry.",
-        "UNKNOWN":         "FII/DII flow data unavailable - do not factor macro flow into this analysis.",
-    }.get(signal, "")
+    headwind_instruction = (
+        "\nINSTRUCTION: FII selling is active — raise your entry bar. "
+        "Even a quality stock faces a timing headwind when FIIs are net sellers at scale. "
+        "Reflect this in your confidence level and entry zone recommendation."
+        if flow_signal in ("STRONG_HEADWIND", "MILD_HEADWIND") else ""
+    )
 
     return (
-        "\nMACRO FLOW (last 5 sessions):\n"
-        f"  FII net: {fii_str} | Signal: {signal}\n"
-        f"  DII net: {dii_str}\n"
-        f"  {instruction}\n"
+        f"\nMACRO FLOW CONTEXT ({as_of or 'latest'}):\n"
+        f"  FII net: {fii_str} | Flow signal: {flow_signal}\n"
+        f"  DII net: {dii_str} | Market signal: {market_signal}\n"
+        f"  Context: {fii_context}"
+        f"{headwind_instruction}\n"
     )

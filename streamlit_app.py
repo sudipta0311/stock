@@ -65,6 +65,7 @@ from stock_platform.agents.quant_model import apply_freshness_cap
 from stock_platform.services.engine import PlatformEngine
 from stock_platform.services.llm import PlatformLLM
 from stock_platform.utils.index_config import DEFAULT_INDEX, INDEX_UNIVERSE, SELECTABLE_INDICES
+from stock_platform.utils.fii_dii_fetcher import fetch_fii_dii_sector_flow
 from stock_platform.utils.pe_history_fetcher import prefetch_pe_history_for_universe
 from stock_platform.utils.recommendation_resolver import (
     extract_synthesis_verdict,
@@ -2034,6 +2035,32 @@ with tabs[2]:
         "Recommendation Studio",
         "Run the existing buy-idea flow with Anthropic, OpenAI, or both providers side by side.",
     )
+
+    # ── Market Flow badge ─────────────────────────────────────────────────────
+    try:
+        _flow = fetch_fii_dii_sector_flow()
+        _msig = _flow.get("market_signal", "UNKNOWN")
+        _fii  = _flow.get("fii_net_5d_cr") or 0
+        _dii  = _flow.get("dii_net_5d_cr") or 0
+        _src  = _flow.get("source", "")
+        _asof = _flow.get("as_of", "")
+        _fii_str = f"+\u20b9{abs(_fii):,.0f}Cr" if _fii >= 0 else f"-\u20b9{abs(_fii):,.0f}Cr"
+        _dii_str = f"+\u20b9{abs(_dii):,.0f}Cr" if _dii >= 0 else f"-\u20b9{abs(_dii):,.0f}Cr"
+        _flow_msg = (
+            f"Market Flow ({_asof}):  "
+            f"FII {_fii_str}  |  DII {_dii_str}  |  "
+            f"Signal: {_msig}  |  via {_src}"
+        )
+        _badge_fn = {
+            "RISK_ON":  st.success,
+            "NEUTRAL":  st.info,
+            "CAUTIOUS": st.warning,
+            "RISK_OFF": st.error,
+        }.get(_msig, st.info)
+        _badge_fn(_flow_msg)
+    except Exception:
+        pass
+    # ─────────────────────────────────────────────────────────────────────────
 
     provider_choice = st.radio(
         "LLM provider",
