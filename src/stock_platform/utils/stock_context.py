@@ -51,8 +51,28 @@ def build_factual_snapshot(
     ))
     revenue_latest_qtr_label = _first_present(
         fin_data.get("revenue_growth_latest_qtr_label"),
+        (fin_data.get("revenue_momentum") or {}).get("period"),
         recent_results.get("comparison_label"),
     )
+    pat_block = fin_data.get("pat_momentum") or {}
+    pat_signal = _first_present(
+        pat_block.get("pat_momentum"),
+        recent_results.get("pat_momentum"),
+    )
+    pat_growth = _normalise_pct(_first_present(
+        pat_block.get("pat_growth_pct"),
+        recent_results.get("pat_growth_pct"),
+    ))
+    pat_period = _first_present(
+        pat_block.get("period"),
+        recent_results.get("period"),
+        revenue_latest_qtr_label,
+    )
+    rev_pat_divergence = bool(_first_present(
+        pat_block.get("rev_pat_divergence"),
+        recent_results.get("rev_pat_divergence"),
+        False,
+    ))
 
     roce = (
         fin_data.get("roce_pct")
@@ -81,6 +101,10 @@ def build_factual_snapshot(
         "revenue_growth_latest_qtr": revenue_latest_qtr,
         "latest_qtr_growth": revenue_latest_qtr,
         "latest_qtr_comparison_label": revenue_latest_qtr_label,
+        "pat_momentum": pat_signal,
+        "pat_growth_pct": pat_growth,
+        "pat_period": pat_period,
+        "rev_pat_divergence": rev_pat_divergence,
         "roce": roce,
         "debt_to_equity": de,
         "week52_low": fin_data.get("week52_low") or fin_data.get("fiftyTwoWeekLow"),
@@ -177,6 +201,14 @@ def format_snapshot_for_prompt(snapshot: dict) -> str:
 
     qtr_growth = _first_present(s.get("revenue_growth_latest_qtr"), s.get("latest_qtr_growth"))
     qtr_label = s.get("latest_qtr_comparison_label") or "latest quarter vs same quarter last year"
+    pat_signal = s.get("pat_momentum") or "UNKNOWN"
+    pat_growth = s.get("pat_growth_pct")
+    pat_period = s.get("pat_period") or qtr_label
+    pat_line = (
+        f"{pat_signal} ({float(pat_growth):+.1f}% YoY)"
+        if pat_growth is not None
+        else pat_signal
+    )
 
     pe_line = f"{float(pe):.1f}x" if pe is not None else "N/A"
     rev_line = f"{float(rev_ttm):.1f}%" if rev_ttm is not None else "N/A"
@@ -235,6 +267,7 @@ def format_snapshot_for_prompt(snapshot: dict) -> str:
         f"  Revenue growth (TTM YoY): {rev_line}\n"
         f"  Revenue growth ({qtr_label}): {qtr_line}\n"
         "  Use quarterly figure for momentum assessment, TTM figure for trend assessment.\n"
+        f"  PAT momentum ({pat_period}): {pat_line}\n"
         f"  ROCE:             {roce_line}\n"
         f"  D/E Ratio:        {float(de):.2f}\n"
         + w52_block
@@ -245,6 +278,12 @@ def format_snapshot_for_prompt(snapshot: dict) -> str:
         f"  PE Context:       {s.get('pe_assessment', '')}\n"
         f"  % Above 52W Low:  {pct_low_l}\n"
         f"  Above 200 DMA:    {above_200_l}\n"
+        + (
+            "  Revenue/PAT divergence: YES - revenue is growing while PAT is deteriorating. "
+            "Identify whether this is one-time or structural before recommending entry.\n"
+            if s.get("rev_pat_divergence")
+            else ""
+        )
         + val_section
         + "\n"
         "PORTFOLIO CONTEXT:\n"

@@ -554,6 +554,43 @@ If no material risks are found, return exactly:
             f"Staleness cap: {_risk_cfg['staleness_cap_days']} days"
         )
 
+        recent_results = live_facts.get("recent_results") or item.get("recent_results") or {}
+        pat_momentum = live_facts.get("pat_momentum") or item.get("pat_momentum") or {}
+        try:
+            rev_growth_latest = float(
+                live_facts.get("revenue_growth_latest_qtr")
+                or recent_results.get("revenue_yoy_growth_pct")
+                or 0.0
+            )
+        except (TypeError, ValueError):
+            rev_growth_latest = 0.0
+        try:
+            pat_growth_pct = float(
+                pat_momentum.get("pat_growth_pct")
+                or recent_results.get("pat_growth_pct")
+                or 0.0
+            )
+        except (TypeError, ValueError):
+            pat_growth_pct = 0.0
+        rev_pat_divergence = bool(
+            pat_momentum.get("rev_pat_divergence")
+            or recent_results.get("rev_pat_divergence")
+        )
+        divergence_block = ""
+        if rev_pat_divergence:
+            divergence_block = (
+                "\n\nCRITICAL DIVERGENCE DETECTED:\n"
+                f"Revenue growing {rev_growth_latest:.0f}% YoY but "
+                f"PAT declining {abs(pat_growth_pct):.0f}% YoY.\n"
+                "This pattern indicates either:\n"
+                "1. One-time exceptional charge (fire, write-off)\n"
+                "2. Margin compression (cost surge)\n"
+                "3. Accounting change\n"
+                "INSTRUCTION: Identify the cause before recommending ACCUMULATE. "
+                "If cause is a one-time event, assess recovery timeline. "
+                "If cause is structural margin compression, downgrade to WATCHLIST.\n"
+            )
+
         # ════════════════════════════════════════════════════════════════════
         # ANTHROPIC — Bear-biased risk analyst (quality candidate pool)
         # ════════════════════════════════════════════════════════════════════
@@ -619,6 +656,7 @@ If no material risks are found, return exactly:
                 f"{risk_profile_block}"
                 f"{macro_flow_block}"
                 f"{news_block}"
+                f"{divergence_block}"
                 f"\n{snapshot_text}\n"
                 "Stress-test this recommendation and produce the risk-focused verdict."
             )
@@ -678,6 +716,7 @@ If no material risks are found, return exactly:
             f"{risk_profile_block}"
             f"{macro_flow_block}"
             f"{news_block}"
+            f"{divergence_block}"
             f"\n{snapshot_text}\n"
             "Identify the catalyst path and produce the timing verdict."
         )

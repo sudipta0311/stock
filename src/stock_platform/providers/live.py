@@ -779,6 +779,8 @@ class LiveMarketDataProvider:
             "revenue_growth_latest_qtr_label": (
                 (screener.get("recent_results") or {}).get("comparison_label")
             ),
+            "revenue_momentum": screener.get("revenue_momentum") or {},
+            "pat_momentum": screener.get("pat_momentum") or {},
             "debtToEquity": screener.get("debt_to_equity"),
             "debt_to_equity": screener.get("debt_to_equity"),
             "pe_trailing": screener.get("pe_ratio"),

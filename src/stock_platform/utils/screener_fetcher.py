@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 import requests
@@ -24,6 +25,19 @@ _SCREENER_MONTHS = {
     "dec": 12,
 }
 
+_REVENUE_ROW_CANDIDATES = (
+    "Total Revenue",
+    "Revenue",
+    "Net Revenue",
+    "Operating Revenue",
+)
+_PAT_ROW_CANDIDATES = (
+    "Net Income",
+    "Net Profit",
+    "Profit After Tax",
+    "Net Income Common Stockholders",
+)
+
 
 def _clean_number(text: str) -> float | None:
     cleaned = (
@@ -41,6 +55,16 @@ def _clean_number(text: str) -> float | None:
         return float(cleaned)
     except ValueError:
         return None
+
+
+def _as_float(value: Any) -> float | None:
+    try:
+        if value is None:
+            return None
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    return result
 
 
 def _parse_screener_quarter_label(label: str) -> tuple[int, int] | None:
@@ -97,6 +121,215 @@ def _find_same_quarter_last_year_index(quarter_labels: list[str]) -> int | None:
     # Screener quarterly tables are usually reverse-chronological quarter columns.
     # When parsing fails, fall back to the fifth visible quarter as the prior-year comp.
     return 4 if len(quarter_labels) >= 5 else None
+
+
+def _quarter_tuple_from_column(column: Any) -> tuple[int, int, int] | None:
+    if hasattr(column, "to_pydatetime"):
+        try:
+            column = column.to_pydatetime()
+        except Exception:
+            pass
+
+    if hasattr(column, "year") and hasattr(column, "month"):
+        try:
+            return int(column.year), int(column.month), int(getattr(column, "day", 1))
+        except Exception:
+            return None
+
+    text = str(column or "").strip()
+    if not text:
+        return None
+    text = text.split()[0]
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            parsed = datetime.strptime(text, fmt)
+            return parsed.year, parsed.month, parsed.day
+        except ValueError:
+            continue
+    return None
+
+
+def _format_fy_quarter_from_column(column: Any) -> str | None:
+    parsed = _quarter_tuple_from_column(column)
+    if parsed is None:
+        return None
+
+    year, month, _day = parsed
+    if month in (4, 5, 6):
+        quarter = "Q1"
+        fy_year = year + 1
+    elif month in (7, 8, 9):
+        quarter = "Q2"
+        fy_year = year + 1
+    elif month in (10, 11, 12):
+        quarter = "Q3"
+        fy_year = year + 1
+    else:
+        quarter = "Q4"
+        fy_year = year
+
+    return f"{quarter} FY{fy_year % 100:02d}"
+
+
+def _ordered_statement_columns(statement: Any) -> list[Any]:
+    raw_columns = getattr(statement, "columns", None)
+    if raw_columns is None:
+        return []
+    columns = list(raw_columns)
+    if not columns:
+        return []
+
+    parsed = [(column, _quarter_tuple_from_column(column)) for column in columns]
+    if any(item[1] is not None for item in parsed):
+        known = [item for item in parsed if item[1] is not None]
+        unknown = [item[0] for item in parsed if item[1] is None]
+        known_sorted = sorted(known, key=lambda item: item[1], reverse=True)
+        return [item[0] for item in known_sorted] + unknown
+    return columns
+
+
+def _pick_statement_row(statement: Any, candidates: tuple[str, ...]) -> str | None:
+    index = getattr(statement, "index", None)
+    if index is None:
+        return None
+    for candidate in candidates:
+        if candidate in index:
+            return candidate
+    lowered = {str(item).strip().lower(): item for item in index}
+    for candidate in candidates:
+        match = lowered.get(candidate.strip().lower())
+        if match is not None:
+            return str(match)
+    return None
+
+
+def _fetch_quarterly_income_stmt(symbol: str) -> Any | None:
+    try:
+        import yfinance as yf
+
+        ticker = yf.Ticker(resolve_nse_symbol(symbol))
+        statement = ticker.quarterly_income_stmt
+        if statement is None or getattr(statement, "empty", True):
+            return None
+        return statement
+    except Exception as exc:
+        print(f"Quarterly income stmt fetch error for {symbol}: {exc}")
+        return None
+
+
+def compute_revenue_momentum(
+    symbol: str,
+    fin_data: dict[str, Any],
+    quarterly_income_stmt: Any | None = None,
+) -> dict[str, Any]:
+    """
+    Compute revenue momentum using most recent quarter vs same quarter last year.
+    """
+    clean_symbol = resolve_symbol_base(normalize_input_symbol(symbol))
+    statement = quarterly_income_stmt if quarterly_income_stmt is not None else _fetch_quarterly_income_stmt(clean_symbol)
+    if statement is None:
+        return {"momentum": "UNKNOWN", "growth_pct": None}
+
+    columns = _ordered_statement_columns(statement)
+    if len(columns) < 5:
+        return {"momentum": "UNKNOWN", "growth_pct": None}
+
+    revenue_row = _pick_statement_row(statement, _REVENUE_ROW_CANDIDATES)
+    if not revenue_row:
+        return {"momentum": "UNKNOWN", "growth_pct": None}
+
+    q0_col = columns[0]
+    q4_col = columns[4]
+    q0 = _as_float(statement.at[revenue_row, q0_col])
+    q4 = _as_float(statement.at[revenue_row, q4_col])
+    q1 = _as_float(statement.at[revenue_row, columns[1]]) if len(columns) > 1 else None
+    if q0 is None or q4 in (None, 0):
+        return {"momentum": "UNKNOWN", "growth_pct": None}
+
+    growth = ((q0 - q4) / abs(q4)) * 100.0
+    signal = (
+        "STRONG" if growth >= 20 else
+        "MODERATE" if growth >= 10 else
+        "WEAK" if growth >= 0 else
+        "DECLINING"
+    )
+    latest_label = _format_fy_quarter_from_column(q0_col)
+    prior_label = _format_fy_quarter_from_column(q4_col)
+    period = (
+        f"{latest_label} vs {prior_label}"
+        if latest_label and prior_label
+        else "latest quarter vs same quarter last year"
+    )
+
+    return {
+        "momentum": signal,
+        "growth_pct": round(growth, 1),
+        "period": period,
+        "latest_quarter_revenue": q0,
+        "prev_quarter_revenue": q1,
+        "same_quarter_last_year_revenue": q4,
+        "revenue_yoy_growth_pct": round(growth, 1),
+        "comparison_label": period,
+        "source": "yfinance_quarterly_income_stmt",
+    }
+
+
+def compute_pat_momentum(
+    symbol: str,
+    fin_data: dict[str, Any],
+    quarterly_income_stmt: Any | None = None,
+) -> dict[str, Any]:
+    """
+    Compute PAT momentum separately so revenue/PAT divergence is explicit.
+    """
+    clean_symbol = resolve_symbol_base(normalize_input_symbol(symbol))
+    statement = quarterly_income_stmt if quarterly_income_stmt is not None else _fetch_quarterly_income_stmt(clean_symbol)
+    if statement is None:
+        return {"pat_momentum": "UNKNOWN"}
+
+    columns = _ordered_statement_columns(statement)
+    if len(columns) < 5:
+        return {"pat_momentum": "UNKNOWN"}
+
+    pat_row = _pick_statement_row(statement, _PAT_ROW_CANDIDATES)
+    if not pat_row:
+        return {"pat_momentum": "UNKNOWN"}
+
+    q0_col = columns[0]
+    q4_col = columns[4]
+    pat_q0 = _as_float(statement.at[pat_row, q0_col])
+    pat_q4 = _as_float(statement.at[pat_row, q4_col])
+    if pat_q0 is None or pat_q4 in (None, 0):
+        return {"pat_momentum": "UNKNOWN"}
+
+    pat_growth = ((pat_q0 - pat_q4) / abs(pat_q4)) * 100.0
+    signal = (
+        "STRONG" if pat_growth >= 20 else
+        "MODERATE" if pat_growth >= 5 else
+        "FLAT" if pat_growth >= -5 else
+        "DECLINING" if pat_growth >= -25 else
+        "COLLAPSING"
+    )
+    period = (
+        f"{_format_fy_quarter_from_column(q0_col)} vs {_format_fy_quarter_from_column(q4_col)}"
+        if _format_fy_quarter_from_column(q0_col) and _format_fy_quarter_from_column(q4_col)
+        else "latest quarter vs same quarter last year"
+    )
+    rev_growth = (
+        _as_float(fin_data.get("revenue_growth_latest_qtr"))
+        or _as_float((fin_data.get("recent_results") or {}).get("revenue_yoy_growth_pct"))
+        or _as_float(fin_data.get("revenue_growth_pct"))
+        or 0.0
+    )
+    divergence = rev_growth > 10 and pat_growth < -15
+
+    return {
+        "pat_momentum": signal,
+        "pat_growth_pct": round(pat_growth, 1),
+        "period": period,
+        "rev_pat_divergence": divergence,
+        "source": "yfinance_quarterly_income_stmt",
+    }
 
 
 def _fetch_soup(clean_symbol: str, consolidated: bool) -> BeautifulSoup | None:
@@ -375,6 +608,11 @@ def fetch_recent_results(symbol: str) -> dict[str, Any]:
     """
     clean_symbol = resolve_symbol_base(normalize_input_symbol(symbol))
     try:
+        quarterly_stmt = _fetch_quarterly_income_stmt(clean_symbol)
+        revenue_momentum = compute_revenue_momentum(clean_symbol, {}, quarterly_income_stmt=quarterly_stmt)
+        if revenue_momentum.get("growth_pct") is not None:
+            return revenue_momentum
+
         soup = _fetch_soup(clean_symbol, consolidated=True)
         if soup is None:
             soup = _fetch_soup(clean_symbol, consolidated=False)
@@ -456,8 +694,27 @@ def fetch_screener_data(nse_symbol: str) -> dict[str, Any]:
         _get_ratio_value(consolidated_ratios, "price to book value", "p/b", "pb")
         or _get_ratio_value(standalone_ratios, "price to book value", "p/b", "pb")
     )
-    recent_results = _parse_recent_results_from_soup(consolidated_soup) or _parse_recent_results_from_soup(standalone_soup)
-    revenue_growth_latest_qtr = recent_results.get("revenue_yoy_growth_pct")
+    quarterly_stmt = _fetch_quarterly_income_stmt(clean_symbol)
+    revenue_momentum = compute_revenue_momentum(clean_symbol, {}, quarterly_income_stmt=quarterly_stmt)
+    if revenue_momentum.get("growth_pct") is None:
+        revenue_momentum = _parse_recent_results_from_soup(consolidated_soup) or _parse_recent_results_from_soup(standalone_soup)
+    revenue_growth_latest_qtr = (
+        revenue_momentum.get("growth_pct")
+        if revenue_momentum.get("growth_pct") is not None
+        else revenue_momentum.get("revenue_yoy_growth_pct")
+    )
+    pat_momentum = compute_pat_momentum(
+        clean_symbol,
+        {
+            "revenue_growth_latest_qtr": revenue_growth_latest_qtr,
+            "recent_results": revenue_momentum,
+            "revenue_growth_pct": revenue_growth_pct,
+        },
+        quarterly_income_stmt=quarterly_stmt,
+    )
+    recent_results = dict(revenue_momentum or {})
+    if pat_momentum:
+        recent_results.update(pat_momentum)
     pledge_data = _parse_pledge_data(consolidated_soup) or _parse_pledge_data(standalone_soup)
 
     result = {
@@ -471,6 +728,8 @@ def fetch_screener_data(nse_symbol: str) -> dict[str, Any]:
         "revenue_growth_pct": revenue_growth_pct,
         "revenue_growth_ttm": revenue_growth_ttm,
         "revenue_growth_latest_qtr": revenue_growth_latest_qtr,
+        "revenue_momentum": revenue_momentum,
+        "pat_momentum": pat_momentum,
         "promoter_holding": promoter_holding,
         "promoter_change": promoter_change,
         "pledge_pct": pledge_data.get("pledge_pct"),
