@@ -12,6 +12,7 @@ from stock_platform.services.llm import PlatformLLM
 from stock_platform.services.mf_lookup import MutualFundHoldingsClient
 from stock_platform.services.pdf_parser import NSDLCASParser
 from stock_platform.utils.entry_calculator import calculate_entry_levels
+from stock_platform.utils.recommendation_resolver import determine_preliminary_verdict
 from stock_platform.utils.result_date_fetcher import purge_invalid_result_dates
 
 
@@ -78,6 +79,31 @@ def _append_entry_summary(synthesis_text: str, recommendation: dict[str, Any]) -
         f"Target ₹{entry['analyst_target']:,.0f} | "
         f"R/R {entry['risk_reward']}x{rr_flag}"
     )
+
+
+def _apply_news_metadata(
+    recommendation: dict[str, Any] | None,
+    *,
+    news_context: dict[str, Any],
+    preliminary_verdict: str,
+    preliminary_verdict_before_news: str,
+    news_override: bool,
+    news_override_verdict: str,
+) -> None:
+    if not recommendation:
+        return
+    recommendation["news_context"] = news_context
+    recommendation["preliminary_verdict"] = preliminary_verdict
+    recommendation["preliminary_verdict_before_news"] = preliminary_verdict_before_news
+    recommendation["news_override"] = news_override
+    recommendation["news_override_verdict"] = news_override_verdict
+
+    payload = recommendation.setdefault("payload", {})
+    payload["news_context"] = news_context
+    payload["preliminary_verdict"] = preliminary_verdict
+    payload["preliminary_verdict_before_news"] = preliminary_verdict_before_news
+    payload["news_override"] = news_override
+    payload["news_override_verdict"] = news_override_verdict
 
 
 def _sample_portfolio_payload() -> dict[str, Any]:
@@ -331,6 +357,48 @@ class PlatformEngine:
                     fallback="No catalyst analysis provided.",
                     provider_name="OpenAI",
                 )
+                preliminary_verdict = determine_preliminary_verdict(
+                    str((a_rec or {}).get("rationale", "")),
+                    str((o_rec or {}).get("rationale", "")),
+                )
+                news_context = synth_llm.fetch_critical_news(
+                    symbol=symbol,
+                    company_name=str(base_rec.get("company_name", symbol)),
+                    verdict=preliminary_verdict,
+                )
+                high_severity_flags = [
+                    flag for flag in (news_context.get("flags") or [])
+                    if str((flag or {}).get("severity") or "").upper() == "HIGH"
+                ]
+                news_override = False
+                news_override_verdict = ""
+                effective_preliminary_verdict = preliminary_verdict
+                revised_news_verdict = str(
+                    news_context.get("revised_verdict_suggestion") or ""
+                ).upper().replace("_", " ").strip()
+                if high_severity_flags and revised_news_verdict in {"WATCHLIST", "AVOID"}:
+                    news_override = True
+                    news_override_verdict = revised_news_verdict
+                    effective_preliminary_verdict = revised_news_verdict
+                    news_context = news_context | {
+                        "news_override": True,
+                        "news_override_verdict": news_override_verdict,
+                    }
+                    print(
+                        f"NEWS OVERRIDE: {symbol} downgraded from "
+                        f"{preliminary_verdict} to {news_override_verdict} due to: "
+                        f"{[f.get('headline', '') for f in high_severity_flags]}"
+                    )
+
+                for rec in (a_rec, o_rec):
+                    _apply_news_metadata(
+                        rec,
+                        news_context=news_context,
+                        preliminary_verdict=effective_preliminary_verdict,
+                        preliminary_verdict_before_news=preliminary_verdict,
+                        news_override=news_override,
+                        news_override_verdict=news_override_verdict,
+                    )
                 # Build entry data for the synthesis entry-guidance block.
                 _payload     = (base_rec or {}).get("payload", {})
                 _entry_lvls  = _payload.get("entry_levels") or {}
@@ -353,6 +421,7 @@ class PlatformEngine:
                     entry_data=_entry_data,
                     macro_flow=_payload.get("macro_flow"),
                     risk_profile=risk_profile,
+                    news_context=news_context,
                 )
                 if synthesis:
                     synthesis_map[symbol] = _append_entry_summary(synthesis, base_rec)

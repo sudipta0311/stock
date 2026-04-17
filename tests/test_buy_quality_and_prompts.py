@@ -734,6 +734,39 @@ class BuyPromptTests(unittest.TestCase):
         self.assertIn("COMBINED VERDICT", system_text)
         self.assertIn("ACCUMULATE GRADUALLY", user_text)
 
+    def test_synthesis_prompt_includes_news_alert_block(self) -> None:
+        fake_module = types.SimpleNamespace(Anthropic=FakeAnthropicClient)
+        llm = PlatformLLM(self.config, provider="anthropic")
+
+        with patch.dict(sys.modules, {"anthropic": fake_module}):
+            llm.synthesise_comparison(
+                stock_name="INDIGO",
+                anthropic_rationale="## RISK VERDICT: BUY",
+                openai_rationale="## CATALYST VERDICT: BUY NOW",
+                news_context={
+                    "material_risks_found": True,
+                    "summary": "CEO transition and regulatory probe are active.",
+                    "flags": [
+                        {
+                            "severity": "HIGH",
+                            "type": "CEO_CHANGE",
+                            "headline": "CEO resigned and interim CEO appointed.",
+                            "verdict_impact": "DOWNGRADE",
+                        }
+                    ],
+                    "revised_verdict_suggestion": "WATCHLIST",
+                    "news_override": True,
+                    "news_override_verdict": "WATCHLIST",
+                },
+            )
+
+        request = FakeAnthropicClient.last_request or {}
+        user_text = request["messages"][0]["content"]  # type: ignore[index]
+        self.assertIn("RECENT NEWS ALERTS", user_text)
+        self.assertIn("CEO resigned and interim CEO appointed.", user_text)
+        self.assertIn("WATCHLIST", user_text)
+        self.assertIn("HIGH severity flags require explicit acknowledgement", user_text)
+
     def test_openai_buy_rationale_surfaces_auth_error(self) -> None:
         fake_openai = types.SimpleNamespace(
             AuthenticationError=FakeOpenAIAuthenticationError,

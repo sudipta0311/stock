@@ -256,6 +256,182 @@ class PlatformLLM:
             self._news_cache[cache_key] = ""
             return ""
 
+    def fetch_critical_news(self, symbol: str, company_name: str, verdict: str) -> dict[str, Any]:
+        """
+        Fetch structured news-risk context for names nearing an actionable verdict.
+
+        Uses Anthropic web_search and only runs for actionable preliminary
+        verdicts so we avoid paying for broad news checks on every candidate.
+        """
+        actionable_verdicts = {
+            "ACCUMULATE",
+            "ACCUMULATE GRADUALLY",
+            "ACCUMULATE ON DIPS",
+            "ACTIONABLE BUY",
+            "BUY",
+            "BUY NOW",
+            "STRONG BUY",
+        }
+        normalized_verdict = (verdict or "").upper().replace("_", " ").strip()
+        default_payload: dict[str, Any] = {
+            "material_risks_found": False,
+            "flags": [],
+            "revised_verdict_suggestion": "NO_CHANGE",
+            "summary": "",
+        }
+        if normalized_verdict not in actionable_verdicts:
+            return default_payload
+
+        if not hasattr(self, "_critical_news_cache"):
+            self._critical_news_cache: dict[str, dict[str, Any]] = {}
+        cache_key = symbol.upper()
+        if cache_key in self._critical_news_cache:
+            return self._critical_news_cache[cache_key]
+        if not self.config.anthropic_enabled:
+            self._critical_news_cache[cache_key] = default_payload
+            return default_payload
+
+        try:
+            import anthropic as _anthropic
+
+            client = (
+                self._client_instance()
+                if self.provider == "anthropic"
+                else _anthropic.Anthropic(api_key=self.config.anthropic_api_key)
+            )
+            prompt = f"""
+Search for recent news about {company_name} ({symbol} NSE India) from the last 90 days.
+
+I need to know about ANY of these:
+1. CEO or leadership changes, resignations, or interim management
+2. Regulatory investigations or probes (SEBI, CCI, DGCA, RBI, IT department)
+3. Credit rating changes, outlook changes, or watch placements
+4. Operational crises, disruptions, or major service failures
+5. Large penalties, lawsuits, or material legal proceedings
+6. Earnings warnings, guidance cuts, or major margin deterioration
+7. Major accidents, safety issues, or governance shocks
+
+Return ONLY valid JSON in this exact shape:
+{{
+  "material_risks_found": true,
+  "flags": [
+    {{
+      "type": "CEO_CHANGE/REGULATORY/CREDIT/OPERATIONAL/LEGAL/EARNINGS/SAFETY",
+      "headline": "brief description",
+      "severity": "HIGH/MEDIUM/LOW",
+      "verdict_impact": "DOWNGRADE/CAUTION/NEUTRAL"
+    }}
+  ],
+  "revised_verdict_suggestion": "WATCHLIST/AVOID/NO_CHANGE",
+  "summary": "2-sentence news summary"
+}}
+
+If no material risks are found, return exactly:
+{{
+  "material_risks_found": false,
+  "flags": [],
+  "revised_verdict_suggestion": "NO_CHANGE",
+  "summary": ""
+}}
+"""
+            response = client.messages.create(
+                model=self.config.llm_reasoning_model,
+                max_tokens=1000,
+                tools=[{"type": "web_search_20250305", "name": "web_search"}],
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text_parts = [
+                block.text
+                for block in response.content
+                if hasattr(block, "text") and block.text
+            ]
+            raw_text = "\n".join(text_parts).strip()
+            if not raw_text:
+                self._critical_news_cache[cache_key] = default_payload
+                return default_payload
+            try:
+                data = json.loads(raw_text)
+            except json.JSONDecodeError:
+                start = raw_text.find("{")
+                end = raw_text.rfind("}")
+                if start == -1 or end == -1 or end <= start:
+                    self._critical_news_cache[cache_key] = default_payload
+                    return default_payload
+                try:
+                    data = json.loads(raw_text[start:end + 1])
+                except json.JSONDecodeError:
+                    self._critical_news_cache[cache_key] = default_payload
+                    return default_payload
+
+            if not isinstance(data, dict):
+                self._critical_news_cache[cache_key] = default_payload
+                return default_payload
+
+            flags = data.get("flags")
+            cleaned_flags = flags if isinstance(flags, list) else []
+            result = {
+                "material_risks_found": bool(data.get("material_risks_found")),
+                "flags": cleaned_flags,
+                "revised_verdict_suggestion": str(
+                    data.get("revised_verdict_suggestion") or "NO_CHANGE"
+                ).upper().replace("_", " ").strip(),
+                "summary": str(data.get("summary") or "").strip(),
+            }
+            self._critical_news_cache[cache_key] = result
+            return result
+        except Exception as exc:
+            print(f"fetch_critical_news failed for {symbol}: {exc}")
+            error_payload = default_payload | {"error": str(exc)}
+            self._critical_news_cache[cache_key] = error_payload
+            return error_payload
+
+    @staticmethod
+    def format_news_risk_block(news_context: dict[str, Any] | None) -> str:
+        """Format structured news flags into a synthesis prompt block."""
+        news = news_context or {}
+        if not news.get("material_risks_found"):
+            return ""
+
+        flags = news.get("flags") or []
+        flag_lines = []
+        for flag in flags:
+            if not isinstance(flag, dict):
+                continue
+            severity = str(flag.get("severity") or "UNKNOWN").upper()
+            flag_type = str(flag.get("type") or "RISK")
+            headline = str(flag.get("headline") or "").strip()
+            verdict_impact = str(flag.get("verdict_impact") or "NEUTRAL").upper()
+            if headline:
+                flag_lines.append(
+                    f"- [{severity}] {flag_type}: {headline} -> {verdict_impact}"
+                )
+
+        summary = str(news.get("summary") or "").strip()
+        revised = str(news.get("news_override_verdict") or news.get("revised_verdict_suggestion") or "").strip()
+        instructions = (
+            "INSTRUCTION: These news flags MUST be reflected in your synthesis verdict and confidence level. "
+            "HIGH severity flags require explicit acknowledgement."
+        )
+        if news.get("news_override") and revised:
+            instructions += (
+                f" The pre-synthesis news gate capped the preliminary stance at {revised}; "
+                "do not issue a more bullish verdict unless you explicitly explain why the flagged risks are immaterial."
+            )
+
+        body_lines = ["\nRECENT NEWS ALERTS (last 90 days):"]
+        if summary:
+            body_lines.append(summary)
+        if flag_lines:
+            body_lines.append("")
+            body_lines.append("Material risk flags:")
+            body_lines.extend(flag_lines)
+        if revised and revised != "NO CHANGE":
+            body_lines.append("")
+            body_lines.append(f"News-gate suggestion: {revised}")
+        body_lines.append("")
+        body_lines.append(instructions)
+        return "\n".join(body_lines)
+
     def buy_rationale(self, item: dict[str, Any], portfolio_context: dict[str, Any]) -> str | None:
         """
         Structured analyst rationale using verified factual snapshot.
@@ -565,6 +741,7 @@ class PlatformLLM:
         entry_data: dict[str, Any] | None = None,
         macro_flow: dict[str, Any] | None = None,
         risk_profile: str = "Balanced",
+        news_context: dict[str, Any] | None = None,
     ) -> str | None:
         """
         Synthesis of Anthropic (risk) and OpenAI (catalyst) views.
@@ -686,6 +863,8 @@ class PlatformLLM:
             from stock_platform.utils.fii_dii_fetcher import format_macro_flow_for_prompt
             _macro_block_synth = format_macro_flow_for_prompt(macro_flow or {})
             macro_section = f"\n{_macro_block_synth}" if _macro_block_synth else ""
+            news_section = self.format_news_risk_block(news_context)
+            news_prompt_section = f"\n{news_section}\n" if news_section else ""
 
             if agreement_type == "anthropic_only":
                 user_prompt = (
@@ -695,6 +874,7 @@ class PlatformLLM:
                     f"CATALYST ANALYST view: [did not select this stock]\n"
                     f"{snapshot_section}"
                     f"{macro_section}"
+                    f"{news_prompt_section}"
                     "Apply the synthesis rules. The 'Nature of disagreement' should explain "
                     "why the catalyst lens likely excluded this stock.\n"
                     "The 'Resolution' should state whether the risk analyst's case stands "
@@ -709,6 +889,7 @@ class PlatformLLM:
                     f"CATALYST ANALYST view:\n{openai_rationale}\n"
                     f"{snapshot_section}"
                     f"{macro_section}"
+                    f"{news_prompt_section}"
                     "Apply the synthesis rules. The 'Nature of disagreement' should explain "
                     "what valuation or governance concern the risk lens likely flagged.\n"
                     "The 'Resolution' should state whether the catalyst case stands "
@@ -722,6 +903,7 @@ class PlatformLLM:
                     f"CATALYST ANALYST (OpenAI):\n{openai_rationale}\n"
                     f"{snapshot_section}"
                     f"{macro_section}"
+                    f"{news_prompt_section}"
                     "Apply the synthesis rules above and produce the structured verdict."
                     + entry_guidance
                 )

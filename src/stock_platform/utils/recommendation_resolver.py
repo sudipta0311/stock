@@ -27,6 +27,11 @@ _CANONICAL_ORDER: list[str] = [
 _CANONICAL_RANK: dict[str, int] = {s: i for i, s in enumerate(_CANONICAL_ORDER)}
 
 
+def rank_canonical_state(state: str) -> int:
+    """Public rank helper for recommendation states (higher = more actionable)."""
+    return _CANONICAL_RANK.get((state or "").upper().strip(), 99)
+
+
 # ── Verdict maps: LLM output token → canonical state ─────────────────────────
 
 # Anthropic risk analyst outputs  ## RISK VERDICT: <token>
@@ -142,6 +147,30 @@ def extract_synthesis_verdict(synthesis_text: str) -> tuple[str, str]:
                 canonical = val
                 break
     return canonical, confidence
+
+
+def determine_preliminary_verdict(
+    anthropic_rationale: str,
+    openai_rationale: str,
+) -> str:
+    """
+    Pick the most actionable analyst verdict before synthesis.
+
+    This is used by the news gate: if either analyst is already approaching an
+    actionable stance, fetch recent risk news before asking the synthesis model
+    for a final verdict.
+    """
+    candidates = [
+        verdict
+        for verdict in (
+            extract_risk_verdict(anthropic_rationale),
+            extract_catalyst_verdict(openai_rationale),
+        )
+        if verdict
+    ]
+    if not candidates:
+        return "WATCHLIST"
+    return max(candidates, key=rank_canonical_state)
 
 
 # ── Signal reconciliation ────────────────────────────────────────────────────
