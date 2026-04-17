@@ -1480,13 +1480,29 @@ def _render_skipped_stocks(skipped: list[dict[str, Any]]) -> None:
     """Show the skipped-stocks transparency panel below recommendation cards."""
     if not skipped:
         return
-    with st.expander(f"⚠️ {len(skipped)} stock(s) skipped — data unavailable", expanded=False):
+
+    group_deferred = [s for s in skipped if s.get("status") == "GROUP_CONCENTRATION"]
+    other_skipped  = [s for s in skipped if s.get("status") != "GROUP_CONCENTRATION"]
+
+    if group_deferred:
+        with st.expander(f"Group concentration: {len(group_deferred)} stock(s) deferred", expanded=False):
+            st.caption(
+                "These stocks scored well but were deferred because another stock "
+                "from the same promoter group already occupies a slot. "
+                "The highest-scoring group member is kept."
+            )
+            for s in group_deferred:
+                st.info(f"**{s['symbol']}** — {s['reason']}")
+
+    if not other_skipped:
+        return
+    with st.expander(f"⚠️ {len(other_skipped)} stock(s) skipped — data unavailable", expanded=False):
         st.caption(
             "These stocks were considered but excluded because financial data "
             "could not be validated. They will not appear in recommendations "
             "until data is available."
         )
-        for sk in skipped:
+        for sk in other_skipped:
             st.warning(f"**{sk['symbol']}** — {sk['status']}: {sk['reason']}")
         st.caption(
             "To fix: update `NSE_SYMBOL_MAP` in "

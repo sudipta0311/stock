@@ -422,8 +422,8 @@ class PlatformLLM:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                max_completion_tokens=800,
-                timeout=30,
+                max_completion_tokens=2000,
+                timeout=45,
             )
             finish_reason = response.choices[0].finish_reason
             rationale = (response.choices[0].message.content or "").strip()
@@ -434,7 +434,7 @@ class PlatformLLM:
             if finish_reason == "content_filter":
                 return "[OpenAI content filter triggered]"
             if finish_reason == "length":
-                return "[OpenAI response truncated — increase max_tokens]"
+                return "[OpenAI response truncated — synthesis based on partial analysis]"
             if len(rationale.strip()) < 100:
                 print(
                     f"WARNING: OpenAI short response for {symbol}: "
