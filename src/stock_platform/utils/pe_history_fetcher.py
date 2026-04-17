@@ -17,7 +17,15 @@ _log = logging.getLogger(__name__)
 
 CACHE_TTL_DAYS = 7  # refresh PE history weekly
 
-HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; portfolio-research/1.0)"}
+_BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+    "DNT": "1",
+}
 
 
 def get_pe_history(
@@ -28,7 +36,7 @@ def get_pe_history(
 ) -> dict[str, Any]:
     """
     Fetch historical PE data for a stock.
-    Tries three sources in sequence: Screener.in → Wisesheets → yfinance.
+    Tries four sources in sequence: Tickertape → Screener.in → Wisesheets → yfinance.
     Caches result in SQLite for 7 days.
 
     Returns dict with median_5yr, median_10yr, pe_low, pe_high, source,
@@ -40,14 +48,19 @@ def get_pe_history(
     if cached:
         return cached
 
+    # Source order: Tickertape (best bot tolerance) → Screener (richest when it works)
+    # → Wisesheets → yfinance (computed from price × earnings)
     result = (
-        _fetch_from_screener(clean)
+        _fetch_from_tickertape_pe(clean)
+        or _fetch_from_screener(clean)
         or _fetch_from_wisesheets(clean)
         or _fetch_from_yfinance(clean)
     )
 
     if result:
         _save_to_cache(clean, result, db_path, neon_database_url)
+        _log.info("PE history cached: %s | median=%.1f via %s",
+                  clean, result.get("median_5yr") or 0, result.get("source", "?"))
         return result
 
     _log.error("PE history: all sources failed for %s", clean)
@@ -60,55 +73,79 @@ def get_pe_history(
 
 def _fetch_from_screener(symbol: str) -> dict[str, Any]:
     """
-    Fetch PE ratio history from Screener.in annual ratios table.
-    Tries consolidated first, falls back to standalone.
+    Fetch PE history from Screener.in chart API.
+
+    Screener requires a real browser session with cookies before the API call
+    will return data. Two steps:
+      1. GET base URL to prime session cookies
+      2. GET company page to extract the numeric company ID
+      3. Hit /api/company/{id}/chart/?q=Price+to+Earning to get weekly PE values
+    Falls back to standalone (non-consolidated) page if consolidated returns 403.
     """
+    import random
+
     try:
+        session = requests.Session()
+        session.headers.update({
+            **_BROWSER_HEADERS,
+            "Referer": "https://www.screener.in/",
+        })
+
+        # Prime session cookies.
+        session.get("https://www.screener.in/", timeout=10)
+        time.sleep(random.uniform(1.5, 3.0))
+
+        # Fetch company page to extract the numeric company ID.
+        company_page = None
         for suffix in ("consolidated/", ""):
             url = f"https://www.screener.in/company/{symbol}/{suffix}"
-            resp = requests.get(url, headers=HEADERS, timeout=12)
-            if resp.status_code == 200:
+            r = session.get(url, timeout=15)
+            if r.status_code == 200:
+                company_page = r.text
                 break
-        else:
+            if r.status_code == 403:
+                _log.warning("Screener 403 for %s (%s)", symbol, suffix or "standalone")
+                time.sleep(random.uniform(1.0, 2.0))
+
+        if not company_page:
             return {}
 
-        soup = BeautifulSoup(resp.text, "html.parser")
+        # Extract numeric company ID from the /api/company/{id}/add/ link.
+        m = re.search(r"/api/company/(\d+)/", company_page)
+        if not m:
+            _log.warning("Screener: could not find company ID for %s", symbol)
+            return {}
+
+        company_id = m.group(1)
+        chart_url = (
+            f"https://www.screener.in/api/company/{company_id}/chart/"
+            "?q=Price+to+Earning&days=1825"
+        )
+        session.headers["Accept"] = "application/json"
+        session.headers["X-Requested-With"] = "XMLHttpRequest"
+
+        cr = session.get(chart_url, timeout=15)
+        if cr.status_code != 200:
+            _log.warning("Screener chart API %s for %s", cr.status_code, symbol)
+            return {}
+
+        datasets = cr.json().get("datasets", [])
+        if not datasets:
+            return {}
+
         pe_values: list[float] = []
-
-        # Method A: #ratios section — annual PE row
-        ratio_section = soup.select_one("#ratios")
-        if ratio_section:
-            for table in ratio_section.select("table"):
-                for row in table.select("tbody tr"):
-                    label_cell = row.select_one("td:first-child")
-                    if not label_cell or "P/E" not in label_cell.text:
-                        continue
-                    for cell in row.select("td")[1:]:
-                        try:
-                            val = float(cell.text.strip().replace(",", ""))
-                            if 0 < val < 1000:
-                                pe_values.append(val)
-                        except (ValueError, AttributeError):
-                            pass
-
-        # Method B: #ten-year-summary section
-        if not pe_values:
-            ten_yr = soup.select_one("#ten-year-summary")
-            if ten_yr:
-                for row in ten_yr.select("tr"):
-                    if "P/E" not in row.text:
-                        continue
-                    for cell in row.select("td"):
-                        try:
-                            val = float(cell.text.strip().replace(",", ""))
-                            if 0 < val < 1000:
-                                pe_values.append(val)
-                        except (ValueError, AttributeError):
-                            pass
+        for row in datasets[0].get("values", []):
+            try:
+                val = float(row[1])
+                if 1 < val < 1000:
+                    pe_values.append(val)
+            except (TypeError, ValueError, IndexError):
+                pass
 
         if len(pe_values) >= 3:
             return _compute_stats(pe_values, "screener.in")
 
+        _log.warning("Screener: insufficient PE data for %s (%d values)", symbol, len(pe_values))
         return {}
 
     except Exception as exc:
@@ -117,7 +154,62 @@ def _fetch_from_screener(symbol: str) -> dict[str, Any]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SOURCE 2: Wisesheets  (free, no auth, structured text)
+# SOURCE 2: Tickertape  (better bot tolerance than Screener for PE history)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _fetch_from_tickertape_pe(symbol: str) -> dict[str, Any]:
+    """
+    Fetch 5-year PE history from Tickertape's public ratios API.
+    Search endpoint returns stock SID; ratios endpoint returns time-series PE values.
+    """
+    try:
+        headers = {**_BROWSER_HEADERS, "Accept": "application/json"}
+
+        sr = requests.get(
+            f"https://api.tickertape.in/search?text={symbol}&type=stock",
+            headers=headers,
+            timeout=10,
+        )
+        if sr.status_code != 200:
+            return {}
+
+        stocks = sr.json().get("data", {}).get("stocks", [])
+        if not stocks:
+            return {}
+
+        sid = stocks[0].get("sid")
+        if not sid:
+            return {}
+
+        pr = requests.get(
+            f"https://api.tickertape.in/stocks/{sid}/ratios?indicators=pe&duration=5y",
+            headers=headers,
+            timeout=15,
+        )
+        if pr.status_code != 200:
+            return {}
+
+        points = pr.json().get("data", {}).get("pe", {}).get("values", [])
+        if not points:
+            return {}
+
+        pe_vals = [
+            float(p["value"])
+            for p in points
+            if p.get("value") is not None and 1 < float(p["value"]) < 1000
+        ]
+        if len(pe_vals) < 3:
+            return {}
+
+        return _compute_stats(pe_vals, "tickertape")
+
+    except Exception as exc:
+        _log.warning("Tickertape PE failed for %s: %r", symbol, exc)
+        return {}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SOURCE 3: Wisesheets  (free, no auth, structured text)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _fetch_from_wisesheets(symbol: str) -> dict[str, Any]:
@@ -126,7 +218,7 @@ def _fetch_from_wisesheets(symbol: str) -> dict[str, Any]:
     """
     try:
         url = f"https://www.wisesheets.io/pe-ratio/{symbol}.NS"
-        resp = requests.get(url, headers=HEADERS, timeout=12)
+        resp = requests.get(url, headers=_BROWSER_HEADERS, timeout=12)
         if resp.status_code != 200:
             return {}
 
@@ -349,13 +441,14 @@ def prefetch_pe_history_for_universe(
     """
     Pre-fetch PE history for a list of stock symbols.
     Skips symbols that are already cached and fresh.
-    Uses 500 ms inter-request delay to be polite to upstream servers.
+    Uses a random 2-4 s inter-request delay — Screener.in and Tickertape both
+    rate-limit aggressive scrapers; the randomised delay avoids pattern detection.
     Intended to run in a background thread.
 
-    Returns {"saved": N, "skipped": N, "failed": N} so callers can surface
-    the outcome — particularly to distinguish "all sources returned empty"
-    (network/scraping block) from actual successes.
+    Returns {"saved": N, "skipped": N, "failed": N}.
     """
+    import random
+
     _log.info("Pre-fetching PE history for %d stocks...", len(symbols))
     saved = 0
     skipped = 0
@@ -371,12 +464,12 @@ def prefetch_pe_history_for_universe(
         else:
             failed += 1
         attempted = saved + failed
-        if attempted % 10 == 0:
+        if attempted % 5 == 0:
             _log.info(
                 "PE pre-fetch: %d saved, %d failed (%d/%d processed)",
                 saved, failed, i + 1, len(symbols),
             )
-        time.sleep(0.5)
+        time.sleep(random.uniform(2.0, 4.0))
     _log.info(
         "PE history pre-fetch complete — %d saved / %d failed / %d already cached / %d total",
         saved, failed, skipped, len(symbols),
@@ -396,7 +489,7 @@ def get_pe_historical_context(
 ) -> dict[str, Any]:
     """
     Complete PE context computation with real-time history fetch.
-    Fetches history from Screener → Wisesheets → yfinance, caches 7 days.
+    Fetches history from Tickertape → Screener → Wisesheets → yfinance, caches 7 days.
     Returns a pe_context dict compatible with the LLM prompt injector.
     """
     if not current_pe or current_pe <= 0:
@@ -424,7 +517,7 @@ def get_pe_historical_context(
                 "Run again after data loads."
             ),
             "pe_context_note": (
-                "Sources tried: Screener.in, Wisesheets, yfinance. Will retry on next run."
+                "Sources tried: Tickertape, Screener.in, Wisesheets, yfinance. Will retry on next run."
             ),
         }
 
