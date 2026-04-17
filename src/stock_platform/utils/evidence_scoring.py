@@ -21,8 +21,19 @@ def compute_evidence_strength(
     components: dict[str, float] = {}
 
     # 1. Data freshness (0-0.20)
+    # Prefer result_days_stale (set by live provider from last_result_date).
+    # data_age_days is a legacy field not populated by the live provider — it
+    # defaults to the sentinel value 99 which incorrectly scores every stock
+    # at minimum freshness. Fall back to it only when result_days_stale is absent.
     try:
-        age = int(fin_data.get("data_age_days", 99))
+        _rds = fin_data.get("result_days_stale")
+        _dad = fin_data.get("data_age_days")
+        if _rds is not None:
+            age = int(_rds)
+        elif _dad is not None and int(_dad) != 99:
+            age = int(_dad)
+        else:
+            age = 99
     except (TypeError, ValueError):
         age = 99
 
