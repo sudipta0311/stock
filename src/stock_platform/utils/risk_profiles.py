@@ -78,7 +78,18 @@ RISK_PROMPT_HINTS: dict[str, str] = {
         "- WATCHLIST only when there is NO identifiable catalyst OR the valuation"
         " is indefensible by any growth metric\n"
         "- Do NOT default to WATCHLIST just because data is slightly stale --"
-        " aggressive investors tolerate information uncertainty in exchange for early entry"
+        " aggressive investors tolerate information uncertainty in exchange for early entry\n\n"
+        "OVERRIDE RULE FOR AGGRESSIVE PROFILE — AVOID THRESHOLD:\n"
+        "If the entry plan R/R >= 2.5x AND ROCE > 10% (or ROCE weakness is explained"
+        " by holding-company structure), you MUST NOT recommend AVOID."
+        " Maximum downgrade allowed is WATCHLIST.\n"
+        "AVOID is reserved ONLY for:\n"
+        "- Governance red flags (promoter pledge > 30%, SEBI action, fraud history)\n"
+        "- D/E > 2.0x with deteriorating earnings\n"
+        "- Revenue growth negative YoY\n"
+        "- PE > 100% above 5-year median with no growth justification\n"
+        "For everything else, WATCHLIST is your floor."
+        " The synthesis layer will adjudicate — your job is to surface risks, not to veto."
     ),
 }
 RISK_PROMPT_HINTS["Moderate"] = RISK_PROMPT_HINTS["Balanced"]

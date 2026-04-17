@@ -64,6 +64,63 @@ def _momentum_sort_key(candidate: dict[str, Any]) -> float:
     return rev_growth * 0.40 + tech_score * 0.35 + sel_score * 0.25
 
 
+PROMOTER_GROUPS: dict[str, list[str]] = {
+    "ADANI": [
+        "ADANIENT", "ADANIPORTS", "ADANIPOWER", "ADANIGREEN",
+        "ADANITRANS", "ADANIGAS", "ADANIWILMAR", "NDTV",
+    ],
+    "TATA": [
+        "TCS", "TATAMOTORS", "TATASTEEL", "TATAPOWER",
+        "TATACONSUM", "TITAN", "TATACOMM", "TATACHEM",
+    ],
+    "RELIANCE": ["RELIANCE", "JIOFINANCE"],
+    "BAJAJ": ["BAJFINANCE", "BAJAJFINSV", "BAJAJ-AUTO", "BAJAJELEC"],
+}
+
+_SYMBOL_TO_GROUP: dict[str, str] = {
+    sym: grp for grp, syms in PROMOTER_GROUPS.items() for sym in syms
+}
+
+
+def apply_group_concentration_check(
+    candidates: list[dict[str, Any]],
+    max_per_group: int = 1,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Keep at most max_per_group stocks from the same promoter group.
+
+    Candidates must already be sorted by score descending (highest first).
+    Returns (filtered, deferred) preserving original order within each bucket.
+    """
+    seen_groups: dict[str, int] = {}
+    filtered: list[dict[str, Any]] = []
+    deferred: list[dict[str, Any]] = []
+
+    sorted_cands = sorted(
+        candidates,
+        key=lambda x: x.get("differentiation_score", x.get("quality_score", 0)),
+        reverse=True,
+    )
+    for stock in sorted_cands:
+        symbol = stock.get("symbol", "")
+        group = _SYMBOL_TO_GROUP.get(symbol)
+        if group:
+            if seen_groups.get(group, 0) < max_per_group:
+                seen_groups[group] = seen_groups.get(group, 0) + 1
+                filtered.append(stock)
+            else:
+                kept = [s["symbol"] for s in filtered if _SYMBOL_TO_GROUP.get(s["symbol"]) == group]
+                deferred.append(
+                    stock | {
+                        "deferred_reason": (
+                            f"Group concentration: {group} already represented by {kept}"
+                        )
+                    }
+                )
+        else:
+            filtered.append(stock)
+    return filtered, deferred
+
+
 def get_top_n_with_replacement(
     scored_candidates: list[dict[str, Any]],
     n: int,
@@ -500,9 +557,13 @@ class BuyAgents:
                 }
             )
         differentiated.sort(key=lambda row: row["differentiation_score"], reverse=True)
+        filtered_diff, group_deferred = apply_group_concentration_check(
+            differentiated[:target_pool_size]
+        )
         return {
-            "differentiated_shortlist": differentiated[:target_pool_size],
+            "differentiated_shortlist": filtered_diff,
             "overlap_filtered": overlap_filtered,
+            "group_deferred": group_deferred,
         }
 
     def assess_timing(self, state: dict[str, Any]) -> dict[str, Any]:
@@ -1028,6 +1089,7 @@ class BuyAgents:
         # Merge validation-gate skips (ValidationResult objects) + governance-filter skips (dicts).
         validation_skipped: list[ValidationResult] = state.get("skipped_candidates", [])
         overlap_filtered: list[str] = state.get("overlap_filtered", [])
+        group_deferred: list[dict] = state.get("group_deferred", [])
         skipped_stocks: list[dict] = [
             {
                 "symbol": vr.symbol,
@@ -1044,6 +1106,14 @@ class BuyAgents:
                 "reason": "Already >3% represented in your mutual fund / ETF holdings.",
             }
             for sym in overlap_filtered
+        ] + [
+            {
+                "symbol": s.get("symbol", ""),
+                "status": "GROUP_CONCENTRATION",
+                "resolved_symbol": s.get("symbol", ""),
+                "reason": s.get("deferred_reason", "Promoter group already represented."),
+            }
+            for s in group_deferred
         ]
         blocked_reason = ""
         if not recommendations:
