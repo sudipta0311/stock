@@ -164,6 +164,17 @@ def _parse_flow(data: list[dict]) -> dict[str, Any]:
     else:
         market_signal = "NEUTRAL"
 
+    # Divergence override: FII buying + heavy DII selling
+    # Domestic institutions distributing into foreign demand often precedes correction.
+    if fii_cr > 0 and dii_cr < -2000:
+        market_signal = "CAUTIOUS"
+        fii_context = (
+            fii_context
+            + f" However, DIIs are selling heavily (net -{abs(dii_cr):,.0f}Cr)"
+            " while FIIs buy — domestic institutions distributing into foreign demand."
+            " This divergence warrants caution on entry timing."
+        )
+
     from datetime import date as _date
     return {
         "fii_net_5d_cr": fii_cr,
