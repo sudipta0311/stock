@@ -36,6 +36,7 @@ from stock_platform.utils.screener_fetcher import (
     compute_pat_momentum,
     compute_revenue_momentum,
     fetch_recent_results,
+    find_yoy_column,
 )
 from stock_platform.utils.stock_validator import check_recently_listed
 
@@ -511,6 +512,48 @@ class BuyQualityScoreTests(unittest.TestCase):
         self.assertEqual(result["growth_pct"], 48.0)
         self.assertEqual(result["period"], "Q3 FY26 vs Q3 FY25")
 
+    def test_find_yoy_column_uses_date_proximity_not_fixed_offset(self) -> None:
+        columns = [
+            datetime(2025, 12, 31),
+            datetime(2025, 9, 30),
+            datetime(2025, 6, 30),
+            datetime(2025, 3, 31),
+            datetime(2025, 6, 30),  # wrong fixed-offset candidate if position alone were used
+            datetime(2024, 12, 31),
+        ]
+
+        result = find_yoy_column(columns, 0)
+
+        self.assertEqual(result, 5)
+
+    def test_compute_revenue_momentum_finds_correct_yoy_quarter_when_offset_four_is_wrong(self) -> None:
+        stmt = FakeQuarterlyIncomeStatement(
+            columns=[
+                datetime(2025, 12, 31),
+                datetime(2025, 9, 30),
+                datetime(2025, 6, 30),
+                datetime(2025, 3, 31),
+                datetime(2024, 6, 30),
+                datetime(2024, 12, 31),
+            ],
+            rows={
+                "Total Revenue": {
+                    datetime(2025, 12, 31): 148.0,
+                    datetime(2025, 9, 30): 118.0,
+                    datetime(2025, 6, 30): 112.0,
+                    datetime(2025, 3, 31): 107.0,
+                    datetime(2024, 6, 30): 95.0,
+                    datetime(2024, 12, 31): 100.0,
+                }
+            },
+        )
+
+        result = compute_revenue_momentum("SUZLON", {}, quarterly_income_stmt=stmt)
+
+        self.assertEqual(result["same_quarter_last_year_revenue"], 100.0)
+        self.assertEqual(result["growth_pct"], 48.0)
+        self.assertEqual(result["period"], "Q3 FY26 vs Q3 FY25")
+
     def test_compute_pat_momentum_detects_revenue_pat_divergence(self) -> None:
         stmt = FakeQuarterlyIncomeStatement(
             columns=[
@@ -540,6 +583,38 @@ class BuyQualityScoreTests(unittest.TestCase):
         self.assertEqual(result["pat_momentum"], "COLLAPSING")
         self.assertEqual(result["pat_growth_pct"], -45.0)
         self.assertTrue(result["rev_pat_divergence"])
+
+    def test_compute_pat_momentum_finds_correct_yoy_quarter_when_offset_four_is_wrong(self) -> None:
+        stmt = FakeQuarterlyIncomeStatement(
+            columns=[
+                datetime(2025, 12, 31),
+                datetime(2025, 9, 30),
+                datetime(2025, 6, 30),
+                datetime(2025, 3, 31),
+                datetime(2024, 6, 30),
+                datetime(2024, 12, 31),
+            ],
+            rows={
+                "Net Income": {
+                    datetime(2025, 12, 31): 145.0,
+                    datetime(2025, 9, 30): 112.0,
+                    datetime(2025, 6, 30): 108.0,
+                    datetime(2025, 3, 31): 104.0,
+                    datetime(2024, 6, 30): 92.0,
+                    datetime(2024, 12, 31): 100.0,
+                }
+            },
+        )
+
+        result = compute_pat_momentum(
+            "IRCTC",
+            {"revenue_growth_latest_qtr": 16.0},
+            quarterly_income_stmt=stmt,
+        )
+
+        self.assertEqual(result["pat_momentum"], "STRONG")
+        self.assertEqual(result["pat_growth_pct"], 45.0)
+        self.assertEqual(result["period"], "Q3 FY26 vs Q3 FY25")
 
     @patch("stock_platform.agents.buy_agents.fetch_analyst_consensus_target", return_value=140.0)
     @patch("stock_platform.agents.buy_agents.governance_risk_blocks", return_value=(False, ""))

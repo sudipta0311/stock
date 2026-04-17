@@ -5,6 +5,7 @@ from .screener_fetcher import (
     compute_pat_momentum,
     compute_revenue_momentum,
     fetch_recent_results,
+    find_yoy_column,
     fetch_screener_data,
     get_stock_fundamentals,
 )
@@ -27,6 +28,7 @@ __all__ = [
     "get_tariff_penalty",
     "compute_revenue_momentum",
     "compute_pat_momentum",
+    "find_yoy_column",
     "fetch_recent_results",
     "fetch_screener_data",
     "get_stock_fundamentals",

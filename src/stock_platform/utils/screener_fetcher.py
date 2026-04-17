@@ -188,6 +188,48 @@ def _ordered_statement_columns(statement: Any) -> list[Any]:
     return columns
 
 
+def find_yoy_column(columns: list[Any], base_col_idx: int = 0) -> int | None:
+    """
+    Find the same-quarter-last-year column by date proximity, not fixed offset.
+    Accepts the already-ordered quarterly columns and matches against the date
+    closest to one year before the base column within a 45-day window.
+    """
+    if len(columns) < 2 or base_col_idx < 0 or base_col_idx >= len(columns):
+        return None
+
+    base_tuple = _quarter_tuple_from_column(columns[base_col_idx])
+    if base_tuple is None:
+        return None
+
+    try:
+        import pandas as pd
+
+        base_date = pd.Timestamp(datetime(*base_tuple))
+        target_date = base_date - pd.DateOffset(years=1)
+    except Exception:
+        return None
+
+    best_idx: int | None = None
+    best_diff = float("inf")
+
+    for idx, column in enumerate(columns):
+        if idx == base_col_idx:
+            continue
+        parsed = _quarter_tuple_from_column(column)
+        if parsed is None:
+            continue
+        try:
+            col_date = pd.Timestamp(datetime(*parsed))
+        except Exception:
+            continue
+        diff = abs((col_date - target_date).days)
+        if diff <= 45 and diff < best_diff:
+            best_diff = diff
+            best_idx = idx
+
+    return best_idx
+
+
 def _pick_statement_row(statement: Any, candidates: tuple[str, ...]) -> str | None:
     index = getattr(statement, "index", None)
     if index is None:
@@ -226,12 +268,13 @@ def compute_revenue_momentum(
     Compute revenue momentum using most recent quarter vs same quarter last year.
     """
     clean_symbol = resolve_symbol_base(normalize_input_symbol(symbol))
+    del fin_data
     statement = quarterly_income_stmt if quarterly_income_stmt is not None else _fetch_quarterly_income_stmt(clean_symbol)
     if statement is None:
         return {"momentum": "UNKNOWN", "growth_pct": None}
 
     columns = _ordered_statement_columns(statement)
-    if len(columns) < 5:
+    if len(columns) < 2:
         return {"momentum": "UNKNOWN", "growth_pct": None}
 
     revenue_row = _pick_statement_row(statement, _REVENUE_ROW_CANDIDATES)
@@ -239,7 +282,10 @@ def compute_revenue_momentum(
         return {"momentum": "UNKNOWN", "growth_pct": None}
 
     q0_col = columns[0]
-    q4_col = columns[4]
+    yoy_idx = find_yoy_column(columns, 0)
+    if yoy_idx is None:
+        return {"momentum": "UNKNOWN", "growth_pct": None, "note": "YoY column not found"}
+    q4_col = columns[yoy_idx]
     q0 = _as_float(statement.at[revenue_row, q0_col])
     q4 = _as_float(statement.at[revenue_row, q4_col])
     q1 = _as_float(statement.at[revenue_row, columns[1]]) if len(columns) > 1 else None
@@ -288,7 +334,7 @@ def compute_pat_momentum(
         return {"pat_momentum": "UNKNOWN"}
 
     columns = _ordered_statement_columns(statement)
-    if len(columns) < 5:
+    if len(columns) < 2:
         return {"pat_momentum": "UNKNOWN"}
 
     pat_row = _pick_statement_row(statement, _PAT_ROW_CANDIDATES)
@@ -296,7 +342,10 @@ def compute_pat_momentum(
         return {"pat_momentum": "UNKNOWN"}
 
     q0_col = columns[0]
-    q4_col = columns[4]
+    yoy_idx = find_yoy_column(columns, 0)
+    if yoy_idx is None:
+        return {"pat_momentum": "UNKNOWN", "note": "YoY column not found"}
+    q4_col = columns[yoy_idx]
     pat_q0 = _as_float(statement.at[pat_row, q0_col])
     pat_q4 = _as_float(statement.at[pat_row, q4_col])
     if pat_q0 is None or pat_q4 in (None, 0):
