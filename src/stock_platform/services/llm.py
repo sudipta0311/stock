@@ -491,6 +491,37 @@ class PlatformLLM:
             _synth_min_rr    = _synth_risk_cfg["min_rr_ratio"]
             _synth_stale_cap = _synth_risk_cfg["staleness_cap_days"]
             _synth_hint      = RISK_PROMPT_HINTS.get(risk_profile, RISK_PROMPT_HINTS["Balanced"])
+            _critical_instruction = {
+                "Conservative": (
+                    "CRITICAL INSTRUCTION: This is a CONSERVATIVE investor. "
+                    "Default to WATCHLIST unless the entry plan has R/R >= 2.5x AND results are fresh (<45 days). "
+                    "Never recommend ACCUMULATE GRADUALLY or STRONG BUY on stale data. "
+                    "Prefer false negatives over false positives."
+                ),
+                "Balanced": (
+                    "CRITICAL INSTRUCTION: This is a BALANCED investor. "
+                    "Recommend ACCUMULATE GRADUALLY when R/R >= 2.0x and business quality is confirmed, "
+                    "even if results are up to 90 days old. "
+                    "Reserve WATCHLIST for when the risk/reward is genuinely unclear, not merely as a default."
+                ),
+                "Aggressive": (
+                    "CRITICAL INSTRUCTION: This is an AGGRESSIVE investor. "
+                    "Recommend ACCUMULATE GRADUALLY or ACCUMULATE ON DIPS when R/R >= 1.5x and "
+                    "business quality is confirmed, even if results are up to 120 days old. "
+                    "Do NOT default to WATCHLIST on staleness grounds — the investor explicitly accepts this risk. "
+                    "Only use WATCHLIST when the R/R is below threshold or business quality is in genuine doubt."
+                ),
+                "Moderate": (
+                    "CRITICAL INSTRUCTION: This is a BALANCED investor. "
+                    "Recommend ACCUMULATE GRADUALLY when R/R >= 2.0x and business quality is confirmed, "
+                    "even if results are up to 90 days old. "
+                    "Reserve WATCHLIST for when the risk/reward is genuinely unclear, not merely as a default."
+                ),
+            }.get(risk_profile, (
+                "CRITICAL INSTRUCTION: Recommend ACCUMULATE GRADUALLY when R/R threshold is met "
+                "and business quality is confirmed. Do not default to WATCHLIST on staleness alone."
+            ))
+
             system_prompt = (
                 "You are a senior portfolio manager synthesising two analyst views on an Indian equity. "
                 "Your job is to produce a clean, honest verdict — not a merger of both texts.\n\n"
@@ -502,6 +533,7 @@ class PlatformLLM:
                 "confirmed, the synthesis MUST consider ACCUMULATE GRADUALLY as a valid verdict "
                 "-- do not default to WATCHLIST purely on data staleness grounds when the risk "
                 "profile explicitly tolerates it.\n\n"
+                f"{_critical_instruction}\n\n"
                 "SYNTHESIS RULES:\n"
                 "1. First identify whether disagreement is about:\n"
                 "   - FACTS (one analyst has wrong data)\n"

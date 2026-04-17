@@ -11,6 +11,8 @@ import re
 from datetime import date as _date
 from typing import Any
 
+from stock_platform.utils.risk_profiles import get_risk_config
+
 
 # ── Canonical state ordering (lower index = more conservative) ───────────────
 _CANONICAL_ORDER: list[str] = [
@@ -144,18 +146,23 @@ def extract_synthesis_verdict(synthesis_text: str) -> tuple[str, str]:
 
 # ── Signal reconciliation ────────────────────────────────────────────────────
 
-def reconcile_signals(quant_canonical: str, llm_canonical: str) -> dict[str, str | None]:
+def reconcile_signals(
+    quant_canonical: str,
+    llm_canonical: str,
+    risk_profile: str = "Balanced",
+) -> dict[str, str | None]:
     """
-    Compare quant canonical state vs the best available LLM canonical state
-    (synthesis > risk analyst > catalyst analyst, whichever was present).
+    Compare quant canonical state vs the best available LLM canonical state.
 
-    Both inputs must already be mapped to the canonical order space.
-    Returns a dict used directly by the UI — no further computation needed.
+    Gap tolerance is risk-profile-aware:
+      Conservative  — gap must be 0 to be ALIGNED (strict)
+      Balanced      — gap <= 1 is ALIGNED (default)
+      Aggressive    — gap <= 2 is ALIGNED (tolerant)
 
     status values:
-      ALIGNED           — gap == 0
-      MINOR_DIVERGENCE  — gap == 1 (one tier apart)
-      CONFLICT          — gap >= 2 (material disagreement)
+      ALIGNED           — within profile tolerance
+      MINOR_DIVERGENCE  — one tier beyond tolerance
+      CONFLICT          — two+ tiers beyond tolerance
       NO_SYNTHESIS      — llm_canonical absent; nothing to compare
       UNKNOWN           — unmapped state; skip display
     """
@@ -170,15 +177,21 @@ def reconcile_signals(quant_canonical: str, llm_canonical: str) -> dict[str, str
 
     gap = abs(q_rank - l_rank)
 
-    if gap == 0:
-        return {
-            "status":     "ALIGNED",
-            "message":    f"Quant and LLM analysis agree: {quant_canonical}",
-            "badge_type": "success",
-            "override":   None,
-        }
+    # Profile-driven alignment threshold
+    _aligned_threshold = {"Conservative": 0, "Balanced": 1, "Aggressive": 2}.get(risk_profile, 1)
 
-    if gap == 1:
+    if gap <= _aligned_threshold:
+        msg = (
+            f"Quant and LLM analysis agree: {quant_canonical}"
+            if gap == 0
+            else (
+                f"Within {risk_profile} tolerance: "
+                f"Quant {quant_canonical} / LLM {llm_canonical}"
+            )
+        )
+        return {"status": "ALIGNED", "message": msg, "badge_type": "success", "override": None}
+
+    if gap == _aligned_threshold + 1:
         if q_rank > l_rank:
             return {
                 "status":     "MINOR_DIVERGENCE",
@@ -200,7 +213,7 @@ def reconcile_signals(quant_canonical: str, llm_canonical: str) -> dict[str, str
                 "override":   "QUANT_DEFERRED",
             }
 
-    # gap >= 2 — material conflict
+    # gap >= _aligned_threshold + 2 — material conflict
     if q_rank > l_rank:
         return {
             "status":     "CONFLICT",
@@ -367,6 +380,7 @@ def resolve_final_recommendation(
     synthesis_text: str,
     payload: dict[str, Any],
     provider: str = "",
+    risk_profile: str = "Balanced",
 ) -> dict[str, Any]:
     """
     Most-conservative-wins aggregation across quant + analyst verdicts + synthesis.
@@ -429,8 +443,13 @@ def resolve_final_recommendation(
         fin_data.get("last_result_date") or "",
     )
 
-    # force_watchlist: VERY_STALE data (>90 days) cannot support an actionable thesis
-    if freshness_score.get("force_watchlist"):
+    # Profile staleness tolerance — Aggressive allows up to 120 days without suppression
+    _profile_cfg      = get_risk_config(risk_profile)
+    _profile_stale_cap = int(_profile_cfg.get("staleness_cap_days", 90))
+    _days_stale_actual = freshness_score.get("days_stale") or 0
+
+    # force_watchlist: suppress only when data exceeds the profile's own staleness cap
+    if freshness_score.get("force_watchlist") and _days_stale_actual > _profile_stale_cap:
         if _rank(canonical_state) > _rank("WATCHLIST"):
             canonical_state = "WATCHLIST"
 
@@ -441,9 +460,11 @@ def resolve_final_recommendation(
     elif _cap == "MEDIUM" and (confidence_level or "").upper() == "HIGH":
         confidence_level = "MODERATE"
 
-    # data_status: map freshness label to legacy OK/STALE/UNKNOWN for actionability gate
+    # data_status: map freshness label to OK/STALE/UNKNOWN for the actionability gate.
+    # Use the profile's staleness cap so Aggressive doesn't get NON_ACTIONABLE on data
+    # that is within its declared tolerance.
     _fl = freshness_score.get("label", "")
-    if _fl in ("FRESH", "ACCEPTABLE"):
+    if _fl in ("FRESH", "ACCEPTABLE") or _days_stale_actual <= _profile_stale_cap:
         data_status = "OK"
     elif _fl in ("STALE", "VERY_STALE"):
         data_status = "STALE"
@@ -518,7 +539,7 @@ def resolve_final_recommendation(
     # Compare against synthesis first; fall back to single-analyst verdict.
     # Deliberately NOT compared against canonical_state (that's already the merged result).
     _llm_for_reconcile = synthesis_canon or risk_canon or catalyst_canon or ""
-    reconciliation = reconcile_signals(quant_canon, _llm_for_reconcile)
+    reconciliation = reconcile_signals(quant_canon, _llm_for_reconcile, risk_profile)
 
     # ── 10. UI flags — derived from resolved state, drive renderer decisions ──
     ui_flags = {

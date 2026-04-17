@@ -1005,6 +1005,7 @@ class BuyAgents:
                 "factual_snapshot_text": prep["snapshot_text"],
                 "target_source_label":   prep["target_source_label"],
                 "macro_flow":            macro_flow,
+                "risk_profile":          risk_profile,
             }
             recommendations.append(
                 RecommendationRecord(
