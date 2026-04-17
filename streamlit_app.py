@@ -2177,6 +2177,38 @@ with tabs[2]:
         # Hoist synthesis_map so card renderers can receive synthesis_text per symbol
         synthesis_map: dict[str, str] = comp.get("synthesis", {})
 
+        # ── Candidate pipeline diagnostic ────────────────────────────────────
+        _a_stats = comp.get("anthropic", {}).get("run_summary", {}).get("pipeline_stats") or {}
+        _o_stats = comp.get("openai", {}).get("run_summary", {}).get("pipeline_stats") or {}
+        _diag_stats = _a_stats or _o_stats
+        if _diag_stats:
+            _universe   = _diag_stats.get("universe_size", "?")
+            _scored     = _diag_stats.get("post_scoring_count", "?")
+            _excl       = _diag_stats.get("post_exclusion_count", "?")
+            _a_short    = _a_stats.get("shortlist_count", "?")
+            _o_short    = _o_stats.get("shortlist_count", "?")
+            _top_n_req  = comp.get("anthropic", {}).get("run_summary", {}).get("recommendation_count", "?")
+            with st.expander("🔍 Candidate Pipeline Diagnostic"):
+                st.caption(
+                    f"Universe: **{_universe}** stocks"
+                    f" → After quant scoring: **{_scored}**"
+                    f" → After hard exclusion: **{_excl}**"
+                    f" → Anthropic pool: **{_a_short}**"
+                    f" → OpenAI pool: **{_o_short}**"
+                )
+                if isinstance(_excl, int) and isinstance(_universe, int) and _excl < 10:
+                    st.warning(
+                        f"⚠️ Only **{_excl}** stocks survived hard exclusion filters "
+                        f"(pledge >50%, D/E >5x, market cap <₹1000 Cr, illiquidity). "
+                        "Consider using a larger index universe (e.g. NIFTY 500)."
+                    )
+                st.caption(
+                    "Hard exclusions are universal (all profiles): illiquidity <₹5 Cr/day, "
+                    "promoter pledge >50%, D/E >5x, market cap <₹1000 Cr. "
+                    "Profile thresholds (ROCE, D/E preferred levels) are scoring modifiers only — "
+                    "they never reduce the candidate pool."
+                )
+
         # ── SYNTHESIS FIRST — final resolved verdicts dominate the view ──────
         if synthesis_map:
             st.markdown("#### Final Synthesis")

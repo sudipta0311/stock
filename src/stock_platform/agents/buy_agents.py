@@ -11,7 +11,7 @@ _log = logging.getLogger(__name__)
 from stock_platform.config import AppConfig
 from stock_platform.models import RecommendationRecord
 from stock_platform.agents.quant_model import apply_freshness_cap, compute_quality_score as compute_quality_score_v2
-from stock_platform.utils.risk_profiles import get_risk_config
+from stock_platform.utils.risk_profiles import UNIVERSAL_HARD_EXCLUDE, get_risk_config
 from stock_platform.utils.entry_calculator import (
     KNOWN_ANALYST_TARGETS,
     apply_momentum_override,
@@ -268,6 +268,46 @@ def buffered_top_n(top_n: int) -> int:
     return max(top_n * FINAL_BUFFER_MULTIPLIER, top_n)
 
 
+def ensure_minimum_candidates(
+        candidates: list[dict[str, Any]],
+        top_n: int,
+        risk_profile: str,
+        all_scored: list[dict[str, Any]],
+        sort_key=None) -> list[dict[str, Any]]:
+    """
+    Guarantees at least top_n candidates reach the LLM layer.
+
+    When strict universal filtering leaves fewer than top_n candidates,
+    backfills from the broader scored universe (stocks that passed quant
+    scoring but were removed by filter_risk).  Backfill candidates are
+    flagged so the LLM knows to apply extra scrutiny.
+    """
+    if len(candidates) >= top_n:
+        return candidates
+    shortfall = top_n - len(candidates)
+    existing_symbols = {c.get("symbol") for c in candidates}
+    _key = sort_key or (lambda row: row.get("selection_score", row.get("quality_score", 0)))
+    backfill_pool = sorted(
+        [s for s in all_scored if s.get("symbol") not in existing_symbols],
+        key=_key,
+        reverse=True,
+    )[:shortfall]
+    for s in backfill_pool:
+        s["backfill_flag"] = True
+        s["backfill_reason"] = (
+            f"Added to meet Top N={top_n} — did not pass universal hard-exclusion "
+            f"filter for {risk_profile} profile. Apply extra scrutiny."
+        )
+    result = candidates + backfill_pool
+    if backfill_pool:
+        _log.info(
+            "Candidate pool backfill: %d primary + %d backfill = %d total "
+            "(top_n=%d, profile=%s)",
+            len(candidates), len(backfill_pool), len(result), top_n, risk_profile,
+        )
+    return result
+
+
 class BuyAgents:
     def __init__(self, repo: Any, provider: Any, config: AppConfig, llm: Any) -> None:
         self.repo = repo
@@ -411,20 +451,44 @@ class BuyAgents:
             sector_weights[row["sector"]] = sector_weights.get(row["sector"], 0.0) + row["total_weight"]
         unified = {row["sector"]: row for row in self.repo.list_signals("unified")}
         filtered = []
+        universe_size = len(state.get("universe", []))
+        scored_size = len(state.get("scored_candidates", []))
+
         for candidate in state["scored_candidates"]:
             risk = self.provider.get_risk_metrics(candidate["symbol"])
-            if risk.get("avg_daily_value_cr") is not None and risk["avg_daily_value_cr"] < 5:
+
+            # ── TIER 1: UNIVERSAL HARD EXCLUSIONS (same for all profiles) ─────
+            if (risk.get("avg_daily_value_cr") is not None
+                    and risk["avg_daily_value_cr"] < UNIVERSAL_HARD_EXCLUDE["min_avg_daily_volume_cr"]):
                 continue
             if risk.get("beta") is not None and risk["beta"] > 2.0:
                 continue
             pledge = risk.get("pledge_pct") or risk.get("promoter_pledge_pct")
-            if pledge is not None and pledge > 30:
+            if pledge is not None and pledge > UNIVERSAL_HARD_EXCLUDE["max_promoter_pledge_pct"]:
                 candidate["hard_exclude"] = True
                 candidate["exclude_reason"] = (
-                    f"Promoter pledge {pledge:.1f}% exceeds 30% threshold — "
-                    f"margin call risk creates forced selling overhang"
+                    f"Promoter pledge {pledge:.1f}% exceeds universal 50% threshold — "
+                    f"extreme margin call risk"
                 )
                 continue
+            # Extreme leverage — solvency risk regardless of profile
+            fin = candidate.get("financials") or candidate.get("live_financials") or {}
+            _de = fin.get("debt_to_equity") or fin.get("debtToEquity")
+            if _de is not None:
+                try:
+                    if float(_de) > UNIVERSAL_HARD_EXCLUDE["max_debt_equity"]:
+                        continue
+                except (TypeError, ValueError):
+                    pass
+            # Micro-cap — too thin for meaningful position sizing
+            _mcap = fin.get("market_cap_cr") or fin.get("marketCapCr")
+            if _mcap is not None:
+                try:
+                    if float(_mcap) < UNIVERSAL_HARD_EXCLUDE["min_market_cap_cr"]:
+                        continue
+                except (TypeError, ValueError):
+                    pass
+
             if risk.get("sebi_flag"):
                 continue
             if sector_weights.get(candidate["sector"], 0.0) > self.config.max_sector_pct:
@@ -432,10 +496,23 @@ class BuyAgents:
             if unified.get(candidate["sector"], {}).get("conviction") == "STRONG_AVOID":
                 continue
             filtered.append(candidate | {"risk_metrics": risk})
-        return {"risk_filtered_candidates": filtered}
+
+        _log.info(
+            "filter_risk: universe=%d scored=%d post_exclusion=%d",
+            universe_size, scored_size, len(filtered),
+        )
+        return {
+            "risk_filtered_candidates": filtered,
+            "pipeline_stats": {
+                "universe_size": universe_size,
+                "post_scoring_count": scored_size,
+                "post_exclusion_count": len(filtered),
+            },
+        }
 
     def shortlist(self, state: dict[str, Any]) -> dict[str, Any]:
         top_n = int(state["request"]["top_n"])
+        risk_profile = state["request"].get("risk_profile", "Balanced")
         skipped_symbols = [result.symbol for result in state.get("skipped_candidates", [])]
         # Each model gets a pool ordered by its own analytical lens so genuine
         # divergence can surface: Anthropic (risk/quality) vs OpenAI (momentum/catalyst).
@@ -443,14 +520,24 @@ class BuyAgents:
             _momentum_sort_key if self.llm.provider == "openai"
             else _quality_sort_key
         )
-        shortlist = get_top_n_with_replacement(
+        target = max(top_n * SHORTLIST_BUFFER_MULTIPLIER, top_n)
+        primary = get_top_n_with_replacement(
             state["risk_filtered_candidates"],
-            max(top_n * SHORTLIST_BUFFER_MULTIPLIER, top_n),
+            target,
             skipped_symbols,
             str(self.config.db_path),
             sort_key=sort_key,
         )
-        return {"shortlist": shortlist}
+        # Guarantee at least top_n candidates reach the LLM layer even when
+        # universal hard exclusions left too few candidates in the primary pool.
+        full_shortlist = ensure_minimum_candidates(
+            primary,
+            top_n,
+            risk_profile,
+            state.get("scored_candidates", []),
+            sort_key=sort_key,
+        )
+        return {"shortlist": full_shortlist}
 
     def validate_qualitative(self, state: dict[str, Any]) -> dict[str, Any]:
         unified = {row["sector"]: row for row in self.repo.list_signals("unified")}
@@ -1174,12 +1261,15 @@ class BuyAgents:
                     "or when current market momentum is broadly negative. "
                     "Try refreshing market signals or re-uploading your portfolio."
                 )
+        _pipeline_stats = state.get("pipeline_stats") or {}
+        _pipeline_stats["shortlist_count"] = len(state.get("shortlist") or [])
         return {
             "recommendations": [asdict(record) for record in recommendations],
             "run_summary": {
                 "run_id": run_id,
                 "recommendation_count": len(recommendations),
                 "blocked_reason": blocked_reason,
+                "pipeline_stats": _pipeline_stats,
             },
             "skipped_stocks": skipped_stocks,
         }

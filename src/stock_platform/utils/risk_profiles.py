@@ -2,45 +2,60 @@ from __future__ import annotations
 
 from typing import Any
 
-# ── Per-profile thresholds ────────────────────────────────────────────────────
+# ── TIER 1: Universal hard exclusions ─────────────────────────────────────────
+# Apply to ALL profiles and ALL runs. These reduce the universe before scoring.
+# Change these only when a new regulatory or structural reason emerges.
+# Do NOT add profile-specific tightening here — use TIER 2 instead.
+UNIVERSAL_HARD_EXCLUDE: dict[str, float] = {
+    "min_avg_daily_volume_cr": 5.0,    # illiquid — cannot exit position safely
+    "max_promoter_pledge_pct": 50.0,   # extreme pledge — margin call overhang
+    "max_debt_equity":         5.0,    # extreme leverage — solvency risk
+    "min_market_cap_cr":       1000.0, # micro-cap — too thin for retail entry
+}
+
+# ── TIER 2: Per-profile thresholds ────────────────────────────────────────────
+# These are SCORING MODIFIERS and CONFIDENCE INPUTS only.
+# They NEVER reduce the candidate pool — they downgrade verdicts and confidence.
+# Field names use "preferred_*" to signal scoring intent, not exclusion gates.
+#
 # quant_cap_no_result_signal uses the quant-layer vocabulary:
 #   "STRONG ENTER" | "ACCUMULATE" | "SMALL INITIAL" | "WAIT" | "DO NOT ENTER"
 RISK_PROFILES: dict[str, dict[str, Any]] = {
     "Conservative": {
-        "min_rr_ratio":               2.5,
-        "max_pe_vs_median_pct":       10,
-        "min_roce":                   22,
-        "max_debt_equity":            0.3,
-        "staleness_cap_days":         45,
-        "quant_cap_no_result_signal": "WAIT",
-        "min_revenue_growth":         15,
-        "confidence_floor":           "MEDIUM",
-        "llm_temperature_hint":       "cautious",
-        "aggressive_entry_pct":       3,
+        "min_rr_ratio":                    2.5,
+        "preferred_max_pe_vs_median_pct":  10,   # scoring modifier — not a hard gate
+        "preferred_min_roce":              22,   # scoring modifier — not a hard gate
+        "preferred_max_de":                0.3,  # scoring modifier — not a hard gate
+        "staleness_cap_days":              45,
+        "quant_cap_no_result_signal":      "WAIT",
+        "preferred_min_revenue_growth":    15,   # scoring modifier — not a hard gate
+        "confidence_floor":                "MEDIUM",
+        "llm_temperature_hint":            "cautious",
+        "aggressive_entry_pct":            3,
     },
     "Balanced": {
-        "min_rr_ratio":               2.0,
-        "max_pe_vs_median_pct":       25,
-        "min_roce":                   18,
-        "max_debt_equity":            0.5,
-        "staleness_cap_days":         90,
-        "quant_cap_no_result_signal": "WAIT",
-        "min_revenue_growth":         12,
-        "confidence_floor":           "LOW",
-        "llm_temperature_hint":       "balanced",
-        "aggressive_entry_pct":       5,
+        "min_rr_ratio":                    2.0,
+        "preferred_max_pe_vs_median_pct":  25,
+        "preferred_min_roce":              18,
+        "preferred_max_de":                0.5,
+        "staleness_cap_days":              90,
+        "quant_cap_no_result_signal":      "WAIT",
+        "preferred_min_revenue_growth":    12,
+        "confidence_floor":                "LOW",
+        "llm_temperature_hint":            "balanced",
+        "aggressive_entry_pct":            5,
     },
     "Aggressive": {
-        "min_rr_ratio":               1.5,
-        "max_pe_vs_median_pct":       50,
-        "min_roce":                   15,
-        "max_debt_equity":            0.8,
-        "staleness_cap_days":         120,
-        "quant_cap_no_result_signal": "SMALL INITIAL",
-        "min_revenue_growth":         8,
-        "confidence_floor":           "LOW",
-        "llm_temperature_hint":       "growth_oriented",
-        "aggressive_entry_pct":       7,
+        "min_rr_ratio":                    1.5,
+        "preferred_max_pe_vs_median_pct":  50,
+        "preferred_min_roce":              15,
+        "preferred_max_de":                0.8,
+        "staleness_cap_days":              120,
+        "quant_cap_no_result_signal":      "SMALL INITIAL",
+        "preferred_min_revenue_growth":    8,
+        "confidence_floor":                "LOW",
+        "llm_temperature_hint":            "growth_oriented",
+        "aggressive_entry_pct":            7,
     },
 }
 # "Moderate" treated as "Balanced" for backward compat with stored UI value.
