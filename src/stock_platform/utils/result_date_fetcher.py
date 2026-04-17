@@ -191,9 +191,7 @@ def _db_connect(db_path: str | Path):
 def _ensure_table(db_path: str | Path) -> None:
     try:
         conn = _db_connect(db_path)
-        dialect = getattr(conn, "dialect", "sqlite")
-        sql = _CREATE_TABLE_SQL_PG if dialect == "postgresql" else _CREATE_TABLE_SQL
-        conn.execute(sql)
+        conn.execute(_CREATE_TABLE_SQL)
         conn.commit()
         conn.close()
     except Exception:
@@ -204,7 +202,6 @@ def _get_cached(symbol: str, db_path: str | Path) -> dict[str, Any]:
     _ensure_table(db_path)
     try:
         conn = _db_connect(db_path)
-        conn.row_factory = None  # no-op on pg wrapper
         row = conn.execute(
             "SELECT result_date, freshness, source, cached_at "
             "FROM result_date_cache WHERE symbol = ?",
@@ -213,18 +210,19 @@ def _get_cached(symbol: str, db_path: str | Path) -> dict[str, Any]:
         conn.close()
         if not row:
             return {}
-        cached_at = datetime.strptime(str(row[3]), "%Y-%m-%d").date()
+        # Use named key access — works for both NeonWrapper._NeonRow and sqlite3.Row
+        cached_at = datetime.strptime(str(row["cached_at"]), "%Y-%m-%d").date()
         if (date.today() - cached_at).days > 7:
             return {}
-        result_date = row[0]
+        result_date = row["result_date"]
         days_stale = None
         if result_date:
             days_stale = (date.today() - datetime.strptime(result_date, "%Y-%m-%d").date()).days
         return {
             "result_date":       result_date,
             "result_days_stale": days_stale,
-            "result_freshness":  _freshness(days_stale) if days_stale is not None else row[1],
-            "source":            str(row[2]) + "_cache",
+            "result_freshness":  _freshness(days_stale) if days_stale is not None else row["freshness"],
+            "source":            str(row["source"]) + "_cache",
         }
     except Exception:
         return {}
@@ -234,28 +232,24 @@ def _save_cache(symbol: str, data: dict[str, Any], db_path: str | Path) -> None:
     _ensure_table(db_path)
     try:
         conn = _db_connect(db_path)
-        dialect = getattr(conn, "dialect", "sqlite")
-        upsert = (
+        # Use ? placeholders — NeonWrapper translates to %s for PostgreSQL.
+        # ON CONFLICT DO UPDATE works for both PostgreSQL and SQLite 3.24+.
+        conn.execute(
             "INSERT INTO result_date_cache "
             "(symbol, result_date, days_stale, freshness, source, cached_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s) "
-            "ON CONFLICT (symbol) DO UPDATE SET "
-            "result_date=EXCLUDED.result_date, days_stale=EXCLUDED.days_stale, "
-            "freshness=EXCLUDED.freshness, source=EXCLUDED.source, cached_at=EXCLUDED.cached_at"
-            if dialect == "postgresql"
-            else
-            "INSERT OR REPLACE INTO result_date_cache "
-            "(symbol, result_date, days_stale, freshness, source, cached_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)"
+            "VALUES (?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(symbol) DO UPDATE SET "
+            "result_date=excluded.result_date, days_stale=excluded.days_stale, "
+            "freshness=excluded.freshness, source=excluded.source, cached_at=excluded.cached_at",
+            (
+                symbol,
+                data.get("result_date"),
+                data.get("result_days_stale"),
+                data.get("result_freshness"),
+                data.get("source"),
+                date.today().strftime("%Y-%m-%d"),
+            ),
         )
-        conn.execute(upsert, (
-            symbol,
-            data.get("result_date"),
-            data.get("result_days_stale"),
-            data.get("result_freshness"),
-            data.get("source"),
-            date.today().strftime("%Y-%m-%d"),
-        ))
         conn.commit()
         conn.close()
     except Exception as exc:
