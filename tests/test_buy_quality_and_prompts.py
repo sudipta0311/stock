@@ -439,8 +439,15 @@ class BuyQualityScoreTests(unittest.TestCase):
             text="""
             <div id="quarters">
               <table>
-                <tr><th>Metric</th><th>Mar 2026</th><th>Mar 2025</th></tr>
-                <tr><td>Sales +</td><td>140</td><td>100</td></tr>
+                <tr>
+                  <th>Metric</th>
+                  <th>Dec 2025</th>
+                  <th>Sep 2025</th>
+                  <th>Jun 2025</th>
+                  <th>Mar 2025</th>
+                  <th>Dec 2024</th>
+                </tr>
+                <tr><td>Sales +</td><td>126</td><td>110</td><td>104</td><td>101</td><td>100</td></tr>
               </table>
             </div>
             """,
@@ -448,10 +455,12 @@ class BuyQualityScoreTests(unittest.TestCase):
 
         result = fetch_recent_results("BEL")
 
-        self.assertEqual(result["latest_quarter_revenue"], 140.0)
-        self.assertEqual(result["prev_quarter_revenue"], 100.0)
-        self.assertEqual(result["revenue_yoy_growth_pct"], 40.0)
-        self.assertEqual(result["momentum"], "STRONG")
+        self.assertEqual(result["latest_quarter_revenue"], 126.0)
+        self.assertEqual(result["prev_quarter_revenue"], 110.0)
+        self.assertEqual(result["same_quarter_last_year_revenue"], 100.0)
+        self.assertEqual(result["revenue_yoy_growth_pct"], 26.0)
+        self.assertEqual(result["comparison_label"], "Q3 FY26 vs Q3 FY25")
+        self.assertEqual(result["momentum"], "GOOD")
 
     @patch("stock_platform.agents.buy_agents.fetch_analyst_consensus_target", return_value=140.0)
     @patch("stock_platform.agents.buy_agents.governance_risk_blocks", return_value=(False, ""))
@@ -686,6 +695,9 @@ class BuyPromptTests(unittest.TestCase):
             "live_financials": {
                 "roce_ttm": 0.266,
                 "revenueGrowth": 0.24,
+                "revenue_growth_ttm": 24.0,
+                "revenue_growth_latest_qtr": 30.0,
+                "revenue_growth_latest_qtr_label": "Q3 FY26 vs Q3 FY25",
                 "debtToEquity": 0.273,
                 "trailingEps": 8.14,
                 "targetMeanPrice": 488.64,
@@ -711,10 +723,16 @@ class BuyPromptTests(unittest.TestCase):
         anthropic_prompt = anthropic_llm.calls[0]["system_prompt"]
         request = FakeOpenAIChat.last_request or {}
         openai_prompt = request["messages"][0]["content"]  # type: ignore[index]
-        self.assertIn("single most important RISK", anthropic_prompt)
-        self.assertIn("momentum and catalyst analyst", openai_prompt)
-        self.assertIn("ROCE 26.6%", anthropic_llm.calls[0]["user_prompt"])
-        self.assertIn("EXIT", str(request["messages"][0]["content"]))  # type: ignore[index]
+        self.assertIn("single most likely way this thesis fails", anthropic_prompt)
+        self.assertIn("BULL-BIASED catalyst analyst", openai_prompt)
+        self.assertIn("ROCE:             26.6%", anthropic_llm.calls[0]["user_prompt"])
+        self.assertIn("Revenue growth (TTM YoY): 24.0%", anthropic_llm.calls[0]["user_prompt"])
+        self.assertIn("Revenue growth (Q3 FY26 vs Q3 FY25): 30.0%", anthropic_llm.calls[0]["user_prompt"])
+        self.assertIn(
+            "Use quarterly figure for momentum assessment, TTM figure for trend assessment.",
+            anthropic_llm.calls[0]["user_prompt"],
+        )
+        self.assertIn("Exit signal", str(request["messages"][0]["content"]))  # type: ignore[index]
 
     def test_synthesis_prompt_requests_combined_verdict(self) -> None:
         fake_module = types.SimpleNamespace(Anthropic=FakeAnthropicClient)

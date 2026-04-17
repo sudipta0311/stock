@@ -767,9 +767,18 @@ class LiveMarketDataProvider:
             "freeCashflow": None,
             "free_cashflow": None,
             "fcf_positive_years": None,
-            "revenueGrowth": None if screener.get("revenue_growth_pct") is None else screener["revenue_growth_pct"] / 100.0,
-            "revenue_growth": None if screener.get("revenue_growth_pct") is None else screener["revenue_growth_pct"] / 100.0,
-            "revenue_growth_pct": screener.get("revenue_growth_pct"),
+            "revenueGrowth": None if screener.get("revenue_growth_ttm") is None else screener["revenue_growth_ttm"] / 100.0,
+            "revenue_growth": None if screener.get("revenue_growth_ttm") is None else screener["revenue_growth_ttm"] / 100.0,
+            "revenue_growth_pct": (
+                screener.get("revenue_growth_ttm")
+                if screener.get("revenue_growth_ttm") is not None
+                else screener.get("revenue_growth_pct")
+            ),
+            "revenue_growth_ttm": screener.get("revenue_growth_ttm"),
+            "revenue_growth_latest_qtr": screener.get("revenue_growth_latest_qtr"),
+            "revenue_growth_latest_qtr_label": (
+                (screener.get("recent_results") or {}).get("comparison_label")
+            ),
             "debtToEquity": screener.get("debt_to_equity"),
             "debt_to_equity": screener.get("debt_to_equity"),
             "pe_trailing": screener.get("pe_ratio"),
@@ -795,6 +804,7 @@ class LiveMarketDataProvider:
             "pledge_history": screener.get("pledge_history") or [],
             "dma_200": screener.get("dma_200"),
             "dma_50": screener.get("dma_50"),
+            "recent_results": screener.get("recent_results") or {},
             "negative_pat_quarters": None,
         }
 

@@ -9,6 +9,20 @@ from stock_platform.utils.symbol_resolver import normalize_input_symbol, resolve
 
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; portfolio-app/1.0)"}
+_SCREENER_MONTHS = {
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
+}
 
 
 def _clean_number(text: str) -> float | None:
@@ -27,6 +41,62 @@ def _clean_number(text: str) -> float | None:
         return float(cleaned)
     except ValueError:
         return None
+
+
+def _parse_screener_quarter_label(label: str) -> tuple[int, int] | None:
+    parts = (label or "").strip().split()
+    if len(parts) < 2:
+        return None
+
+    month = _SCREENER_MONTHS.get(parts[0][:3].lower())
+    if month is None:
+        return None
+
+    try:
+        year = int(parts[1])
+    except ValueError:
+        return None
+
+    return month, year
+
+
+def _format_fiscal_quarter_label(label: str) -> str | None:
+    parsed = _parse_screener_quarter_label(label)
+    if parsed is None:
+        return None
+
+    month, year = parsed
+    if month in (4, 5, 6):
+        quarter = "Q1"
+        fy_year = year + 1
+    elif month in (7, 8, 9):
+        quarter = "Q2"
+        fy_year = year + 1
+    elif month in (10, 11, 12):
+        quarter = "Q3"
+        fy_year = year + 1
+    else:
+        quarter = "Q4"
+        fy_year = year
+
+    return f"{quarter} FY{fy_year % 100:02d}"
+
+
+def _find_same_quarter_last_year_index(quarter_labels: list[str]) -> int | None:
+    if not quarter_labels:
+        return None
+
+    latest = _parse_screener_quarter_label(quarter_labels[0])
+    if latest is not None:
+        latest_month, latest_year = latest
+        for idx, label in enumerate(quarter_labels[1:], start=1):
+            parsed = _parse_screener_quarter_label(label)
+            if parsed == (latest_month, latest_year - 1):
+                return idx
+
+    # Screener quarterly tables are usually reverse-chronological quarter columns.
+    # When parsing fails, fall back to the fifth visible quarter as the prior-year comp.
+    return 4 if len(quarter_labels) >= 5 else None
 
 
 def _fetch_soup(clean_symbol: str, consolidated: bool) -> BeautifulSoup | None:
@@ -230,9 +300,9 @@ def _parse_recent_results_from_soup(soup: BeautifulSoup | None) -> dict[str, Any
         return {}
 
     header_cells = quarters[0].select("th, td")
-    quarter_names = [cell.get_text(" ", strip=True) for cell in header_cells[1:3]]
-    if len(quarter_names) < 2:
-        quarter_names = []
+    quarter_labels = [cell.get_text(" ", strip=True) for cell in header_cells[1:]]
+    if not quarter_labels:
+        return {}
 
     sales_row = None
     for row in quarters[1:]:
@@ -249,12 +319,33 @@ def _parse_recent_results_from_soup(soup: BeautifulSoup | None) -> dict[str, Any
     if len(cells) < 3:
         return {}
 
-    latest = _clean_number(cells[1].get_text(" ", strip=True))
-    prev = _clean_number(cells[2].get_text(" ", strip=True))
-    if latest is None or prev is None:
+    sales_values = [_clean_number(cell.get_text(" ", strip=True)) for cell in cells[1:]]
+    latest = sales_values[0] if sales_values else None
+    prev_quarter = sales_values[1] if len(sales_values) > 1 else None
+    same_qtr_idx = _find_same_quarter_last_year_index(quarter_labels)
+    same_qtr_last_year = (
+        sales_values[same_qtr_idx]
+        if same_qtr_idx is not None and same_qtr_idx < len(sales_values)
+        else None
+    )
+    if latest is None or same_qtr_last_year is None:
         return {}
 
-    growth = ((latest - prev) / prev * 100.0) if prev > 0 else 0.0
+    latest_label = quarter_labels[0]
+    same_qtr_label = quarter_labels[same_qtr_idx] if same_qtr_idx is not None else ""
+    formatted_latest = _format_fiscal_quarter_label(latest_label)
+    formatted_same_qtr = _format_fiscal_quarter_label(same_qtr_label)
+    comparison_label = (
+        f"{formatted_latest} vs {formatted_same_qtr}"
+        if formatted_latest and formatted_same_qtr
+        else (
+            f"{latest_label} vs {same_qtr_label}"
+            if latest_label and same_qtr_label
+            else "latest quarter vs same quarter last year"
+        )
+    )
+
+    growth = ((latest - same_qtr_last_year) / same_qtr_last_year * 100.0) if same_qtr_last_year > 0 else 0.0
     if growth > 30:
         momentum = "STRONG"
     elif growth > 15:
@@ -266,9 +357,13 @@ def _parse_recent_results_from_soup(soup: BeautifulSoup | None) -> dict[str, Any
 
     return {
         "latest_quarter_revenue": latest,
-        "prev_quarter_revenue": prev,
+        "prev_quarter_revenue": prev_quarter,
+        "same_quarter_last_year_revenue": same_qtr_last_year,
         "revenue_yoy_growth_pct": round(growth, 1),
-        "quarter_names": quarter_names,
+        "quarter_names": [latest_label, same_qtr_label] if same_qtr_label else [latest_label],
+        "latest_quarter_label": latest_label,
+        "same_quarter_last_year_label": same_qtr_label,
+        "comparison_label": comparison_label,
         "momentum": momentum,
     }
 
@@ -325,9 +420,17 @@ def fetch_screener_data(nse_symbol: str) -> dict[str, Any]:
         or _parse_ranges_table_value(consolidated_soup, "Return on Equity", ["Last Year", "3 Years", "5 Years"])
     )
     roce_pct = consolidated_ratios.get("ROCE") or standalone_ratios.get("ROCE") or roe_pct
+    revenue_growth_ttm = (
+        _parse_ranges_table_value(consolidated_soup, "Compounded Sales Growth", ["TTM"])
+        or _parse_ranges_table_value(standalone_soup, "Compounded Sales Growth", ["TTM"])
+    )
     revenue_growth_pct = (
-        _parse_ranges_table_value(consolidated_soup, "Compounded Sales Growth", ["5 Years", "3 Years", "TTM"])
-        or _parse_ranges_table_value(standalone_soup, "Compounded Sales Growth", ["5 Years", "3 Years", "TTM"])
+        revenue_growth_ttm
+        if revenue_growth_ttm is not None
+        else (
+            _parse_ranges_table_value(consolidated_soup, "Compounded Sales Growth", ["3 Years", "5 Years"])
+            or _parse_ranges_table_value(standalone_soup, "Compounded Sales Growth", ["3 Years", "5 Years"])
+        )
     )
     promoter_holding = _parse_promoter_holding(consolidated_soup) or _parse_promoter_holding(standalone_soup)
     promoter_change = (
@@ -354,6 +457,7 @@ def fetch_screener_data(nse_symbol: str) -> dict[str, Any]:
         or _get_ratio_value(standalone_ratios, "price to book value", "p/b", "pb")
     )
     recent_results = _parse_recent_results_from_soup(consolidated_soup) or _parse_recent_results_from_soup(standalone_soup)
+    revenue_growth_latest_qtr = recent_results.get("revenue_yoy_growth_pct")
     pledge_data = _parse_pledge_data(consolidated_soup) or _parse_pledge_data(standalone_soup)
 
     result = {
@@ -365,6 +469,8 @@ def fetch_screener_data(nse_symbol: str) -> dict[str, Any]:
         "pb_ratio": pb_ratio,
         "eps": eps,
         "revenue_growth_pct": revenue_growth_pct,
+        "revenue_growth_ttm": revenue_growth_ttm,
+        "revenue_growth_latest_qtr": revenue_growth_latest_qtr,
         "promoter_holding": promoter_holding,
         "promoter_change": promoter_change,
         "pledge_pct": pledge_data.get("pledge_pct"),
