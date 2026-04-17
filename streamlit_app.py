@@ -1099,6 +1099,14 @@ def render_recommendation_card(
     show_trade_plan  = actionability != "NON_ACTIONABLE"
     is_degraded      = actionability == "DEGRADED"
 
+    # Display verdict: use final_verdict (governing signal from reconciliation)
+    # rather than canonical_state, which may have been silently downgraded by
+    # safety gates (data freshness, critical failures) while the reconciliation
+    # strip already shows the pre-downgrade agreement. This keeps the badge and
+    # the reconciliation message consistent. Actionability / trade-plan logic
+    # still uses canonical_state (the fully resolved conservative state).
+    _display_verdict = gov.get("final_verdict") or canonical_state
+
     # ── Profile-aware entry plan visibility override ──────────────────────────
     # Only apply staleness override when canonical_state itself is actionable
     # (i.e. suppression is purely staleness-driven, not a hard AVOID/WATCHLIST/CONFIRMATION).
@@ -1119,7 +1127,7 @@ def render_recommendation_card(
         "ACCUMULATE GRADUALLY":       "#27ae60",
         "ACTIONABLE BUY":             "#1a7a1a",
     }
-    _badge_color = _state_badge_color.get(canonical_state, "#555")
+    _badge_color = _state_badge_color.get(_display_verdict, "#555")
 
     with st.container(border=True):
         # ── Verdict stripe — colored top bar gives instant visual signal ──────
@@ -1174,7 +1182,7 @@ def render_recommendation_card(
                 f'<div style="background:{_badge_color};color:#fff;opacity:{_badge_opacity};'
                 f'padding:6px 8px;border-radius:5px;font-size:13px;font-weight:700;'
                 f'text-align:center;line-height:1.25;">'
-                f'{canonical_state}</div>',
+                f'{_display_verdict}</div>',
                 unsafe_allow_html=True,
             )
 
