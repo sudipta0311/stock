@@ -751,7 +751,9 @@ class LiveMarketDataProvider:
             return self._financial_cache[normalized]
 
         snapshot = self.get_stock_snapshot(normalized)
-        screener = get_stock_fundamentals(normalized)
+        screener = get_stock_fundamentals(normalized, include_market_data=False)
+        snapshot_price = snapshot.get("price")
+        snapshot_target = snapshot.get("analyst_target")
         result: dict[str, Any] = {
             "symbol": screener.get("symbol", normalized),
             "company_name": snapshot["company_name"],
@@ -791,8 +793,8 @@ class LiveMarketDataProvider:
             "profit_margins": None,
             "trailingEps": screener.get("eps"),
             "eps": screener.get("eps"),
-            "currentPrice": screener.get("current_price"),
-            "targetMeanPrice": screener.get("target_mean_price"),
+            "currentPrice": snapshot_price or screener.get("current_price"),
+            "targetMeanPrice": snapshot_target or screener.get("target_mean_price"),
             "week52_high": screener.get("week52_high"),
             "week52_low": screener.get("week52_low"),
             "fiftyTwoWeekHigh": screener.get("week52_high"),
