@@ -16,6 +16,7 @@ import requests
 import yfinance as yf
 
 from stock_platform.utils.index_config import NSE_INDEX_CSV_URLS, STATIC_INDEX_MEMBERS
+from stock_platform.utils.result_date_fetcher import fetch_last_result_date
 from stock_platform.utils.rules import clamp
 from stock_platform.utils.screener_fetcher import get_stock_fundamentals
 from stock_platform.utils.sector_config import get_sector
@@ -26,43 +27,8 @@ _INDEX_CACHE_DIR = Path(__file__).resolve().parents[3] / "data" / "index_constit
 _INDEX_CACHE_TTL_DAYS = 7
 
 
-def _fetch_last_result_date(symbol: str) -> dict[str, Any]:
-    """
-    Three-source fallback to resolve the most recent quarterly result date for NSE stocks.
-    yfinance mostRecentQuarter -> quarterly_financials columns -> quarterly_income_stmt columns.
-    Returns {"result_date": "YYYY-MM-DD", "source": "<name>"} or result_date=None on full failure.
-    """
-    ticker_sym = f"{symbol}.NS"
-    t = yf.Ticker(ticker_sym)
-
-    # Source 1: mostRecentQuarter (Unix timestamp in ticker.info)
-    try:
-        mrq = t.info.get("mostRecentQuarter")
-        if mrq and int(mrq) > 0:
-            dt = datetime.fromtimestamp(int(mrq)).strftime("%Y-%m-%d")
-            return {"result_date": dt, "source": "yfinance_mrq"}
-    except Exception:
-        pass
-
-    # Source 2: quarterly_financials column index (most recent = columns[0])
-    try:
-        qf = t.quarterly_financials
-        if qf is not None and not qf.empty:
-            dt = pd.Timestamp(qf.columns[0]).strftime("%Y-%m-%d")
-            return {"result_date": dt, "source": "yfinance_quarterly"}
-    except Exception:
-        pass
-
-    # Source 3: quarterly_income_stmt column index
-    try:
-        qi = t.quarterly_income_stmt
-        if qi is not None and not qi.empty:
-            dt = pd.Timestamp(qi.columns[0]).strftime("%Y-%m-%d")
-            return {"result_date": dt, "source": "yfinance_income_stmt"}
-    except Exception:
-        pass
-
-    return {"result_date": None, "source": "unavailable"}
+# _fetch_last_result_date replaced by result_date_fetcher.fetch_last_result_date
+# (NSE official → Tickertape → yfinance chain with 7-day SQLite cache)
 
 
 class LiveMarketDataProvider:
@@ -71,9 +37,17 @@ class LiveMarketDataProvider:
     # All supported index CSV URLs — sourced from index_config.NSE_INDEX_CSV_URLS.
     INDEX_URLS = NSE_INDEX_CSV_URLS
 
-    def __init__(self, holdings_client: Any | None = None, repo: Any | None = None) -> None:
+    def __init__(
+        self,
+        holdings_client: Any | None = None,
+        repo: Any | None = None,
+        db_path: "str | Path | None" = None,
+    ) -> None:
         self.holdings_client = holdings_client
         self.repo = repo
+        self.db_path: Path = Path(db_path) if db_path else (
+            Path(__file__).resolve().parents[3] / "data" / "platform.db"
+        )
         self.today = date.today()
         self.session = requests.Session()
         self.session.headers.update(
@@ -824,20 +798,12 @@ class LiveMarketDataProvider:
             "negative_pat_quarters": None,
         }
 
-        # Populate last_result_date via three-source yfinance fallback.
-        _rdate_info = _fetch_last_result_date(normalized)
-        _rdate = _rdate_info.get("result_date")
-        result["last_result_date"] = _rdate
+        # Populate last_result_date via NSE official → Tickertape → yfinance chain.
+        _rdate_info = fetch_last_result_date(normalized, db_path=self.db_path)
+        result["last_result_date"]   = _rdate_info.get("result_date")
         result["result_date_source"] = _rdate_info.get("source")
-        if _rdate:
-            _days_stale = (date.today() - datetime.strptime(_rdate, "%Y-%m-%d").date()).days
-            result["result_days_stale"] = _days_stale
-            result["result_freshness"] = (
-                "FRESH"      if _days_stale <= 45  else
-                "RECENT"     if _days_stale <= 90  else
-                "STALE"      if _days_stale <= 180 else
-                "VERY_STALE"
-            )
+        result["result_days_stale"]  = _rdate_info.get("result_days_stale")
+        result["result_freshness"]   = _rdate_info.get("result_freshness", "NO_DATA")
 
         filtered = {key: value for key, value in result.items() if value is not None}
         self._financial_cache[normalized] = filtered

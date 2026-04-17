@@ -1,0 +1,317 @@
+"""
+result_date_fetcher.py
+──────────────────────
+Three-source chain for last quarterly result date on NSE stocks.
+Priority: NSE official → Tickertape → yfinance.
+Results cached in the platform database for 7 days.
+"""
+from __future__ import annotations
+
+import os
+from datetime import date, datetime
+from pathlib import Path
+from typing import Any
+
+import requests
+
+_DEFAULT_DB_PATH = Path(__file__).resolve().parents[3] / "data" / "platform.db"
+
+_CREATE_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS result_date_cache (
+        symbol      TEXT PRIMARY KEY,
+        result_date TEXT,
+        days_stale  INTEGER,
+        freshness   TEXT,
+        source      TEXT,
+        cached_at   TEXT
+    )
+"""
+_CREATE_TABLE_SQL_PG = """
+    CREATE TABLE IF NOT EXISTS result_date_cache (
+        symbol      TEXT PRIMARY KEY,
+        result_date TEXT,
+        days_stale  INTEGER,
+        freshness   TEXT,
+        source      TEXT,
+        cached_at   TEXT
+    )
+"""
+
+
+# ── Source 1: NSE official corporate filings ─────────────────────────────────
+
+def _fetch_from_nse(symbol: str) -> dict[str, Any]:
+    """Query NSE's public corp-info API for the latest financial-result filing date."""
+    try:
+        session = requests.Session()
+        session.headers.update({
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0 Safari/537.36"
+            ),
+            "Accept":  "application/json",
+            "Referer": "https://www.nseindia.com",
+        })
+        # NSE requires a valid session cookie — prime it first.
+        session.get("https://www.nseindia.com", timeout=10)
+
+        url = (
+            "https://www.nseindia.com/api/"
+            f"corp-info?symbol={symbol}&corpType=financials"
+        )
+        r = session.get(url, timeout=15)
+        if r.status_code != 200:
+            return {}
+
+        filings = r.json().get("data", [])
+        if not filings:
+            return {}
+
+        dates: list[datetime] = []
+        for f in filings:
+            raw = f.get("date") or f.get("bm_date") or ""
+            for fmt in ("%d-%b-%Y", "%Y-%m-%d"):
+                try:
+                    dates.append(datetime.strptime(raw, fmt))
+                    break
+                except ValueError:
+                    continue
+
+        if not dates:
+            return {}
+
+        return {
+            "result_date": max(dates).strftime("%Y-%m-%d"),
+            "source": "nse_official",
+        }
+    except Exception as exc:
+        print(f"NSE fetch failed for {symbol}: {exc}")
+        return {}
+
+
+# ── Source 2: Tickertape ──────────────────────────────────────────────────────
+
+def _fetch_from_tickertape(symbol: str) -> dict[str, Any]:
+    """Query Tickertape's search + income API for the most recent quarter end date."""
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "application/json",
+        }
+        sr = requests.get(
+            f"https://api.tickertape.in/search?text={symbol}&type=stock",
+            headers=headers,
+            timeout=10,
+        )
+        if sr.status_code != 200:
+            return {}
+
+        stocks = sr.json().get("data", {}).get("stocks", [])
+        if not stocks:
+            return {}
+
+        sid = stocks[0].get("sid")
+        if not sid:
+            return {}
+
+        fr = requests.get(
+            f"https://api.tickertape.in/stocks/{sid}/financials/income?period=quarterly",
+            headers=headers,
+            timeout=15,
+        )
+        if fr.status_code != 200:
+            return {}
+
+        statements = fr.json().get("data", {}).get("statements", [])
+        if not statements:
+            return {}
+
+        latest = statements[0].get("periodEnd") or statements[0].get("date")
+        if not latest:
+            return {}
+
+        return {"result_date": str(latest)[:10], "source": "tickertape"}
+    except Exception as exc:
+        print(f"Tickertape fetch failed for {symbol}: {exc}")
+        return {}
+
+
+# ── Source 3: yfinance fallback ───────────────────────────────────────────────
+
+def _fetch_from_yfinance(symbol: str) -> dict[str, Any]:
+    """yfinance three-path fallback: mrq timestamp → quarterly_financials → quarterly_income_stmt."""
+    try:
+        import yfinance as yf
+        import pandas as pd
+
+        t = yf.Ticker(f"{symbol}.NS")
+
+        mrq = t.info.get("mostRecentQuarter")
+        if mrq and int(mrq) > 0:
+            return {
+                "result_date": datetime.fromtimestamp(int(mrq)).strftime("%Y-%m-%d"),
+                "source": "yfinance_mrq",
+            }
+
+        for attr in ("quarterly_financials", "quarterly_income_stmt"):
+            try:
+                df = getattr(t, attr)
+                if df is not None and not df.empty:
+                    return {
+                        "result_date": pd.Timestamp(df.columns[0]).strftime("%Y-%m-%d"),
+                        "source": f"yfinance_{attr}",
+                    }
+            except Exception:
+                continue
+    except Exception as exc:
+        print(f"yfinance date fetch failed for {symbol}: {exc}")
+    return {}
+
+
+# ── Freshness bucket ──────────────────────────────────────────────────────────
+
+def _freshness(days: int) -> str:
+    if days <= 45:
+        return "FRESH"
+    if days <= 90:
+        return "RECENT"
+    if days <= 180:
+        return "STALE"
+    return "VERY_STALE"
+
+
+# ── SQLite / Neon cache helpers ───────────────────────────────────────────────
+
+def _db_connect(db_path: str | Path):
+    from stock_platform.data.db import connect_database
+    neon_url = os.environ.get("NEON_DATABASE_URL", "")
+    return connect_database(db_path, neon_url=neon_url or None)
+
+
+def _ensure_table(db_path: str | Path) -> None:
+    try:
+        conn = _db_connect(db_path)
+        dialect = getattr(conn, "dialect", "sqlite")
+        sql = _CREATE_TABLE_SQL_PG if dialect == "postgresql" else _CREATE_TABLE_SQL
+        conn.execute(sql)
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def _get_cached(symbol: str, db_path: str | Path) -> dict[str, Any]:
+    _ensure_table(db_path)
+    try:
+        conn = _db_connect(db_path)
+        conn.row_factory = None  # no-op on pg wrapper
+        row = conn.execute(
+            "SELECT result_date, freshness, source, cached_at "
+            "FROM result_date_cache WHERE symbol = ?",
+            (symbol,),
+        ).fetchone()
+        conn.close()
+        if not row:
+            return {}
+        cached_at = datetime.strptime(str(row[3]), "%Y-%m-%d").date()
+        if (date.today() - cached_at).days > 7:
+            return {}
+        result_date = row[0]
+        days_stale = None
+        if result_date:
+            days_stale = (date.today() - datetime.strptime(result_date, "%Y-%m-%d").date()).days
+        return {
+            "result_date":       result_date,
+            "result_days_stale": days_stale,
+            "result_freshness":  _freshness(days_stale) if days_stale is not None else row[1],
+            "source":            str(row[2]) + "_cache",
+        }
+    except Exception:
+        return {}
+
+
+def _save_cache(symbol: str, data: dict[str, Any], db_path: str | Path) -> None:
+    _ensure_table(db_path)
+    try:
+        conn = _db_connect(db_path)
+        dialect = getattr(conn, "dialect", "sqlite")
+        upsert = (
+            "INSERT INTO result_date_cache "
+            "(symbol, result_date, days_stale, freshness, source, cached_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s) "
+            "ON CONFLICT (symbol) DO UPDATE SET "
+            "result_date=EXCLUDED.result_date, days_stale=EXCLUDED.days_stale, "
+            "freshness=EXCLUDED.freshness, source=EXCLUDED.source, cached_at=EXCLUDED.cached_at"
+            if dialect == "postgresql"
+            else
+            "INSERT OR REPLACE INTO result_date_cache "
+            "(symbol, result_date, days_stale, freshness, source, cached_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)"
+        )
+        conn.execute(upsert, (
+            symbol,
+            data.get("result_date"),
+            data.get("result_days_stale"),
+            data.get("result_freshness"),
+            data.get("source"),
+            date.today().strftime("%Y-%m-%d"),
+        ))
+        conn.commit()
+        conn.close()
+    except Exception as exc:
+        print(f"result_date_cache save failed for {symbol}: {exc}")
+
+
+# ── Public entry point ────────────────────────────────────────────────────────
+
+def fetch_last_result_date(
+    symbol: str,
+    db_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """
+    Fetch the most recent quarterly result date for an NSE stock.
+
+    Chain: NSE official → Tickertape → yfinance.
+    Results are cached in the platform database for 7 days.
+    Never raises — returns a dict with result_date=None on total failure.
+    """
+    if db_path is None:
+        db_path = _DEFAULT_DB_PATH
+
+    clean = symbol.upper().replace(".NS", "").replace(".BO", "")
+
+    cached = _get_cached(clean, db_path)
+    if cached:
+        return cached
+
+    result = (
+        _fetch_from_nse(clean)
+        or _fetch_from_tickertape(clean)
+        or _fetch_from_yfinance(clean)
+    )
+
+    if result and result.get("result_date"):
+        try:
+            rd = datetime.strptime(result["result_date"], "%Y-%m-%d")
+            days_stale = (date.today() - rd.date()).days
+            result["result_days_stale"] = days_stale
+            result["result_freshness"]  = _freshness(days_stale)
+        except Exception:
+            result["result_days_stale"] = None
+            result["result_freshness"]  = "UNKNOWN"
+
+        _save_cache(clean, result, db_path)
+        print(
+            f"Result date for {clean}: {result['result_date']} "
+            f"({result.get('result_freshness')}, {result.get('result_days_stale')}d) "
+            f"via {result.get('source')}"
+        )
+        return result
+
+    print(f"Result date: all sources failed for {clean}")
+    return {
+        "result_date":       None,
+        "result_days_stale": None,
+        "result_freshness":  "NO_DATA",
+        "source":            "unavailable",
+    }

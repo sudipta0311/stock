@@ -109,7 +109,11 @@ class PlatformEngine:
         )
         self.repo.initialize()
         self.mf_holdings = MutualFundHoldingsClient(self.config, repo=self.repo)
-        self.provider = LiveMarketDataProvider(holdings_client=self.mf_holdings, repo=self.repo)
+        self.provider = LiveMarketDataProvider(
+            holdings_client=self.mf_holdings,
+            repo=self.repo,
+            db_path=self.config.db_path,
+        )
         # Default LLM uses Anthropic; provider-keyed buy graphs are built on demand.
         self.llm = PlatformLLM(self.config, provider="anthropic")
         self.pdf_parser = NSDLCASParser()
