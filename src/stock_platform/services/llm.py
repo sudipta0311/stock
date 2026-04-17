@@ -306,6 +306,20 @@ class PlatformLLM:
         # ANTHROPIC — Bear-biased risk analyst (quality candidate pool)
         # ════════════════════════════════════════════════════════════════════
         if self.provider == "anthropic":
+            _conservative_gate = (
+                "\nIMPORTANT: Your job is to SURFACE stocks with a risk assessment, not to PRE-REJECT them. "
+                "Even if you believe a stock fails conservative criteria, provide your full bear analysis "
+                "and state WHY it fails — do not simply omit it.\n\n"
+                "The synthesis layer applies the hard Conservative filters. "
+                "You are the risk lens, not the gatekeeper. "
+                "Surface every stock in your candidate pool with:\n"
+                "1. Your bear case\n"
+                "2. The single most likely failure mode\n"
+                "3. Whether it passes or fails each conservative criterion explicitly\n"
+                "4. Your verdict: ACCUMULATE / WATCHLIST / AVOID\n\n"
+                "Do not leave stocks unanalysed — an absent analysis is worse than a negative one.\n"
+                if risk_profile == "Conservative" else ""
+            )
             system_prompt = (
                 "You are a BEAR-BIASED risk analyst reviewing Indian equity recommendations. "
                 "You received this stock because it scored highly on QUALITY (ROCE, low debt, "
@@ -329,6 +343,7 @@ class PlatformLLM:
                 "5. Never say 'this is a bargain' without quantifying what happens if the thesis is wrong.\n"
                 "6. End with a specific INVALIDATION CONDITION — the single most likely event that "
                 "would make you wrong.\n\n"
+                f"{_conservative_gate}"
                 "OUTPUT STRUCTURE:\n"
                 "## RISK VERDICT: [AVOID / WAIT / ACCUMULATE WITH CONDITIONS / BUY]\n\n"
                 "### What the facts show\n"
