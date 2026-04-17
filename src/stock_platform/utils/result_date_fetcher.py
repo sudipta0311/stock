@@ -198,6 +198,17 @@ def _ensure_table(db_path: str | Path) -> None:
         pass
 
 
+def _delete_cached(symbol: str, db_path: str | Path) -> None:
+    """Remove a cached entry so it gets re-fetched from live sources."""
+    try:
+        conn = _db_connect(db_path)
+        conn.execute("DELETE FROM result_date_cache WHERE symbol = ?", (symbol,))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
 def _get_cached(symbol: str, db_path: str | Path) -> dict[str, Any]:
     _ensure_table(db_path)
     try:
@@ -215,6 +226,12 @@ def _get_cached(symbol: str, db_path: str | Path) -> dict[str, Any]:
         if (date.today() - cached_at).days > 7:
             return {}
         result_date = row["result_date"]
+        # Validity gate on cached value — bad dates (e.g. 2014 artefacts) can be
+        # persisted in Neon before this gate was added.  Evict and re-fetch live.
+        if result_date and not _is_valid_result_date(result_date):
+            print(f"Evicting invalid cached date for {symbol}: {result_date} — will re-fetch")
+            _delete_cached(symbol, db_path)
+            return {}
         days_stale = None
         if result_date:
             days_stale = (date.today() - datetime.strptime(result_date, "%Y-%m-%d").date()).days
@@ -272,6 +289,39 @@ def _is_valid_result_date(date_str: str) -> bool:
         return 0 <= years_ago <= 3
     except Exception:
         return False
+
+
+# ── Cache cleanup ────────────────────────────────────────────────────────────
+
+def purge_invalid_result_dates(db_path: str | Path | None = None) -> int:
+    """
+    Delete all rows from result_date_cache whose result_date is outside the
+    valid 3-year window (catches historical artefacts like 2014-06-30).
+
+    Returns the number of rows deleted.  Safe to call on every app startup —
+    it is a no-op when the cache is already clean.
+    """
+    if db_path is None:
+        db_path = _DEFAULT_DB_PATH
+    _ensure_table(db_path)
+    try:
+        today = date.today().strftime("%Y-%m-%d")
+        cutoff = (date.today().replace(year=date.today().year - 3)).strftime("%Y-%m-%d")
+        conn = _db_connect(db_path)
+        cur = conn.execute(
+            "DELETE FROM result_date_cache "
+            "WHERE result_date < ? OR result_date > ?",
+            (cutoff, today),
+        )
+        deleted = cur.rowcount if cur.rowcount is not None else 0
+        conn.commit()
+        conn.close()
+        if deleted:
+            print(f"purge_invalid_result_dates: removed {deleted} bad cache rows (outside {cutoff}–{today})")
+        return deleted
+    except Exception as exc:
+        print(f"purge_invalid_result_dates failed: {exc}")
+        return 0
 
 
 # ── Public entry point ────────────────────────────────────────────────────────

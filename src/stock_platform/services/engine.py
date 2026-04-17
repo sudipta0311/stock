@@ -12,6 +12,7 @@ from stock_platform.services.llm import PlatformLLM
 from stock_platform.services.mf_lookup import MutualFundHoldingsClient
 from stock_platform.services.pdf_parser import NSDLCASParser
 from stock_platform.utils.entry_calculator import calculate_entry_levels
+from stock_platform.utils.result_date_fetcher import purge_invalid_result_dates
 
 
 def compare_model_selections(
@@ -108,6 +109,9 @@ class PlatformEngine:
             neon_database_url=self.config.neon_database_url,
         )
         self.repo.initialize()
+        # Purge historically bad result dates (e.g. 2014 artefacts) from cache
+        # on every startup — no-op when cache is already clean.
+        purge_invalid_result_dates(db_path=self.config.db_path)
         self.mf_holdings = MutualFundHoldingsClient(self.config, repo=self.repo)
         self.provider = LiveMarketDataProvider(
             holdings_client=self.mf_holdings,
