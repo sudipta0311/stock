@@ -1121,11 +1121,13 @@ class BuyAgents:
         if not recommendations:
             low_rr_count = sum(1 for row in skipped_stocks if row.get("status") == "LOW_RISK_REWARD")
             negative_return_count = sum(1 for row in skipped_stocks if row.get("status") == "NEGATIVE_NET_RETURN")
+            weak_evidence_count = sum(1 for row in skipped_stocks if row.get("status") == "WEAK_EVIDENCE")
             overlap_count = len(overlap_filtered)
             do_not_enter_count = sum(
                 1 for item in state.get("allocations", [])
                 if item.get("entry_signal") == "DO NOT ENTER"
             )
+            shortlist_empty = not state.get("shortlist")
             if negative_return_count:
                 blocked_reason = (
                     f"{negative_return_count} shortlisted stock(s) were excluded because the analyst "
@@ -1138,6 +1140,15 @@ class BuyAgents:
                     f"All shortlisted candidates failed the minimum risk/reward gate of "
                     f"{_min_rr}x ({risk_profile} profile). Try a broader universe or rerun when prices/targets improve."
                 )
+            elif weak_evidence_count:
+                _stale_cap = _risk_cfg.get("staleness_cap_days", 90)
+                blocked_reason = (
+                    f"{weak_evidence_count} candidate(s) were rejected due to insufficient evidence quality — "
+                    f"financial data is likely stale (>{_stale_cap} days) for the {risk_profile} profile. "
+                    "This is common at end-of-quarter before new results are published. "
+                    "Try switching to Balanced profile (90-day tolerance), using a broader universe, "
+                    "or waiting for Q4 results to be published."
+                )
             elif overlap_count:
                 blocked_reason = (
                     f"{overlap_count} shortlisted stock(s) were skipped because they are already "
@@ -1148,6 +1159,13 @@ class BuyAgents:
                 blocked_reason = (
                     f"{do_not_enter_count} candidate(s) flagged DO NOT ENTER — their sectors have "
                     "STRONG_AVOID market signals. Rerun after a signal refresh or wait for conditions to improve."
+                )
+            elif shortlist_empty:
+                blocked_reason = (
+                    "No candidates passed qualitative validation — all shortlisted stocks were rejected "
+                    "by the news/sentiment filter or LLM analysis. Current market momentum may be broadly "
+                    "negative. Try refreshing market signals, using a broader index, or switching to a "
+                    "less restrictive risk profile."
                 )
             else:
                 blocked_reason = (
