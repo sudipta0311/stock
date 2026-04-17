@@ -260,18 +260,12 @@ class PlatformLLM:
         """
         Fetch structured news-risk context for names nearing an actionable verdict.
 
-        Uses Anthropic web_search and only runs for actionable preliminary
-        verdicts so we avoid paying for broad news checks on every candidate.
+        Runs for all verdicts except AVOID (already a hard reject). WATCHLIST is
+        included because material news can confirm the cautious stance or escalate
+        to AVOID — exactly the case for leadership/accounting changes like ETERNAL.
         """
-        actionable_verdicts = {
-            "ACCUMULATE",
-            "ACCUMULATE GRADUALLY",
-            "ACCUMULATE ON DIPS",
-            "ACTIONABLE BUY",
-            "BUY",
-            "BUY NOW",
-            "STRONG BUY",
-        }
+        # Hard rejects: news cannot make things worse, skip to save API cost.
+        skip_verdicts = {"AVOID"}
         normalized_verdict = (verdict or "").upper().replace("_", " ").strip()
         default_payload: dict[str, Any] = {
             "material_risks_found": False,
@@ -279,7 +273,7 @@ class PlatformLLM:
             "revised_verdict_suggestion": "NO_CHANGE",
             "summary": "",
         }
-        if normalized_verdict not in actionable_verdicts:
+        if normalized_verdict in skip_verdicts:
             return default_payload
 
         if not hasattr(self, "_critical_news_cache"):
