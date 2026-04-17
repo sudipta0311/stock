@@ -53,8 +53,11 @@ def compute_evidence_strength(
         0.25 if momentum == "STRONG"   else
         0.18 if momentum == "GOOD"     else
         0.10 if momentum == "MODERATE" else
+        0.05 if momentum == "WEAK"     else
         0.03
     )
+    if qtr.get("rev_pat_divergence"):
+        earnings_score = max(0.02, earnings_score - 0.08)
     score += earnings_score
     components["earnings_quality"] = earnings_score
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import types
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -31,7 +32,11 @@ from stock_platform.utils.entry_calculator import (
     fetch_analyst_consensus_target,
 )
 from stock_platform.utils.signal_sources import get_tariff_signal
-from stock_platform.utils.screener_fetcher import fetch_recent_results
+from stock_platform.utils.screener_fetcher import (
+    compute_pat_momentum,
+    compute_revenue_momentum,
+    fetch_recent_results,
+)
 from stock_platform.utils.stock_validator import check_recently_listed
 
 LOCAL_DB_CONFIG = {
@@ -103,6 +108,23 @@ class FakeOpenAIChat:
 class FakeOpenAIClient:
     def __init__(self, exc: Exception | None = None) -> None:
         self.chat = types.SimpleNamespace(completions=FakeOpenAIChat(exc))
+
+
+class _FakeAtAccessor:
+    def __init__(self, data):
+        self.data = data
+
+    def __getitem__(self, key):
+        row, column = key
+        return self.data[row][column]
+
+
+class FakeQuarterlyIncomeStatement:
+    def __init__(self, columns, rows) -> None:
+        self.columns = columns
+        self.index = list(rows.keys())
+        self.empty = False
+        self.at = _FakeAtAccessor(rows)
 
 
 class StubRepo:
@@ -432,8 +454,9 @@ class BuyQualityScoreTests(unittest.TestCase):
         self.assertEqual(row["entry_signal"], "ACCUMULATE")
         self.assertTrue(row["momentum_override_applied"])
 
+    @patch("stock_platform.utils.screener_fetcher._fetch_quarterly_income_stmt", return_value=None)
     @patch("stock_platform.utils.screener_fetcher.requests.get")
-    def test_fetch_recent_results_parses_quarterly_sales(self, get_mock) -> None:
+    def test_fetch_recent_results_parses_quarterly_sales(self, get_mock, _stmt_mock) -> None:
         get_mock.return_value = types.SimpleNamespace(
             status_code=200,
             text="""
@@ -461,6 +484,62 @@ class BuyQualityScoreTests(unittest.TestCase):
         self.assertEqual(result["revenue_yoy_growth_pct"], 26.0)
         self.assertEqual(result["comparison_label"], "Q3 FY26 vs Q3 FY25")
         self.assertEqual(result["momentum"], "GOOD")
+
+    def test_compute_revenue_momentum_uses_most_recent_quarter_vs_same_quarter_last_year(self) -> None:
+        stmt = FakeQuarterlyIncomeStatement(
+            columns=[
+                datetime(2025, 12, 31),
+                datetime(2025, 9, 30),
+                datetime(2025, 6, 30),
+                datetime(2025, 3, 31),
+                datetime(2024, 12, 31),
+            ],
+            rows={
+                "Total Revenue": {
+                    datetime(2025, 12, 31): 148.0,
+                    datetime(2025, 9, 30): 118.0,
+                    datetime(2025, 6, 30): 112.0,
+                    datetime(2025, 3, 31): 107.0,
+                    datetime(2024, 12, 31): 100.0,
+                }
+            },
+        )
+
+        result = compute_revenue_momentum("SUZLON", {}, quarterly_income_stmt=stmt)
+
+        self.assertEqual(result["momentum"], "STRONG")
+        self.assertEqual(result["growth_pct"], 48.0)
+        self.assertEqual(result["period"], "Q3 FY26 vs Q3 FY25")
+
+    def test_compute_pat_momentum_detects_revenue_pat_divergence(self) -> None:
+        stmt = FakeQuarterlyIncomeStatement(
+            columns=[
+                datetime(2025, 12, 31),
+                datetime(2025, 9, 30),
+                datetime(2025, 6, 30),
+                datetime(2025, 3, 31),
+                datetime(2024, 12, 31),
+            ],
+            rows={
+                "Net Income": {
+                    datetime(2025, 12, 31): 55.0,
+                    datetime(2025, 9, 30): 80.0,
+                    datetime(2025, 6, 30): 76.0,
+                    datetime(2025, 3, 31): 73.0,
+                    datetime(2024, 12, 31): 100.0,
+                }
+            },
+        )
+
+        result = compute_pat_momentum(
+            "HINDALCO",
+            {"revenue_growth_latest_qtr": 13.0},
+            quarterly_income_stmt=stmt,
+        )
+
+        self.assertEqual(result["pat_momentum"], "COLLAPSING")
+        self.assertEqual(result["pat_growth_pct"], -45.0)
+        self.assertTrue(result["rev_pat_divergence"])
 
     @patch("stock_platform.agents.buy_agents.fetch_analyst_consensus_target", return_value=140.0)
     @patch("stock_platform.agents.buy_agents.governance_risk_blocks", return_value=(False, ""))
@@ -733,6 +812,32 @@ class BuyPromptTests(unittest.TestCase):
             anthropic_llm.calls[0]["user_prompt"],
         )
         self.assertIn("Exit signal", str(request["messages"][0]["content"]))  # type: ignore[index]
+
+    def test_buy_rationale_includes_rev_pat_divergence_warning(self) -> None:
+        anthropic_llm = RecordingLLM(self.config, provider="anthropic")
+        stressed_item = self.item | {
+            "live_financials": self.item["live_financials"] | {
+                "revenue_growth_latest_qtr": 13.0,
+                "revenue_growth_latest_qtr_label": "Q3 FY26 vs Q3 FY25",
+                "recent_results": {
+                    "revenue_yoy_growth_pct": 13.0,
+                    "comparison_label": "Q3 FY26 vs Q3 FY25",
+                },
+                "pat_momentum": {
+                    "pat_momentum": "COLLAPSING",
+                    "pat_growth_pct": -45.0,
+                    "rev_pat_divergence": True,
+                    "period": "Q3 FY26 vs Q3 FY25",
+                },
+            }
+        }
+
+        anthropic_llm.buy_rationale(stressed_item, self.portfolio_context)
+
+        user_prompt = anthropic_llm.calls[0]["user_prompt"]
+        self.assertIn("CRITICAL DIVERGENCE DETECTED", user_prompt)
+        self.assertIn("Revenue growing 13% YoY but PAT declining 45% YoY.", user_prompt)
+        self.assertIn("downgrade to WATCHLIST", user_prompt)
 
     def test_synthesis_prompt_requests_combined_verdict(self) -> None:
         fake_module = types.SimpleNamespace(Anthropic=FakeAnthropicClient)
