@@ -177,6 +177,86 @@ class EngineMonitoringTests(unittest.TestCase):
         self.assertEqual(bel_call[1], "No risk analysis provided.")
         self.assertEqual(bel_call[2], "Catalyst analysis available.")
 
+    def test_comparison_news_gate_attaches_override_context_before_synthesis(self) -> None:
+        config = AppConfig(
+            data_dir=self.temp_dir,
+            db_path=self.db_path,
+            turso_database_url="",
+            turso_auth_token="",
+            turso_sync_interval_seconds=0,
+            anthropic_api_key="test-anthropic",
+            openai_api_key="test-openai",
+        )
+        engine = PlatformEngine(config)
+
+        def fake_run_buy_analysis(request: dict, llm_provider: str = "anthropic") -> dict:
+            del request
+            rationale = (
+                "## RISK VERDICT: BUY"
+                if llm_provider == "anthropic"
+                else "## CATALYST VERDICT: BUY NOW"
+            )
+            return {
+                "recommendations": [
+                    {
+                        "symbol": "INDIGO",
+                        "company_name": "InterGlobe Aviation",
+                        "action": "BUY",
+                        "rationale": rationale,
+                        "payload": {
+                            "current_price": 100.0,
+                            "analyst_target": 120.0,
+                            "entry_signal": "BUY",
+                            "quality_score": 0.8,
+                            "fin_data": {},
+                        },
+                    }
+                ],
+                "skipped_stocks": [],
+                "run_summary": {"recommendation_count": 1},
+            }
+
+        captured_news_contexts: list[dict] = []
+
+        def fake_synthesise(*args, **kwargs) -> str:
+            captured_news_contexts.append(kwargs.get("news_context") or {})
+            return "## SYNTHESIS VERDICT: WATCHLIST | Confidence: LOW"
+
+        with (
+            patch.object(engine.repo, "list_signals", return_value=[{"sector": "Airlines"}]),
+            patch.object(engine, "run_buy_analysis", side_effect=fake_run_buy_analysis),
+            patch("stock_platform.services.engine.PlatformLLM.fetch_critical_news", return_value={
+                "material_risks_found": True,
+                "flags": [
+                    {
+                        "type": "REGULATORY",
+                        "headline": "CCI probe ordered.",
+                        "severity": "HIGH",
+                        "verdict_impact": "DOWNGRADE",
+                    }
+                ],
+                "revised_verdict_suggestion": "WATCHLIST",
+                "summary": "Material regulatory pressure surfaced.",
+            }),
+            patch("stock_platform.services.engine.PlatformLLM.synthesise_comparison", side_effect=fake_synthesise),
+        ):
+            result = engine.run_buy_analysis_comparison(
+                {"index_name": "NIFTY 200", "horizon_months": 18, "risk_profile": "Balanced", "top_n": 4}
+            )
+
+        self.assertEqual(len(captured_news_contexts), 1)
+        self.assertTrue(captured_news_contexts[0]["material_risks_found"])
+        self.assertTrue(captured_news_contexts[0]["news_override"])
+        self.assertEqual(captured_news_contexts[0]["news_override_verdict"], "WATCHLIST")
+
+        for provider_key in ("anthropic", "openai"):
+            rec = result[provider_key]["recommendations"][0]
+            self.assertTrue(rec["news_override"])
+            self.assertEqual(rec["news_override_verdict"], "WATCHLIST")
+            self.assertEqual(rec["preliminary_verdict"], "WATCHLIST")
+            self.assertEqual(rec["preliminary_verdict_before_news"], "ACTIONABLE BUY")
+            self.assertTrue(rec["payload"]["news_context"]["material_risks_found"])
+
 
 if __name__ == "__main__":
     unittest.main()

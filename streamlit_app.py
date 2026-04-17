@@ -1067,6 +1067,10 @@ def render_recommendation_card(
         quant_score=payload.get("quality_score"),
         fin_data=payload.get("fin_data") or {},
     )
+    news_context = item.get("news_context")
+    if not isinstance(news_context, dict):
+        payload_news = payload.get("news_context")
+        news_context = payload_news if isinstance(payload_news, dict) else {}
 
     provider_label = ""
     if provider == "anthropic":
@@ -1266,6 +1270,42 @@ def render_recommendation_card(
                 st.write(rationale)
 
         # ── Improvement 6A: remove false decimal precision from deploy% ──────
+        if news_context.get("material_risks_found"):
+            summary = str(news_context.get("summary") or "").strip()
+            st.error("Recent News Risk Flags")
+            if summary:
+                st.caption(summary)
+            for flag in news_context.get("flags", []):
+                if not isinstance(flag, dict):
+                    continue
+                severity = str(flag.get("severity") or "LOW").upper()
+                flag_type = str(flag.get("type") or "RISK")
+                headline = str(flag.get("headline") or "").strip()
+                if not headline:
+                    continue
+                severity_color = {
+                    "HIGH": "error",
+                    "MEDIUM": "warning",
+                    "LOW": "info",
+                }.get(severity, "info")
+                getattr(st, severity_color)(f"[{flag_type}] {headline}")
+
+            if item.get("news_override") or payload.get("news_override"):
+                prior_verdict = (
+                    item.get("preliminary_verdict_before_news")
+                    or payload.get("preliminary_verdict_before_news")
+                    or "ACCUMULATE GRADUALLY"
+                )
+                override_verdict = (
+                    item.get("news_override_verdict")
+                    or payload.get("news_override_verdict")
+                    or "WATCHLIST"
+                )
+                st.warning(
+                    f"Verdict downgraded from {prior_verdict} to {override_verdict} "
+                    "due to material news risk."
+                )
+
         initial_pct_display = f"~{round(float(initial_pct or 0))}%"
 
         # ── Improvement 6B: target label with source caveat ──────────────────
