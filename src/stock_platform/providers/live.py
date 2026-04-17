@@ -28,7 +28,7 @@ _INDEX_CACHE_TTL_DAYS = 7
 
 
 # _fetch_last_result_date replaced by result_date_fetcher.fetch_last_result_date
-# (NSE official → Tickertape → yfinance chain with 7-day SQLite cache)
+# (NSE official → Tickertape → yfinance chain with 7-day Neon cache, SQLite fallback)
 
 
 class LiveMarketDataProvider:

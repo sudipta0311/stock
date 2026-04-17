@@ -716,9 +716,11 @@ class BuyAgents:
                 },
             }
 
-        # Fetch FII/DII macro flow once per run — cached for 24h in SQLite.
+        # Fetch FII/DII macro flow once per run — cached 24h in Neon (SQLite fallback).
         try:
-            macro_flow = fetch_fii_dii_sector_flow()
+            macro_flow = fetch_fii_dii_sector_flow(
+                neon_database_url=self.config.neon_database_url,
+            )
             _log.info(
                 "FII/DII macro flow: signal=%s FII=%.0fCr DII=%.0fCr (source=%s)",
                 macro_flow.get("flow_signal"), macro_flow.get("fii_net_5d_cr") or 0,

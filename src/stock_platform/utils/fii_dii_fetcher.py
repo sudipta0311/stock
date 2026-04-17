@@ -2,7 +2,7 @@
 fii_dii_fetcher.py
 ──────────────────
 Fetch net FII/DII equity flow from NSE India's public API.
-Results are cached in SQLite for 24 hours to avoid hammering NSE on every run.
+Results are cached in the platform database (Neon primary, SQLite fallback) for 24 hours.
 
 NSE requires a session cookie obtained by hitting the base URL first.
 The API returns per-date rows with net equity buy/sell by category.
@@ -11,17 +11,26 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
-from datetime import datetime, timedelta, timezone
+import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from stock_platform.data.db import connect_database
 
 _log = logging.getLogger(__name__)
 
 _CACHE_TTL_HOURS = 24
 
-# Standalone SQLite for this cache — doesn't need the full platform DB schema.
-_DEFAULT_CACHE_PATH = Path(__file__).resolve().parents[3] / "data" / "fii_dii_cache.db"
+_DEFAULT_DB_PATH = Path(__file__).resolve().parents[3] / "data" / "platform.db"
+
+_CREATE_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS fii_dii_cache (
+        key        TEXT PRIMARY KEY,
+        payload    TEXT NOT NULL,
+        fetched_at TEXT NOT NULL
+    )
+"""
 
 NSE_BASE_URL = "https://www.nseindia.com"
 NSE_API_URL  = "https://www.nseindia.com/api/fiidiiTradeReact"
@@ -33,43 +42,37 @@ NSE_HEADERS  = {
 }
 
 
-def _get_cache_conn(cache_path: Path) -> sqlite3.Connection:
-    cache_path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(cache_path))
-    conn.execute(
-        """CREATE TABLE IF NOT EXISTS fii_dii_cache (
-            key        TEXT PRIMARY KEY,
-            payload    TEXT NOT NULL,
-            fetched_at TEXT NOT NULL
-        )"""
-    )
+def _ensure_table(conn: Any) -> None:
+    conn.execute(_CREATE_TABLE_SQL)
     conn.commit()
-    return conn
 
 
-def _load_cache(conn: sqlite3.Connection, key: str) -> dict[str, Any] | None:
+def _load_cache(conn: Any, key: str) -> dict[str, Any] | None:
     row = conn.execute(
         "SELECT payload, fetched_at FROM fii_dii_cache WHERE key = ?", (key,)
     ).fetchone()
     if not row:
         return None
     try:
-        fetched_at = datetime.fromisoformat(row[1])
+        fetched_at = datetime.fromisoformat(row["fetched_at"])
         if fetched_at.tzinfo is None:
             fetched_at = fetched_at.replace(tzinfo=timezone.utc)
         age_hours = (datetime.now(timezone.utc) - fetched_at).total_seconds() / 3600
         if age_hours > _CACHE_TTL_HOURS:
             return None
-        return json.loads(row[0])
+        return json.loads(row["payload"])
     except Exception:
         return None
 
 
-def _save_cache(conn: sqlite3.Connection, key: str, data: dict[str, Any]) -> None:
+def _save_cache(conn: Any, key: str, data: dict[str, Any]) -> None:
     payload = json.dumps(data)
     now = datetime.now(timezone.utc).isoformat()
     conn.execute(
-        "INSERT OR REPLACE INTO fii_dii_cache (key, payload, fetched_at) VALUES (?, ?, ?)",
+        """INSERT INTO fii_dii_cache (key, payload, fetched_at) VALUES (?, ?, ?)
+           ON CONFLICT(key) DO UPDATE SET
+               payload    = excluded.payload,
+               fetched_at = excluded.fetched_at""",
         (key, payload, now),
     )
     conn.commit()
@@ -175,11 +178,12 @@ def _parse_flow(data: list[dict]) -> dict[str, Any]:
 
 
 def fetch_fii_dii_sector_flow(
-    cache_path: str | Path | None = None,
+    db_path: str | Path | None = None,
+    neon_database_url: str = "",
 ) -> dict[str, Any]:
     """
     Fetch net FII/DII equity activity from NSE India for the last 5 sessions.
-    Results are cached in SQLite for 24 hours.
+    Results are cached in the platform database (Neon primary, SQLite fallback) for 24 hours.
 
     Returns:
         fii_net_5d_cr  — net FII buy (+) / sell (-) in crores
@@ -189,17 +193,28 @@ def fetch_fii_dii_sector_flow(
     """
     import requests
 
-    _cache_path = Path(cache_path) if cache_path else _DEFAULT_CACHE_PATH
+    _db_path = Path(db_path) if db_path else _DEFAULT_DB_PATH
+    _neon_url = neon_database_url or os.environ.get("NEON_DATABASE_URL", "")
     cache_key = "fii_dii_5d"
 
-    conn = _get_cache_conn(_cache_path)
+    conn = None
     try:
+        conn = connect_database(_db_path, neon_url=_neon_url or None)
+        _ensure_table(conn)
+
         cached = _load_cache(conn, cache_key)
         if cached:
             _log.info("FII/DII flow: cache hit")
+            conn.close()
             return {**cached, "source": "cache"}
-    finally:
-        pass  # keep conn open for potential write below
+    except Exception as exc:
+        _log.warning("FII/DII cache read error: %s", exc)
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        conn = None
 
     try:
         session = requests.Session()
@@ -219,12 +234,25 @@ def fetch_fii_dii_sector_flow(
 
         if not data:
             _log.warning("FII/DII: NSE returned empty payload")
-            conn.close()
             return _unavailable("empty NSE response")
 
         result = _parse_flow(data)
-        _save_cache(conn, cache_key, result)
-        conn.close()
+
+        # Write back to cache
+        try:
+            if conn is None:
+                conn = connect_database(_db_path, neon_url=_neon_url or None)
+                _ensure_table(conn)
+            _save_cache(conn, cache_key, result)
+        except Exception as exc:
+            _log.warning("FII/DII cache write error: %s", exc)
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
         _log.info(
             "FII/DII flow fetched: FII=%.0fCr DII=%.0fCr signal=%s",
             result["fii_net_5d_cr"], result["dii_net_5d_cr"], result["flow_signal"],
@@ -232,7 +260,11 @@ def fetch_fii_dii_sector_flow(
         return {**result, "source": "nse_api"}
 
     except Exception as exc:
-        conn.close()
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
         _log.warning("FII/DII fetch failed: %s", exc)
         return _unavailable(str(exc))
 

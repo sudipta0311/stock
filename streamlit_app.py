@@ -66,7 +66,17 @@ from stock_platform.services.engine import PlatformEngine
 from stock_platform.services.llm import PlatformLLM
 from stock_platform.utils.index_config import DEFAULT_INDEX, INDEX_UNIVERSE, SELECTABLE_INDICES
 from stock_platform.utils.fii_dii_fetcher import fetch_fii_dii_sector_flow
+from stock_platform.utils.cache_init import ensure_cache_tables, get_cache_row_counts
 from stock_platform.utils.pe_history_fetcher import prefetch_pe_history_for_universe
+
+# Ensure all three cache tables exist in Neon (or SQLite fallback) at startup.
+# Guard prevents re-running on every Streamlit rerun within the same process.
+if "_CACHE_TABLES_ENSURED" not in globals():
+    try:
+        ensure_cache_tables()
+    except Exception:
+        pass
+    _CACHE_TABLES_ENSURED = True
 from stock_platform.utils.recommendation_resolver import (
     extract_synthesis_verdict,
     resolve_final_recommendation,
@@ -1630,6 +1640,20 @@ if openai_ok:
     st.sidebar.success("OpenAI ✓")
 else:
     st.sidebar.error(f"OpenAI ✗ {openai_message}")
+
+# ── Cache health widget ───────────────────────────────────────────────────────
+with st.sidebar.expander("Cache DB health", expanded=False):
+    try:
+        _cc = get_cache_row_counts()
+        _be = _cc.get("backend", "?")
+        _be_label = "Neon" if "postgresql" in str(_be) else "SQLite"
+        st.caption(f"Backend: **{_be_label}**")
+        st.caption(f"result_date_cache: {_cc.get('result_date_cache', '?')} rows")
+        st.caption(f"pe_history_cache:  {_cc.get('pe_history_cache', '?')} rows")
+        st.caption(f"fii_dii_cache:     {_cc.get('fii_dii_cache', '?')} rows")
+    except Exception as _cce:
+        st.caption(f"Cache check failed: {_cce}")
+
 holding_count = len(portfolio["raw_holdings"])
 gap_count = len(portfolio["identified_gaps"])
 recommendation_count = len(recommendations)
@@ -2038,7 +2062,9 @@ with tabs[2]:
 
     # ── Market Flow badge ─────────────────────────────────────────────────────
     try:
-        _flow = fetch_fii_dii_sector_flow()
+        _flow = fetch_fii_dii_sector_flow(
+            neon_database_url=_os.environ.get("NEON_DATABASE_URL", ""),
+        )
         _msig = _flow.get("market_signal", "UNKNOWN")
         _fii  = _flow.get("fii_net_5d_cr") or 0
         _dii  = _flow.get("dii_net_5d_cr") or 0
