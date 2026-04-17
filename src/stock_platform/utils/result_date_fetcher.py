@@ -256,6 +256,24 @@ def _save_cache(symbol: str, data: dict[str, Any], db_path: str | Path) -> None:
         print(f"result_date_cache save failed for {symbol}: {exc}")
 
 
+# ── Validity gate ────────────────────────────────────────────────────────────
+
+def _is_valid_result_date(date_str: str) -> bool:
+    """
+    Rejects obviously wrong dates.
+    Valid result dates must be within the last 3 years — anything older is
+    a data artefact (e.g. yfinance returning 2014 IPO-era financials).
+    """
+    if not date_str:
+        return False
+    try:
+        rd = datetime.strptime(date_str, "%Y-%m-%d").date()
+        years_ago = (date.today() - rd).days / 365
+        return 0 <= years_ago <= 3
+    except Exception:
+        return False
+
+
 # ── Public entry point ────────────────────────────────────────────────────────
 
 def fetch_last_result_date(
@@ -278,11 +296,20 @@ def fetch_last_result_date(
     if cached:
         return cached
 
-    result = (
-        _fetch_from_nse(clean)
-        or _fetch_from_tickertape(clean)
-        or _fetch_from_yfinance(clean)
-    )
+    result = _fetch_from_nse(clean)
+    if result and not _is_valid_result_date(result.get("result_date")):
+        print(f"NSE returned invalid date for {clean}: {result.get('result_date')} — trying next source")
+        result = None
+
+    result = result or _fetch_from_tickertape(clean)
+    if result and not _is_valid_result_date(result.get("result_date")):
+        print(f"Tickertape returned invalid date for {clean}: {result.get('result_date')} — trying next source")
+        result = None
+
+    result = result or _fetch_from_yfinance(clean)
+    if result and not _is_valid_result_date(result.get("result_date")):
+        print(f"yfinance returned invalid date for {clean}: {result.get('result_date')} — discarding")
+        result = None
 
     if result and result.get("result_date"):
         try:
