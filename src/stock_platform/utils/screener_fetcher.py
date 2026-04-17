@@ -878,7 +878,7 @@ def compute_pe_context(
     }
 
 
-def get_stock_fundamentals(symbol: str) -> dict[str, Any]:
+def get_stock_fundamentals(symbol: str, include_market_data: bool = True) -> dict[str, Any]:
     """
     Resolve a symbol, fetch Screener fundamentals, then enrich with yfinance price metadata.
     """
@@ -890,18 +890,19 @@ def get_stock_fundamentals(symbol: str) -> dict[str, Any]:
     data["input_symbol"] = normalize_input_symbol(symbol)
     data["symbol_mapped"] = normalize_input_symbol(symbol) != clean
 
-    try:
-        import yfinance as yf
+    if include_market_data:
+        try:
+            import yfinance as yf
 
-        ticker = yf.Ticker(resolved)
-        history = ticker.history(period="1d")
-        if not history.empty:
-            data["current_price"] = float(history["Close"].iloc[-1])
-        info = ticker.info or {}
-        target = info.get("targetMeanPrice")
-        if target is not None:
-            data["target_mean_price"] = float(target)
-    except Exception:
-        pass
+            ticker = yf.Ticker(resolved)
+            history = ticker.history(period="1d")
+            if not history.empty:
+                data["current_price"] = float(history["Close"].iloc[-1])
+            info = ticker.info or {}
+            target = info.get("targetMeanPrice")
+            if target is not None:
+                data["target_mean_price"] = float(target)
+        except Exception:
+            pass
 
     return data

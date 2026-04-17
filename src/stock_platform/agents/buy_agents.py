@@ -836,12 +836,33 @@ class BuyAgents:
                 or 0.0
             )
 
+        def _existing_analyst_target(it: dict[str, Any], current_price: float) -> float | None:
+            for raw in (
+                dict(it.get("price_context") or {}).get("analyst_target"),
+                it.get("live_financials", {}).get("targetMeanPrice"),
+                it.get("analyst_target"),
+            ):
+                try:
+                    target = float(raw)
+                except (TypeError, ValueError):
+                    continue
+                if target > current_price > 0:
+                    return target
+            return None
+
         _analyst_cache: dict[str, float] = {}
-        _prefetch_items = [
-            (it["symbol"], _safe_item_price(it))
-            for it in state["allocations"]
-            if it.get("entry_signal") != "DO NOT ENTER"
-        ]
+        _prefetch_items: list[tuple[str, float]] = []
+        for it in state["allocations"]:
+            if it.get("entry_signal") == "DO NOT ENTER":
+                continue
+            _price = _safe_item_price(it)
+            if _price <= 0:
+                continue
+            _target = _existing_analyst_target(it, _price)
+            if _target is not None:
+                _analyst_cache[it["symbol"]] = _target
+            else:
+                _prefetch_items.append((it["symbol"], _price))
         with ThreadPoolExecutor(max_workers=8) as _aex:
             _afuts = {
                 _aex.submit(fetch_analyst_consensus_target, sym, price): sym
@@ -886,7 +907,11 @@ class BuyAgents:
                     "reason": "current_price unavailable",
                 })
                 continue
-            analyst_target = _analyst_cache.get(item["symbol"]) or fetch_analyst_consensus_target(item["symbol"], current_price)
+            analyst_target = (
+                _existing_analyst_target(item, float(current_price))
+                or _analyst_cache.get(item["symbol"])
+                or fetch_analyst_consensus_target(item["symbol"], current_price)
+            )
             price_ctx["analyst_target"] = analyst_target
             net_return_pct = compute_net_return(current_price, analyst_target, holding_months=24)
 
@@ -1075,14 +1100,28 @@ class BuyAgents:
         # ── Phase 1b: fetch recent news context (one web_search per stock) ──────
         # Done serially before the parallel LLM phase so both analyst paths
         # (Anthropic + OpenAI) share the same cached headline text.
-        for _prep in _prepared:
-            _sym = _prep["item"].get("symbol", "")
-            _co  = _prep["item"].get("company_name", "")
+        def _fetch_news_context_safe(symbol: str, company_name: str) -> str:
+            if not hasattr(self.llm, "fetch_stock_news_context"):
+                return ""
             try:
-                _prep["news_context"] = self.llm.fetch_stock_news_context(_sym, _co)
-            except Exception as _ne:
-                _log.warning("News fetch failed for %s: %s", _sym, _ne)
-                _prep["news_context"] = ""
+                return self.llm.fetch_stock_news_context(symbol, company_name)
+            except Exception as exc:
+                _log.warning("News fetch failed for %s: %s", symbol, exc)
+                return ""
+
+        if _prepared:
+            with ThreadPoolExecutor(max_workers=min(4, len(_prepared))) as _nex:
+                _nfuts = {
+                    _nex.submit(
+                        _fetch_news_context_safe,
+                        p["item"].get("symbol", ""),
+                        p["item"].get("company_name", ""),
+                    ): idx
+                    for idx, p in enumerate(_prepared)
+                }
+                for _nf in as_completed(_nfuts):
+                    _nidx = _nfuts[_nf]
+                    _prepared[_nidx]["news_context"] = _nf.result()
 
         # ── Phase 2: parallel LLM calls ───────────────────────────────────────
         def _call_rationale(prep: dict[str, Any]) -> str | None:

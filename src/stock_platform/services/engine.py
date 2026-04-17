@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
@@ -227,10 +228,17 @@ class PlatformEngine:
         llm_provider: "anthropic" (default) or "openai"
         Falls back to deterministic rationale if the provider key is not configured.
         """
+        start = time.perf_counter()
         if not self.repo.list_signals("unified"):
             self.run_signal_refresh(trigger="buy-precheck")
         graph = self._build_buy_graph(llm_provider=llm_provider)
-        return graph.invoke({"request": request})
+        result = graph.invoke({"request": request})
+        elapsed = time.perf_counter() - start
+        print(
+            f"Buy flow completed in {elapsed:.1f}s "
+            f"(provider={llm_provider}, top_n={request.get('top_n', '?')})"
+        )
+        return result
 
     def run_buy_analysis_comparison(self, request: dict[str, Any]) -> dict[str, Any]:
         """
@@ -248,6 +256,7 @@ class PlatformEngine:
             "openai": { ... same shape ... },
           }
         """
+        start = time.perf_counter()
         # Always refresh signals before a comparison run so stale Turso data
         # does not silently block recommendations with out-of-date sector scores.
         self.run_signal_refresh(trigger="buy-precheck")
@@ -426,6 +435,11 @@ class PlatformEngine:
                 if synthesis:
                     synthesis_map[symbol] = _append_entry_summary(synthesis, base_rec)
         results["synthesis"] = synthesis_map
+        elapsed = time.perf_counter() - start
+        print(
+            f"Buy comparison completed in {elapsed:.1f}s "
+            f"(top_n={request.get('top_n', '?')})"
+        )
         return results
 
     def run_monitoring(
