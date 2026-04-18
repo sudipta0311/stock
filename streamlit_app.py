@@ -2440,9 +2440,7 @@ with tabs[3]:
         )
 
     _overlap_rows = snapshot["portfolio"].get("overlap_scores", [])
-    _cutoff = (datetime.now() - timedelta(days=35)).isoformat()
-    _fresh_overlap = [r for r in _overlap_rows if r.get("updated_at", "") > _cutoff]
-    if not _fresh_overlap:
+    if not snapshot["portfolio"].get("raw_holdings"):
         st.warning(
             "Portfolio context missing. Please upload a CAMS statement first "
             "so overlap scores can be computed before monitoring runs."

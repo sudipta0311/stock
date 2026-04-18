@@ -278,7 +278,7 @@ class PlatformRepository:
             normalized_rows if normalized_rows is not None else self.list_normalized_exposure()
         )
         self.replace_overlap_scores(rows)
-        return rows
+        return self.list_overlap_scores()  # return DB rows so updated_at is populated
 
     def replace_gaps(self, rows: list[dict[str, Any]]) -> None:
         timestamp = utc_now_iso()
