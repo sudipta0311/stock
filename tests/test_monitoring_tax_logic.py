@@ -13,7 +13,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from stock_platform.agents.monitor_agents import MonitoringAgents, compute_monitoring_score
+from stock_platform.agents.monitor_agents import MonitoringAgents, compute_monitoring_score, get_overlap_pct
 from stock_platform.config import AppConfig
 
 LOCAL_DB_CONFIG = {
@@ -68,6 +68,37 @@ class ErrorLLM:
 
 
 class MonitoringTaxLogicTests(unittest.TestCase):
+    def test_get_overlap_pct_uses_alias_variants(self) -> None:
+        overlap = get_overlap_pct(
+            "LT",
+            {
+                "LARSENTOUBRO": {"overlap_pct": 2.75},
+            },
+        )
+
+        self.assertAlmostEqual(overlap, 2.75)
+
+    def test_get_overlap_pct_uses_case_insensitive_alias_variants(self) -> None:
+        overlap = get_overlap_pct(
+            "HINDUNILVR",
+            {
+                "hul": {"overlap_pct": 1.8},
+            },
+        )
+
+        self.assertAlmostEqual(overlap, 1.8)
+
+    def test_get_overlap_pct_prefers_positive_alias_over_zero_exact_match(self) -> None:
+        overlap = get_overlap_pct(
+            "KWIL",
+            {
+                "KWIL": {"overlap_pct": 0.0},
+                "KALYANJEWELS": {"overlap_pct": 3.13},
+            },
+        )
+
+        self.assertAlmostEqual(overlap, 3.13)
+
     def test_compute_monitoring_score_returns_none_when_core_data_is_missing(self) -> None:
         score = compute_monitoring_score(
             "BEL",

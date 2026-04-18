@@ -18,6 +18,16 @@ BANKING_SECTORS = {
     "INSURANCE",
 }
 
+SYMBOL_ALIASES = {
+    "HINDUNILVR": ["HUL", "HINDUNILVR", "HINDUSTAN UNILEVER"],
+    "KOTAKBANK": ["KOTAK", "KOTAKBANK", "KOTAK MAHINDRA"],
+    "LT": ["LT", "LARSENTOUBRO", "LARSEN"],
+    "TCS": ["TCS", "TATACONSULTANCY"],
+    "KWIL": ["KWIL", "KALYANJEWELS", "KALYAN JEWELLERS"],
+    "SBICARD": ["SBICARD", "SBI CARDS", "SBI CARD"],
+    "AXITA": ["AXITA", "AXITA COTTON"],
+}
+
 
 def _as_float(value: Any) -> float | None:
     try:
@@ -59,6 +69,36 @@ def _score_debt_to_equity(debt_equity: float) -> float:
     if debt_equity >= 2.0:
         return 0.0
     return max(0.0, 1.0 - ((debt_equity - 0.25) / 1.75))
+
+
+def _overlap_value(entry: Any) -> float:
+    if isinstance(entry, dict):
+        return float(entry.get("overlap_pct", 0.0) or 0.0)
+    return float(entry or 0.0)
+
+
+def get_overlap_pct(symbol: str, portfolio_ctx: dict[str, Any]) -> float:
+    """
+    Look up overlap_pct with alias and case-insensitive fallback.
+    Returns the highest matching overlap so a zero exact match does not mask
+    a positive alias match from the portfolio DB.
+    """
+    normalized_symbol = str(symbol or "").upper().strip()
+    candidates = [normalized_symbol, *SYMBOL_ALIASES.get(normalized_symbol, [])]
+    found = 0.0
+
+    for candidate in candidates:
+        if candidate in portfolio_ctx:
+            found = max(found, _overlap_value(portfolio_ctx[candidate]))
+
+    for key, value in portfolio_ctx.items():
+        key_upper = str(key or "").upper()
+        key_clean = _clean_company_key(key)
+        for candidate in candidates:
+            if key_upper == str(candidate).upper() or key_clean == _clean_company_key(candidate):
+                found = max(found, _overlap_value(value))
+
+    return found
 
 
 def get_monitoring_metrics(symbol: str, stock_data: dict[str, Any], sector: str | None = None) -> dict[str, Any]:
@@ -314,7 +354,7 @@ class MonitoringAgents:
                 "total_weight": round(row["market_value"] / total_direct_value * 100, 2),
             }
             entry["monitor_source"] = "direct"
-            entry["overlap_pct"] = float(overlap_lookup.get(sym, 0.0) or 0.0)
+            entry["overlap_pct"] = get_overlap_pct(sym, overlap_lookup)
             monitor_universe.append(entry)
 
         for row in ctx["watchlist"]:
@@ -329,7 +369,7 @@ class MonitoringAgents:
                 "total_weight": 0.0,
             }
             entry["monitor_source"] = "watchlist"
-            entry["overlap_pct"] = float(overlap_lookup.get(sym, 0.0) or 0.0)
+            entry["overlap_pct"] = get_overlap_pct(sym, overlap_lookup)
             monitor_universe.append(entry)
 
         broker_map = {
