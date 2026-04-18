@@ -2447,7 +2447,7 @@ with tabs[3]:
             "Portfolio context missing. Please upload a CAMS statement first "
             "so overlap scores can be computed before monitoring runs."
         )
-    elif st.button("Run Monitoring For Current Portfolio", use_container_width=True, key="monitoring_tab_run_btn"):
+    if st.button("Run Monitoring For Current Portfolio", use_container_width=True, key="monitoring_tab_run_btn"):
         try:
             provider_for_mon = st.session_state.get("monitoring_llm_provider", "anthropic")
             provider_label = "Anthropic Claude" if provider_for_mon == "anthropic" else "OpenAI GPT"
