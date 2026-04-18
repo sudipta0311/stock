@@ -70,15 +70,28 @@ class ErrorLLM:
 class MonitoringTaxLogicTests(unittest.TestCase):
     def test_compute_monitoring_score_returns_none_when_core_data_is_missing(self) -> None:
         score = compute_monitoring_score(
-            "HDFCBANK",
+            "BEL",
             {
-                "roce_ttm": 0.162,
+                "roce_ttm": None,
                 "revenueGrowth": None,
                 "debtToEquity": 0.9,
             },
         )
 
         self.assertIsNone(score)
+
+    def test_compute_monitoring_score_uses_roe_for_banking_names(self) -> None:
+        score = compute_monitoring_score(
+            "HDFCBANK",
+            {
+                "returnOnEquity": 0.162,
+                "revenueGrowth": 0.12,
+                "debtToEquity": 8.5,
+            },
+            "Banks - Regional",
+        )
+
+        self.assertEqual(score, 0.75)
 
     def test_wait_then_exit_when_ltcg_is_close_and_upside_is_limited(self) -> None:
         agent = MonitoringAgents(StubRepo(), StubProvider(), AppConfig(**LOCAL_DB_CONFIG), lambda **kwargs: None, StubLLM())
@@ -294,7 +307,18 @@ class MonitoringTaxLogicTests(unittest.TestCase):
     def test_load_context_carries_overlap_and_buy_fields_into_monitor_universe(self) -> None:
         repo = StubRepo(
             {
-                "normalized_exposure": [],
+                "normalized_exposure": [
+                    {
+                        "symbol": "HDFCBANK",
+                        "company_name": "HDFC BANK LIMITED",
+                        "source_mix": {"direct_equity": 1.875},
+                    },
+                    {
+                        "symbol": "HDFCBANKLIMITED",
+                        "company_name": "HDFCBANKLIMITED",
+                        "source_mix": {"mutual_fund": 0.306},
+                    },
+                ],
                 "raw_holdings": [
                     {
                         "holding_type": "direct_equity",
@@ -312,7 +336,10 @@ class MonitoringTaxLogicTests(unittest.TestCase):
                         "buy_date": "2025-01-01",
                     }
                 ],
-                "overlap_scores": [{"symbol": "HDFCBANK", "overlap_pct": 3.13}],
+                "overlap_scores": [
+                    {"symbol": "HDFCBANK", "overlap_pct": 0.0},
+                    {"symbol": "HDFCBANKLIMITED", "overlap_pct": 3.13},
+                ],
                 "unified_signals": [],
                 "user_preferences": {},
             }

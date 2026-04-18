@@ -664,8 +664,11 @@ class DemoDataProvider:
         return {
             "symbol": info["symbol"],
             "roce_5y": info["roce_5y"],
+            "returnOnEquity": info["roce_5y"] / 100.0,
+            "roe": info["roce_5y"] / 100.0,
             "fcf_positive_years": info["fcf_positive_years"],
             "revenue_consistency": info["revenue_consistency"],
+            "earningsGrowth": min(info["revenue_consistency"] / 10.0, 1.0) * 0.15,
             "promoter_trend": info["promoter_trend"],
             "de_ratio": info["de_ratio"],
             "us_revenue_pct": info.get("us_revenue_pct", 0.0),

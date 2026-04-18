@@ -89,6 +89,36 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual(rows[0]["urgency"], "MEDIUM")
         self.assertAlmostEqual(rows[0]["overlap_pct"], 2.75)
 
+    def test_monitoring_rows_prefer_payload_overlap_when_db_join_is_zero(self) -> None:
+        self.repo.replace_overlap_scores(
+            [
+                {
+                    "symbol": "HDFCBANK",
+                    "overlap_pct": 0.0,
+                    "band": "GREEN",
+                    "attribution": [],
+                }
+            ]
+        )
+        self.repo.save_monitoring_actions(
+            "monitor-test-payload",
+            [
+                MonitoringAction(
+                    symbol="HDFCBANK",
+                    action="HOLD",
+                    severity="LOW",
+                    urgency="LOW",
+                    rationale="Readable rationale",
+                    payload={"overlap_pct": 3.13},
+                )
+            ],
+        )
+
+        rows = self.repo.list_monitoring_actions()
+
+        self.assertEqual(len(rows), 1)
+        self.assertAlmostEqual(rows[0]["overlap_pct"], 3.13)
+
 
 class LiveProviderTests(unittest.TestCase):
     def test_live_provider_normalizes_exchange_suffixes(self) -> None:
