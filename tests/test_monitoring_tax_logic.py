@@ -13,7 +13,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from stock_platform.agents.monitor_agents import MonitoringAgents
+from stock_platform.agents.monitor_agents import MonitoringAgents, compute_monitoring_score
 from stock_platform.config import AppConfig
 
 LOCAL_DB_CONFIG = {
@@ -24,12 +24,23 @@ LOCAL_DB_CONFIG = {
 
 
 class StubRepo:
-    pass
+    def __init__(self, context: dict | None = None) -> None:
+        self.context = context or {}
+        self.saved_rows = []
+
+    def load_portfolio_context(self) -> dict:
+        return self.context
+
+    def save_monitoring_actions(self, run_id: str, rows: list) -> None:
+        self.saved_rows = rows
 
 
 class StubProvider:
     def __init__(self, analyst_target: float = 210.0) -> None:
         self.analyst_target = analyst_target
+
+    def normalize_symbol(self, symbol: str) -> str:
+        return str(symbol or "").upper()
 
     def get_price_context(self, symbol: str) -> dict[str, float]:
         return {"analyst_target": self.analyst_target}
@@ -40,7 +51,35 @@ class StubLLM:
         return None
 
 
+class ShortRationaleLLM:
+    def monitoring_rationale(self, action_row, thesis, drawdown):
+        del thesis, drawdown
+        return {
+            "action": action_row["action"],
+            "severity": action_row["severity"],
+            "rationale": "Too short",
+        }
+
+
+class ErrorLLM:
+    def monitoring_rationale(self, action_row, thesis, drawdown):
+        del action_row, thesis, drawdown
+        raise RuntimeError("monitoring LLM blew up")
+
+
 class MonitoringTaxLogicTests(unittest.TestCase):
+    def test_compute_monitoring_score_returns_none_when_core_data_is_missing(self) -> None:
+        score = compute_monitoring_score(
+            "HDFCBANK",
+            {
+                "roce_ttm": 0.162,
+                "revenueGrowth": None,
+                "debtToEquity": 0.9,
+            },
+        )
+
+        self.assertIsNone(score)
+
     def test_wait_then_exit_when_ltcg_is_close_and_upside_is_limited(self) -> None:
         agent = MonitoringAgents(StubRepo(), StubProvider(), AppConfig(**LOCAL_DB_CONFIG), lambda **kwargs: None, StubLLM())
         buy_date = (date.today() - timedelta(days=340)).isoformat()
@@ -229,6 +268,118 @@ class MonitoringTaxLogicTests(unittest.TestCase):
             self.assertEqual(row["action"], "HOLD - already in MFs")
             self.assertEqual(row["urgency"], "LOW")
             self.assertAlmostEqual(row["overlap_pct"], 2.4)
+
+    def test_data_unavailable_action_is_used_when_quant_score_is_missing(self) -> None:
+        agent = MonitoringAgents(StubRepo(), StubProvider(), AppConfig(**LOCAL_DB_CONFIG), lambda **kwargs: None, StubLLM())
+        state = {
+            "portfolio_context": {
+                "monitor_universe": [{"symbol": "HDFCBANK", "monitor_source": "direct", "total_weight": 8.0, "overlap_pct": 3.13}],
+                "direct_equity_buy_map": {},
+            },
+            "stock_reviews": [{"symbol": "HDFCBANK", "sentiment_score": 0.1}],
+            "thesis_reviews": [{"symbol": "HDFCBANK", "status": "UNKNOWN"}],
+            "drawdown_alerts": [{"symbol": "HDFCBANK", "severity": "LOW", "current_price": 1700.0}],
+            "quant_scores": [{"symbol": "HDFCBANK", "quant_score": None}],
+        }
+
+        with patch("stock_platform.agents.monitor_agents.fetch_analyst_consensus_target", return_value=1900.0):
+            result = agent.decide_actions(state)
+
+        row = result["actions"][0]
+        self.assertEqual(row["action"], "DATA_UNAVAILABLE")
+        self.assertEqual(row["severity"], "UNKNOWN")
+        self.assertAlmostEqual(row["overlap_pct"], 3.13)
+        self.assertIn("Monitoring skipped - financial data not available", row["rationale"])
+
+    def test_load_context_carries_overlap_and_buy_fields_into_monitor_universe(self) -> None:
+        repo = StubRepo(
+            {
+                "normalized_exposure": [],
+                "raw_holdings": [
+                    {
+                        "holding_type": "direct_equity",
+                        "instrument_name": "HDFC Bank",
+                        "symbol": "HDFCBANK",
+                        "market_value": 100000.0,
+                    }
+                ],
+                "watchlist": [],
+                "direct_equity_holdings": [
+                    {
+                        "symbol": "HDFCBANK",
+                        "avg_buy_price": 1450.0,
+                        "current_price": 1700.0,
+                        "buy_date": "2025-01-01",
+                    }
+                ],
+                "overlap_scores": [{"symbol": "HDFCBANK", "overlap_pct": 3.13}],
+                "unified_signals": [],
+                "user_preferences": {},
+            }
+        )
+        agent = MonitoringAgents(repo, StubProvider(), AppConfig(**LOCAL_DB_CONFIG), lambda **kwargs: None, StubLLM())
+
+        result = agent.load_context({})
+
+        holding = result["portfolio_context"]["monitor_universe"][0]
+        self.assertEqual(holding["symbol"], "HDFCBANK")
+        self.assertAlmostEqual(holding["overlap_pct"], 3.13)
+        self.assertEqual(holding["avg_buy_price"], 1450.0)
+        self.assertEqual(holding["buy_date"], "2025-01-01")
+
+    def test_replace_feedback_marks_empty_monitoring_llm_rationale(self) -> None:
+        repo = StubRepo()
+        agent = MonitoringAgents(repo, StubProvider(), AppConfig(**LOCAL_DB_CONFIG), lambda **kwargs: None, ShortRationaleLLM())
+        state = {
+            "actions": [
+                {
+                    "symbol": "HDFCBANK",
+                    "action": "HOLD",
+                    "severity": "LOW",
+                    "urgency": "LOW",
+                    "rationale": "Thesis intact (quant 0.72) | MF overlap 3.13%",
+                    "overlap_pct": 3.13,
+                    "pnl": None,
+                    "exit_recommendation": None,
+                    "analyst_target": 1900.0,
+                }
+            ],
+            "thesis_reviews": [{"symbol": "HDFCBANK", "status": "INTACT", "geo_signal_change": "NEUTRAL"}],
+            "drawdown_alerts": [{"symbol": "HDFCBANK", "severity": "LOW", "drawdown_pct": -4.0}],
+            "behavioural_flags": [],
+        }
+
+        agent.replace_feedback(state)
+
+        self.assertEqual(len(repo.saved_rows), 1)
+        self.assertIn("[LLM analysis failed - data context may be empty]", repo.saved_rows[0].rationale)
+
+    def test_replace_feedback_surfaces_monitoring_llm_errors(self) -> None:
+        repo = StubRepo()
+        agent = MonitoringAgents(repo, StubProvider(), AppConfig(**LOCAL_DB_CONFIG), lambda **kwargs: None, ErrorLLM())
+        state = {
+            "actions": [
+                {
+                    "symbol": "HDFCBANK",
+                    "action": "HOLD",
+                    "severity": "LOW",
+                    "urgency": "LOW",
+                    "rationale": "Thesis intact (quant 0.72) | MF overlap 3.13%",
+                    "overlap_pct": 3.13,
+                    "pnl": None,
+                    "exit_recommendation": None,
+                    "analyst_target": 1900.0,
+                }
+            ],
+            "thesis_reviews": [{"symbol": "HDFCBANK", "status": "INTACT", "geo_signal_change": "NEUTRAL"}],
+            "drawdown_alerts": [{"symbol": "HDFCBANK", "severity": "LOW", "drawdown_pct": -4.0}],
+            "behavioural_flags": [],
+        }
+
+        agent.replace_feedback(state)
+
+        self.assertEqual(len(repo.saved_rows), 1)
+        self.assertIn("[LLM error: RuntimeError]", repo.saved_rows[0].rationale)
 
 
 if __name__ == "__main__":
