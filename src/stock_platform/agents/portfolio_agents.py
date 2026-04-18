@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from typing import Any
 
+from stock_platform.data.repository import build_overlap_score_rows
 from stock_platform.utils.rules import clamp
 
 
@@ -218,28 +219,7 @@ class PortfolioAgents:
 
     def compute_overlap(self, state: dict[str, Any]) -> dict[str, Any]:
         normalized = state.get("normalized_exposure") or self.repo.list_normalized_exposure()
-        rows: list[dict[str, Any]] = []
-        for row in normalized:
-            indirect_overlap = sum(
-                item["lookthrough_weight"] for item in row["attribution"] if item["source"] != "direct_equity"
-            )
-            overlap_pct = round(indirect_overlap, 3)
-            if overlap_pct > 3:
-                band = "HARD_EXCLUDE"
-            elif overlap_pct > 1:
-                band = "FLAG"
-            elif overlap_pct > 0.5:
-                band = "YELLOW"
-            else:
-                band = "GREEN"
-            rows.append(
-                {
-                    "symbol": row["symbol"],
-                    "overlap_pct": overlap_pct,
-                    "band": band,
-                    "attribution": [item for item in row["attribution"] if item["source"] != "direct_equity"],
-                }
-            )
+        rows = build_overlap_score_rows(normalized)
         self.repo.replace_overlap_scores(rows)
         return {"overlap_scores": rows}
 

@@ -119,6 +119,65 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertAlmostEqual(rows[0]["overlap_pct"], 3.13)
 
+    def test_load_portfolio_context_refreshes_overlap_scores_from_normalized_exposure(self) -> None:
+        self.repo.replace_normalized_exposure(
+            [
+                {
+                    "symbol": "HDFCBANK",
+                    "company_name": "HDFC Bank",
+                    "sector": "Banks",
+                    "total_weight": 1.875,
+                    "source_mix": {"direct_equity": 1.875},
+                    "attribution": [
+                        {
+                            "instrument_name": "Direct",
+                            "symbol": "HDFCBANK",
+                            "lookthrough_weight": 1.875,
+                            "source": "direct_equity",
+                        },
+                    ],
+                },
+                {
+                    "symbol": "HDFCBANKLIMITED",
+                    "company_name": "HDFCBANKLIMITED",
+                    "sector": "Banks",
+                    "total_weight": 3.13,
+                    "source_mix": {"mutual_fund": 3.13},
+                    "attribution": [
+                        {
+                            "instrument_name": "Fund A",
+                            "symbol": "HDFCBANKLIMITED",
+                            "lookthrough_weight": 3.13,
+                            "source": "mutual_fund",
+                        },
+                    ],
+                }
+            ]
+        )
+        self.repo.replace_overlap_scores(
+            [
+                {
+                    "symbol": "HDFCBANK",
+                    "overlap_pct": 0.0,
+                    "band": "GREEN",
+                    "attribution": [],
+                }
+            ]
+        )
+
+        context = self.repo.load_portfolio_context()
+
+        self.assertEqual(len(context["overlap_scores"]), 1)
+        self.assertEqual(context["overlap_scores"][0]["symbol"], "HDFCBANK")
+        self.assertAlmostEqual(context["overlap_scores"][0]["overlap_pct"], 3.13)
+        self.assertEqual(context["overlap_scores"][0]["band"], "HARD_EXCLUDE")
+
+        stored = self.repo.list_overlap_scores()
+        self.assertEqual(len(stored), 1)
+        self.assertEqual(stored[0]["symbol"], "HDFCBANK")
+        self.assertAlmostEqual(stored[0]["overlap_pct"], 3.13)
+        self.assertEqual(stored[0]["band"], "HARD_EXCLUDE")
+
 
 class LiveProviderTests(unittest.TestCase):
     def test_live_provider_normalizes_exchange_suffixes(self) -> None:
@@ -127,7 +186,9 @@ class LiveProviderTests(unittest.TestCase):
         self.assertEqual(provider.normalize_symbol(" tcs.nse "), "TCS")
         self.assertEqual(provider.normalize_symbol("TATAMOTORS"), "TMCV")
         self.assertEqual(provider.normalize_symbol("HDFBANEQ"), "HDFCBANK")
+        self.assertEqual(provider.normalize_symbol("HDFCBANKLIMITED"), "HDFCBANK")
         self.assertEqual(provider.normalize_symbol("ICIBAN"), "ICICIBANK")
+        self.assertEqual(provider.normalize_symbol("ICICIBANKLIMITED"), "ICICIBANK")
         self.assertEqual(provider.normalize_symbol("LARTOU"), "LT")
 
     def test_live_provider_uses_fallback_universe_when_index_download_is_empty(self) -> None:
