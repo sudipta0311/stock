@@ -1396,6 +1396,7 @@ def render_recommendation_card(
         pat_signal = str(pat_momentum.get("pat_momentum") or "")
         pat_growth = pat_momentum.get("pat_growth_pct")
         pat_period = str(pat_momentum.get("period") or period)
+        pat_qualifier = str(pat_momentum.get("qualifier") or "").strip()
         if pat_signal and pat_growth is not None:
             pat_level = {
                 "STRONG": "success",
@@ -1406,6 +1407,7 @@ def render_recommendation_card(
             }.get(pat_signal, "info")
             getattr(st, pat_level)(
                 f"PAT momentum: {pat_signal} - {float(pat_growth):+.1f}% YoY ({pat_period})"
+                + (f" {pat_qualifier}" if pat_qualifier else "")
             )
         if pat_momentum.get("rev_pat_divergence"):
             st.warning(

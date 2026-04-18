@@ -68,6 +68,15 @@ def build_factual_snapshot(
         recent_results.get("period"),
         revenue_latest_qtr_label,
     )
+    pat_qualifier = _first_present(
+        pat_block.get("qualifier"),
+        recent_results.get("qualifier"),
+        "",
+    )
+    pat_abs_cr = _first_present(
+        pat_block.get("pat_abs_cr"),
+        recent_results.get("pat_abs_cr"),
+    )
     rev_pat_divergence = bool(_first_present(
         pat_block.get("rev_pat_divergence"),
         recent_results.get("rev_pat_divergence"),
@@ -104,6 +113,8 @@ def build_factual_snapshot(
         "pat_momentum": pat_signal,
         "pat_growth_pct": pat_growth,
         "pat_period": pat_period,
+        "pat_qualifier": pat_qualifier,
+        "pat_abs_cr": pat_abs_cr,
         "rev_pat_divergence": rev_pat_divergence,
         "roce": roce,
         "debt_to_equity": de,
@@ -204,8 +215,9 @@ def format_snapshot_for_prompt(snapshot: dict) -> str:
     pat_signal = s.get("pat_momentum") or "UNKNOWN"
     pat_growth = s.get("pat_growth_pct")
     pat_period = s.get("pat_period") or qtr_label
+    pat_qualifier = s.get("pat_qualifier") or ""
     pat_line = (
-        f"{pat_signal} ({float(pat_growth):+.1f}% YoY)"
+        f"{pat_signal} ({float(pat_growth):+.1f}% YoY){f' {pat_qualifier}' if pat_qualifier else ''}"
         if pat_growth is not None
         else pat_signal
     )
