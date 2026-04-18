@@ -10,11 +10,120 @@ from stock_platform.utils.entry_calculator import fetch_analyst_consensus_target
 from utils.tax_calculator import calculate_pnl, should_exit
 
 
+def _as_float(value: Any) -> float | None:
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _as_ratio(value: Any) -> float | None:
+    raw = _as_float(value)
+    if raw is None:
+        return None
+    return raw / 100.0 if abs(raw) > 1.5 else raw
+
+
+def debug_monitoring_data(symbol: str, stock_data: dict[str, Any]) -> None:
+    print(f"MONITORING DATA CHECK {symbol}:")
+    print(f"  roce:           {stock_data.get('roce')}")
+    print(f"  revenue_growth: {stock_data.get('revenue_growth')}")
+    print(f"  debt_equity:    {stock_data.get('debt_equity')}")
+    print(f"  current_price:  {stock_data.get('current_price')}")
+    print(f"  overlap_pct:    {stock_data.get('overlap_pct')}")
+
+
+def _score_debt_to_equity(debt_equity: float) -> float:
+    if debt_equity <= 0.25:
+        return 1.0
+    if debt_equity >= 2.0:
+        return 0.0
+    return max(0.0, 1.0 - ((debt_equity - 0.25) / 1.75))
+
+
+def compute_monitoring_score(symbol: str, stock_data: dict[str, Any]) -> float | None:
+    try:
+        roce = _as_ratio(
+            stock_data.get("roce_ttm")
+            or stock_data.get("returnOnCapitalEmployed")
+            or stock_data.get("roce_5y")
+        )
+        revenue_growth = _as_ratio(
+            stock_data.get("revenueGrowth")
+            or stock_data.get("revenue_growth")
+        )
+        if revenue_growth is None:
+            consistency = _as_float(stock_data.get("revenue_consistency"))
+            if consistency is not None:
+                revenue_growth = max(0.0, min(consistency / 10.0, 1.0)) * 0.15
+
+        debt_equity = _as_float(
+            stock_data.get("debt_equity")
+            or stock_data.get("debt_to_equity")
+            or stock_data.get("debtToEquity")
+            or stock_data.get("de_ratio")
+        )
+
+        if any(value is None for value in (roce, revenue_growth, debt_equity)):
+            print(
+                f"MONITORING SCORE FAIL {symbol}: missing data "
+                f"roce={roce} rev={revenue_growth} de={debt_equity}"
+            )
+            return None
+
+        pe_t = _as_float(stock_data.get("pe_trailing"))
+        pe_5y = _as_float(stock_data.get("pe_5yr_avg"))
+        pe_sec = _as_float(stock_data.get("sector_pe"))
+        pe_fwd = _as_float(stock_data.get("pe_forward"))
+
+        pe_components: list[tuple[float, float]] = []
+        if pe_t and pe_5y:
+            pe_components.append((0.40, max(0.0, min(1.0, 1.0 - (pe_t - pe_5y) / pe_5y))))
+        if pe_t and pe_sec:
+            pe_components.append((0.35, max(0.0, min(1.0, 1.0 - (pe_t - pe_sec) / pe_sec))))
+        if pe_t and pe_fwd:
+            pe_components.append((0.25, max(0.0, min(1.0, 2.0 - pe_fwd / pe_t))))
+        pe_score = (
+            sum(weight * score for weight, score in pe_components) / sum(weight for weight, _ in pe_components)
+            if pe_components
+            else None
+        )
+
+        quality_components: list[tuple[float, float]] = [
+            (0.40, min(max(roce, 0.0) / 0.20, 1.0)),
+            (0.30, min(max(revenue_growth, 0.0) / 0.15, 1.0)),
+            (0.20, _score_debt_to_equity(debt_equity)),
+        ]
+
+        fcf_positive_years = stock_data.get("fcf_positive_years")
+        free_cashflow = stock_data.get("freeCashflow") or stock_data.get("free_cashflow")
+        if isinstance(fcf_positive_years, int):
+            quality_components.append((0.10, min(fcf_positive_years / 5, 1.0)))
+        elif free_cashflow is not None:
+            cash_value = _as_float(free_cashflow)
+            quality_components.append((0.10, 1.0 if cash_value is not None and cash_value > 0 else 0.0))
+        elif pe_score is not None:
+            quality_components.append((0.10, pe_score))
+
+        total_weight = sum(weight for weight, _ in quality_components)
+        if total_weight <= 0:
+            print(f"MONITORING SCORE FAIL {symbol}: no usable score components")
+            return None
+
+        return round(sum(weight * score for weight, score in quality_components) / total_weight, 3)
+    except Exception as exc:
+        print(f"MONITORING SCORE ERROR {symbol}: {exc}")
+        return None
+
+
 def apply_overlap_override(
     symbol: str,
     exit_rec: dict[str, Any],
     db_path: str,
     *,
+    overlap_pct: float | None = None,
     turso_database_url: str = "",
     turso_auth_token: str = "",
     turso_sync_interval_seconds: int | None = None,
@@ -22,19 +131,20 @@ def apply_overlap_override(
     """
     Suppress BUY MORE when the same stock is already owned meaningfully via MFs.
     """
-    overlap = 0.0
-    with database_connection(
-        db_path,
-        turso_url=turso_database_url,
-        turso_token=turso_auth_token,
-        sync_interval=turso_sync_interval_seconds,
-    ) as conn:
-        row = conn.execute(
-            "SELECT overlap_pct FROM overlap_scores "
-            "WHERE UPPER(TRIM(symbol)) = UPPER(TRIM(?))",
-            (symbol,),
-        ).fetchone()
-        overlap = float(row[0]) if row else 0.0
+    overlap = float(overlap_pct or 0.0)
+    if overlap <= 0:
+        with database_connection(
+            db_path,
+            turso_url=turso_database_url,
+            turso_token=turso_auth_token,
+            sync_interval=turso_sync_interval_seconds,
+        ) as conn:
+            row = conn.execute(
+                "SELECT overlap_pct FROM overlap_scores "
+                "WHERE UPPER(TRIM(symbol)) = UPPER(TRIM(?))",
+                (symbol,),
+            ).fetchone()
+            overlap = float(row[0]) if row else 0.0
 
     if overlap >= 2.0 and exit_rec["exit_recommendation"] == "BUY MORE":
         exit_rec = dict(exit_rec)
@@ -73,6 +183,9 @@ def format_monitoring_rationale(
     if exit_rec:
         parts.append(exit_rec["exit_recommendation"])
         parts.append(exit_rec["tax_note"])
+    overlap_pct = _as_float(row.get("overlap_pct"))
+    if overlap_pct and overlap_pct > 0:
+        parts.append(f"MF overlap {overlap_pct:.2f}%")
 
     return " | ".join(parts)
 
@@ -103,6 +216,12 @@ class MonitoringAgents:
             if row["holding_type"] == "direct_equity" and row.get("market_value")
         ) or 1.0
 
+        overlap_map = {
+            self.provider.normalize_symbol(item["symbol"]): item
+            for item in ctx.get("overlap_scores", [])
+            if item.get("symbol")
+        }
+
         monitor_universe: list[dict[str, Any]] = []
         seen: set[str] = set()
 
@@ -120,6 +239,7 @@ class MonitoringAgents:
                 "total_weight": round(row["market_value"] / total_direct_value * 100, 2),
             }
             entry["monitor_source"] = "direct"
+            entry["overlap_pct"] = float(overlap_map.get(sym, {}).get("overlap_pct", 0.0) or 0.0)
             monitor_universe.append(entry)
 
         for row in ctx["watchlist"]:
@@ -134,6 +254,7 @@ class MonitoringAgents:
                 "total_weight": 0.0,
             }
             entry["monitor_source"] = "watchlist"
+            entry["overlap_pct"] = float(overlap_map.get(sym, {}).get("overlap_pct", 0.0) or 0.0)
             monitor_universe.append(entry)
 
         broker_map = {
@@ -141,8 +262,14 @@ class MonitoringAgents:
             for item in ctx.get("direct_equity_holdings", [])
             if item.get("symbol")
         }
+        for entry in monitor_universe:
+            buy_info = broker_map.get(entry["symbol"], {})
+            entry["avg_buy_price"] = buy_info.get("avg_buy_price")
+            entry["buy_date"] = buy_info.get("buy_date")
+            entry["current_price"] = buy_info.get("current_price")
         ctx["monitor_universe"] = monitor_universe
         ctx["direct_equity_buy_map"] = broker_map
+        ctx["portfolio_overlap_map"] = overlap_map
         return {"portfolio_context": ctx}
 
     def monitor_industries(self, state: dict[str, Any]) -> dict[str, Any]:
@@ -179,78 +306,33 @@ class MonitoringAgents:
 
     def rescore_quant(self, state: dict[str, Any]) -> dict[str, Any]:
         scores = []
-        for holding in state["portfolio_context"]["monitor_universe"]:
-            financials = self.provider.get_financials(holding["symbol"])
-
-            pe_t = financials.get("pe_trailing")
-            pe_5y = financials.get("pe_5yr_avg")
-            pe_sec = financials.get("sector_pe")
-            pe_fwd = financials.get("pe_forward")
-
-            pe_components: list[tuple[float, float]] = []
-            if pe_t and pe_5y:
-                pe_components.append((0.40, max(0.0, min(1.0, 1.0 - (pe_t - pe_5y) / pe_5y))))
-            if pe_t and pe_sec:
-                pe_components.append((0.35, max(0.0, min(1.0, 1.0 - (pe_t - pe_sec) / pe_sec))))
-            if pe_t and pe_fwd:
-                pe_components.append((0.25, max(0.0, min(1.0, 2.0 - pe_fwd / pe_t))))
-            pe_weight = sum(weight for weight, _ in pe_components)
-            pe_score = sum(weight * score for weight, score in pe_components) / pe_weight if pe_weight > 0 else 0.5
-
-            quality_components: list[tuple[float, float]] = []
-            roce = financials.get("roce_ttm") or financials.get("returnOnCapitalEmployed")
-            if roce is not None:
-                quality_components.append((0.35, min(roce / 0.20, 1.0)))
-
-            fcf_positive_years = financials.get("fcf_positive_years")
-            free_cashflow = financials.get("freeCashflow") or financials.get("free_cashflow")
-            if isinstance(fcf_positive_years, int):
-                quality_components.append((0.25, min(fcf_positive_years / 5, 1.0)))
-            elif free_cashflow is not None:
-                quality_components.append((0.25, 1.0 if free_cashflow > 0 else 0.0))
-
-            revenue_growth = financials.get("revenueGrowth") or financials.get("revenue_growth")
-            if revenue_growth is not None:
-                quality_components.append((0.20, min(max(revenue_growth, 0.0) / 0.15, 1.0)))
-
-            quality_components.append((0.20, pe_score))
-            total_weight = sum(weight for weight, _ in quality_components)
-            quant = round(
-                sum(weight * score for weight, score in quality_components) / total_weight if total_weight > 0 else 0.5,
-                3,
+        for idx, holding in enumerate(state["portfolio_context"]["monitor_universe"]):
+            financials = dict(self.provider.get_financials(holding["symbol"]) or {})
+            financials["overlap_pct"] = holding.get("overlap_pct", 0.0)
+            financials["current_price"] = holding.get("current_price")
+            financials["roce"] = (
+                financials.get("roce_ttm")
+                or financials.get("returnOnCapitalEmployed")
+                or financials.get("roce_5y")
             )
-            scores.append({"symbol": holding["symbol"], "quant_score": quant})
-        return {"quant_scores": scores}
-
-        scores = []
-        for holding in state["portfolio_context"]["monitor_universe"]:
-            financials = self.provider.get_financials(holding["symbol"])
-
-            # P/E score: weighted combination of three relative comparisons.
-            # NOT an absolute threshold — each sub-component is scored 0–1.
-            pe_t = financials["pe_trailing"]
-            pe_5y = financials["pe_5yr_avg"]
-            pe_sec = financials["sector_pe"]
-            pe_fwd = financials["pe_forward"]
-
-            # 40%: stock vs own 5yr avg P/E (discount to own history = good)
-            vs_own = max(0.0, min(1.0, 1.0 - (pe_t - pe_5y) / pe_5y))
-            # 35%: stock vs sector peer P/E (discount to peers = good)
-            vs_sector = max(0.0, min(1.0, 1.0 - (pe_t - pe_sec) / pe_sec))
-            # 25%: forward vs trailing P/E (forward < trailing = earnings growth = good)
-            fwd_vs_trail = max(0.0, min(1.0, 2.0 - pe_fwd / pe_t))
-
-            pe_score = 0.40 * vs_own + 0.35 * vs_sector + 0.25 * fwd_vs_trail
-
-            # Overall quant score: quality + valuation blend.
-            quant = round(
-                min(financials["roce_5y"] / 20, 1.0) * 0.35
-                + min(financials["fcf_positive_years"] / 5, 1.0) * 0.25
-                + min(financials["revenue_consistency"] / 10, 1.0) * 0.20
-                + pe_score * 0.20,
-                3,
+            financials["revenue_growth"] = (
+                financials.get("revenueGrowth")
+                or financials.get("revenue_growth")
             )
-            scores.append({"symbol": holding["symbol"], "quant_score": quant})
+            financials["debt_equity"] = (
+                financials.get("debt_equity")
+                or financials.get("debt_to_equity")
+                or financials.get("debtToEquity")
+                or financials.get("de_ratio")
+            )
+            if idx < 3:
+                debug_monitoring_data(holding["symbol"], financials)
+            scores.append(
+                {
+                    "symbol": holding["symbol"],
+                    "quant_score": compute_monitoring_score(holding["symbol"], financials),
+                }
+            )
         return {"quant_scores": scores}
 
     def review_thesis(self, state: dict[str, Any]) -> dict[str, Any]:
@@ -260,12 +342,15 @@ class MonitoringAgents:
         thesis = []
         for holding in state["portfolio_context"]["monitor_universe"]:
             sector_signal = unified.get(holding["sector"], {})
-            quant = quant_scores.get(holding["symbol"], 0.5)
+            quant = quant_scores.get(holding["symbol"])
 
             # Hard rules always override LLM — enforce first.
             if sector_signal.get("conviction") == "STRONG_AVOID":
                 status = "BREACHED"
                 llm_reasoning = ""
+            elif quant is None:
+                status = "UNKNOWN"
+                llm_reasoning = "Financial data unavailable for monitoring score."
             else:
                 # LLM:Sonnet — nuanced multi-signal thesis assessment.
                 news = stock_news.get(holding["symbol"], {})
@@ -346,11 +431,11 @@ class MonitoringAgents:
             thesis = thesis_map[symbol]["status"]
             drawdown = drawdown_map[symbol]["severity"]
             sentiment = stock_reviews[symbol]["sentiment_score"]
-            quant = quant_map[symbol]
+            quant = quant_map.get(symbol)
             pnl = None
             exit_rec = None
             urgency = "LOW"
-            overlap_pct = 0.0
+            overlap_pct = float(holding.get("overlap_pct", 0.0) or 0.0)
 
             buy_info = buy_map.get(symbol)
             current_price = drawdown_map[symbol].get("current_price")
@@ -359,6 +444,25 @@ class MonitoringAgents:
                 if current_price
                 else self.provider.get_price_context(symbol).get("analyst_target")
             )
+
+            if quant is None:
+                actions.append(
+                    {
+                        "symbol": symbol,
+                        "action": "DATA_UNAVAILABLE",
+                        "severity": "UNKNOWN",
+                        "urgency": "LOW",
+                        "rationale": (
+                            f"Monitoring skipped - financial data not available for {symbol}. "
+                            "Re-run after data refresh."
+                        ),
+                        "overlap_pct": overlap_pct,
+                        "pnl": pnl,
+                        "exit_recommendation": exit_rec,
+                        "analyst_target": analyst_target,
+                    }
+                )
+                continue
 
             if buy_info and current_price:
                 pnl = calculate_pnl(
@@ -379,6 +483,7 @@ class MonitoringAgents:
                     symbol=symbol,
                     exit_rec=exit_rec,
                     db_path=str(self.config.db_path),
+                    overlap_pct=overlap_pct,
                     turso_database_url=self.config.turso_database_url,
                     turso_auth_token=self.config.turso_auth_token,
                     turso_sync_interval_seconds=self.config.turso_sync_interval_seconds,
@@ -416,6 +521,7 @@ class MonitoringAgents:
                     "symbol": symbol,
                     "thesis_status": thesis,
                     "quant_score": quant,
+                    "overlap_pct": overlap_pct,
                 },
                 pnl,
                 exit_rec,
@@ -486,13 +592,30 @@ class MonitoringAgents:
             thesis = next(item for item in state["thesis_reviews"] if item["symbol"] == row["symbol"])
             drawdown = next(item for item in state["drawdown_alerts"] if item["symbol"] == row["symbol"])
             llm_result = None
+            llm_fallback_note = ""
             if row["action"] in {"BUY MORE", "HOLD", "TRIM", "SELL", "REPLACE"}:
-                llm_result = self.llm.monitoring_rationale(row, thesis, drawdown)
+                try:
+                    llm_result = self.llm.monitoring_rationale(row, thesis, drawdown)
+                    llm_rationale = str((llm_result or {}).get("rationale", "")).strip()
+                    if not llm_rationale or len(llm_rationale) < 20:
+                        print(f"MONITORING LLM EMPTY: {row['symbol']}")
+                        llm_fallback_note = "[LLM analysis failed - data context may be empty]"
+                        if llm_result is not None:
+                            llm_result = dict(llm_result)
+                            llm_result["rationale"] = ""
+                except Exception as exc:
+                    print(f"MONITORING LLM ERROR {row['symbol']}: {exc}")
+                    llm_result = None
+                    llm_fallback_note = f"[LLM error: {type(exc).__name__}]"
             # Use LLM-confirmed action/severity/rationale if parsing succeeded;
             # fall back to deterministic values so a JSON failure never drops a row.
             final_action = llm_result["action"] if llm_result else row["action"]
             final_severity = llm_result["severity"] if llm_result else row["severity"]
             final_rationale = row["rationale"]
+            if llm_result and str(llm_result.get("rationale", "")).strip():
+                final_rationale = str(llm_result["rationale"]).strip()
+            elif llm_fallback_note:
+                final_rationale = f"{row['rationale']} {llm_fallback_note}".strip()
             rows.append(
                 MonitoringAction(
                     symbol=row["symbol"],

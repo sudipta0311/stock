@@ -987,6 +987,7 @@ If no material risks are found, return exactly:
             f"Computed action: {action_row['action']} on {action_row['symbol']}\n"
             f"Computed severity: {action_row['severity']}\n"
             f"Computed rationale: {action_row['rationale']}\n"
+            f"Overlap pct: {float(action_row.get('overlap_pct', 0.0)):.2f}%\n"
             f"Thesis status: {thesis['status']} | Sector signal: {thesis['geo_signal_change']}\n"
             f"Drawdown: {drawdown['drawdown_pct']:.1f}% | Alert severity: {drawdown['severity']}"
         )
@@ -999,6 +1000,7 @@ If no material risks are found, return exactly:
             cache_system=True,
         )
         if not raw:
+            print(f"MONITORING LLM EMPTY: {action_row['symbol']}")
             return None
         try:
             result = json.loads(raw)
@@ -1008,12 +1010,16 @@ If no material risks are found, return exactly:
             severity = str(result.get("severity", action_row["severity"])).upper()
             if severity not in {"LOW", "MEDIUM", "HIGH", "CRITICAL"}:
                 severity = action_row["severity"]
+            rationale = str(result.get("rationale", "")).strip()
+            if not rationale or len(rationale) < 20:
+                print(f"MONITORING LLM EMPTY: {action_row['symbol']}")
             return {
                 "action": action,
                 "severity": severity,
-                "rationale": str(result.get("rationale", "")),
+                "rationale": rationale,
             }
-        except (json.JSONDecodeError, ValueError, KeyError):
+        except (json.JSONDecodeError, ValueError, KeyError) as exc:
+            print(f"MONITORING LLM ERROR {action_row['symbol']}: {type(exc).__name__}: {exc}")
             return None
 
     # ── REASONING TIER ───────────────────────────────────────────────────────
