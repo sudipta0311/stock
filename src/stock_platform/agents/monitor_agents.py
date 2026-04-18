@@ -28,6 +28,25 @@ SYMBOL_ALIASES = {
     "AXITA": ["AXITA", "AXITA COTTON"],
 }
 
+# Remaps truncated company-name symbols (produced by mf_lookup._symbol_from_name
+# before the normalisation fix) to proper NSE tickers. Applied in
+# _build_overlap_lookup() so existing DB rows with old keys resolve correctly.
+_NAME_TO_TICKER: dict[str, str] = {
+    "HDFCBANKLIMITED":    "HDFCBANK",
+    "ICICIBANKLIMITED":   "ICICIBANK",
+    "RELIANCEINDUSTRIES": "RELIANCE",
+    "AXISBANKLIMITED":    "AXISBANK",
+    "TATACONSULTANCYSER": "TCS",
+    "INFOSYSLIMITED":     "INFY",
+    "BHARTIAIRTELLIMITE": "BHARTIARTL",
+    "STATEBANKOFINDIA":   "SBIN",
+    "SUNPHARMACEUTICALI": "SUNPHARMA",
+    "HCLTECHNOLOGIESLIM": "HCLTECH",
+    "BIOCONLIMITED":      "BIOCON",
+    "SBILIFEINSURANCECO": "SBILIFE",
+    "95MUTHOOTFINANCELI": "MUTHOOTFIN",
+}
+
 
 def _as_float(value: Any) -> float | None:
     try:
@@ -253,7 +272,19 @@ def format_monitoring_rationale(
         parts.append(exit_rec["tax_note"])
     overlap_pct = _as_float(row.get("overlap_pct"))
     if overlap_pct and overlap_pct > 0:
-        parts.append(f"MF overlap {overlap_pct:.2f}%")
+        if overlap_pct > 10:
+            parts.append(
+                f"MF overlap HIGH at {overlap_pct:.1f}% — MFs already give substantial exposure; "
+                "direct holding adds concentration, not diversification"
+            )
+        elif overlap_pct > 5:
+            parts.append(
+                f"MF overlap MODERATE at {overlap_pct:.1f}% — direct holding adds marginal incremental exposure"
+            )
+        else:
+            parts.append(
+                f"MF overlap LOW at {overlap_pct:.1f}% — direct holding genuinely diversifies"
+            )
 
     return " | ".join(parts)
 
@@ -272,6 +303,11 @@ def _build_overlap_lookup(ctx: dict[str, Any], normalize_symbol: Any) -> dict[st
         overlap_pct = float(overlap_row.get("overlap_pct", 0.0) or 0.0)
         if symbol:
             exact_overlap[symbol] = max(exact_overlap.get(symbol, 0.0), overlap_pct)
+            # Remap legacy truncated company-name symbols to proper NSE tickers
+            # so existing DB rows resolve correctly before re-ingestion.
+            ticker = _NAME_TO_TICKER.get(symbol)
+            if ticker:
+                exact_overlap[ticker] = max(exact_overlap.get(ticker, 0.0), overlap_pct)
         exposure_row = exposure_by_symbol.get(symbol, {})
         company_key = _clean_company_key(exposure_row.get("company_name"))
         if company_key:
