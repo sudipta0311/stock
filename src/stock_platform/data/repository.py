@@ -254,6 +254,38 @@ class PlatformRepository:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def portfolio_table_diagnostics(self) -> dict[str, Any]:
+        with self.connect() as connection:
+            dialect = getattr(connection, "dialect", "sqlite")
+            if dialect == "postgresql":
+                table_rows = connection.execute(
+                    """
+                    SELECT table_name
+                    FROM information_schema.tables
+                    WHERE table_schema = 'public'
+                    ORDER BY table_name
+                    """
+                ).fetchall()
+                table_names = [str(row["table_name"]) for row in table_rows]
+            else:
+                table_rows = connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
+                ).fetchall()
+                table_names = [str(row["name"]) for row in table_rows]
+
+            counts: dict[str, int] = {}
+            for table_name in ("direct_equity", "raw_holdings", "normalized_exposure", "overlap_scores"):
+                if table_name not in table_names:
+                    continue
+                row = connection.execute(f"SELECT COUNT(*) AS row_count FROM {table_name}").fetchone()
+                counts[table_name] = int(row["row_count"]) if row else 0
+
+        return {
+            "dialect": dialect,
+            "tables": table_names,
+            "counts": counts,
+        }
+
     def replace_signals(self, family: str, rows: list[SignalRecord | dict[str, Any]]) -> None:
         timestamp = utc_now_iso()
         normalized_rows: list[SignalRecord] = []
@@ -300,10 +332,13 @@ class PlatformRepository:
         with self.connect() as connection:
             rows = connection.execute(query, params).fetchall()
         return [
-            {
-                **dict(row),
-                "payload": json.loads(row["payload_json"]),
-            }
+            (
+                lambda base, payload: {
+                    **base,
+                    "payload": payload,
+                    "overlap_pct": float(payload.get("overlap_pct", base.get("overlap_pct", 0.0)) or 0.0),
+                }
+            )(dict(row), json.loads(row["payload_json"]))
             for row in rows
         ]
 
@@ -358,10 +393,13 @@ class PlatformRepository:
                 (run_id,),
             ).fetchall()
         return [
-            {
-                **dict(row),
-                "payload": json.loads(row["payload_json"]),
-            }
+            (
+                lambda base, payload: {
+                    **base,
+                    "payload": payload,
+                    "overlap_pct": float(payload.get("overlap_pct", base.get("overlap_pct", 0.0)) or 0.0),
+                }
+            )(dict(row), json.loads(row["payload_json"]))
             for row in rows
         ]
 
@@ -440,10 +478,13 @@ class PlatformRepository:
                 (run_id,),
             ).fetchall()
         return [
-            {
-                **dict(row),
-                "payload": json.loads(row["payload_json"]),
-            }
+            (
+                lambda base, payload: {
+                    **base,
+                    "payload": payload,
+                    "overlap_pct": float(payload.get("overlap_pct", base.get("overlap_pct", 0.0)) or 0.0),
+                }
+            )(dict(row), json.loads(row["payload_json"]))
             for row in rows
         ]
 

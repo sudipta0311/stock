@@ -763,6 +763,8 @@ class LiveMarketDataProvider:
             "symbol_mapped": screener.get("symbol_mapped", False),
             "roce_pct": screener.get("roce_pct"),
             "roe_pct": screener.get("roe_pct"),
+            "returnOnEquity": None if screener.get("roe_pct") is None else screener["roe_pct"] / 100.0,
+            "roe": None if screener.get("roe_pct") is None else screener["roe_pct"] / 100.0,
             "roce_ttm": None if screener.get("roce_pct") is None else screener["roce_pct"] / 100.0,
             "returnOnCapitalEmployed": None if screener.get("roce_pct") is None else screener["roce_pct"] / 100.0,
             "roce_5y": screener.get("roce_pct"),
@@ -783,6 +785,11 @@ class LiveMarketDataProvider:
             ),
             "revenue_momentum": screener.get("revenue_momentum") or {},
             "pat_momentum": screener.get("pat_momentum") or {},
+            "earningsGrowth": (
+                None
+                if (screener.get("pat_momentum") or {}).get("pat_growth_pct") is None
+                else (screener["pat_momentum"]["pat_growth_pct"] / 100.0)
+            ),
             "debtToEquity": screener.get("debt_to_equity"),
             "debt_to_equity": screener.get("debt_to_equity"),
             "pe_trailing": screener.get("pe_ratio"),

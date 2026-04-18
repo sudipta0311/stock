@@ -9,6 +9,15 @@ from stock_platform.models import MonitoringAction
 from stock_platform.utils.entry_calculator import fetch_analyst_consensus_target
 from utils.tax_calculator import calculate_pnl, should_exit
 
+BANKING_SECTORS = {
+    "BANKS",
+    "BANKS - REGIONAL",
+    "PRIVATE BANKING",
+    "FINANCIAL SERVICES",
+    "NBFC",
+    "INSURANCE",
+}
+
 
 def _as_float(value: Any) -> float | None:
     try:
@@ -29,10 +38,19 @@ def _as_ratio(value: Any) -> float | None:
 def debug_monitoring_data(symbol: str, stock_data: dict[str, Any]) -> None:
     print(f"MONITORING DATA CHECK {symbol}:")
     print(f"  roce:           {stock_data.get('roce')}")
+    print(f"  roe:            {stock_data.get('roe')}")
     print(f"  revenue_growth: {stock_data.get('revenue_growth')}")
     print(f"  debt_equity:    {stock_data.get('debt_equity')}")
     print(f"  current_price:  {stock_data.get('current_price')}")
     print(f"  overlap_pct:    {stock_data.get('overlap_pct')}")
+
+
+def _clean_company_key(value: Any) -> str:
+    text = "".join(ch for ch in str(value or "").upper() if ch.isalnum())
+    for suffix in ("LIMITED", "LTD"):
+        if text.endswith(suffix):
+            text = text[: -len(suffix)]
+    return text
 
 
 def _score_debt_to_equity(debt_equity: float) -> float:
@@ -43,76 +61,86 @@ def _score_debt_to_equity(debt_equity: float) -> float:
     return max(0.0, 1.0 - ((debt_equity - 0.25) / 1.75))
 
 
-def compute_monitoring_score(symbol: str, stock_data: dict[str, Any]) -> float | None:
-    try:
-        roce = _as_ratio(
-            stock_data.get("roce_ttm")
+def get_monitoring_metrics(symbol: str, stock_data: dict[str, Any], sector: str | None = None) -> dict[str, Any]:
+    sector_name = str(sector or stock_data.get("sector") or "").strip().upper()
+    symbol_name = str(symbol or "").upper()
+    is_bank = sector_name in BANKING_SECTORS or any(
+        token in symbol_name for token in ["BANK", "FIN", "CARD", "HDFC", "ICICI", "KOTAK", "SBI", "AXIS"]
+    )
+    if is_bank:
+        return {
+            "quality_metric": _as_ratio(
+                stock_data.get("returnOnEquity")
+                or stock_data.get("roe")
+                or stock_data.get("roe_pct")
+                or stock_data.get("roce")
+                or stock_data.get("roce_ttm")
+            ),
+            "growth_metric": _as_ratio(
+                stock_data.get("revenueGrowth")
+                or stock_data.get("revenue_growth")
+                or stock_data.get("earningsGrowth")
+                or stock_data.get("pat_growth_pct")
+            ),
+            "leverage_metric": _as_float(
+                stock_data.get("debtToEquity")
+                or stock_data.get("debt_equity")
+                or stock_data.get("debt_to_equity")
+                or 1.0
+            ),
+            "metric_type": "banking",
+        }
+    return {
+        "quality_metric": _as_ratio(
+            stock_data.get("roce")
+            or stock_data.get("roce_ttm")
             or stock_data.get("returnOnCapitalEmployed")
-            or stock_data.get("roce_5y")
-        )
-        revenue_growth = _as_ratio(
-            stock_data.get("revenueGrowth")
-            or stock_data.get("revenue_growth")
-        )
-        if revenue_growth is None:
-            consistency = _as_float(stock_data.get("revenue_consistency"))
-            if consistency is not None:
-                revenue_growth = max(0.0, min(consistency / 10.0, 1.0)) * 0.15
-
-        debt_equity = _as_float(
+            or stock_data.get("returnOnEquity")
+            or stock_data.get("roe")
+            or stock_data.get("roe_pct")
+        ),
+        "growth_metric": _as_ratio(
+            stock_data.get("revenue_growth")
+            or stock_data.get("revenueGrowth")
+            or stock_data.get("earningsGrowth")
+            or stock_data.get("pat_growth_pct")
+        ),
+        "leverage_metric": _as_float(
             stock_data.get("debt_equity")
             or stock_data.get("debt_to_equity")
             or stock_data.get("debtToEquity")
             or stock_data.get("de_ratio")
-        )
+        ),
+        "metric_type": "standard",
+    }
 
-        if any(value is None for value in (roce, revenue_growth, debt_equity)):
+
+def compute_monitoring_score(symbol: str, stock_data: dict[str, Any], sector: str | None = None) -> float | None:
+    try:
+        metrics = get_monitoring_metrics(symbol, stock_data, sector)
+        quality_metric = metrics["quality_metric"]
+        growth_metric = metrics["growth_metric"]
+        leverage_metric = metrics["leverage_metric"]
+        metric_type = metrics["metric_type"]
+
+        if quality_metric is None and growth_metric is None:
             print(
-                f"MONITORING SCORE FAIL {symbol}: missing data "
-                f"roce={roce} rev={revenue_growth} de={debt_equity}"
+                f"MONITORING SCORE FAIL {symbol}: no quality or growth metric found "
+                f"sector={sector} metric_type={metric_type}"
             )
             return None
 
-        pe_t = _as_float(stock_data.get("pe_trailing"))
-        pe_5y = _as_float(stock_data.get("pe_5yr_avg"))
-        pe_sec = _as_float(stock_data.get("sector_pe"))
-        pe_fwd = _as_float(stock_data.get("pe_forward"))
-
-        pe_components: list[tuple[float, float]] = []
-        if pe_t and pe_5y:
-            pe_components.append((0.40, max(0.0, min(1.0, 1.0 - (pe_t - pe_5y) / pe_5y))))
-        if pe_t and pe_sec:
-            pe_components.append((0.35, max(0.0, min(1.0, 1.0 - (pe_t - pe_sec) / pe_sec))))
-        if pe_t and pe_fwd:
-            pe_components.append((0.25, max(0.0, min(1.0, 2.0 - pe_fwd / pe_t))))
-        pe_score = (
-            sum(weight * score for weight, score in pe_components) / sum(weight for weight, _ in pe_components)
-            if pe_components
-            else None
-        )
-
-        quality_components: list[tuple[float, float]] = [
-            (0.40, min(max(roce, 0.0) / 0.20, 1.0)),
-            (0.30, min(max(revenue_growth, 0.0) / 0.15, 1.0)),
-            (0.20, _score_debt_to_equity(debt_equity)),
-        ]
-
-        fcf_positive_years = stock_data.get("fcf_positive_years")
-        free_cashflow = stock_data.get("freeCashflow") or stock_data.get("free_cashflow")
-        if isinstance(fcf_positive_years, int):
-            quality_components.append((0.10, min(fcf_positive_years / 5, 1.0)))
-        elif free_cashflow is not None:
-            cash_value = _as_float(free_cashflow)
-            quality_components.append((0.10, 1.0 if cash_value is not None and cash_value > 0 else 0.0))
-        elif pe_score is not None:
-            quality_components.append((0.10, pe_score))
-
-        total_weight = sum(weight for weight, _ in quality_components)
-        if total_weight <= 0:
-            print(f"MONITORING SCORE FAIL {symbol}: no usable score components")
-            return None
-
-        return round(sum(weight * score for weight, score in quality_components) / total_weight, 3)
+        score = 0.5
+        if quality_metric is not None:
+            if metric_type == "banking":
+                score += 0.2 if quality_metric > 0.12 else 0.1 if quality_metric > 0.08 else -0.1
+            else:
+                score += 0.2 if quality_metric > 0.15 else 0.1 if quality_metric > 0.10 else -0.1
+        if growth_metric is not None:
+            score += 0.15 if growth_metric > 0.15 else 0.05 if growth_metric > 0.08 else -0.1
+        if leverage_metric is not None and metric_type != "banking":
+            score += 0.1 if leverage_metric < 0.5 else 0.0 if leverage_metric < 1.0 else -0.1
+        return round(min(max(score, 0.0), 1.0), 2)
     except Exception as exc:
         print(f"MONITORING SCORE ERROR {symbol}: {exc}")
         return None
@@ -190,6 +218,35 @@ def format_monitoring_rationale(
     return " | ".join(parts)
 
 
+def _build_overlap_lookup(ctx: dict[str, Any], normalize_symbol: Any) -> dict[str, float]:
+    exact_overlap: dict[str, float] = {}
+    company_overlap: dict[str, float] = {}
+    exposure_by_symbol = {
+        normalize_symbol(row.get("symbol") or ""): row
+        for row in ctx.get("normalized_exposure", [])
+        if row.get("symbol")
+    }
+
+    for overlap_row in ctx.get("overlap_scores", []):
+        symbol = normalize_symbol(overlap_row.get("symbol") or "")
+        overlap_pct = float(overlap_row.get("overlap_pct", 0.0) or 0.0)
+        if symbol:
+            exact_overlap[symbol] = max(exact_overlap.get(symbol, 0.0), overlap_pct)
+        exposure_row = exposure_by_symbol.get(symbol, {})
+        company_key = _clean_company_key(exposure_row.get("company_name"))
+        if company_key:
+            company_overlap[company_key] = max(company_overlap.get(company_key, 0.0), overlap_pct)
+
+    resolved: dict[str, float] = dict(exact_overlap)
+    for exposure_row in ctx.get("normalized_exposure", []):
+        symbol = normalize_symbol(exposure_row.get("symbol") or "")
+        company_key = _clean_company_key(exposure_row.get("company_name"))
+        if not symbol or not company_key:
+            continue
+        resolved[symbol] = max(resolved.get(symbol, 0.0), company_overlap.get(company_key, 0.0))
+    return resolved
+
+
 class MonitoringAgents:
     def __init__(self, repo: Any, provider: Any, config: AppConfig, signal_refresh_runner: Any, llm: Any) -> None:
         self.repo = repo
@@ -204,6 +261,28 @@ class MonitoringAgents:
 
     def load_context(self, state: dict[str, Any]) -> dict[str, Any]:
         ctx = self.repo.load_portfolio_context()
+        print(
+            "Portfolio context loaded: "
+            f"{len(ctx.get('direct_equity_holdings', []))} direct holdings, "
+            f"{len(ctx.get('raw_holdings', []))} raw rows, "
+            f"{len(ctx.get('overlap_scores', []))} overlap rows"
+        )
+        sample_holdings = [
+            {
+                "symbol": row.get("symbol"),
+                "avg_buy_price": row.get("avg_buy_price"),
+                "buy_date": row.get("buy_date"),
+            }
+            for row in ctx.get("direct_equity_holdings", [])[:3]
+        ]
+        print(f"Portfolio context sample: {sample_holdings}")
+        if (
+            not ctx.get("direct_equity_holdings")
+            or not any(float(row.get("overlap_pct", 0.0) or 0.0) > 0 for row in ctx.get("overlap_scores", []))
+        ):
+            diagnostics = getattr(self.repo, "portfolio_table_diagnostics", lambda: {})()
+            if diagnostics:
+                print(f"Portfolio table diagnostic: {diagnostics}")
 
         # Build monitor universe: direct equity holdings + watchlist only.
         # MF / ETF indirect holdings are excluded — the user monitors those
@@ -216,11 +295,7 @@ class MonitoringAgents:
             if row["holding_type"] == "direct_equity" and row.get("market_value")
         ) or 1.0
 
-        overlap_map = {
-            self.provider.normalize_symbol(item["symbol"]): item
-            for item in ctx.get("overlap_scores", [])
-            if item.get("symbol")
-        }
+        overlap_lookup = _build_overlap_lookup(ctx, self.provider.normalize_symbol)
 
         monitor_universe: list[dict[str, Any]] = []
         seen: set[str] = set()
@@ -239,7 +314,7 @@ class MonitoringAgents:
                 "total_weight": round(row["market_value"] / total_direct_value * 100, 2),
             }
             entry["monitor_source"] = "direct"
-            entry["overlap_pct"] = float(overlap_map.get(sym, {}).get("overlap_pct", 0.0) or 0.0)
+            entry["overlap_pct"] = float(overlap_lookup.get(sym, 0.0) or 0.0)
             monitor_universe.append(entry)
 
         for row in ctx["watchlist"]:
@@ -254,7 +329,7 @@ class MonitoringAgents:
                 "total_weight": 0.0,
             }
             entry["monitor_source"] = "watchlist"
-            entry["overlap_pct"] = float(overlap_map.get(sym, {}).get("overlap_pct", 0.0) or 0.0)
+            entry["overlap_pct"] = float(overlap_lookup.get(sym, 0.0) or 0.0)
             monitor_universe.append(entry)
 
         broker_map = {
@@ -269,7 +344,7 @@ class MonitoringAgents:
             entry["current_price"] = buy_info.get("current_price")
         ctx["monitor_universe"] = monitor_universe
         ctx["direct_equity_buy_map"] = broker_map
-        ctx["portfolio_overlap_map"] = overlap_map
+        ctx["portfolio_overlap_map"] = overlap_lookup
         return {"portfolio_context": ctx}
 
     def monitor_industries(self, state: dict[str, Any]) -> dict[str, Any]:
@@ -310,6 +385,12 @@ class MonitoringAgents:
             financials = dict(self.provider.get_financials(holding["symbol"]) or {})
             financials["overlap_pct"] = holding.get("overlap_pct", 0.0)
             financials["current_price"] = holding.get("current_price")
+            financials["sector"] = holding.get("sector")
+            financials["roe"] = (
+                financials.get("returnOnEquity")
+                or financials.get("roe")
+                or financials.get("roe_pct")
+            )
             financials["roce"] = (
                 financials.get("roce_ttm")
                 or financials.get("returnOnCapitalEmployed")
@@ -330,7 +411,11 @@ class MonitoringAgents:
             scores.append(
                 {
                     "symbol": holding["symbol"],
-                    "quant_score": compute_monitoring_score(holding["symbol"], financials),
+                    "quant_score": compute_monitoring_score(
+                        holding["symbol"],
+                        financials,
+                        holding.get("sector"),
+                    ),
                 }
             )
         return {"quant_scores": scores}
