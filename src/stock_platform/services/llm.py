@@ -987,6 +987,7 @@ If no material risks are found, return exactly:
             f"Computed action: {action_row['action']} on {action_row['symbol']}\n"
             f"Computed severity: {action_row['severity']}\n"
             f"Computed rationale: {action_row['rationale']}\n"
+            f"Caution flag: {action_row.get('caution_flag') or 'None'}\n"
             f"Overlap pct: {float(action_row.get('overlap_pct', 0.0)):.2f}%\n"
             f"Thesis status: {thesis['status']} | Sector signal: {thesis['geo_signal_change']}\n"
             f"Drawdown: {drawdown['drawdown_pct']:.1f}% | Alert severity: {drawdown['severity']}"
