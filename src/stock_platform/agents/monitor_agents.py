@@ -323,6 +323,36 @@ def _build_overlap_lookup(ctx: dict[str, Any], normalize_symbol: Any) -> dict[st
     return resolved
 
 
+AUTOMATIC_REVIEW_TRIGGERS = {
+    "revenue_degrowth_severe": lambda s: (s.get("revenue_growth", 0) or 0) < -0.20,
+    "near_zero_margin": lambda s: (s.get("pat_margin", 1) or 1) < 0.01,
+    "pe_extreme_low_profit": lambda s: (
+        (s.get("pe_ratio", 0) or 0) > 50 and (s.get("pat_margin", 1) or 1) < 0.02
+    ),
+    "promoter_selling": lambda s: (s.get("promoter_holding_change_3yr", 0) or 0) < -0.15,
+}
+
+
+def check_auto_review(symbol: str, stock_data: dict) -> dict:
+    triggers_fired = []
+    for name, condition in AUTOMATIC_REVIEW_TRIGGERS.items():
+        try:
+            if condition(stock_data):
+                triggers_fired.append(name)
+        except Exception:
+            pass
+    if len(triggers_fired) >= 2:
+        return {
+            "override_action": "REVIEW",
+            "override_severity": "HIGH",
+            "override_reason": (
+                f"Auto-review triggered: {', '.join(triggers_fired)}. "
+                "Standard HOLD threshold does not apply — manual review needed."
+            ),
+        }
+    return {}
+
+
 class MonitoringAgents:
     def __init__(self, repo: Any, provider: Any, config: AppConfig, signal_refresh_runner: Any, llm: Any) -> None:
         self.repo = repo
@@ -492,6 +522,7 @@ class MonitoringAgents:
                         financials,
                         holding.get("sector"),
                     ),
+                    "financials": financials,
                 }
             )
         return {"quant_scores": scores}
@@ -585,6 +616,7 @@ class MonitoringAgents:
         thesis_map = {row["symbol"]: row for row in state["thesis_reviews"]}
         drawdown_map = {row["symbol"]: row for row in state["drawdown_alerts"]}
         quant_map = {row["symbol"]: row["quant_score"] for row in state["quant_scores"]}
+        financials_map = {row["symbol"]: row.get("financials", {}) for row in state["quant_scores"]}
         buy_map = state["portfolio_context"].get("direct_equity_buy_map", {})
         actions = []
         for holding in state["portfolio_context"]["monitor_universe"]:
@@ -650,6 +682,28 @@ class MonitoringAgents:
                     turso_sync_interval_seconds=self.config.turso_sync_interval_seconds,
                 )
                 urgency = exit_rec["urgency"]
+
+            auto = check_auto_review(symbol, financials_map.get(symbol, {}))
+            if auto:
+                action = auto["override_action"]
+                severity = auto["override_severity"]
+                urgency = "HIGH"
+                rationale = auto["override_reason"]
+                actions.append(
+                    {
+                        "symbol": symbol,
+                        "action": action,
+                        "severity": severity,
+                        "urgency": urgency,
+                        "rationale": rationale,
+                        "overlap_pct": overlap_pct,
+                        "pnl": pnl,
+                        "exit_recommendation": exit_rec,
+                        "analyst_target": analyst_target,
+                        "auto_review_override": True,
+                    }
+                )
+                continue
 
             if thesis == "BREACHED":
                 action = "EXIT - thesis breached"
@@ -754,7 +808,9 @@ class MonitoringAgents:
             drawdown = next(item for item in state["drawdown_alerts"] if item["symbol"] == row["symbol"])
             llm_result = None
             llm_fallback_note = ""
-            if row["action"] in {"BUY MORE", "HOLD", "TRIM", "SELL", "REPLACE"}:
+            if row.get("auto_review_override"):
+                pass  # Auto-override is sufficient — skip LLM call.
+            elif row["action"] in {"BUY MORE", "HOLD", "TRIM", "SELL", "REPLACE"}:
                 try:
                     llm_result = self.llm.monitoring_rationale(row, thesis, drawdown)
                     llm_rationale = str((llm_result or {}).get("rationale", "")).strip()
