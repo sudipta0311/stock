@@ -551,6 +551,11 @@ class LiveMarketDataProvider:
             "sector": sector,
             "price": current_price,
             "analyst_target": self._as_float(info.get("targetMeanPrice")),
+            "market_cap_cr": (
+                None
+                if self._as_float(info.get("marketCap")) is None
+                else round(float(self._as_float(info.get("marketCap")) or 0.0) / 1e7, 2)
+            ),
             "us_revenue_pct": None,
             "beta": self._as_float(info.get("beta")),
             "avg_daily_value_cr": price_metrics.get("avg_daily_value_cr"),
@@ -797,7 +802,13 @@ class LiveMarketDataProvider:
             "pe_5yr_avg": None,
             "sector_pe": None,
             "pe_forward": None,
-            "profit_margins": None,
+            "profit_margins": (
+                None if screener.get("net_margin_pct") is None else screener["net_margin_pct"] / 100.0
+            ),
+            "pat_margin": None if screener.get("pat_margin_pct") is None else screener["pat_margin_pct"] / 100.0,
+            "pat_margin_pct": screener.get("pat_margin_pct"),
+            "net_margin": None if screener.get("net_margin_pct") is None else screener["net_margin_pct"] / 100.0,
+            "net_margin_pct": screener.get("net_margin_pct"),
             "trailingEps": screener.get("eps"),
             "eps": screener.get("eps"),
             "currentPrice": snapshot_price or screener.get("current_price"),
@@ -807,9 +818,12 @@ class LiveMarketDataProvider:
             "fiftyTwoWeekHigh": screener.get("week52_high"),
             "fiftyTwoWeekLow": screener.get("week52_low"),
             "beta": snapshot.get("beta"),
+            "market_cap_cr": screener.get("market_cap_cr") or snapshot.get("market_cap_cr"),
+            "marketCapCr": screener.get("market_cap_cr") or snapshot.get("market_cap_cr"),
             "promoter_holding_pct": None if screener.get("promoter_holding") is None else screener["promoter_holding"] / 100.0,
             "promoter_holding": screener.get("promoter_holding"),
             "promoter_change": screener.get("promoter_change"),
+            "promoter_holding_change_3yr": screener.get("promoter_holding_change_3yr"),
             "pledge_pct": screener.get("pledge_pct"),
             "pledge_trend": screener.get("pledge_trend"),
             "pledge_history": screener.get("pledge_history") or [],

@@ -391,6 +391,44 @@ def compute_pat_momentum(
     }
 
 
+def compute_profitability_snapshot(
+    symbol: str,
+    quarterly_income_stmt: Any | None = None,
+) -> dict[str, Any]:
+    """
+    Compute a simple latest-quarter PAT margin snapshot from the quarterly statement.
+    Returns margins in percentage terms so downstream callers can choose their own
+    ratio/percent normalisation.
+    """
+    clean_symbol = resolve_symbol_base(normalize_input_symbol(symbol))
+    statement = quarterly_income_stmt if quarterly_income_stmt is not None else _fetch_quarterly_income_stmt(clean_symbol)
+    if statement is None:
+        return {}
+
+    columns = _ordered_statement_columns(statement)
+    if not columns:
+        return {}
+
+    revenue_row = _pick_statement_row(statement, _REVENUE_ROW_CANDIDATES)
+    pat_row = _pick_statement_row(statement, _PAT_ROW_CANDIDATES)
+    if not revenue_row or not pat_row:
+        return {}
+
+    latest_col = columns[0]
+    revenue = _as_float(statement.at[revenue_row, latest_col])
+    pat = _as_float(statement.at[pat_row, latest_col])
+    if revenue in (None, 0) or pat is None:
+        return {}
+
+    margin_pct = round((pat / revenue) * 100.0, 2)
+    return {
+        "pat_margin_pct": margin_pct,
+        "net_margin_pct": margin_pct,
+        "latest_quarter_label": _format_fy_quarter_from_column(latest_col),
+        "source": "yfinance_quarterly_income_stmt",
+    }
+
+
 def _fetch_soup(clean_symbol: str, consolidated: bool) -> BeautifulSoup | None:
     suffix = "consolidated/" if consolidated else ""
     url = f"https://www.screener.in/company/{clean_symbol}/{suffix}"
@@ -478,6 +516,37 @@ def _parse_promoter_change(soup: BeautifulSoup | None) -> float | None:
                             return latest - prev
                         except Exception:
                             pass
+    except Exception:
+        pass
+    return None
+
+
+def _parse_promoter_change_3yr(soup: BeautifulSoup | None) -> float | None:
+    """
+    Return the relative promoter holding change versus roughly 3 years ago.
+    Negative values mean promoters have been selling.
+    """
+    if soup is None:
+        return None
+    try:
+        for table in soup.select(".shareholding-table, #quarterly-shp table, #yearly-shp table"):
+            for row in table.select("tr"):
+                cells = row.select("td, th")
+                if len(cells) < 3:
+                    continue
+                label = cells[0].get_text(" ", strip=True).lower()
+                if "promoter" not in label:
+                    continue
+                values = [_clean_number(cell.get_text(" ", strip=True)) for cell in cells[1:]]
+                values = [value for value in values if value is not None]
+                if len(values) < 2:
+                    continue
+                compare_idx = 12 if len(values) > 12 else len(values) - 1
+                latest = values[0]
+                oldest = values[compare_idx]
+                if latest is None or oldest in (None, 0):
+                    continue
+                return (latest - oldest) / abs(oldest)
     except Exception:
         pass
     return None
@@ -734,9 +803,17 @@ def fetch_screener_data(nse_symbol: str) -> dict[str, Any]:
         _parse_promoter_change(consolidated_soup)
         or _parse_promoter_change(standalone_soup)
     )
+    promoter_change_3yr = (
+        _parse_promoter_change_3yr(consolidated_soup)
+        or _parse_promoter_change_3yr(standalone_soup)
+    )
     debt_to_equity = _parse_debt_to_equity(consolidated_soup)
     if debt_to_equity is None:
         debt_to_equity = _parse_debt_to_equity(standalone_soup)
+    market_cap_cr = (
+        _get_ratio_value(consolidated_ratios, "market cap")
+        or _get_ratio_value(standalone_ratios, "market cap")
+    )
     dma_200 = (
         _get_ratio_value(consolidated_ratios, "200 DMA", "200D MA")
         or _get_ratio_value(standalone_ratios, "200 DMA", "200D MA")
@@ -771,6 +848,7 @@ def fetch_screener_data(nse_symbol: str) -> dict[str, Any]:
         },
         quarterly_income_stmt=quarterly_stmt,
     )
+    profitability = compute_profitability_snapshot(clean_symbol, quarterly_income_stmt=quarterly_stmt)
     recent_results = dict(revenue_momentum or {})
     if pat_momentum:
         recent_results.update(pat_momentum)
@@ -789,8 +867,12 @@ def fetch_screener_data(nse_symbol: str) -> dict[str, Any]:
         "revenue_growth_latest_qtr": revenue_growth_latest_qtr,
         "revenue_momentum": revenue_momentum,
         "pat_momentum": pat_momentum,
+        "pat_margin_pct": profitability.get("pat_margin_pct"),
+        "net_margin_pct": profitability.get("net_margin_pct"),
         "promoter_holding": promoter_holding,
         "promoter_change": promoter_change,
+        "promoter_holding_change_3yr": promoter_change_3yr,
+        "market_cap_cr": market_cap_cr,
         "pledge_pct": pledge_data.get("pledge_pct"),
         "pledge_trend": pledge_data.get("pledge_trend"),
         "pledge_history": pledge_data.get("pledge_history") or [],

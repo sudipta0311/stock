@@ -13,7 +13,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from stock_platform.agents.monitor_agents import MonitoringAgents, compute_monitoring_score, get_overlap_pct
+from stock_platform.agents.monitor_agents import MonitoringAgents, check_auto_review, compute_monitoring_score, get_overlap_pct
 from stock_platform.config import AppConfig
 
 LOCAL_DB_CONFIG = {
@@ -47,6 +47,10 @@ class StubProvider:
 
 
 class StubLLM:
+    def thesis_review(self, holding, quant, sector_signal, news):  # pragma: no cover - not used in this test
+        del holding, quant, sector_signal, news
+        return None
+
     def monitoring_rationale(self, action_row, thesis, drawdown):  # pragma: no cover - not used in this test
         return None
 
@@ -62,6 +66,10 @@ class ShortRationaleLLM:
 
 
 class ErrorLLM:
+    def thesis_review(self, holding, quant, sector_signal, news):
+        del holding, quant, sector_signal, news
+        raise RuntimeError("thesis LLM blew up")
+
     def monitoring_rationale(self, action_row, thesis, drawdown):
         del action_row, thesis, drawdown
         raise RuntimeError("monitoring LLM blew up")
@@ -123,6 +131,42 @@ class MonitoringTaxLogicTests(unittest.TestCase):
         )
 
         self.assertEqual(score, 0.75)
+
+    def test_check_auto_review_overrides_axita_style_failure_pattern(self) -> None:
+        result = check_auto_review(
+            "AXITA",
+            {
+                "revenue_growth": -0.41,
+                "pat_margin": 0.003,
+                "pe_ratio": 144.0,
+                "promoter_holding_change_3yr": -0.277,
+                "pat_growth_pct": -0.52,
+                "market_cap_cr": 320.0,
+                "sector": "Textiles",
+            },
+        )
+
+        self.assertTrue(result["override"])
+        self.assertEqual(result["override_action"], "REVIEW")
+        self.assertEqual(result["override_severity"], "HIGH")
+        self.assertEqual(result["override_urgency"], "HIGH")
+        self.assertGreaterEqual(len(result["triggers"]), 4)
+
+    def test_check_auto_review_returns_caution_for_single_trigger(self) -> None:
+        result = check_auto_review(
+            "HINDUNILVR",
+            {
+                "revenue_growth": -0.25,
+                "pat_margin": 0.18,
+                "pe_ratio": 48.0,
+                "sector": "Consumer Staples",
+                "market_cap_cr": 500000.0,
+            },
+        )
+
+        self.assertFalse(result["override"])
+        self.assertIn("caution_flag", result)
+        self.assertEqual(len(result["triggers"]), 1)
 
     def test_wait_then_exit_when_ltcg_is_close_and_upside_is_limited(self) -> None:
         agent = MonitoringAgents(StubRepo(), StubProvider(), AppConfig(**LOCAL_DB_CONFIG), lambda **kwargs: None, StubLLM())
@@ -233,6 +277,79 @@ class MonitoringTaxLogicTests(unittest.TestCase):
         fresh.assert_called_once_with("JIOFIN", 120.0)
         self.assertEqual(row["action"], "HOLD")
         self.assertEqual(row["urgency"], "LOW")
+
+    def test_review_thesis_skips_llm_when_auto_review_override_exists(self) -> None:
+        agent = MonitoringAgents(StubRepo(), StubProvider(), AppConfig(**LOCAL_DB_CONFIG), lambda **kwargs: None, ErrorLLM())
+        state = {
+            "portfolio_context": {
+                "monitor_universe": [{"symbol": "AXITA", "sector": "Textiles", "monitor_source": "direct", "total_weight": 8.0}],
+                "unified_signals": [],
+            },
+            "quant_scores": [
+                {
+                    "symbol": "AXITA",
+                    "quant_score": 0.41,
+                    "financials": {
+                        "revenue_growth": -0.41,
+                        "pat_margin": 0.003,
+                        "pe_ratio": 144.0,
+                        "promoter_holding_change_3yr": -0.277,
+                        "market_cap_cr": 320.0,
+                        "sector": "Textiles",
+                    },
+                    "auto_review": check_auto_review(
+                        "AXITA",
+                        {
+                            "revenue_growth": -0.41,
+                            "pat_margin": 0.003,
+                            "pe_ratio": 144.0,
+                            "promoter_holding_change_3yr": -0.277,
+                            "market_cap_cr": 320.0,
+                            "sector": "Textiles",
+                        },
+                    ),
+                }
+            ],
+            "stock_reviews": [{"symbol": "AXITA", "sentiment_score": 0.1}],
+        }
+
+        result = agent.review_thesis(state)
+
+        self.assertEqual(result["thesis_reviews"][0]["status"], "WEAKENED")
+        self.assertIn("AUTO-REVIEW", result["thesis_reviews"][0]["llm_reasoning"])
+
+    def test_decide_actions_promotes_auto_review_override_to_review_high(self) -> None:
+        agent = MonitoringAgents(StubRepo(), StubProvider(), AppConfig(**LOCAL_DB_CONFIG), lambda **kwargs: None, StubLLM())
+        auto = check_auto_review(
+            "AXITA",
+            {
+                "revenue_growth": -0.41,
+                "pat_margin": 0.003,
+                "pe_ratio": 144.0,
+                "promoter_holding_change_3yr": -0.277,
+                "market_cap_cr": 320.0,
+                "sector": "Textiles",
+            },
+        )
+        state = {
+            "portfolio_context": {
+                "monitor_universe": [{"symbol": "AXITA", "monitor_source": "direct", "total_weight": 8.0, "overlap_pct": 0.0}],
+                "direct_equity_buy_map": {},
+            },
+            "stock_reviews": [{"symbol": "AXITA", "sentiment_score": 0.1}],
+            "thesis_reviews": [{"symbol": "AXITA", "status": "WEAKENED"}],
+            "drawdown_alerts": [{"symbol": "AXITA", "severity": "LOW", "current_price": 18.0}],
+            "quant_scores": [{"symbol": "AXITA", "quant_score": 0.52, "auto_review": auto, "financials": {}}],
+        }
+
+        with patch("stock_platform.agents.monitor_agents.fetch_analyst_consensus_target", return_value=20.0):
+            result = agent.decide_actions(state)
+
+        row = result["actions"][0]
+        self.assertEqual(row["action"], "REVIEW")
+        self.assertEqual(row["severity"], "HIGH")
+        self.assertEqual(row["urgency"], "HIGH")
+        self.assertTrue(row["auto_review_override"])
 
     def test_large_winner_with_intact_thesis_becomes_strong_winner_hold(self) -> None:
         agent = MonitoringAgents(StubRepo(), StubProvider(), AppConfig(**LOCAL_DB_CONFIG), lambda **kwargs: None, StubLLM())

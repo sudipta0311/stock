@@ -64,6 +64,22 @@ def _as_ratio(value: Any) -> float | None:
     return raw / 100.0 if abs(raw) > 1.5 else raw
 
 
+def _metric_ratio(stock_data: dict[str, Any], *keys: str) -> float | None:
+    for key in keys:
+        ratio = _as_ratio(stock_data.get(key))
+        if ratio is not None:
+            return ratio
+    return None
+
+
+def _metric_float(stock_data: dict[str, Any], *keys: str) -> float | None:
+    for key in keys:
+        numeric = _as_float(stock_data.get(key))
+        if numeric is not None:
+            return numeric
+    return None
+
+
 def debug_monitoring_data(symbol: str, stock_data: dict[str, Any]) -> None:
     print(f"MONITORING DATA CHECK {symbol}:")
     print(f"  roce:           {stock_data.get('roce')}")
@@ -286,6 +302,10 @@ def format_monitoring_rationale(
                 f"MF overlap LOW at {overlap_pct:.1f}% — direct holding genuinely diversifies"
             )
 
+    caution_flag = str(row.get("caution_flag") or "").strip()
+    if caution_flag:
+        parts.append(f"Caution flag: {caution_flag}")
+
     return " | ".join(parts)
 
 
@@ -323,7 +343,7 @@ def _build_overlap_lookup(ctx: dict[str, Any], normalize_symbol: Any) -> dict[st
     return resolved
 
 
-AUTOMATIC_REVIEW_TRIGGERS = {
+LEGACY_AUTOMATIC_REVIEW_TRIGGERS = {
     "revenue_degrowth_severe": lambda s: (s.get("revenue_growth", 0) or 0) < -0.20,
     "near_zero_margin": lambda s: (s.get("pat_margin", 1) or 1) < 0.01,
     "pe_extreme_low_profit": lambda s: (
@@ -333,9 +353,9 @@ AUTOMATIC_REVIEW_TRIGGERS = {
 }
 
 
-def check_auto_review(symbol: str, stock_data: dict) -> dict:
+def _legacy_check_auto_review(symbol: str, stock_data: dict) -> dict:
     triggers_fired = []
-    for name, condition in AUTOMATIC_REVIEW_TRIGGERS.items():
+    for name, condition in LEGACY_AUTOMATIC_REVIEW_TRIGGERS.items():
         try:
             if condition(stock_data):
                 triggers_fired.append(name)
@@ -349,6 +369,88 @@ def check_auto_review(symbol: str, stock_data: dict) -> dict:
                 f"Auto-review triggered: {', '.join(triggers_fired)}. "
                 "Standard HOLD threshold does not apply — manual review needed."
             ),
+        }
+    return {}
+
+
+AUTOMATIC_REVIEW_TRIGGERS: dict[str, dict[str, Any]] = {
+    "revenue_degrowth_severe": {
+        "condition": lambda s: (
+            (_metric_ratio(s, "revenue_growth", "revenueGrowth", "revenue_growth_pct", "revenue_growth_ttm") or 0.0)
+            < -0.20
+        ),
+        "message": "Revenue declining >20% YoY - severe top-line deterioration",
+    },
+    "near_zero_margin": {
+        "condition": lambda s: (
+            0.0
+            < (_metric_ratio(s, "pat_margin", "net_margin", "profit_margins", "pat_margin_pct", "net_margin_pct") or 0.0)
+            < 0.01
+        ),
+        "message": "PAT margin below 1% - business generating no profit",
+    },
+    "pe_extreme_low_profit": {
+        "condition": lambda s: (
+            (_metric_float(s, "pe_ratio", "pe_trailing") or 0.0) > 80.0
+            and (_metric_ratio(s, "pat_margin", "net_margin", "profit_margins", "pat_margin_pct", "net_margin_pct") or 0.0)
+            < 0.02
+        ),
+        "message": "PE >80x with <2% margin - valuation entirely speculative",
+    },
+    "promoter_selling_sustained": {
+        "condition": lambda s: (_metric_ratio(s, "promoter_holding_change_3yr") or 0.0) < -0.15,
+        "message": "Promoter holding down >15% over 3 years - sustained insider selling",
+    },
+    "pat_momentum_collapsing": {
+        "condition": lambda s: (_metric_ratio(s, "pat_growth_pct", "earningsGrowth") or 0.0) < -0.40,
+        "message": "PAT down >40% YoY - earnings collapsing",
+    },
+    "micro_cap_commodity": {
+        "condition": lambda s: (
+            (_metric_float(s, "market_cap_cr", "marketCapCr") or 999999.0) < 500.0
+            and any(
+                token in str(s.get("sector", "") or "").lower()
+                for token in ("textile", "textiles", "cotton", "commodity", "agri", "agriculture", "sugar", "paper")
+            )
+        ),
+        "message": "Micro-cap commodity processor - standard thresholds unreliable",
+    },
+}
+
+
+def check_auto_review(symbol: str, stock_data: dict[str, Any]) -> dict[str, Any]:
+    """
+    Evaluate warning conditions before the monitoring LLM path.
+    Two or more triggers force REVIEW/HIGH; one trigger becomes a caution flag.
+    """
+    fired: list[dict[str, str]] = []
+
+    for name, trigger in AUTOMATIC_REVIEW_TRIGGERS.items():
+        try:
+            if trigger["condition"](stock_data):
+                fired.append({"name": name, "message": str(trigger["message"])})
+                print(f"AUTO-REVIEW TRIGGER: {symbol} - {name}: {trigger['message']}")
+        except Exception as exc:
+            print(f"Trigger check error {symbol}/{name}: {exc}")
+
+    if len(fired) >= 2:
+        trigger_summary = " | ".join(item["message"] for item in fired)
+        return {
+            "override": True,
+            "override_action": "REVIEW",
+            "override_severity": "HIGH",
+            "override_urgency": "HIGH",
+            "override_rationale": (
+                f"WARNING AUTO-REVIEW: {len(fired)} warning conditions fired - {trigger_summary}. "
+                "Standard HOLD threshold does not apply. Manual review required before next portfolio rebalancing."
+            ),
+            "triggers": fired,
+        }
+    if len(fired) == 1:
+        return {
+            "override": False,
+            "caution_flag": fired[0]["message"],
+            "triggers": fired,
         }
     return {}
 
@@ -512,6 +614,7 @@ class MonitoringAgents:
                 or financials.get("debtToEquity")
                 or financials.get("de_ratio")
             )
+            auto_review = check_auto_review(holding["symbol"], financials)
             if idx < 3:
                 debug_monitoring_data(holding["symbol"], financials)
             scores.append(
@@ -523,23 +626,29 @@ class MonitoringAgents:
                         holding.get("sector"),
                     ),
                     "financials": financials,
+                    "auto_review": auto_review,
                 }
             )
         return {"quant_scores": scores}
 
     def review_thesis(self, state: dict[str, Any]) -> dict[str, Any]:
         unified = {row["sector"]: row for row in state["portfolio_context"]["unified_signals"]}
-        quant_scores = {row["symbol"]: row["quant_score"] for row in state["quant_scores"]}
+        quant_rows = {row["symbol"]: row for row in state["quant_scores"]}
+        quant_scores = {symbol: row["quant_score"] for symbol, row in quant_rows.items()}
         stock_news = {row["symbol"]: row for row in state["stock_reviews"]}
         thesis = []
         for holding in state["portfolio_context"]["monitor_universe"]:
             sector_signal = unified.get(holding["sector"], {})
             quant = quant_scores.get(holding["symbol"])
+            auto_review = quant_rows.get(holding["symbol"], {}).get("auto_review", {})
 
             # Hard rules always override LLM — enforce first.
             if sector_signal.get("conviction") == "STRONG_AVOID":
                 status = "BREACHED"
                 llm_reasoning = ""
+            elif auto_review.get("override"):
+                status = "WEAKENED"
+                llm_reasoning = auto_review["override_rationale"]
             elif quant is None:
                 status = "UNKNOWN"
                 llm_reasoning = "Financial data unavailable for monitoring score."
@@ -615,8 +724,9 @@ class MonitoringAgents:
         stock_reviews = {row["symbol"]: row for row in state["stock_reviews"]}
         thesis_map = {row["symbol"]: row for row in state["thesis_reviews"]}
         drawdown_map = {row["symbol"]: row for row in state["drawdown_alerts"]}
-        quant_map = {row["symbol"]: row["quant_score"] for row in state["quant_scores"]}
-        financials_map = {row["symbol"]: row.get("financials", {}) for row in state["quant_scores"]}
+        quant_rows = {row["symbol"]: row for row in state["quant_scores"]}
+        quant_map = {symbol: row["quant_score"] for symbol, row in quant_rows.items()}
+        auto_review_map = {symbol: row.get("auto_review", {}) for symbol, row in quant_rows.items()}
         buy_map = state["portfolio_context"].get("direct_equity_buy_map", {})
         actions = []
         for holding in state["portfolio_context"]["monitor_universe"]:
@@ -629,6 +739,8 @@ class MonitoringAgents:
             exit_rec = None
             urgency = "LOW"
             overlap_pct = float(holding.get("overlap_pct", 0.0) or 0.0)
+            auto = auto_review_map.get(symbol, {})
+            caution_flag = str(auto.get("caution_flag") or "").strip()
 
             buy_info = buy_map.get(symbol)
             current_price = drawdown_map[symbol].get("current_price")
@@ -637,6 +749,24 @@ class MonitoringAgents:
                 if current_price
                 else self.provider.get_price_context(symbol).get("analyst_target")
             )
+
+            if auto.get("override"):
+                actions.append(
+                    {
+                        "symbol": symbol,
+                        "action": auto["override_action"],
+                        "severity": auto["override_severity"],
+                        "urgency": auto["override_urgency"],
+                        "rationale": auto["override_rationale"],
+                        "overlap_pct": overlap_pct,
+                        "pnl": pnl,
+                        "exit_recommendation": exit_rec,
+                        "analyst_target": analyst_target,
+                        "auto_review_override": True,
+                        "auto_review": auto,
+                    }
+                )
+                continue
 
             if quant is None:
                 actions.append(
@@ -653,6 +783,8 @@ class MonitoringAgents:
                         "pnl": pnl,
                         "exit_recommendation": exit_rec,
                         "analyst_target": analyst_target,
+                        "caution_flag": caution_flag,
+                        "auto_review": auto,
                     }
                 )
                 continue
@@ -682,28 +814,6 @@ class MonitoringAgents:
                     turso_sync_interval_seconds=self.config.turso_sync_interval_seconds,
                 )
                 urgency = exit_rec["urgency"]
-
-            auto = check_auto_review(symbol, financials_map.get(symbol, {}))
-            if auto:
-                action = auto["override_action"]
-                severity = auto["override_severity"]
-                urgency = "HIGH"
-                rationale = auto["override_reason"]
-                actions.append(
-                    {
-                        "symbol": symbol,
-                        "action": action,
-                        "severity": severity,
-                        "urgency": urgency,
-                        "rationale": rationale,
-                        "overlap_pct": overlap_pct,
-                        "pnl": pnl,
-                        "exit_recommendation": exit_rec,
-                        "analyst_target": analyst_target,
-                        "auto_review_override": True,
-                    }
-                )
-                continue
 
             if thesis == "BREACHED":
                 action = "EXIT - thesis breached"
@@ -737,6 +847,7 @@ class MonitoringAgents:
                     "thesis_status": thesis,
                     "quant_score": quant,
                     "overlap_pct": overlap_pct,
+                    "caution_flag": caution_flag,
                 },
                 pnl,
                 exit_rec,
@@ -752,6 +863,8 @@ class MonitoringAgents:
                     "pnl": pnl,
                     "exit_recommendation": exit_rec,
                     "analyst_target": analyst_target,
+                    "caution_flag": caution_flag,
+                    "auto_review": auto,
                 }
             )
         return {"actions": actions}
@@ -851,6 +964,8 @@ class MonitoringAgents:
                         "overlap_pct": row.get("overlap_pct", 0.0),
                         "exit_recommendation": row.get("exit_recommendation"),
                         "analyst_target": row.get("analyst_target"),
+                        "caution_flag": row.get("caution_flag"),
+                        "auto_review": row.get("auto_review", {}),
                         "llm_used": bool(llm_result),
                     },
                 )
