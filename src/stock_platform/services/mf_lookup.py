@@ -10,6 +10,24 @@ import requests
 from stock_platform.services.amc_adapters import OfficialAMCResolver
 from stock_platform.config import AppConfig
 
+# Maps truncated company names (cleaned[:18]) produced when an API response
+# lacks a proper NSE symbol, to the canonical NSE ticker.
+_MF_NAME_TO_NSE: dict[str, str] = {
+    "HDFCBANKLIMITED":      "HDFCBANK",
+    "ICICIBANKLIMITED":     "ICICIBANK",
+    "RELIANCEINDUSTRIES":   "RELIANCE",
+    "AXISBANKLIMITED":      "AXISBANK",
+    "TATACONSULTANCYSER":   "TCS",
+    "INFOSYSLIMITED":       "INFY",
+    "BHARTIAIRTELLIMITE":   "BHARTIARTL",
+    "STATEBANKOFINDIA":     "SBIN",
+    "SUNPHARMACEUTICALI":   "SUNPHARMA",
+    "HCLTECHNOLOGIESLIM":   "HCLTECH",
+    "BIOCONLIMITED":        "BIOCON",
+    "SBILIFEINSURANCECO":   "SBILIFE",
+    "95MUTHOOTFINANCELI":   "MUTHOOTFIN",
+}
+
 
 class MutualFundHoldingsClient:
     def __init__(self, config: AppConfig, repo: Any | None = None) -> None:
@@ -182,4 +200,5 @@ class MutualFundHoldingsClient:
         if symbol:
             return symbol
         cleaned = re.sub(r"[^A-Za-z0-9]+", "", name).upper()
-        return cleaned[:18] if cleaned else "UNKNOWN"
+        raw = cleaned[:18] if cleaned else "UNKNOWN"
+        return _MF_NAME_TO_NSE.get(raw, raw)
