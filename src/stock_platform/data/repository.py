@@ -182,6 +182,9 @@ class PlatformRepository:
 
     def replace_overlap_scores(self, rows: list[dict[str, Any]]) -> None:
         timestamp = utc_now_iso()
+        print(f"replace_overlap_scores: writing {len(rows)} rows at {timestamp}")
+        for row in rows:
+            print(f"  overlap_scores write: {row['symbol']} = {row['overlap_pct']:.4f} ({row['band']})")
         with self.connect() as connection:
             connection.execute("DELETE FROM overlap_scores")
             connection.executemany(
@@ -199,6 +202,17 @@ class PlatformRepository:
                     )
                     for row in rows
                 ],
+            )
+
+    def patch_overlap_pct(self, symbol: str, overlap_pct: float, source: str = "unknown") -> None:
+        """Emergency single-symbol update — use only when full recompute is not possible."""
+        timestamp = utc_now_iso()
+        print(f"patch_overlap_pct: {symbol} = {overlap_pct:.4f} (source: {source}) at {timestamp}")
+        with self.connect() as connection:
+            connection.execute(
+                "UPDATE overlap_scores SET overlap_pct = ?, updated_at = ? "
+                "WHERE UPPER(TRIM(symbol)) = UPPER(TRIM(?))",
+                (overlap_pct, timestamp, symbol),
             )
 
     def list_overlap_scores(self) -> list[dict[str, Any]]:
@@ -526,6 +540,7 @@ class PlatformRepository:
         return [dict(row) for row in rows]
 
     def load_portfolio_context(self) -> dict[str, Any]:
+        print("load_portfolio_context v2 running — with dedup fix")
         portfolio_meta = self.get_state("portfolio_meta", {})
         return {
             "portfolio_meta": portfolio_meta,
