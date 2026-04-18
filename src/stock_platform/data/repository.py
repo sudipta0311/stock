@@ -9,6 +9,51 @@ from typing import Any, Iterator
 from stock_platform.data.db import database_connection
 from stock_platform.data.schema import initialize_schema
 from stock_platform.models import MonitoringAction, RecommendationRecord, SignalRecord, utc_now_iso
+from stock_platform.utils.symbol_resolver import resolve_symbol_base
+
+
+def build_overlap_score_rows(normalized_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    aggregated: dict[str, dict[str, Any]] = {}
+    for row in normalized_rows:
+        attribution = row.get("attribution", [])
+        if not isinstance(attribution, list):
+            attribution = []
+        symbol = resolve_symbol_base(str(row.get("symbol") or "").strip())
+        if not symbol:
+            continue
+        bucket = aggregated.setdefault(
+            symbol,
+            {
+                "symbol": symbol,
+                "overlap_pct": 0.0,
+                "attribution": [],
+            },
+        )
+        indirect_items = [item for item in attribution if item.get("source") != "direct_equity"]
+        bucket["overlap_pct"] += sum(float(item.get("lookthrough_weight", 0.0) or 0.0) for item in indirect_items)
+        bucket["attribution"].extend(indirect_items)
+
+    rows: list[dict[str, Any]] = []
+    for bucket in aggregated.values():
+        overlap_pct = round(float(bucket["overlap_pct"] or 0.0), 3)
+        if overlap_pct > 3:
+            band = "HARD_EXCLUDE"
+        elif overlap_pct > 1:
+            band = "FLAG"
+        elif overlap_pct > 0.5:
+            band = "YELLOW"
+        else:
+            band = "GREEN"
+        rows.append(
+            {
+                "symbol": bucket["symbol"],
+                "overlap_pct": overlap_pct,
+                "band": band,
+                "attribution": bucket["attribution"],
+            }
+        )
+    rows.sort(key=lambda row: (row["symbol"]))
+    return rows
 
 
 class PlatformRepository:
@@ -227,6 +272,13 @@ class PlatformRepository:
             }
             for row in rows
         ]
+
+    def refresh_overlap_scores(self, normalized_rows: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+        rows = build_overlap_score_rows(
+            normalized_rows if normalized_rows is not None else self.list_normalized_exposure()
+        )
+        self.replace_overlap_scores(rows)
+        return rows
 
     def replace_gaps(self, rows: list[dict[str, Any]]) -> None:
         timestamp = utc_now_iso()
@@ -539,7 +591,7 @@ class PlatformRepository:
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def load_portfolio_context(self) -> dict[str, Any]:
+    def _load_portfolio_context_legacy(self) -> dict[str, Any]:
         print("load_portfolio_context v2 running — with dedup fix")
         portfolio_meta = self.get_state("portfolio_meta", {})
         return {
@@ -547,6 +599,23 @@ class PlatformRepository:
             "raw_holdings": self.list_raw_holdings(),
             "normalized_exposure": self.list_normalized_exposure(),
             "overlap_scores": self.list_overlap_scores(),
+            "identified_gaps": self.list_gaps(),
+            "unified_signals": self.list_signals("unified"),
+            "user_preferences": self.get_state("user_preferences", {}),
+            "watchlist": self.list_watchlist(),
+            "direct_equity_holdings": self.list_direct_equity_holdings(),
+        }
+
+    def load_portfolio_context(self) -> dict[str, Any]:
+        print("load_portfolio_context v3 running - refreshing overlap_scores from normalized_exposure")
+        portfolio_meta = self.get_state("portfolio_meta", {})
+        normalized_exposure = self.list_normalized_exposure()
+        overlap_scores = self.refresh_overlap_scores(normalized_exposure)
+        return {
+            "portfolio_meta": portfolio_meta,
+            "raw_holdings": self.list_raw_holdings(),
+            "normalized_exposure": normalized_exposure,
+            "overlap_scores": overlap_scores,
             "identified_gaps": self.list_gaps(),
             "unified_signals": self.list_signals("unified"),
             "user_preferences": self.get_state("user_preferences", {}),
