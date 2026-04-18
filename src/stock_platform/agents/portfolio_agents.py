@@ -21,6 +21,13 @@ class PortfolioAgents:
         except (ValueError, TypeError):
             return default
 
+    def _portfolio_total_assets(self, payload: dict[str, Any]) -> float:
+        return (
+            sum(float(row.get("market_value", 0)) for row in payload.get("mutual_funds", []))
+            + sum(float(row.get("market_value", 0)) for row in payload.get("etfs", []))
+            + sum(float(row.get("market_value", 0)) for row in payload.get("direct_equities", []))
+        ) or 1.0
+
     def capture_user_portfolio(self, state: dict[str, Any]) -> dict[str, Any]:
         payload = state.get("payload", {})
         prefs = {
@@ -76,7 +83,7 @@ class PortfolioAgents:
         payload = state.get("payload", {})
         statement_month = payload.get("statement_month") or None
         positions: list[dict[str, Any]] = []
-        total_value = sum(float(row.get("market_value", 0)) for row in payload.get("mutual_funds", [])) or 1.0
+        total_assets = self._portfolio_total_assets(payload)
         for fund in payload.get("mutual_funds", []):
             fund_value = float(fund.get("market_value", 0))
             holdings, source = self.provider.get_fund_holdings(fund["instrument_name"], month=statement_month)
@@ -85,19 +92,20 @@ class PortfolioAgents:
                     self.provider.build_proxy_holding(
                         fund["instrument_name"],
                         "mutual_fund",
-                        (fund_value / total_value) * 100,
+                        (fund_value / total_assets) * 100,
                         holdings_source=source,
                     )
                 )
                 continue
             for symbol, weight in holdings.items():
-                snapshot = self.provider.get_stock_snapshot(symbol)
+                normalized_symbol = self.provider.normalize_symbol(symbol)
+                snapshot = self.provider.get_stock_snapshot(normalized_symbol)
                 positions.append(
                     {
                         "instrument_name": fund["instrument_name"],
                         "fund_weight": round(weight * 100, 2),
-                        "lookthrough_weight": round((fund_value / total_value) * weight * 100, 3),
-                        "symbol": symbol,
+                        "lookthrough_weight": round((fund_value / total_assets) * weight * 100, 3),
+                        "symbol": normalized_symbol,
                         "company_name": snapshot["company_name"],
                         "sector": snapshot["sector"],
                         "source": "mutual_fund",
@@ -110,7 +118,7 @@ class PortfolioAgents:
         payload = state.get("payload", {})
         statement_month = payload.get("statement_month") or None
         positions: list[dict[str, Any]] = []
-        total_value = sum(float(row.get("market_value", 0)) for row in payload.get("etfs", [])) or 1.0
+        total_assets = self._portfolio_total_assets(payload)
         for etf in payload.get("etfs", []):
             etf_value = float(etf.get("market_value", 0))
             holdings, source = self.provider.get_etf_holdings(etf["instrument_name"], month=statement_month)
@@ -119,19 +127,20 @@ class PortfolioAgents:
                     self.provider.build_proxy_holding(
                         etf["instrument_name"],
                         "etf",
-                        (etf_value / total_value) * 100,
+                        (etf_value / total_assets) * 100,
                         holdings_source=source,
                     )
                 )
                 continue
             for symbol, weight in holdings.items():
-                snapshot = self.provider.get_stock_snapshot(symbol)
+                normalized_symbol = self.provider.normalize_symbol(symbol)
+                snapshot = self.provider.get_stock_snapshot(normalized_symbol)
                 positions.append(
                     {
                         "instrument_name": etf["instrument_name"],
                         "fund_weight": round(weight * 100, 2),
-                        "lookthrough_weight": round((etf_value / total_value) * weight * 100, 3),
-                        "symbol": symbol,
+                        "lookthrough_weight": round((etf_value / total_assets) * weight * 100, 3),
+                        "symbol": normalized_symbol,
                         "company_name": snapshot["company_name"],
                         "sector": snapshot["sector"],
                         "source": "etf",
@@ -145,11 +154,7 @@ class PortfolioAgents:
         mf_positions = state.get("mutual_fund_exposure", [])
         etf_positions = state.get("etf_exposure", [])
         direct_positions = payload.get("direct_equities", [])
-        total_assets = (
-            sum(float(row.get("market_value", 0)) for row in payload.get("mutual_funds", []))
-            + sum(float(row.get("market_value", 0)) for row in payload.get("etfs", []))
-            + sum(float(row.get("market_value", 0)) for row in direct_positions)
-        ) or 1.0
+        total_assets = self._portfolio_total_assets(payload)
         aggregated: dict[str, dict[str, Any]] = {}
         for row in mf_positions + etf_positions:
             bucket = aggregated.setdefault(
