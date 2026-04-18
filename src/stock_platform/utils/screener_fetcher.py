@@ -359,6 +359,14 @@ def compute_pat_momentum(
         "DECLINING" if pat_growth >= -25 else
         "COLLAPSING"
     )
+    low_base_threshold_cr = 100.0
+    pat_abs_cr = abs(pat_q0) / 1e7
+    low_base_flag = pat_abs_cr < low_base_threshold_cr and pat_growth > 50
+    qualifier = (
+        f"(Rs.{pat_abs_cr:.0f}Cr absolute - high growth on small base)"
+        if low_base_flag
+        else ""
+    )
     period = (
         f"{_format_fy_quarter_from_column(q0_col)} vs {_format_fy_quarter_from_column(q4_col)}"
         if _format_fy_quarter_from_column(q0_col) and _format_fy_quarter_from_column(q4_col)
@@ -376,6 +384,8 @@ def compute_pat_momentum(
         "pat_momentum": signal,
         "pat_growth_pct": round(pat_growth, 1),
         "period": period,
+        "qualifier": qualifier,
+        "pat_abs_cr": round(pat_abs_cr, 1),
         "rev_pat_divergence": divergence,
         "source": "yfinance_quarterly_income_stmt",
     }

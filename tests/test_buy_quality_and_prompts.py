@@ -615,6 +615,43 @@ class BuyQualityScoreTests(unittest.TestCase):
         self.assertEqual(result["pat_momentum"], "STRONG")
         self.assertEqual(result["pat_growth_pct"], 45.0)
         self.assertEqual(result["period"], "Q3 FY26 vs Q3 FY25")
+        self.assertEqual(result["qualifier"], "")
+        self.assertEqual(result["pat_abs_cr"], 0.0)
+
+    def test_compute_pat_momentum_flags_high_growth_on_small_pat_base(self) -> None:
+        stmt = FakeQuarterlyIncomeStatement(
+            columns=[
+                datetime(2025, 12, 31),
+                datetime(2025, 9, 30),
+                datetime(2025, 6, 30),
+                datetime(2025, 3, 31),
+                datetime(2024, 12, 31),
+            ],
+            rows={
+                "Net Income": {
+                    datetime(2025, 12, 31): 710000000.0,
+                    datetime(2025, 9, 30): 640000000.0,
+                    datetime(2025, 6, 30): 600000000.0,
+                    datetime(2025, 3, 31): 580000000.0,
+                    datetime(2024, 12, 31): 429800000.0,
+                }
+            },
+        )
+
+        result = compute_pat_momentum(
+            "JUBLFOOD",
+            {"revenue_growth_latest_qtr": 12.0},
+            quarterly_income_stmt=stmt,
+        )
+
+        self.assertEqual(result["pat_momentum"], "STRONG")
+        self.assertEqual(result["pat_growth_pct"], 65.2)
+        self.assertEqual(result["period"], "Q3 FY26 vs Q3 FY25")
+        self.assertEqual(
+            result["qualifier"],
+            "(Rs.71Cr absolute - high growth on small base)",
+        )
+        self.assertEqual(result["pat_abs_cr"], 71.0)
 
     @patch("stock_platform.agents.buy_agents.fetch_analyst_consensus_target", return_value=140.0)
     @patch("stock_platform.agents.buy_agents.governance_risk_blocks", return_value=(False, ""))
@@ -913,6 +950,39 @@ class BuyPromptTests(unittest.TestCase):
         self.assertIn("CRITICAL DIVERGENCE DETECTED", user_prompt)
         self.assertIn("Revenue growing 13% YoY but PAT declining 45% YoY.", user_prompt)
         self.assertIn("downgrade to WATCHLIST", user_prompt)
+
+    def test_buy_rationale_includes_pat_low_base_qualifier(self) -> None:
+        anthropic_llm = RecordingLLM(self.config, provider="anthropic")
+        qualified_item = self.item | {
+            "live_financials": self.item["live_financials"] | {
+                "revenue_growth_latest_qtr": 18.0,
+                "revenue_growth_latest_qtr_label": "Q3 FY26 vs Q3 FY25",
+                "recent_results": {
+                    "revenue_yoy_growth_pct": 18.0,
+                    "comparison_label": "Q3 FY26 vs Q3 FY25",
+                    "pat_momentum": "STRONG",
+                    "pat_growth_pct": 65.2,
+                    "period": "Q3 FY26 vs Q3 FY25",
+                    "qualifier": "(Rs.71Cr absolute - high growth on small base)",
+                    "pat_abs_cr": 71.0,
+                },
+                "pat_momentum": {
+                    "pat_momentum": "STRONG",
+                    "pat_growth_pct": 65.2,
+                    "period": "Q3 FY26 vs Q3 FY25",
+                    "qualifier": "(Rs.71Cr absolute - high growth on small base)",
+                    "pat_abs_cr": 71.0,
+                },
+            }
+        }
+
+        anthropic_llm.buy_rationale(qualified_item, self.portfolio_context)
+
+        user_prompt = anthropic_llm.calls[0]["user_prompt"]
+        self.assertIn(
+            "PAT momentum (Q3 FY26 vs Q3 FY25): STRONG (+65.2% YoY) (Rs.71Cr absolute - high growth on small base)",
+            user_prompt,
+        )
 
     def test_synthesis_prompt_requests_combined_verdict(self) -> None:
         fake_module = types.SimpleNamespace(Anthropic=FakeAnthropicClient)
