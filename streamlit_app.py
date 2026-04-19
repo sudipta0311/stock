@@ -2000,7 +2000,10 @@ with tabs[1]:
                 if _broker_holdings:
                     engine.repo.upsert_direct_equity_holdings(_broker_holdings)
                     st.session_state["broker_autoimport_sig"] = _csv_sig
-                    st.rerun()
+                    st.session_state["broker_holdings_refreshed"] = True
+                    # No st.rerun() here — a rerun before tabs[3] would swallow
+                    # any Monitoring button click. The snapshot refreshes on the
+                    # next natural user action instead.
             except Exception as _exc:
                 pass  # Silent fail — broker parsing is best-effort
 
@@ -2034,7 +2037,10 @@ with tabs[1]:
         help="Zerodha: Console -> Holdings -> Download CSV",
     )
 
-    latest_direct_equity_holdings = portfolio.get("direct_equity_holdings", [])
+    if st.session_state.pop("broker_holdings_refreshed", False):
+        latest_direct_equity_holdings = engine.repo.list_direct_equity_holdings()
+    else:
+        latest_direct_equity_holdings = portfolio.get("direct_equity_holdings", [])
 
     if broker_file:
         import os
