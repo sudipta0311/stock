@@ -2503,7 +2503,7 @@ with tabs[3]:
             push_notice(f"Monitoring complete using {provider_label}.", "success")
             st.rerun()
         except Exception as exc:
-            st.error(str(exc))
+            st.exception(exc)  # show full traceback so root cause is visible
 
     if portfolio_updated_at:
         freshness_bits = [f"Portfolio updated: {portfolio_updated_at}"]
