@@ -1982,6 +1982,27 @@ with tabs[1]:
     uploaded = st.file_uploader("Upload portfolio file", type=["json", "csv", "pdf"])
     uploaded_payload = parse_upload(uploaded, pdf_password, engine)
 
+    # Auto-extract buying prices from any CSV uploaded here (broker format detection).
+    if uploaded and Path(uploaded.name).suffix.lower() == ".csv":
+        _csv_sig = f"broker_autoimport_{uploaded.name}_{len(uploaded.getvalue())}"
+        if st.session_state.get("broker_autoimport_sig") != _csv_sig:
+            try:
+                import os, tempfile
+                from utils.broker_parser import parse_broker_file, save_broker_holdings_to_db
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as _tmp:
+                    _tmp.write(uploaded.getvalue())
+                    _tmp_path = _tmp.name
+                try:
+                    _broker_holdings = parse_broker_file(_tmp_path)
+                finally:
+                    os.unlink(_tmp_path)
+                if _broker_holdings:
+                    save_broker_holdings_to_db(_broker_holdings, DB_PATH)
+                    st.session_state["broker_autoimport_sig"] = _csv_sig
+                    st.success(f"Buying prices extracted from CSV: {len(_broker_holdings)} stocks saved.")
+            except Exception as _exc:
+                pass  # Silent fail — broker parsing is best-effort
+
     if uploaded and uploaded_payload and Path(uploaded.name).suffix.lower() == ".pdf":
         upload_signature = build_upload_signature(uploaded, pdf_password)
         if st.session_state.get("auto_ingested_pdf_signature") != upload_signature:
