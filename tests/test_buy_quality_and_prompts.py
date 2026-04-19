@@ -1079,6 +1079,27 @@ class BuyPromptTests(unittest.TestCase):
 
         self.assertIn("max_completion_tokens", FakeOpenAIChat.last_request or {})
 
+    def test_openai_thesis_review_uses_fast_model_and_timeout(self) -> None:
+        fake_openai = types.SimpleNamespace(
+            AuthenticationError=FakeOpenAIAuthenticationError,
+            RateLimitError=FakeOpenAIRateLimitError,
+            APITimeoutError=FakeOpenAITimeoutError,
+        )
+        llm = PlatformLLM(self.config, provider="openai")
+        llm._client = FakeOpenAIClient()
+
+        with patch.dict(sys.modules, {"openai": fake_openai}):
+            llm.thesis_review(
+                holding={"symbol": "BEL", "sector": "Defence"},
+                quant_score=0.72,
+                sector_signal={"conviction": "BUY"},
+                stock_news={"headline": "Order book remains strong", "sentiment_score": 0.2},
+            )
+
+        request = FakeOpenAIChat.last_request or {}
+        self.assertEqual(request.get("model"), self.config.openai_fast_model)
+        self.assertEqual(request.get("timeout"), self.config.openai_timeout_seconds)
+
 
 if __name__ == "__main__":
     unittest.main()
