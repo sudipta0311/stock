@@ -690,8 +690,9 @@ def run_buy_workflow(
         else:
             status.write("Recommendation cards are ready to review.")
             status.update(label="Recommendations ready", state="complete", expanded=False)
-    # Persist skipped stocks in session state so the display section can show them.
+    # Persist skipped stocks and pipeline stats so the display section can show them.
     st.session_state["buy_skipped_stocks"] = (result or {}).get("skipped_stocks", [])
+    st.session_state["buy_run_summary"] = run_summary
     engine.repo.set_state("buy_comparison_result", {})
     return {"run_summary": run_summary} if run_summary.get("blocked_reason") else None
 
@@ -1570,13 +1571,37 @@ def render_check_card(title: str, passed: bool, detail: str) -> None:
     )
 
 
-def _render_skipped_stocks(skipped: list[dict[str, Any]]) -> None:
+def _render_skipped_stocks(skipped: list[dict[str, Any]], run_summary: dict[str, Any] | None = None) -> None:
     """Show the skipped-stocks transparency panel below recommendation cards."""
-    if not skipped:
-        return
+    _INVESTMENT_CRITERIA_STATUSES = {
+        "NEGATIVE_NET_RETURN", "LOW_RISK_REWARD", "GOVERNANCE_RISK",
+        "WEAK_EVIDENCE", "NO_PRICE", "OVERLAP_FILTERED",
+    }
+    _DATA_VALIDATION_STATUSES = {
+        "NOT_FOUND", "NO_DATA", "PRICE_MISSING", "DEMERGED", "DELISTED", "STALE_DATA",
+    }
 
-    group_deferred = [s for s in skipped if s.get("status") == "GROUP_CONCENTRATION"]
-    other_skipped  = [s for s in skipped if s.get("status") != "GROUP_CONCENTRATION"]
+    group_deferred    = [s for s in skipped if s.get("status") == "GROUP_CONCENTRATION"]
+    investment_gated  = [s for s in skipped if s.get("status") in _INVESTMENT_CRITERIA_STATUSES]
+    data_failures     = [s for s in skipped if s.get("status") in _DATA_VALIDATION_STATUSES]
+    other_skipped     = [s for s in skipped if s.get("status") not in
+                         _INVESTMENT_CRITERIA_STATUSES | _DATA_VALIDATION_STATUSES | {"GROUP_CONCENTRATION"}]
+
+    # Pipeline stats summary — always show if run_summary is available.
+    if run_summary:
+        stats = run_summary.get("pipeline_stats", {})
+        rec_count = run_summary.get("recommendation_count", 0)
+        shortlist_count = stats.get("shortlist_count", 0)
+        parts = []
+        if shortlist_count:
+            parts.append(f"Shortlisted: **{shortlist_count}**")
+        parts.append(f"Recommended: **{rec_count}**")
+        if investment_gated:
+            parts.append(f"Excluded by criteria: **{len(investment_gated)}**")
+        if data_failures:
+            parts.append(f"Data unavailable: **{len(data_failures)}**")
+        if parts:
+            st.caption("Pipeline: " + "  ·  ".join(parts))
 
     if group_deferred:
         with st.expander(f"Group concentration: {len(group_deferred)} stock(s) deferred", expanded=False):
@@ -1588,20 +1613,41 @@ def _render_skipped_stocks(skipped: list[dict[str, Any]]) -> None:
             for s in group_deferred:
                 st.info(f"**{s['symbol']}** — {s['reason']}")
 
-    if not other_skipped:
-        return
-    with st.expander(f"⚠️ {len(other_skipped)} stock(s) skipped — data unavailable", expanded=False):
-        st.caption(
-            "These stocks were considered but excluded because financial data "
-            "could not be validated. They will not appear in recommendations "
-            "until data is available."
-        )
-        for sk in other_skipped:
-            st.warning(f"**{sk['symbol']}** — {sk['status']}: {sk['reason']}")
-        st.caption(
-            "To fix: update `NSE_SYMBOL_MAP` in "
-            "`src/stock_platform/utils/symbol_resolver.py` with the correct current ticker."
-        )
+    if investment_gated:
+        _status_labels = {
+            "NEGATIVE_NET_RETURN": "Analyst target ≤ current price — no net-positive return",
+            "LOW_RISK_REWARD":     "Risk/reward ratio below profile minimum",
+            "GOVERNANCE_RISK":     "Governance / fraud risk block",
+            "WEAK_EVIDENCE":       "Evidence too stale or thin for this risk profile",
+            "NO_PRICE":            "Current price unavailable",
+            "OVERLAP_FILTERED":    "Already >3% represented via MF/ETF look-through",
+        }
+        with st.expander(
+            f"⚠️ {len(investment_gated)} stock(s) excluded by investment criteria", expanded=True
+        ):
+            st.caption(
+                "These shortlisted stocks were eliminated by the investment-quality gates — "
+                "not a data issue, but current prices / analyst targets / evidence don't meet "
+                "the bar for this risk profile."
+            )
+            for sk in investment_gated:
+                label = _status_labels.get(sk["status"], sk["status"])
+                st.warning(f"**{sk['symbol']}** — {label}: {sk['reason']}")
+
+    if data_failures or other_skipped:
+        all_data = data_failures + other_skipped
+        with st.expander(f"⚠️ {len(all_data)} stock(s) skipped — data unavailable", expanded=False):
+            st.caption(
+                "These stocks were considered but excluded because financial data "
+                "could not be validated. They will not appear in recommendations "
+                "until data is available."
+            )
+            for sk in all_data:
+                st.warning(f"**{sk['symbol']}** — {sk['status']}: {sk['reason']}")
+            st.caption(
+                "To fix: update `NSE_SYMBOL_MAP` in "
+                "`src/stock_platform/utils/symbol_resolver.py` with the correct current ticker."
+            )
 
 
 def build_render_checks(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
@@ -2456,7 +2502,10 @@ with tabs[2]:
                 render_recommendation_card(item)
         else:
             render_empty_panel("Run the buy workflow to populate the recommendation feed.")
-        _render_skipped_stocks(st.session_state.get("buy_skipped_stocks", []))
+        _render_skipped_stocks(
+            st.session_state.get("buy_skipped_stocks", []),
+            run_summary=st.session_state.get("buy_run_summary"),
+        )
 
 with tabs[3]:
     render_section_header(
