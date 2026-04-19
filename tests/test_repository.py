@@ -58,6 +58,29 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual(rows[0]["symbol"], "BEL")
         self.assertAlmostEqual(rows[0]["total_weight"], 4.2)
 
+    def test_direct_equity_holdings_round_trip_uses_repository_store(self) -> None:
+        saved = self.repo.upsert_direct_equity_holdings(
+            [
+                {
+                    "symbol": "HDFBANEQ",
+                    "quantity": 220.0,
+                    "avg_buy_price": 712.2691,
+                    "current_price": 810.30,
+                    "buy_date": "2026-04-12",
+                    "source": "broker_csv",
+                }
+            ]
+        )
+
+        self.assertEqual(saved, 1)
+
+        rows = self.repo.list_direct_equity_holdings()
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["symbol"], "HDFCBANK")
+        self.assertAlmostEqual(rows[0]["avg_buy_price"], 712.2691)
+        self.assertAlmostEqual(rows[0]["quantity"], 220.0)
+
     def test_monitoring_rows_include_joined_overlap_and_urgency(self) -> None:
         self.repo.replace_overlap_scores(
             [

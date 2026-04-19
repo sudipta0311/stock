@@ -1989,7 +1989,7 @@ with tabs[1]:
         if st.session_state.get("broker_autoimport_sig") != _csv_sig:
             try:
                 import os, tempfile
-                from utils.broker_parser import parse_broker_file, save_broker_holdings_to_db
+                from utils.broker_parser import parse_broker_file
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".csv") as _tmp:
                     _tmp.write(uploaded.getvalue())
                     _tmp_path = _tmp.name
@@ -1998,7 +1998,7 @@ with tabs[1]:
                 finally:
                     os.unlink(_tmp_path)
                 if _broker_holdings:
-                    save_broker_holdings_to_db(_broker_holdings, DB_PATH)
+                    engine.repo.upsert_direct_equity_holdings(_broker_holdings)
                     st.session_state["broker_autoimport_sig"] = _csv_sig
                     st.rerun()
             except Exception as _exc:
@@ -2045,14 +2045,14 @@ with tabs[1]:
             tmp.write(broker_file.getvalue())
             tmp_path = tmp.name
         try:
-            from utils.broker_parser import parse_broker_file, save_broker_holdings_to_db
+            from utils.broker_parser import parse_broker_file
 
             holdings = parse_broker_file(tmp_path)
         finally:
             os.unlink(tmp_path)
 
         if holdings:
-            saved = save_broker_holdings_to_db(holdings, DB_PATH)
+            saved = engine.repo.upsert_direct_equity_holdings(holdings)
             latest_direct_equity_holdings = engine.repo.list_direct_equity_holdings()
             st.success(f"Saved {saved} holdings with buying prices")
             preview_df = pd.DataFrame(holdings)[["symbol", "quantity", "avg_buy_price", "buy_date"]]
@@ -2083,9 +2083,7 @@ with tabs[1]:
             m_date = st.date_input("Buy date", key="manual_broker_date")
         if st.button("Save holding", key="manual_broker_save"):
             if m_symbol and m_price > 0:
-                from utils.broker_parser import save_broker_holdings_to_db
-
-                save_broker_holdings_to_db(
+                engine.repo.upsert_direct_equity_holdings(
                     [
                         {
                             "symbol": m_symbol.upper(),
@@ -2096,7 +2094,6 @@ with tabs[1]:
                             "source": "manual",
                         }
                     ],
-                    DB_PATH,
                 )
                 latest_direct_equity_holdings = engine.repo.list_direct_equity_holdings()
                 st.success(f"Saved {m_symbol.upper()} at Rs{m_price}")

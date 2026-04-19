@@ -320,6 +320,49 @@ class PlatformRepository:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def upsert_direct_equity_holdings(self, holdings: list[dict[str, Any]]) -> int:
+        if not holdings:
+            return 0
+
+        timestamp = utc_now_iso()
+        rows_to_save: list[tuple[Any, ...]] = []
+        for holding in holdings:
+            symbol = resolve_symbol_base(str(holding.get("symbol") or "").strip())
+            if not symbol:
+                continue
+            rows_to_save.append(
+                (
+                    symbol,
+                    holding.get("quantity"),
+                    holding.get("avg_buy_price"),
+                    holding.get("current_price"),
+                    str(holding.get("buy_date", "unknown") or "unknown"),
+                    holding.get("source", "broker_csv"),
+                    timestamp,
+                )
+            )
+
+        if not rows_to_save:
+            return 0
+
+        with self.connect() as connection:
+            connection.executemany(
+                """
+                INSERT INTO direct_equity
+                    (symbol, quantity, avg_buy_price, current_price, buy_date, source, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(symbol) DO UPDATE SET
+                    quantity = excluded.quantity,
+                    avg_buy_price = excluded.avg_buy_price,
+                    current_price = excluded.current_price,
+                    buy_date = excluded.buy_date,
+                    source = excluded.source,
+                    updated_at = excluded.updated_at
+                """,
+                rows_to_save,
+            )
+        return len(rows_to_save)
+
     def portfolio_table_diagnostics(self) -> dict[str, Any]:
         with self.connect() as connection:
             dialect = getattr(connection, "dialect", "sqlite")
