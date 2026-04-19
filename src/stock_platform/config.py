@@ -62,6 +62,9 @@ class AppConfig:
     openai_reasoning_model: str = field(
         default_factory=lambda: os.getenv("OPENAI_REASONING_MODEL", "gpt-5.4")
     )
+    openai_timeout_seconds: int = field(
+        default_factory=lambda: int(os.getenv("OPENAI_TIMEOUT_SECONDS", "30"))
+    )
 
     mf_api_base_url: str = field(default_factory=lambda: os.getenv("MF_API_BASE_URL", "https://mfdata.in/api/v1"))
     mf_holdings_timeout_seconds: int = field(default_factory=lambda: int(os.getenv("MF_HOLDINGS_TIMEOUT_SECONDS", "20")))

@@ -157,6 +157,7 @@ class PlatformLLM:
             model=model,
             temperature=temperature,
             max_completion_tokens=max_tokens,
+            timeout=self.config.openai_timeout_seconds,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -180,6 +181,7 @@ class PlatformLLM:
                 model=self.config.openai_fast_model or "gpt-5.4-mini",
                 messages=[{"role": "user", "content": "Say OK"}],
                 max_completion_tokens=5,
+                timeout=self.config.openai_timeout_seconds,
             )
             return True, "Connected"
         except openai.AuthenticationError:
@@ -1136,8 +1138,9 @@ If no material risks are found, return exactly:
             f"News sentiment: {stock_news.get('sentiment_score', 0.0):.2f}\n"
             "Assess whether the investment thesis is INTACT, WEAKENED, or BREACHED."
         )
+        thesis_model = self._fast_model if self.provider == "openai" else self._smart_model
         raw = self._call(
-            model=self._smart_model,
+            model=thesis_model,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             max_tokens=200,
