@@ -247,7 +247,7 @@ def apply_overlap_override(
                 "WHERE UPPER(TRIM(symbol)) = UPPER(TRIM(?))",
                 (symbol,),
             ).fetchone()
-            overlap = float(row[0]) if row else 0.0
+            overlap = float(row["overlap_pct"]) if row else 0.0
 
     if overlap >= 2.0 and exit_rec["exit_recommendation"] == "BUY MORE":
         exit_rec = dict(exit_rec)
