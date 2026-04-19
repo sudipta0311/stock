@@ -2277,6 +2277,7 @@ with tabs[2]:
                 "risk_profile": risk_profile,
                 "top_n": top_n,
             }
+            _buy_exc: Exception | None = None
             try:
                 comp = run_buy_workflow(engine, buy_request, provider_choice=provider_choice)
                 if provider_choice == "Compare Both":
@@ -2292,9 +2293,12 @@ with tabs[2]:
                     else:
                         st.session_state.pop("buy_blocked_reason", None)
                         push_notice("Recommendation run complete.", "success")
-                st.rerun()
             except Exception as exc:
-                st.error(str(exc))
+                _buy_exc = exc
+            if _buy_exc is not None:
+                st.error(str(_buy_exc))
+            else:
+                st.rerun()
 
     if "comparison_result" in st.session_state:
         st.subheader("Provider Comparison")
