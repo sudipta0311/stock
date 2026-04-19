@@ -388,7 +388,7 @@ If no material risks are found, return exactly:
         if not news.get("material_risks_found"):
             return ""
 
-        flags = news.get("flags") or []
+        flags = (news.get("flags") or [])[:3]  # cap at 3 to control synthesis prompt size
         flag_lines = []
         for flag in flags:
             if not isinstance(flag, dict):
@@ -943,6 +943,13 @@ If no material risks are found, return exactly:
                     + entry_guidance
                 )
 
+            _prompt_chars = len(system_prompt) + len(user_prompt)
+            print(
+                f"SYNTHESIS [{stock_name}]: prompt {_prompt_chars} chars "
+                f"(~{_prompt_chars // 4} tokens)"
+            )
+            if _prompt_chars > 80_000:
+                print(f"WARNING: synthesis prompt for {stock_name} is very large — may approach context limits")
             response = client.messages.create(
                 model=self.config.llm_reasoning_model,
                 max_tokens=4000,
