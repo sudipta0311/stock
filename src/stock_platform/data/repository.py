@@ -210,6 +210,10 @@ class PlatformRepository:
                 ],
             )
         self.set_state("portfolio_meta", {"portfolio_last_updated": timestamp})
+        # Keep overlap scores in sync whenever portfolio exposure changes.
+        # This replaces the previous approach of recomputing on every load_portfolio_context call.
+        overlap_rows = build_overlap_score_rows(rows)
+        self.replace_overlap_scores(overlap_rows)
 
     def list_normalized_exposure(self) -> list[dict[str, Any]]:
         with self.connect() as connection:
@@ -235,8 +239,6 @@ class PlatformRepository:
                 deduped[sym] = row
         rows = list(deduped.values())
         print(f"replace_overlap_scores: writing {len(rows)} rows at {timestamp}")
-        for row in rows:
-            print(f"  overlap_scores write: {row['symbol']} = {row['overlap_pct']:.4f} ({row['band']})")
         with self.connect() as connection:
             connection.execute("DELETE FROM overlap_scores")
             connection.executemany(
@@ -662,10 +664,9 @@ class PlatformRepository:
         }
 
     def load_portfolio_context(self) -> dict[str, Any]:
-        print("load_portfolio_context v3 running - refreshing overlap_scores from normalized_exposure")
         portfolio_meta = self.get_state("portfolio_meta", {})
         normalized_exposure = self.list_normalized_exposure()
-        overlap_scores = self.refresh_overlap_scores(normalized_exposure)
+        overlap_scores = self.list_overlap_scores()
         return {
             "portfolio_meta": portfolio_meta,
             "raw_holdings": self.list_raw_holdings(),

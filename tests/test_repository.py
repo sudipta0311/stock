@@ -142,7 +142,9 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertAlmostEqual(rows[0]["overlap_pct"], 3.13)
 
-    def test_load_portfolio_context_refreshes_overlap_scores_from_normalized_exposure(self) -> None:
+    def test_replace_normalized_exposure_syncs_overlap_scores(self) -> None:
+        # replace_normalized_exposure now atomically refreshes overlap scores so
+        # load_portfolio_context can read them cheaply without recomputing.
         self.repo.replace_normalized_exposure(
             [
                 {
@@ -177,29 +179,20 @@ class RepositoryTests(unittest.TestCase):
                 }
             ]
         )
-        self.repo.replace_overlap_scores(
-            [
-                {
-                    "symbol": "HDFCBANK",
-                    "overlap_pct": 0.0,
-                    "band": "GREEN",
-                    "attribution": [],
-                }
-            ]
-        )
 
-        context = self.repo.load_portfolio_context()
-
-        self.assertEqual(len(context["overlap_scores"]), 1)
-        self.assertEqual(context["overlap_scores"][0]["symbol"], "HDFCBANK")
-        self.assertAlmostEqual(context["overlap_scores"][0]["overlap_pct"], 3.13)
-        self.assertEqual(context["overlap_scores"][0]["band"], "HARD_EXCLUDE")
-
+        # Overlap scores are computed atomically inside replace_normalized_exposure.
         stored = self.repo.list_overlap_scores()
         self.assertEqual(len(stored), 1)
         self.assertEqual(stored[0]["symbol"], "HDFCBANK")
         self.assertAlmostEqual(stored[0]["overlap_pct"], 3.13)
         self.assertEqual(stored[0]["band"], "HARD_EXCLUDE")
+
+        # load_portfolio_context returns the pre-computed scores without recomputing.
+        context = self.repo.load_portfolio_context()
+        self.assertEqual(len(context["overlap_scores"]), 1)
+        self.assertEqual(context["overlap_scores"][0]["symbol"], "HDFCBANK")
+        self.assertAlmostEqual(context["overlap_scores"][0]["overlap_pct"], 3.13)
+        self.assertEqual(context["overlap_scores"][0]["band"], "HARD_EXCLUDE")
 
 
 class LiveProviderTests(unittest.TestCase):
