@@ -1999,7 +1999,7 @@ with tabs[1]:
                 if _broker_holdings:
                     save_broker_holdings_to_db(_broker_holdings, DB_PATH)
                     st.session_state["broker_autoimport_sig"] = _csv_sig
-                    st.success(f"Buying prices extracted from CSV: {len(_broker_holdings)} stocks saved.")
+                    st.rerun()
             except Exception as _exc:
                 pass  # Silent fail — broker parsing is best-effort
 
@@ -2102,8 +2102,6 @@ with tabs[1]:
         deh_df = pd.DataFrame(deh)[["symbol", "quantity", "avg_buy_price", "buy_date"]]
         deh_df.columns = ["Symbol", "Qty", "Avg Buy Rs", "Buy Date"]
         st.dataframe(deh_df, use_container_width=True, hide_index=True)
-    else:
-        st.info("No buying prices saved yet. Upload a broker statement or use the manual entry above.")
 
     existing_prefs = portfolio["user_preferences"]
     default_payload = uploaded_payload or {
@@ -2149,6 +2147,11 @@ with tabs[1]:
                 num_rows="dynamic",
                 use_container_width=True,
                 key="direct_editor",
+            )
+            st.caption(
+                "Click **Save And Ingest Portfolio** to run sector gap analysis and generate buy ideas. "
+                "Your portfolio is already saved from the CSV upload — click this only to re-run the analysis "
+                "after editing the tables above."
             )
             submitted = st.form_submit_button("Save And Ingest Portfolio", use_container_width=True)
             if submitted:
