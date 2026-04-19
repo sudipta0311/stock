@@ -945,7 +945,7 @@ If no material risks are found, return exactly:
 
             response = client.messages.create(
                 model=self.config.llm_reasoning_model,
-                max_tokens=1500,
+                max_tokens=4000,
                 temperature=0.2,
                 system=[{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
                 messages=[{"role": "user", "content": user_prompt}],
@@ -962,7 +962,10 @@ If no material risks are found, return exactly:
                     "Synthesis incomplete — re-run Compare Both to regenerate."
                 )
             return synthesis_text
-        except Exception:
+        except Exception as exc:
+            import traceback
+            print(f"SYNTHESIS ERROR [{stock_name}]: {type(exc).__name__}: {exc}")
+            traceback.print_exc()
             return None
 
     def monitoring_rationale(
