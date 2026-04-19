@@ -2075,6 +2075,15 @@ with tabs[1]:
                 )
                 st.success(f"Saved {m_symbol.upper()} at Rs{m_price}")
 
+    deh = portfolio.get("direct_equity_holdings", [])
+    if deh:
+        st.subheader("Saved Buying Prices")
+        deh_df = pd.DataFrame(deh)[["symbol", "quantity", "avg_buy_price", "buy_date"]]
+        deh_df.columns = ["Symbol", "Qty", "Avg Buy Rs", "Buy Date"]
+        st.dataframe(deh_df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No buying prices saved yet. Upload a broker statement or use the manual entry above.")
+
     existing_prefs = portfolio["user_preferences"]
     default_payload = uploaded_payload or {
         "macro_thesis": existing_prefs.get("macro_thesis", ""),
@@ -2084,6 +2093,11 @@ with tabs[1]:
         "etfs": [row["payload"] for row in portfolio["raw_holdings"] if row["holding_type"] == "etf"],
         "direct_equities": [row["payload"] for row in portfolio["raw_holdings"] if row["holding_type"] == "direct_equity"],
     }
+    _buy_price_lookup = {h["symbol"]: h.get("avg_buy_price") for h in portfolio.get("direct_equity_holdings", []) if h.get("symbol")}
+    for _eq in default_payload.get("direct_equities", []):
+        sym = str(_eq.get("symbol") or "").upper()
+        if sym and sym in _buy_price_lookup and not _eq.get("avg_buy_price"):
+            _eq["avg_buy_price"] = _buy_price_lookup[sym]
 
     with st.expander("Edit portfolio manually", expanded=not bool(uploaded and Path(uploaded.name).suffix.lower() == ".pdf")):
         with st.form("portfolio-form"):
@@ -2110,7 +2124,7 @@ with tabs[1]:
             )
             st.caption("Direct equities")
             direct_df = st.data_editor(
-                _df(default_payload.get("direct_equities", []), ["instrument_name", "symbol", "quantity", "market_value"]),
+                _df(default_payload.get("direct_equities", []), ["instrument_name", "symbol", "quantity", "avg_buy_price", "market_value"]),
                 num_rows="dynamic",
                 use_container_width=True,
                 key="direct_editor",
