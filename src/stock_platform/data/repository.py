@@ -227,6 +227,13 @@ class PlatformRepository:
 
     def replace_overlap_scores(self, rows: list[dict[str, Any]]) -> None:
         timestamp = utc_now_iso()
+        # Deduplicate by symbol — last writer wins (safety net for any upstream duplication).
+        deduped: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            sym = str(row["symbol"] or "").strip()
+            if sym:
+                deduped[sym] = row
+        rows = list(deduped.values())
         print(f"replace_overlap_scores: writing {len(rows)} rows at {timestamp}")
         for row in rows:
             print(f"  overlap_scores write: {row['symbol']} = {row['overlap_pct']:.4f} ({row['band']})")
@@ -236,6 +243,11 @@ class PlatformRepository:
                 """
                 INSERT INTO overlap_scores(symbol, overlap_pct, band, attribution_json, updated_at)
                 VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(symbol) DO UPDATE SET
+                    overlap_pct      = excluded.overlap_pct,
+                    band             = excluded.band,
+                    attribution_json = excluded.attribution_json,
+                    updated_at       = excluded.updated_at
                 """,
                 [
                     (
