@@ -947,7 +947,7 @@ If no material risks are found, return exactly:
                 model=self.config.llm_reasoning_model,
                 max_tokens=1500,
                 temperature=0.2,
-                system=[{"type": "text", "text": system_prompt}],
+                system=[{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
                 messages=[{"role": "user", "content": user_prompt}],
             )
             synthesis_text = (response.content[0].text or "").strip()
@@ -1061,6 +1061,7 @@ If no material risks are found, return exactly:
             user_prompt=user_prompt,
             max_tokens=350,
             temperature=0.3,
+            cache_system=True,
         )
 
     def qualitative_analysis(
@@ -1096,6 +1097,7 @@ If no material risks are found, return exactly:
             user_prompt=user_prompt,
             max_tokens=200,
             temperature=0.1,
+            cache_system=True,
         )
         if not raw:
             return None
@@ -1145,6 +1147,7 @@ If no material risks are found, return exactly:
             user_prompt=user_prompt,
             max_tokens=200,
             temperature=0.1,
+            cache_system=True,
         )
         if not raw:
             return None
