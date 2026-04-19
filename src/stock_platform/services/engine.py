@@ -434,6 +434,8 @@ class PlatformEngine:
                 )
                 if synthesis:
                     synthesis_map[symbol] = _append_entry_summary(synthesis, base_rec)
+                else:
+                    print(f"SYNTHESIS MISSING [{symbol}]: synthesise_comparison returned None")
         results["synthesis"] = synthesis_map
         elapsed = time.perf_counter() - start
         print(

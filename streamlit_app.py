@@ -2387,12 +2387,17 @@ with tabs[2]:
                 )
 
         # ── SYNTHESIS FIRST — final resolved verdicts dominate the view ──────
-        if synthesis_map:
-            st.markdown("#### Final Synthesis")
-            st.caption(
-                "Contrarian risk view (Anthropic) vs. momentum catalyst view (OpenAI) — "
-                "synthesised by Claude Sonnet. This section reflects the final resolved verdict."
+        st.markdown("#### Final Synthesis")
+        st.caption(
+            "Contrarian risk view (Anthropic) vs. momentum catalyst view (OpenAI) — "
+            "synthesised by Claude Sonnet. This section reflects the final resolved verdict."
+        )
+        if not synthesis_map:
+            st.warning(
+                "⚠️ Synthesis not available for this run — individual analyst views shown below. "
+                "Re-run Compare Both to generate synthesis."
             )
+        else:
             _synth_state_colors: dict[str, str] = {
                 "AVOID":                      "#c0392b",
                 "WATCHLIST":                  "#e67e22",
@@ -2405,6 +2410,7 @@ with tabs[2]:
             for symbol in conviction_order:
                 synthesis_text = synthesis_map.get(symbol)
                 if not synthesis_text:
+                    st.warning(f"⚠️ {symbol}: synthesis unavailable — re-run to regenerate.")
                     continue
                 synth_canon, synth_conf = extract_synthesis_verdict(synthesis_text)
                 _sv_color = _synth_state_colors.get(synth_canon, "#555")
