@@ -1423,6 +1423,9 @@ def render_recommendation_card(
             )
 
         # ── Trade mechanics: conditional on actionability ─────────────────────
+        if entry and entry.get("withheld"):
+            st.warning(entry.get("withheld_note") or "⚠️ Entry plan withheld — insufficient evidence quality.")
+            entry = None
         if show_trade_plan and entry:
             if is_degraded:
                 st.markdown(

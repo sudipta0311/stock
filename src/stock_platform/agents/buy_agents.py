@@ -64,6 +64,37 @@ def _momentum_sort_key(candidate: dict[str, Any]) -> float:
     return rev_growth * 0.40 + tech_score * 0.35 + sel_score * 0.25
 
 
+def _apply_momentum_exclusions(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Hard exclusion for the OpenAI momentum pool.
+
+    Rejects stocks where revenue AND earnings are declining while the stock
+    sits near its 52W high — a sign that price momentum has decoupled from
+    fundamentals and the thesis rests on price action alone.
+    All four conditions must hold to exclude (conservative gate).
+    """
+    eligible: list[dict[str, Any]] = []
+    for c in candidates:
+        fin        = c.get("live_financials") or c.get("financials") or {}
+        rev_growth = float(fin.get("revenue_growth_pct") or 0)
+        pat_info   = fin.get("pat_momentum") or {}
+        pat_growth = float(pat_info.get("pat_growth_pct") or 0)
+        current    = float(fin.get("currentPrice") or fin.get("current_price") or 0)
+        w52_high   = float(fin.get("week52_high") or fin.get("fiftyTwoWeekHigh") or 0)
+        near_high  = (
+            w52_high > 0 and current > 0
+            and (w52_high - current) / w52_high < 0.05
+        )
+        if rev_growth < -5.0 and pat_growth < -10.0 and near_high:
+            print(
+                f"MOMENTUM EXCLUDED: {c.get('symbol')} — "
+                f"rev {rev_growth:.1f}% PAT {pat_growth:.1f}% "
+                f"within 5% of 52W high ({current:.0f}/{w52_high:.0f})"
+            )
+            continue
+        eligible.append(c)
+    return eligible
+
+
 PROMOTER_GROUPS: dict[str, list[str]] = {
     "ADANI": [
         "ADANIENT", "ADANIPORTS", "ADANIPOWER", "ADANIGREEN",
@@ -537,6 +568,8 @@ class BuyAgents:
             state.get("scored_candidates", []),
             sort_key=sort_key,
         )
+        if self.llm.provider == "openai":
+            full_shortlist = _apply_momentum_exclusions(full_shortlist)
         return {"shortlist": full_shortlist}
 
     def validate_qualitative(self, state: dict[str, Any]) -> dict[str, Any]:
@@ -1001,6 +1034,21 @@ class BuyAgents:
                 })
                 continue
 
+            # WEAK evidence: stock passes through but entry plan is withheld.
+            # Insufficient data to generate reliable entry parameters.
+            _entry_withheld = evidence["label"] == "WEAK"
+            _entry_withheld_note: str | None = (
+                "⚠️ Entry plan withheld — WEAK evidence basis. "
+                "Insufficient data to generate reliable entry parameters. "
+                "Do not treat as trade-ready."
+                if _entry_withheld else None
+            )
+            if _entry_withheld:
+                _log.info(
+                    "ENTRY WITHHELD %s: WEAK evidence (%.2f) — entry plan suppressed, stock retained",
+                    item["symbol"], evidence["score"],
+                )
+
             sector_gap_row = gaps_by_sector.get(item.get("sector", ""), {})
             _snap = build_factual_snapshot(
                 symbol=item["symbol"],
@@ -1088,6 +1136,8 @@ class BuyAgents:
                 "snapshot_text": snapshot_text,
                 "target_source_label": target_source_label,
                 "entry_levels": entry_levels,
+                "entry_withheld": _entry_withheld,
+                "entry_withheld_note": _entry_withheld_note,
                 "tariff_signal": tariff_signal,
                 "tariff_warning": tariff_warning,
                 "initial_tranche_pct": initial_tranche_pct,
@@ -1183,7 +1233,14 @@ class BuyAgents:
                 "current_price": round(float(prep["current_price"]), 2) if prep["current_price"] else None,
                 "analyst_target": round(float(prep["analyst_target"]), 2) if prep["analyst_target"] else None,
                 "fin_data": prep["fin_data"],
-                "entry_levels": prep["entry_levels"],
+                "entry_levels": (
+                    prep["entry_levels"] | {
+                        "withheld": True,
+                        "withheld_note": prep["entry_withheld_note"],
+                    }
+                    if prep.get("entry_withheld")
+                    else prep["entry_levels"]
+                ),
                 # Legacy key kept for backward compatibility with stored recommendations.
                 "allocation_pct": prep["allocation_pct"],
                 "allocation_amount": prep["allocation_amount"],
