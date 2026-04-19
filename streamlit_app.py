@@ -68,6 +68,7 @@ from stock_platform.utils.index_config import DEFAULT_INDEX, INDEX_UNIVERSE, SEL
 from stock_platform.utils.fii_dii_fetcher import fetch_fii_dii_sector_flow
 from stock_platform.utils.cache_init import ensure_cache_tables, get_cache_row_counts
 from stock_platform.utils.pe_history_fetcher import prefetch_pe_history_for_universe
+from stock_platform.utils.direct_equity_merge import apply_saved_buy_prices
 
 # Ensure all three cache tables exist in Neon (or SQLite fallback) at startup.
 # Guard prevents re-running on every Streamlit rerun within the same process.
@@ -2033,6 +2034,8 @@ with tabs[1]:
         help="Zerodha: Console -> Holdings -> Download CSV",
     )
 
+    latest_direct_equity_holdings = portfolio.get("direct_equity_holdings", [])
+
     if broker_file:
         import os
         import tempfile
@@ -2050,6 +2053,7 @@ with tabs[1]:
 
         if holdings:
             saved = save_broker_holdings_to_db(holdings, DB_PATH)
+            latest_direct_equity_holdings = engine.repo.list_direct_equity_holdings()
             st.success(f"Saved {saved} holdings with buying prices")
             preview_df = pd.DataFrame(holdings)[["symbol", "quantity", "avg_buy_price", "buy_date"]]
             preview_df.columns = ["Symbol", "Qty", "Avg Buy Rs", "Buy Date"]
@@ -2094,9 +2098,10 @@ with tabs[1]:
                     ],
                     DB_PATH,
                 )
+                latest_direct_equity_holdings = engine.repo.list_direct_equity_holdings()
                 st.success(f"Saved {m_symbol.upper()} at Rs{m_price}")
 
-    deh = portfolio.get("direct_equity_holdings", [])
+    deh = latest_direct_equity_holdings
     if deh:
         st.subheader("Saved Buying Prices")
         deh_df = pd.DataFrame(deh)[["symbol", "quantity", "avg_buy_price", "buy_date"]]
@@ -2112,11 +2117,10 @@ with tabs[1]:
         "etfs": [row["payload"] for row in portfolio["raw_holdings"] if row["holding_type"] == "etf"],
         "direct_equities": [row["payload"] for row in portfolio["raw_holdings"] if row["holding_type"] == "direct_equity"],
     }
-    _buy_price_lookup = {h["symbol"]: h.get("avg_buy_price") for h in portfolio.get("direct_equity_holdings", []) if h.get("symbol")}
-    for _eq in default_payload.get("direct_equities", []):
-        sym = str(_eq.get("symbol") or "").upper()
-        if sym and sym in _buy_price_lookup and not _eq.get("avg_buy_price"):
-            _eq["avg_buy_price"] = _buy_price_lookup[sym]
+    default_payload["direct_equities"] = apply_saved_buy_prices(
+        default_payload.get("direct_equities", []),
+        latest_direct_equity_holdings,
+    )
 
     with st.expander("Edit portfolio manually", expanded=not bool(uploaded and Path(uploaded.name).suffix.lower() == ".pdf")):
         with st.form("portfolio-form"):
