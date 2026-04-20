@@ -132,7 +132,7 @@ def extract_synthesis_verdict(synthesis_text: str) -> tuple[str, str]:
     if not synthesis_text:
         return "", ""
     m = re.search(
-        r"##\s*SYNTHESIS VERDICT\s*:\s*([^|]+?)(?:\s*\|\s*Confidence\s*:\s*([A-Z]+))?(?:\n|$)",
+        r"(?:##\s*SYNTHESIS\s+)?VERDICT\s*:\s*([^|]+?)(?:\s*\|\s*Confidence\s*:\s*([A-Z]+))?(?:\n|$)",
         synthesis_text, re.IGNORECASE
     )
     if not m:

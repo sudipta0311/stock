@@ -342,12 +342,21 @@ class PlatformEngine:
             o_by_symbol = {r["symbol"]: r for r in o_recs}
             synth_llm = PlatformLLM(self.config, provider="anthropic")
             # Synthesise in conviction order: both-agree first, then single-model.
+            _synth_idx = 0
             for symbol in agreement["conviction_order"]:
                 a_rec = a_by_symbol.get(symbol)
                 o_rec = o_by_symbol.get(symbol)
                 base_rec = a_rec or o_rec
                 if not base_rec:
                     continue
+
+                # Space synthesis calls 20s apart to stay under 30k input-TPM.
+                # The system prompt is cached after the first call, so subsequent
+                # calls only pay uncached (user prompt) tokens — still ~5-8k each.
+                if _synth_idx > 0:
+                    print(f"Synthesis: 20s inter-call delay before {symbol}...")
+                    time.sleep(20)
+                _synth_idx += 1
 
                 if symbol in agreement["both_agree"]:
                     agreement_type = "both"
