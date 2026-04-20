@@ -60,7 +60,7 @@ The platform is organized around four major flows from the PlantUML sequence dia
 ### Services
 
 - [llm.py](c:/Project/App/src/stock_platform/services/llm.py)
-  Standard OpenAI client wrapper used for rationale generation.
+  Provider-aware Anthropic/OpenAI client wrapper used for rationale generation, Compare Both synthesis, and deterministic fallback handling.
 
 - [pdf_parser.py](c:/Project/App/src/stock_platform/services/pdf_parser.py)
   Parses encrypted NSDL CAS statements into structured portfolio payloads.
@@ -79,21 +79,24 @@ The platform is organized around four major flows from the PlantUML sequence dia
 - [schema.py](c:/Project/App/src/stock_platform/data/schema.py)
 - [repository.py](c:/Project/App/src/stock_platform/data/repository.py)
 
-## Environment and LLM Setup (v6.0)
+## Environment and LLM Setup (v6.1)
 
-The app now uses a tiered Anthropic Claude strategy via [.env](c:/Project/App/.env).
+The app supports both Anthropic Claude and OpenAI GPT via [.env](c:/Project/App/.env). Anthropic remains the default cached high-volume path for rationale generation, while OpenAI can be enabled for the side-by-side Compare Both workflow.
 
-Required key:
+Optional provider keys:
 
 ```env
 ANTHROPIC_API_KEY=sk-ant-...
+OPENAI_API_KEY=sk-...
 ```
 
 Optional model overrides:
 
 ```env
-LLM_FAST_MODEL=claude-haiku-4-5-20251001      # default
-LLM_REASONING_MODEL=claude-sonnet-4-6          # default
+LLM_FAST_MODEL=claude-haiku-4-5-20251001
+LLM_REASONING_MODEL=claude-sonnet-4-6
+OPENAI_FAST_MODEL=gpt-5.4-mini
+OPENAI_REASONING_MODEL=gpt-5.4
 ```
 
 Config handling is in [config.py](c:/Project/App/src/stock_platform/config.py).
@@ -109,7 +112,17 @@ The service class is [PlatformLLM](c:/Project/App/src/stock_platform/services/ll
 | `qualitative_analysis` | Sonnet 4.6 | 4-8 calls/session | No |
 | `thesis_review` | Sonnet 4.6 | ~50 calls/session | No |
 
-All methods fall back to deterministic text when `ANTHROPIC_API_KEY` is absent or a call fails.
+OpenAI follows the same fast/reasoning split (`gpt-5.4-mini` / `gpt-5.4`) when selected in the UI.
+All methods fall back to deterministic text when the chosen provider key is absent or a call fails.
+
+### Recent LLM hardening (2026-04)
+
+- Cached Anthropic system prompts now request a `1h` TTL, which improves reuse across repeated rationale and synthesis calls.
+- Compare Both synthesis output is now a compact 4-line verdict: `VERDICT`, `Key agreement`, `Resolution`, and `Flip condition`.
+- Large factual snapshots and news blocks are truncated before synthesis so one Compare Both run stays within Anthropic prompt-budget limits.
+- Synthesis retries Anthropic rate-limit failures up to 3 times with increasing wait windows.
+- `PlatformEngine` spaces synthesis calls 20 seconds apart when multiple stocks need a synthesis pass in one run.
+- `extract_synthesis_verdict()` accepts both the legacy `SYNTHESIS VERDICT` header and the newer `VERDICT:` format.
 
 ## PDF Statement Ingestion
 
