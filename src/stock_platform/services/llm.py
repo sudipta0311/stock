@@ -132,7 +132,7 @@ class PlatformLLM:
         system: list[dict[str, Any]] = [{"type": "text", "text": system_prompt}]
         if cache_system:
             # Marks the compiled prompt prefix for 5-minute server-side caching.
-            system[0]["cache_control"] = {"type": "ephemeral"}
+            system[0]["cache_control"] = {"type": "ephemeral", "ttl": "1h"}
         response = client.messages.create(
             model=model,
             max_tokens=max_tokens,
@@ -829,46 +829,22 @@ If no material risks are found, return exactly:
 
             system_prompt = (
                 "You are a senior portfolio manager synthesising two analyst views on an Indian equity. "
-                "Your job is to produce a clean, honest verdict — not a merger of both texts.\n\n"
+                "Produce a concise verdict — do not repeat what the analysts said, only what the synthesis ADDS.\n\n"
                 f"INVESTOR RISK PROFILE: {risk_profile}\n"
                 f"{_synth_hint}\n"
-                f"The minimum acceptable R/R for this profile is {_synth_min_rr}x. "
-                f"Data up to {_synth_stale_cap} days stale is tolerated for this profile. "
-                "If either analyst's entry plan meets the R/R threshold AND business quality is "
-                "confirmed, the synthesis MUST consider ACCUMULATE GRADUALLY as a valid verdict "
-                "-- do not default to WATCHLIST purely on data staleness grounds when the risk "
-                "profile explicitly tolerates it.\n\n"
+                f"Minimum acceptable R/R: {_synth_min_rr}x. "
+                f"Staleness tolerance: {_synth_stale_cap} days. "
+                "If the R/R threshold is met and business quality confirmed, "
+                "MUST consider ACCUMULATE GRADUALLY — do not default to WATCHLIST on staleness alone.\n\n"
                 f"{_critical_instruction}\n\n"
-                "SYNTHESIS RULES:\n"
-                "1. First identify whether disagreement is about:\n"
-                "   - FACTS (one analyst has wrong data)\n"
-                "   - TIME HORIZON (both right, different windows)\n"
-                "   - VALUATION vs EXECUTION (classic divergence)\n"
-                "   - POLICY RISK vs GROWTH OPTIMISM\n"
-                "   - STALE ASSUMPTIONS (one using outdated framing)\n"
-                "2. Do not average the views. Resolve the disagreement or acknowledge it "
-                "cannot be resolved with current data.\n"
-                "3. Do not repeat what both analysts said. Only state what the synthesis ADDS.\n"
-                "4. End with ONE of these exact stances:\n"
-                "   AVOID | WATCHLIST | BUY AFTER CONFIRMATION |\n"
-                "   ACCUMULATE ON DIPS | ACCUMULATE GRADUALLY | STRONG BUY\n"
-                "5. State confidence: HIGH / MEDIUM / LOW and the specific reason for that level.\n"
-                "6. State the single most important condition that would change your stance.\n\n"
-                "OUTPUT STRUCTURE:\n"
-                "## SYNTHESIS VERDICT: [STANCE] | Confidence: [LEVEL]\n\n"
-                "### Where analysts agree\n"
-                "[Facts both accept as true]\n\n"
-                "### Nature of disagreement\n"
-                "[LABEL from rule 1 + one sentence explanation]\n\n"
-                "### Resolution\n"
-                "[Which view is better supported by current evidence and why — "
-                "or why it cannot be resolved]\n\n"
-                "### Portfolio fit\n"
-                "[Why this stock specifically for this portfolio — gap it fills, risk it adds]\n\n"
-                "### Confidence explanation\n"
-                "[Why HIGH/MEDIUM/LOW — specific to evidence quality]\n\n"
-                "### Stance-changing condition\n"
-                "[The single event that would move stance up or down]"
+                "RULES: Do not average views — resolve the disagreement or state it cannot be resolved. "
+                "Pick ONE stance: AVOID | WATCHLIST | BUY AFTER CONFIRMATION | "
+                "ACCUMULATE ON DIPS | ACCUMULATE GRADUALLY | STRONG BUY\n\n"
+                "OUTPUT — 4 lines only, no headers, no bullet points:\n"
+                "Line 1: VERDICT: [STANCE] | Confidence: [HIGH/MEDIUM/LOW]\n"
+                "Line 2: Key agreement: [one fact both analysts accept]\n"
+                "Line 3: Resolution: [which view wins and why, or why unresolvable — max 2 sentences]\n"
+                "Line 4: Flip condition: [single event that would change the stance]"
             )
 
             # ── Build entry guidance block (provided verbatim for accuracy) ─
@@ -894,11 +870,20 @@ If no material risks are found, return exactly:
                     )
 
             # ── Build user prompt — vary only the analyst section ────────────
-            snapshot_section = f"\nFACTUAL SNAPSHOT:\n{factual_snapshot}\n" if factual_snapshot else ""
+            # Cap large sections to keep per-call input tokens under ~7k total,
+            # which lets 4 sequential synthesis calls fit inside the 30k TPM limit.
+            _SNAPSHOT_CHAR_LIMIT = 4000   # ~1000 tokens
+            _NEWS_CHAR_LIMIT     = 3000   # ~750 tokens
+            _snap_raw = factual_snapshot or ""
+            if len(_snap_raw) > _SNAPSHOT_CHAR_LIMIT:
+                _snap_raw = _snap_raw[:_SNAPSHOT_CHAR_LIMIT] + "\n[...snapshot truncated for token budget]"
+            snapshot_section = f"\nFACTUAL SNAPSHOT:\n{_snap_raw}\n" if _snap_raw else ""
             from stock_platform.utils.fii_dii_fetcher import format_macro_flow_for_prompt
             _macro_block_synth = format_macro_flow_for_prompt(macro_flow or {})
             macro_section = f"\n{_macro_block_synth}" if _macro_block_synth else ""
             news_section = self.format_news_risk_block(news_context)
+            if len(news_section) > _NEWS_CHAR_LIMIT:
+                news_section = news_section[:_NEWS_CHAR_LIMIT] + "\n[...news truncated for token budget]"
             news_prompt_section = f"\n{news_section}\n" if news_section else ""
 
             if agreement_type == "anthropic_only":
@@ -950,22 +935,38 @@ If no material risks are found, return exactly:
             )
             if _prompt_chars > 80_000:
                 print(f"WARNING: synthesis prompt for {stock_name} is very large — may approach context limits")
-            response = client.messages.create(
-                model=self.config.llm_reasoning_model,
-                max_tokens=4000,
-                temperature=0.2,
-                system=[{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
-                messages=[{"role": "user", "content": user_prompt}],
-            )
+            import time as _time
+            _last_exc: Exception | None = None
+            response = None
+            for _attempt in range(3):
+                try:
+                    response = client.messages.create(
+                        model=self.config.llm_reasoning_model,
+                        max_tokens=400,
+                        temperature=0.2,
+                        system=[{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
+                        messages=[{"role": "user", "content": user_prompt}],
+                    )
+                    break
+                except _anthropic.RateLimitError as _rle:
+                    _last_exc = _rle
+                    _wait = 65 * (_attempt + 1)
+                    print(
+                        f"SYNTHESIS rate-limited [{stock_name}] attempt {_attempt + 1}/3 "
+                        f"— waiting {_wait}s before retry"
+                    )
+                    _time.sleep(_wait)
+            if response is None:
+                raise _last_exc  # type: ignore[misc]
             synthesis_text = (response.content[0].text or "").strip()
             if response.stop_reason == "max_tokens":
                 synthesis_text += "\n\n[Analysis truncated — re-run for full synthesis]"
                 print(f"WARNING: synthesis truncated for {stock_name}")
             if not synthesis_text:
                 return None
-            if "SYNTHESIS VERDICT" not in synthesis_text:
+            if "VERDICT:" not in synthesis_text:
                 synthesis_text += (
-                    "\n\n## SYNTHESIS VERDICT: WATCHLIST | Confidence: LOW\n"
+                    "\n\nVERDICT: WATCHLIST | Confidence: LOW\n"
                     "Synthesis incomplete — re-run Compare Both to regenerate."
                 )
             return synthesis_text
