@@ -111,7 +111,7 @@ If you update secrets or OAuth settings, reboot the Streamlit app before re-test
 ### Current deployment reference
 
 - Active deployment branch: `codex/streamlit-cloud-ready`
-- Latest deployment branch commit verified in this workspace: `cd5d0ee`
+- Latest deployment branch commit verified in this workspace: `addaaae`
 - App URL: `https://sudipta0311-stock-streamlit-app-codexstreamlit-cloud-rea-ynukc3.streamlit.app/`
 
 ### Redeploy checklist
@@ -166,7 +166,9 @@ The ingestion tab supports:
 | **Screener.in data source** | Fundamentals (ROCE, D/E, EPS, promoter holding, revenue growth) are now fetched from Screener.in via `utils/screener_fetcher.py`, with consolidated/standalone fallback. `yfinance` is retained for current price and analyst target only. This fixes stale/missing data for Indian stocks that `yfinance` returns incorrectly. |
 | **Quality score accuracy** | `agents/quant_model.py` scores on 5 rules using Screener field names (`roce_pct`, `eps`, `revenue_growth_pct`, `promoter_holding`, `debt_to_equity`). No-data returns `0.5` (never `1.0`). Negative EPS hard-caps quality at `0.35`. |
 | **Compare Both — analyst differentiation** | Anthropic Claude uses a **contrarian risk analyst** prompt (4 bullets: RISK / WE ARE WRONG IF / VERDICT / SUPPORTING METRIC). OpenAI GPT uses a **momentum catalyst analyst** prompt (4 bullets: CATALYST / MARKET MISREAD / EXIT TRIGGER / VERDICT). The two rationales are structurally different and surface distinct information. |
-| **Compare Both — synthesis** | When both providers return recommendations, a third **Analyst Synthesis** section appears below the two columns. Claude Sonnet synthesises the contrarian and catalyst views into 3 bullets: WHERE THEY AGREE / WHERE THEY DISAGREE / COMBINED VERDICT (ENTER NOW / ACCUMULATE GRADUALLY / WAIT FOR BETTER ENTRY). |
+| **Compare Both — synthesis output** | The third **Analyst Synthesis** panel now returns a tighter 4-line verdict: `VERDICT`, `Key agreement`, `Resolution`, and `Flip condition`. `extract_synthesis_verdict()` accepts both the new `VERDICT:` format and the older `SYNTHESIS VERDICT` header so previously stored results still parse correctly. |
+| **Compare Both — synthesis stability** | Anthropic synthesis calls were hardened to stay inside rate and token limits: large factual snapshots and news blocks are truncated for prompt budget, synthesis responses are capped at `max_tokens=400`, rate-limit retries back off automatically, and `PlatformEngine` spaces multi-stock synthesis calls 20 seconds apart instead of firing them back-to-back. |
+| **Anthropic prompt caching** | Cached Anthropic system prompts now request a `1h` TTL instead of only ephemeral reuse, which reduces repeat prompt cost across high-volume rationale and synthesis runs. |
 | **Live market-data runtime** | `PlatformEngine` now uses `LiveMarketDataProvider` instead of `DemoDataProvider`. Candidate discovery uses official NSE constituent files, stock snapshots/price context/financials come from live sources, and unknown live fields are left unknown rather than replaced with optimistic demo defaults. |
 | **Direct holdings — Monitoring Desk** | `capture_user_portfolio` now skips blank data-editor rows (`float("")` no longer crashes ingestion). Direct equity rows are preserved on PDF re-ingestion — only replaced when the new payload explicitly provides at least one valid row. `normalize_exposure` no longer crashes on stocks with no symbol. |
 | **Position sizing** | Buy recommendations show **"Deploy now: X% \| Target: Y% over 3 months"** using `compute_position_size(entry_signal, quality_score, corpus)`. Each stock gets a different initial tranche. Hard cap remains 30%. |
