@@ -1128,12 +1128,15 @@ If no material risks are found, return exactly:
         quant_score: float,
         sector_signal: dict[str, Any],
         stock_news: dict[str, Any],
+        sector_correction_flag: bool = False,
     ) -> dict[str, Any] | None:
         """
         INTACT / WEAKENED / BREACHED thesis assessment.
         Returns {"status": str, "reasoning": str} or None.
         Hard rules (STRONG_AVOID, etc.) override the LLM result upstream.
         Temperature 0.1 — deterministic, traceable for compliance.
+        sector_correction_flag=True when ≥2 stocks in the same sector are >10%
+        below their 52W high simultaneously (macro correction, not stock-specific).
         """
         system_prompt = (
             "You are a portfolio risk manager for Indian equity portfolios. "
@@ -1141,7 +1144,29 @@ If no material risks are found, return exactly:
             'Respond ONLY as valid JSON: {"status": "INTACT"|"WEAKENED"|"BREACHED", "reasoning": "..."}. '
             "BREACHED means sell immediately regardless of P&L. "
             "WEAKENED means monitor closely. INTACT means thesis still valid. "
-            "No markdown, no prose outside the JSON object."
+            "No markdown, no prose outside the JSON object.\n\n"
+            "CRITICAL: You MUST distinguish between two types of weakness:\n\n"
+            "TYPE A — PRICE-ONLY WEAKNESS (sector/market correction):\n"
+            "  Signs: stock price down, but fundamentals unchanged, sector peers also\n"
+            "  down, no company-specific bad news, NPA/ROCE/revenue within historical\n"
+            "  norms. Output status = 'INTACT' with note 'price correction, fundamentals\n"
+            "  stable'. This must NOT generate WEAKENED or BREACHED.\n\n"
+            "TYPE B — FUNDAMENTAL WEAKNESS (genuine thesis deterioration):\n"
+            "  Signs: NPA rising quarter-on-quarter, revenue declining, management\n"
+            "  change, promoter pledge spike, sector structural headwind (not cyclical),\n"
+            "  ROCE below 12% for two consecutive quarters.\n"
+            "  Output status = 'WEAKENED' or 'BREACHED'. This SHOULD drive TRIM/EXIT.\n\n"
+            "For private banks specifically: improving NPA, double-digit deposit and\n"
+            "profit growth = TYPE A only. Do NOT classify as fundamental weakness.\n"
+            "A sector-wide rate-concern correction is TYPE A, not TYPE B."
+        )
+        _correction_line = (
+            "Sector correction flag: TRUE — ≥2 stocks in this sector are >10% below "
+            "their 52W high simultaneously. This is a macro/sector correction. "
+            "Classify price weakness as TYPE A (INTACT) unless company-specific "
+            "fundamentals have genuinely deteriorated."
+            if sector_correction_flag
+            else "Sector correction flag: FALSE"
         )
         user_prompt = (
             f"Holding: {holding['symbol']} in sector {holding['sector']}\n"
@@ -1149,7 +1174,9 @@ If no material risks are found, return exactly:
             f"Sector signal conviction: {sector_signal.get('conviction', 'NEUTRAL')}\n"
             f"Recent news headline: {stock_news.get('headline', 'N/A')}\n"
             f"News sentiment: {stock_news.get('sentiment_score', 0.0):.2f}\n"
-            "Assess whether the investment thesis is INTACT, WEAKENED, or BREACHED."
+            f"{_correction_line}\n"
+            "Assess whether the investment thesis is INTACT, WEAKENED, or BREACHED. "
+            "Apply the TYPE A / TYPE B distinction above before deciding."
         )
         thesis_model = self._fast_model if self.provider == "openai" else self._smart_model
         raw = self._call(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -343,6 +344,87 @@ def _build_overlap_lookup(ctx: dict[str, Any], normalize_symbol: Any) -> dict[st
     return resolved
 
 
+# ── Valuation floor helpers (Fix 1 & 3) ─────────────────────────────────────
+
+def _valuation_floor_active(d: dict) -> bool:
+    """
+    Returns True when a stock is near its 52W low AND trading at a PE discount
+    to its own 5-year average, signalling a sector-wide correction rather than
+    a thesis breach.  All four conditions must be met:
+      - quant_score >= 0.55 (fundamentals not broken)
+      - price <= week52_low * 1.15 (within 15% of 52W low)
+      - current_pe < pe_5yr_avg * 0.85 (PE at 15%+ discount to own history)
+      - thesis_status in ("INTACT", "WEAKENED") — not "BREACHED"
+    Returns False if any required field is missing so the guard never fires
+    on incomplete data.
+    """
+    pe      = d.get("current_pe") or 0
+    avg_pe  = d.get("pe_5yr_avg") or d.get("sector_avg_pe") or 0
+    low52w  = d.get("week52_low") or 0
+    price   = d.get("current_price") or 0
+    quant   = d.get("quant_score", 0)
+    thesis  = d.get("thesis_status", "INTACT")
+
+    if not all([pe, avg_pe, low52w, price]):
+        return False
+    return (
+        quant >= 0.55
+        and price <= low52w * 1.15
+        and pe < avg_pe * 0.85
+        and thesis in ("INTACT", "WEAKENED")
+    )
+
+
+def _ltcg_guard(d: dict) -> dict:
+    """
+    Returns {"block": True, ...} when selling under STCG would burn more than
+    40% of the gross gain as tax and the holding is within 90 days of LTCG
+    qualification.  Does NOT fire if the thesis is BREACHED or the position
+    is already in a loss / already LTCG.
+    """
+    pnl_pct      = d.get("pnl_pct", 0)
+    holding_days = d.get("holding_days")
+    gross_pnl    = d.get("gross_pnl", 0)
+
+    if pnl_pct <= 0 or holding_days is None or holding_days >= 365:
+        return {"block": False}
+
+    stcg_tax = gross_pnl * 0.20
+    ltcg_tax = max(0.0, gross_pnl - 125000) * 0.125
+    days_to_ltcg   = 365 - holding_days
+    tax_pct_of_gain = (stcg_tax / gross_pnl * 100) if gross_pnl > 0 else 0
+
+    block = (
+        pnl_pct > 5
+        and days_to_ltcg < 90
+        and tax_pct_of_gain > 40
+        and d.get("thesis_status") != "BREACHED"
+    )
+    return {
+        "block": block,
+        "reason": f"STCG exit {days_to_ltcg}d before LTCG",
+        "tax": round(stcg_tax, 0),
+        "tax_pct": round(tax_pct_of_gain, 1),
+        "ltcg_date": (date.today() + timedelta(days=days_to_ltcg)).strftime("%d %b %Y"),
+    }
+
+
+def check_sector_correction(sector: str, holdings: list) -> bool:
+    """
+    Returns True when ≥2 stocks in the same sector are >10% below their
+    52-week high simultaneously — a signal of a macro/sector-wide pullback
+    rather than company-specific deterioration.
+    Expects each holding dict to contain a ``pct_from_52w_high`` key
+    (negative value, e.g. -14 means 14% below the 52W high).
+    """
+    sector_stocks = [s for s in holdings if (s.get("sector") or "") == sector]
+    down_count = sum(
+        1 for s in sector_stocks
+        if (s.get("pct_from_52w_high") or 0) < -10
+    )
+    return down_count >= 2
+
+
 LEGACY_AUTOMATIC_REVIEW_TRIGGERS = {
     "revenue_degrowth_severe": lambda s: (s.get("revenue_growth", 0) or 0) < -0.20,
     "near_zero_margin": lambda s: (s.get("pat_margin", 1) or 1) < 0.01,
@@ -636,6 +718,23 @@ class MonitoringAgents:
         quant_rows = {row["symbol"]: row for row in state["quant_scores"]}
         quant_scores = {symbol: row["quant_score"] for symbol, row in quant_rows.items()}
         stock_news = {row["symbol"]: row for row in state["stock_reviews"]}
+
+        # Fix 2: build per-holding pct_from_52w_high so we can detect sector corrections
+        _universe = state["portfolio_context"]["monitor_universe"]
+        _enriched: list[dict[str, Any]] = []
+        for _h in _universe:
+            try:
+                _pctx = self.provider.get_price_context(_h["symbol"])
+                _dd_from_high = float(_pctx.get("drawdown_from_52w") or 0)
+            except Exception:
+                _dd_from_high = 0.0
+            _enriched.append({**_h, "pct_from_52w_high": -_dd_from_high})
+        sector_correction_cache: dict[str, bool] = {}
+        for _h in _enriched:
+            _sec = _h.get("sector") or ""
+            if _sec and _sec not in sector_correction_cache:
+                sector_correction_cache[_sec] = check_sector_correction(_sec, _enriched)
+
         thesis = []
         for holding in state["portfolio_context"]["monitor_universe"]:
             sector_signal = unified.get(holding["sector"], {})
@@ -655,7 +754,11 @@ class MonitoringAgents:
             else:
                 # LLM:Sonnet — nuanced multi-signal thesis assessment.
                 news = stock_news.get(holding["symbol"], {})
-                llm_result = self.llm.thesis_review(holding, quant, sector_signal, news)
+                _sector_flag = sector_correction_cache.get(holding.get("sector") or "", False)
+                llm_result = self.llm.thesis_review(
+                    holding, quant, sector_signal, news,
+                    sector_correction_flag=_sector_flag,
+                )
                 if llm_result is not None:
                     status = llm_result["status"]
                     llm_reasoning = llm_result["reasoning"]
@@ -841,17 +944,76 @@ class MonitoringAgents:
                     severity = "LOW"
                 urgency = self._fallback_urgency(action, severity)
 
-            rationale = format_monitoring_rationale(
-                {
-                    "symbol": symbol,
+            # ── Fix 1: Valuation floor gate ──────────────────────────────────
+            # Blocks EXIT/TRIM on quality stocks that are near their 52W low
+            # AND trading at a PE discount vs own history — indicates a
+            # sector-wide macro correction, not a thesis breach.
+            vf_override_rationale: str | None = None
+            action_upper = str(action).upper()
+            if thesis != "BREACHED" and ("EXIT" in action_upper or "TRIM" in action_upper):
+                _fin = quant_rows.get(symbol, {}).get("financials", {})
+                _vf_data = {
+                    "current_pe":   _as_float(_fin.get("pe_trailing") or _fin.get("pe_ratio")),
+                    "pe_5yr_avg":   _as_float(_fin.get("pe_5yr_avg")),
+                    "sector_avg_pe": _as_float(_fin.get("sector_pe")),
+                    "week52_low":   _as_float(
+                        _fin.get("week52_low") or _fin.get("fiftyTwoWeekLow")
+                    ),
+                    "current_price": float(current_price) if current_price else None,
+                    "quant_score":  quant,
                     "thesis_status": thesis,
-                    "quant_score": quant,
-                    "overlap_pct": overlap_pct,
-                    "caution_flag": caution_flag,
-                },
-                pnl,
-                exit_rec,
-            )
+                }
+                if _valuation_floor_active(_vf_data):
+                    _pe_disp   = _vf_data["current_pe"] or 0
+                    _low52w_dp = _vf_data["week52_low"] or 0
+                    action    = "HOLD"
+                    severity  = "LOW"
+                    urgency   = "LOW"
+                    vf_override_rationale = (
+                        f"Valuation floor active: PE {_pe_disp:.1f}× "
+                        f"near 52W low ₹{_low52w_dp:,.0f}. "
+                        "Sector-wide correction, not thesis breach."
+                    )
+
+            # ── Fix 3: LTCG guard ────────────────────────────────────────────
+            # Downgrades EXIT/TRIM to HOLD when STCG tax erodes >40% of gain
+            # and LTCG threshold is within 90 days.
+            ltcg_addendum: str = ""
+            if pnl and ("EXIT" in str(action).upper() or "TRIM" in str(action).upper()):
+                _guard_data = {
+                    "pnl_pct":      pnl.get("pnl_pct", 0),
+                    "holding_days": pnl.get("days_held"),
+                    "gross_pnl":    pnl.get("gross_pnl", 0),
+                    "thesis_status": thesis,
+                }
+                _tax_check = _ltcg_guard(_guard_data)
+                if _tax_check["block"]:
+                    action   = "HOLD"
+                    severity = "LOW"
+                    urgency  = "LOW"
+                    ltcg_addendum = (
+                        f" [LTCG GUARD: {_tax_check['reason']}. "
+                        f"Exit tax cost ₹{_tax_check['tax']:,.0f} "
+                        f"({_tax_check['tax_pct']:.0f}% of gain). "
+                        f"Review at LTCG threshold on {_tax_check['ltcg_date']}]"
+                    )
+
+            if vf_override_rationale:
+                rationale = vf_override_rationale + ltcg_addendum
+            else:
+                rationale = format_monitoring_rationale(
+                    {
+                        "symbol": symbol,
+                        "thesis_status": thesis,
+                        "quant_score": quant,
+                        "overlap_pct": overlap_pct,
+                        "caution_flag": caution_flag,
+                    },
+                    pnl,
+                    exit_rec,
+                )
+                if ltcg_addendum:
+                    rationale += ltcg_addendum
             actions.append(
                 {
                     "symbol": symbol,
