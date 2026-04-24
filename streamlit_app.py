@@ -2675,12 +2675,19 @@ with tabs[3]:
     if monitor_provider_label:
         st.caption(f"Latest monitoring run used {monitor_provider_label}.")
     if monitoring_actions:
+        def _action_display(item: dict) -> str:
+            action = item["action"]
+            badge = (item.get("payload") or {}).get("winner_badge")
+            if badge:
+                return f"{action} · {badge.replace('_', ' ')}"
+            return action
+
         monitor_frame = pd.DataFrame(
             [
                 {
                     "llm": monitor_provider_label or "Unknown",
                     "symbol": item["symbol"],
-                    "action": item["action"],
+                    "action": _action_display(item),
                     "severity": item["severity"],
                     "urgency": item.get("urgency", "LOW"),
                     "overlap_pct": item.get("overlap_pct", 0.0),
