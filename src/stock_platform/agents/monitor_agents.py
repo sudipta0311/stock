@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+from collections import Counter
 from datetime import date, datetime, timedelta
 from typing import Any
 from uuid import uuid4
@@ -8,8 +10,13 @@ from stock_platform.config import AppConfig
 from stock_platform.data.db import database_connection
 from stock_platform.models import MonitoringAction
 from stock_platform.utils.entry_calculator import fetch_analyst_consensus_target
+from stock_platform.utils.pe_history_fetcher import get_pe_history
 from utils.tax_calculator import calculate_pnl, should_exit
 from stock_platform.utils.result_date_fetcher import fetch_last_result_date
+
+_log = logging.getLogger(__name__)
+
+_SEVERITY_RANK: dict[str, int] = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
 
 BANKING_SECTORS = {
     "BANKS",
@@ -426,6 +433,24 @@ def check_sector_correction(sector: str, holdings: list) -> bool:
     return down_count >= 2
 
 
+# ── Fix 10: Output diversity diagnostic ──────────────────────────────────────
+
+def _check_output_diversity(results: list[dict]) -> None:
+    if not results:
+        return
+    action_counts = Counter(r.get("action", "HOLD") for r in results)
+    hold_ratio = action_counts.get("HOLD", 0) / len(results)
+    if hold_ratio > 0.80:
+        _log.warning(
+            "LOW_OUTPUT_DIVERSITY: %.0f%% of stocks flagged HOLD (%s). "
+            "Review LLM prompt — may be defaulting due to ambiguity.",
+            hold_ratio * 100,
+            dict(action_counts),
+        )
+    else:
+        _log.info("Output diversity OK: %s", dict(action_counts))
+
+
 # ── Fix 4: Earnings blackout ─────────────────────────────────────────────────
 
 def _earnings_blackout_active(d: dict) -> bool:
@@ -437,18 +462,23 @@ def _earnings_blackout_active(d: dict) -> bool:
     return 0 <= days_to_earnings <= 7
 
 
-# ── Fix 5: Field consistency enforcer ────────────────────────────────────────
+# ── Fix 5 / Fix 9: Field consistency enforcer ────────────────────────────────
 
 def _enforce_field_consistency(result: dict) -> dict:
-    """Catches internal contradictions in LLM output — called post-LLM, pre-DB."""
+    """
+    Catches internal contradictions — mandatory LAST step before DB write.
+    Never call before all other transformations (valuation floor, blackout, winner).
+    """
     quant    = result.get("quant_score", 0.5)
     thesis   = result.get("thesis_status", "INTACT")
     severity = result.get("severity", "LOW")
     action   = result.get("action", "HOLD")
+    pnl_pct  = result.get("pnl_pct", 0) or 0
 
     # Rule 1: quant <0.45 cannot be thesis INTACT
     if quant < 0.45 and thesis == "INTACT":
         result["thesis_status"] = "WEAKENED"
+        thesis = "WEAKENED"
         result["rationale"] = result.get("rationale", "") + (
             f" [AUTO-CORRECT: quant {quant:.2f} inconsistent "
             f"with thesis INTACT, downgraded to WEAKENED]"
@@ -457,18 +487,26 @@ def _enforce_field_consistency(result: dict) -> dict:
     # Rule 2: quant <0.30 forces thesis BREACHED
     if quant < 0.30:
         result["thesis_status"] = "BREACHED"
+        thesis = "BREACHED"
 
-    # Rule 3: CRITICAL severity requires EXIT/TRIM/REVIEW — escalate HOLD/BUY MORE
-    if severity == "CRITICAL" and action in ("HOLD", "BUY MORE"):
+    # Rule 3 (strengthened): CRITICAL severity requires an actionable response.
+    # HOLD or BUY MORE with CRITICAL is always a contradiction.
+    if severity == "CRITICAL" and not str(action).startswith(("EXIT", "TRIM", "REVIEW")):
         result["action"] = "REVIEW"
-        result["rationale"] = result.get("rationale", "") + (
-            f" [AUTO-CORRECT: CRITICAL severity incompatible "
-            f"with {action}, escalated to REVIEW]"
+        result["rationale"] = (
+            f"[AUTO-ESCALATED from {action}] " + result.get("rationale", "")
         )
+        action = "REVIEW"
 
-    # Rule 4: HIGH + HOLD allowed only when thesis INTACT — otherwise escalate
-    if severity == "HIGH" and action == "HOLD" and result.get("thesis_status", thesis) != "INTACT":
+    # Rule 4 (new): WEAKENED/BREACHED thesis + large loss + HOLD = must escalate.
+    if thesis in ("WEAKENED", "BREACHED") and pnl_pct < -30 and action == "HOLD":
         result["action"] = "REVIEW"
+        current_rank = _SEVERITY_RANK.get(severity, 0)
+        if current_rank < _SEVERITY_RANK["HIGH"]:
+            result["severity"] = "HIGH"
+        result["rationale"] = result.get("rationale", "") + (
+            f" [AUTO-ESCALATE: thesis {thesis} + P&L {pnl_pct:.1f}% + HOLD is inconsistent]"
+        )
 
     return result
 
@@ -485,14 +523,32 @@ def _winner_badge(pnl_pct: float) -> str | None:
 
 def _compute_action_for_winner(d: dict) -> str:
     """For big-gain stocks, action is based on forward risk — not backward P&L."""
-    pe_now       = d.get("current_pe") or 0
-    pe_5yr_avg   = d.get("pe_5yr_avg") or d.get("sector_avg_pe") or 0
-    price_to_ath = d.get("pct_from_52w_high", 0)  # negative = below ATH
+    symbol       = d.get("symbol", "?")
+    pe_now       = d.get("current_pe")
+    pe_5yr_avg   = d.get("pe_5yr_avg") or d.get("sector_avg_pe")
+    price_to_ath = d.get("pct_from_52w_high")
     quant        = d.get("quant_score", 0.5)
     thesis       = d.get("thesis_status", "INTACT")
 
-    # Near ATH with stretched PE and softening quant = small trim
-    if (price_to_ath > -5
+    _log.info(
+        "WINNER_ACTION %s: pe_now=%s pe_5yr_avg=%s price_to_ath=%s quant=%s thesis=%s",
+        symbol, pe_now, pe_5yr_avg, price_to_ath, quant, thesis,
+    )
+
+    if pe_now is None or pe_5yr_avg is None or price_to_ath is None:
+        missing = " ".join(
+            k for k, v in (
+                ("pe_now", pe_now),
+                ("pe_5yr_avg", pe_5yr_avg),
+                ("price_to_ath", price_to_ath),
+            ) if v is None
+        )
+        _log.warning("WINNER_ACTION %s: missing data (%s) — defaulting HOLD", symbol, missing)
+        d["_winner_action_degraded"] = True
+        return "HOLD"
+
+    # Within 10% of ATH with stretched PE and softening quant = small trim
+    if (price_to_ath > -10
             and pe_5yr_avg > 0
             and pe_now > pe_5yr_avg * 1.15
             and quant < 0.65):
@@ -777,6 +833,24 @@ class MonitoringAgents:
                 or financials.get("de_ratio")
             )
             auto_review = check_auto_review(holding["symbol"], financials)
+            # Populate pe_5yr_avg from cached PE history if provider didn't supply it
+            if not financials.get("pe_5yr_avg"):
+                try:
+                    _pe_hist = get_pe_history(
+                        holding["symbol"],
+                        db_path=str(self.config.db_path),
+                        neon_database_url=self.config.neon_database_url if hasattr(self.config, "neon_database_url") else "",
+                    )
+                    _med = _pe_hist.get("median_5yr") or _pe_hist.get("median_10yr")
+                    if _med:
+                        financials["pe_5yr_avg"] = float(_med)
+                        _log.info("PE history populated for %s: pe_5yr_avg=%.1f via %s",
+                                  holding["symbol"], float(_med), _pe_hist.get("source", "?"))
+                    else:
+                        _log.warning("PE history unavailable for %s — winner TRIM may degrade to HOLD",
+                                     holding["symbol"])
+                except Exception as _pe_exc:
+                    _log.warning("PE history fetch error for %s: %r", holding["symbol"], _pe_exc)
             # Estimate next earnings date: last result + ~91 days (quarterly cycle)
             _result_info = fetch_last_result_date(holding["symbol"])
             _last_result_str = _result_info.get("result_date")
@@ -1049,10 +1123,11 @@ class MonitoringAgents:
                     if _w52_high and current_price and _w52_high > 0:
                         _pct_from_ath = (float(current_price) / _w52_high - 1) * 100
                     _winner_data = {
+                        "symbol":         symbol,
                         "current_pe":     _as_float(_fin_w.get("pe_trailing") or _fin_w.get("pe_ratio")),
                         "pe_5yr_avg":     _as_float(_fin_w.get("pe_5yr_avg")),
                         "sector_avg_pe":  _as_float(_fin_w.get("sector_pe")),
-                        "pct_from_52w_high": _pct_from_ath,
+                        "pct_from_52w_high": _pct_from_ath if _pct_from_ath != 0.0 or _w52_high else None,
                         "quant_score":    quant,
                         "thesis_status":  thesis,
                     }
@@ -1258,13 +1333,20 @@ class MonitoringAgents:
             # Preserve winner-derived trim percentages if LLM normalised to plain TRIM
             if str(row["action"]).startswith("TRIM ") and final_action == "TRIM":
                 final_action = row["action"]
-            # ── Fix 5: Field consistency enforcement (post-LLM, pre-DB) ────
+            # Severity protection: LLM must not downgrade below the deterministic floor.
+            _det_rank = _SEVERITY_RANK.get(row["severity"], 0)
+            _llm_rank = _SEVERITY_RANK.get(final_severity, 0)
+            if _det_rank > _llm_rank:
+                final_severity = row["severity"]
+            # ── Fix 5/9: Field consistency enforcement — MANDATORY last step ─
+            _pnl_for_consistency = float((row.get("pnl") or {}).get("pnl_pct", 0) or 0)
             _consistency_data = {
                 "action":       final_action,
                 "severity":     final_severity,
                 "rationale":    final_rationale,
                 "quant_score":  _quant_score_map.get(row["symbol"], 0.5),
                 "thesis_status": thesis["status"],
+                "pnl_pct":      _pnl_for_consistency,
             }
             _consistency_data = _enforce_field_consistency(_consistency_data)
             final_action   = _consistency_data["action"]
@@ -1296,6 +1378,7 @@ class MonitoringAgents:
                 )
             )
         self.repo.save_monitoring_actions(run_id, rows)
+        _check_output_diversity([{"action": r.action} for r in rows])
         return {
             "replacement_prompt": prompt,
             "run_summary": {"run_id": run_id, "action_count": len(rows)},
