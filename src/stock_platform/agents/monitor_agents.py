@@ -18,6 +18,9 @@ _log = logging.getLogger(__name__)
 
 _SEVERITY_RANK: dict[str, int] = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
 
+# Symbols that emit verbose per-stage diagnostics — remove after root-cause confirmed.
+_DIAG_SYMBOLS: frozenset[str] = frozenset({"LT", "KWIL"})
+
 BANKING_SECTORS = {
     "BANKS",
     "BANKS - REGIONAL",
@@ -866,6 +869,22 @@ class MonitoringAgents:
                 print(f"WARNING: next_earnings_date unknown for {holding['symbol']} — result_date_fetcher returned no date")
             if idx < 3:
                 debug_monitoring_data(holding["symbol"], financials)
+            if holding["symbol"] in _DIAG_SYMBOLS:
+                _log.info(
+                    "=== DIAG %s FINANCIALS ==="
+                    "\n  current_price=%s  pe_trailing=%s  pe_ratio=%s  pe_5yr_avg=%s"
+                    "\n  sector_pe=%s  week52_high=%s  week52_low=%s"
+                    "\n  next_earnings_date=%s",
+                    holding["symbol"],
+                    financials.get("current_price"),
+                    financials.get("pe_trailing"),
+                    financials.get("pe_ratio"),
+                    financials.get("pe_5yr_avg"),
+                    financials.get("sector_pe"),
+                    financials.get("week52_high") or financials.get("fiftyTwoWeekHigh"),
+                    financials.get("week52_low") or financials.get("fiftyTwoWeekLow"),
+                    financials.get("next_earnings_date"),
+                )
             scores.append(
                 {
                     "symbol": holding["symbol"],
@@ -1111,6 +1130,14 @@ class MonitoringAgents:
                     severity = "LOW"
                 urgency = self._fallback_urgency(action, severity)
 
+            if symbol in _DIAG_SYMBOLS:
+                _log.info(
+                    "=== DIAG %s POST-DECISION: action=%s severity=%s urgency=%s"
+                    " thesis=%s quant=%s pnl_pct=%s drawdown=%s",
+                    symbol, action, severity, urgency, thesis, quant,
+                    float((pnl or {}).get("pnl_pct", 0) or 0), drawdown,
+                )
+
             # ── Fix 6: Winner badge — decouple P&L from forward-risk action ─
             winner_badge: str | None = None
             if pnl and thesis != "BREACHED":
@@ -1133,6 +1160,17 @@ class MonitoringAgents:
                     }
                     action = _compute_action_for_winner(_winner_data)
                     urgency = self._fallback_urgency(action, severity)
+
+            if symbol in _DIAG_SYMBOLS:
+                _log.info(
+                    "=== DIAG %s POST-WINNER: action=%s winner_badge=%s"
+                    " (w52_high=%s pct_from_ath=%s pe_now=%s pe_5yr_avg=%s)",
+                    symbol, action, winner_badge,
+                    (_fin_w if winner_badge else {}).get("week52_high") or (_fin_w if winner_badge else {}).get("fiftyTwoWeekHigh"),
+                    _pct_from_ath if winner_badge else "n/a",
+                    (_fin_w if winner_badge else {}).get("pe_trailing") or (_fin_w if winner_badge else {}).get("pe_ratio"),
+                    (_fin_w if winner_badge else {}).get("pe_5yr_avg"),
+                )
 
             # ── Fix 4: Earnings blackout — block BUY MORE within 7d of results ─
             _earnings_blackout_rationale = ""
@@ -1161,6 +1199,12 @@ class MonitoringAgents:
                         f"{_next_earnings.strftime('%d %b')}. "
                         f"Review after results]"
                     )
+
+            if symbol in _DIAG_SYMBOLS:
+                _log.info(
+                    "=== DIAG %s POST-BLACKOUT: action=%s note=%r",
+                    symbol, action, _earnings_blackout_rationale or "none",
+                )
 
             # ── Fix 1: Valuation floor gate ──────────────────────────────────
             # Blocks EXIT/TRIM on quality stocks that are near their 52W low
@@ -1193,6 +1237,12 @@ class MonitoringAgents:
                         "Sector-wide correction, not thesis breach."
                     )
 
+            if symbol in _DIAG_SYMBOLS:
+                _log.info(
+                    "=== DIAG %s POST-VALUATION-FLOOR: action=%s vf_fired=%s",
+                    symbol, action, bool(vf_override_rationale),
+                )
+
             # ── Fix 3: LTCG guard ────────────────────────────────────────────
             # Downgrades EXIT/TRIM to HOLD when STCG tax erodes >40% of gain
             # and LTCG threshold is within 90 days.
@@ -1215,6 +1265,13 @@ class MonitoringAgents:
                         f"({_tax_check['tax_pct']:.0f}% of gain). "
                         f"Review at LTCG threshold on {_tax_check['ltcg_date']}]"
                     )
+
+            if symbol in _DIAG_SYMBOLS:
+                _log.info(
+                    "=== DIAG %s POST-LTCG: action=%s ltcg_fired=%s"
+                    " → final deterministic action leaving decide_actions",
+                    symbol, action, bool(ltcg_addendum),
+                )
 
             if vf_override_rationale:
                 rationale = vf_override_rationale + ltcg_addendum + _earnings_blackout_rationale
@@ -1321,6 +1378,15 @@ class MonitoringAgents:
                     print(f"MONITORING LLM ERROR {row['symbol']}: {exc}")
                     llm_result = None
                     llm_fallback_note = f"[LLM error: {type(exc).__name__}]"
+            if row["symbol"] in _DIAG_SYMBOLS:
+                _log.info(
+                    "=== DIAG %s POST-LLM: llm_called=%s llm_action=%s"
+                    " llm_severity=%s det_action=%s det_severity=%s",
+                    row["symbol"], llm_result is not None,
+                    (llm_result or {}).get("action", "n/a"),
+                    (llm_result or {}).get("severity", "n/a"),
+                    row["action"], row["severity"],
+                )
             # Use LLM-confirmed action/severity/rationale if parsing succeeded;
             # fall back to deterministic values so a JSON failure never drops a row.
             final_action = llm_result["action"] if llm_result else row["action"]
@@ -1338,6 +1404,14 @@ class MonitoringAgents:
             _llm_rank = _SEVERITY_RANK.get(final_severity, 0)
             if _det_rank > _llm_rank:
                 final_severity = row["severity"]
+            if row["symbol"] in _DIAG_SYMBOLS:
+                _log.info(
+                    "=== DIAG %s POST-SEVERITY-PROTECT: final_action=%s final_severity=%s"
+                    " (det_severity=%s llm_severity=%s — protected=%s)",
+                    row["symbol"], final_action, final_severity,
+                    row["severity"], (llm_result or {}).get("severity", "n/a"),
+                    _det_rank > _llm_rank,
+                )
             # ── Fix 5/9: Field consistency enforcement — MANDATORY last step ─
             _pnl_for_consistency = float((row.get("pnl") or {}).get("pnl_pct", 0) or 0)
             _consistency_data = {
@@ -1352,6 +1426,15 @@ class MonitoringAgents:
             final_action   = _consistency_data["action"]
             final_severity = _consistency_data["severity"]
             final_rationale = _consistency_data.get("rationale", final_rationale)
+            if row["symbol"] in _DIAG_SYMBOLS:
+                _log.info(
+                    "=== DIAG %s POST-CONSISTENCY: action=%s severity=%s"
+                    " (quant=%.2f thesis=%s pnl_pct=%.1f) → writing to DB",
+                    row["symbol"], final_action, final_severity,
+                    _consistency_data.get("quant_score", 0),
+                    _consistency_data.get("thesis_status", "?"),
+                    _consistency_data.get("pnl_pct", 0),
+                )
             rows.append(
                 MonitoringAction(
                     symbol=row["symbol"],
