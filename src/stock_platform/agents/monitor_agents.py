@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -9,6 +9,7 @@ from stock_platform.data.db import database_connection
 from stock_platform.models import MonitoringAction
 from stock_platform.utils.entry_calculator import fetch_analyst_consensus_target
 from utils.tax_calculator import calculate_pnl, should_exit
+from stock_platform.utils.result_date_fetcher import fetch_last_result_date
 
 BANKING_SECTORS = {
     "BANKS",
@@ -425,6 +426,85 @@ def check_sector_correction(sector: str, holdings: list) -> bool:
     return down_count >= 2
 
 
+# ── Fix 4: Earnings blackout ─────────────────────────────────────────────────
+
+def _earnings_blackout_active(d: dict) -> bool:
+    """Block BUY MORE within 7 days of earnings."""
+    next_earnings = d.get("next_earnings_date")
+    if not next_earnings:
+        return False
+    days_to_earnings = (next_earnings - date.today()).days
+    return 0 <= days_to_earnings <= 7
+
+
+# ── Fix 5: Field consistency enforcer ────────────────────────────────────────
+
+def _enforce_field_consistency(result: dict) -> dict:
+    """Catches internal contradictions in LLM output — called post-LLM, pre-DB."""
+    quant    = result.get("quant_score", 0.5)
+    thesis   = result.get("thesis_status", "INTACT")
+    severity = result.get("severity", "LOW")
+    action   = result.get("action", "HOLD")
+
+    # Rule 1: quant <0.45 cannot be thesis INTACT
+    if quant < 0.45 and thesis == "INTACT":
+        result["thesis_status"] = "WEAKENED"
+        result["rationale"] = result.get("rationale", "") + (
+            f" [AUTO-CORRECT: quant {quant:.2f} inconsistent "
+            f"with thesis INTACT, downgraded to WEAKENED]"
+        )
+
+    # Rule 2: quant <0.30 forces thesis BREACHED
+    if quant < 0.30:
+        result["thesis_status"] = "BREACHED"
+
+    # Rule 3: CRITICAL severity requires EXIT/TRIM/REVIEW — escalate HOLD/BUY MORE
+    if severity == "CRITICAL" and action in ("HOLD", "BUY MORE"):
+        result["action"] = "REVIEW"
+        result["rationale"] = result.get("rationale", "") + (
+            f" [AUTO-CORRECT: CRITICAL severity incompatible "
+            f"with {action}, escalated to REVIEW]"
+        )
+
+    # Rule 4: HIGH + HOLD allowed only when thesis INTACT — otherwise escalate
+    if severity == "HIGH" and action == "HOLD" and result.get("thesis_status", thesis) != "INTACT":
+        result["action"] = "REVIEW"
+
+    return result
+
+
+# ── Fix 6: Winner badge helpers ───────────────────────────────────────────────
+
+def _winner_badge(pnl_pct: float) -> str | None:
+    if pnl_pct >= 200:
+        return "strong_winner"
+    if pnl_pct >= 100:
+        return "big_gainer"
+    return None
+
+
+def _compute_action_for_winner(d: dict) -> str:
+    """For big-gain stocks, action is based on forward risk — not backward P&L."""
+    pe_now       = d.get("current_pe") or 0
+    pe_5yr_avg   = d.get("pe_5yr_avg") or d.get("sector_avg_pe") or 0
+    price_to_ath = d.get("pct_from_52w_high", 0)  # negative = below ATH
+    quant        = d.get("quant_score", 0.5)
+    thesis       = d.get("thesis_status", "INTACT")
+
+    # Near ATH with stretched PE and softening quant = small trim
+    if (price_to_ath > -5
+            and pe_5yr_avg > 0
+            and pe_now > pe_5yr_avg * 1.15
+            and quant < 0.65):
+        return "TRIM 20%"
+
+    # Not near ATH, thesis intact = hold
+    if thesis == "INTACT" and price_to_ath < -10:
+        return "HOLD"
+
+    return "HOLD"
+
+
 LEGACY_AUTOMATIC_REVIEW_TRIGGERS = {
     "revenue_degrowth_severe": lambda s: (s.get("revenue_growth", 0) or 0) < -0.20,
     "near_zero_margin": lambda s: (s.get("pat_margin", 1) or 1) < 0.01,
@@ -697,6 +777,19 @@ class MonitoringAgents:
                 or financials.get("de_ratio")
             )
             auto_review = check_auto_review(holding["symbol"], financials)
+            # Estimate next earnings date: last result + ~91 days (quarterly cycle)
+            _result_info = fetch_last_result_date(holding["symbol"])
+            _last_result_str = _result_info.get("result_date")
+            if _last_result_str:
+                try:
+                    _last_result = datetime.strptime(_last_result_str, "%Y-%m-%d").date()
+                    financials["next_earnings_date"] = _last_result + timedelta(days=91)
+                except (ValueError, TypeError):
+                    financials["next_earnings_date"] = None
+                    print(f"WARNING: next_earnings_date parse failed for {holding['symbol']}: {_last_result_str}")
+            else:
+                financials["next_earnings_date"] = None
+                print(f"WARNING: next_earnings_date unknown for {holding['symbol']} — result_date_fetcher returned no date")
             if idx < 3:
                 debug_monitoring_data(holding["symbol"], financials)
             scores.append(
@@ -944,6 +1037,56 @@ class MonitoringAgents:
                     severity = "LOW"
                 urgency = self._fallback_urgency(action, severity)
 
+            # ── Fix 6: Winner badge — decouple P&L from forward-risk action ─
+            winner_badge: str | None = None
+            if pnl and thesis != "BREACHED":
+                _pnl_pct_val = float(pnl.get("pnl_pct", 0) or 0)
+                winner_badge = _winner_badge(_pnl_pct_val)
+                if winner_badge is not None:
+                    _fin_w = quant_rows.get(symbol, {}).get("financials", {})
+                    _w52_high = _as_float(_fin_w.get("week52_high") or _fin_w.get("fiftyTwoWeekHigh"))
+                    _pct_from_ath = 0.0
+                    if _w52_high and current_price and _w52_high > 0:
+                        _pct_from_ath = (float(current_price) / _w52_high - 1) * 100
+                    _winner_data = {
+                        "current_pe":     _as_float(_fin_w.get("pe_trailing") or _fin_w.get("pe_ratio")),
+                        "pe_5yr_avg":     _as_float(_fin_w.get("pe_5yr_avg")),
+                        "sector_avg_pe":  _as_float(_fin_w.get("sector_pe")),
+                        "pct_from_52w_high": _pct_from_ath,
+                        "quant_score":    quant,
+                        "thesis_status":  thesis,
+                    }
+                    action = _compute_action_for_winner(_winner_data)
+                    urgency = self._fallback_urgency(action, severity)
+
+            # ── Fix 4: Earnings blackout — block BUY MORE within 7d of results ─
+            _earnings_blackout_rationale = ""
+            if action == "BUY MORE":
+                _fin_eb = quant_rows.get(symbol, {}).get("financials", {})
+                _next_earnings = _fin_eb.get("next_earnings_date")
+                if _next_earnings is None:
+                    import logging as _logging
+                    _logging.warning(
+                        "EARNINGS BLACKOUT: next_earnings_date unknown for %s "
+                        "— conservatively blocking BUY MORE", symbol
+                    )
+                    action = "HOLD"
+                    severity = "LOW"
+                    urgency = "LOW"
+                    _earnings_blackout_rationale = (
+                        " [EARNINGS BLACKOUT: next earnings date unknown — "
+                        "conservatively blocking BUY MORE]"
+                    )
+                elif _earnings_blackout_active({"next_earnings_date": _next_earnings}):
+                    action = "HOLD"
+                    severity = "LOW"
+                    urgency = "LOW"
+                    _earnings_blackout_rationale = (
+                        f" [EARNINGS BLACKOUT: Q4 results due "
+                        f"{_next_earnings.strftime('%d %b')}. "
+                        f"Review after results]"
+                    )
+
             # ── Fix 1: Valuation floor gate ──────────────────────────────────
             # Blocks EXIT/TRIM on quality stocks that are near their 52W low
             # AND trading at a PE discount vs own history — indicates a
@@ -999,7 +1142,7 @@ class MonitoringAgents:
                     )
 
             if vf_override_rationale:
-                rationale = vf_override_rationale + ltcg_addendum
+                rationale = vf_override_rationale + ltcg_addendum + _earnings_blackout_rationale
             else:
                 rationale = format_monitoring_rationale(
                     {
@@ -1014,6 +1157,8 @@ class MonitoringAgents:
                 )
                 if ltcg_addendum:
                     rationale += ltcg_addendum
+                if _earnings_blackout_rationale:
+                    rationale += _earnings_blackout_rationale
             actions.append(
                 {
                     "symbol": symbol,
@@ -1027,6 +1172,7 @@ class MonitoringAgents:
                     "analyst_target": analyst_target,
                     "caution_flag": caution_flag,
                     "auto_review": auto,
+                    "winner_badge": winner_badge,
                 }
             )
         return {"actions": actions}
@@ -1077,6 +1223,7 @@ class MonitoringAgents:
             else "No replacement cycle needed.",
         }
         run_id = f"monitor-{uuid4().hex[:10]}"
+        _quant_score_map = {r["symbol"]: (r["quant_score"] or 0.5) for r in state["quant_scores"]}
         rows = []
         for row in state["actions"]:
             thesis = next(item for item in state["thesis_reviews"] if item["symbol"] == row["symbol"])
@@ -1085,7 +1232,7 @@ class MonitoringAgents:
             llm_fallback_note = ""
             if row.get("auto_review_override"):
                 pass  # Auto-override is sufficient — skip LLM call.
-            elif row["action"] in {"BUY MORE", "HOLD", "TRIM", "SELL", "REPLACE"}:
+            elif row["action"] in {"BUY MORE", "HOLD", "TRIM", "SELL", "REPLACE", "REVIEW"} or str(row["action"]).startswith("TRIM "):
                 try:
                     llm_result = self.llm.monitoring_rationale(row, thesis, drawdown)
                     llm_rationale = str((llm_result or {}).get("rationale", "")).strip()
@@ -1108,6 +1255,21 @@ class MonitoringAgents:
                 final_rationale = str(llm_result["rationale"]).strip()
             elif llm_fallback_note:
                 final_rationale = f"{row['rationale']} {llm_fallback_note}".strip()
+            # Preserve winner-derived trim percentages if LLM normalised to plain TRIM
+            if str(row["action"]).startswith("TRIM ") and final_action == "TRIM":
+                final_action = row["action"]
+            # ── Fix 5: Field consistency enforcement (post-LLM, pre-DB) ────
+            _consistency_data = {
+                "action":       final_action,
+                "severity":     final_severity,
+                "rationale":    final_rationale,
+                "quant_score":  _quant_score_map.get(row["symbol"], 0.5),
+                "thesis_status": thesis["status"],
+            }
+            _consistency_data = _enforce_field_consistency(_consistency_data)
+            final_action   = _consistency_data["action"]
+            final_severity = _consistency_data["severity"]
+            final_rationale = _consistency_data.get("rationale", final_rationale)
             rows.append(
                 MonitoringAction(
                     symbol=row["symbol"],
@@ -1128,6 +1290,7 @@ class MonitoringAgents:
                         "analyst_target": row.get("analyst_target"),
                         "caution_flag": row.get("caution_flag"),
                         "auto_review": row.get("auto_review", {}),
+                        "winner_badge": row.get("winner_badge"),
                         "llm_used": bool(llm_result),
                     },
                 )
