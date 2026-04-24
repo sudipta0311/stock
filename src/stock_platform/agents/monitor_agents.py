@@ -12,14 +12,14 @@ from stock_platform.models import MonitoringAction
 from stock_platform.utils.entry_calculator import fetch_analyst_consensus_target
 from stock_platform.utils.pe_history_fetcher import get_pe_history
 from utils.tax_calculator import calculate_pnl, should_exit
-from stock_platform.utils.result_date_fetcher import fetch_last_result_date
+import requests as _requests
 
 _log = logging.getLogger(__name__)
 
 _SEVERITY_RANK: dict[str, int] = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
 
 # Symbols that emit verbose per-stage diagnostics — remove after root-cause confirmed.
-_DIAG_SYMBOLS: frozenset[str] = frozenset({"LT", "KWIL"})
+_DIAG_SYMBOLS: frozenset[str] = frozenset({"LT", "KWIL", "SBICARD"})
 
 BANKING_SECTORS = {
     "BANKS",
@@ -465,51 +465,218 @@ def _earnings_blackout_active(d: dict) -> bool:
     return 0 <= days_to_earnings <= 7
 
 
-# ── Fix 5 / Fix 9: Field consistency enforcer ────────────────────────────────
+# ── Fix 11: Forward-looking earnings date fetchers ────────────────────────────
+
+def _fetch_nse_earnings_date(symbol: str) -> date | None:
+    """Query NSE event calendar for the next board meeting for financial results."""
+    try:
+        session = _requests.Session()
+        session.headers.update({
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0 Safari/537.36"
+            ),
+            "Accept": "application/json",
+            "Referer": "https://www.nseindia.com",
+        })
+        session.get("https://www.nseindia.com", timeout=10)
+        r = session.get(
+            f"https://www.nseindia.com/api/event-calendar?index={symbol}",
+            timeout=15,
+        )
+        if r.status_code != 200:
+            return None
+        data = r.json()
+        events = data if isinstance(data, list) else data.get("data", [])
+        today = date.today()
+        future_dates: list[date] = []
+        for event in events:
+            purpose = str(event.get("purpose") or event.get("bm_purpose") or "").lower()
+            if not any(kw in purpose for kw in ("financial", "result", "quarterly")):
+                continue
+            raw = event.get("date") or event.get("bm_date") or ""
+            for fmt in ("%d-%b-%Y", "%Y-%m-%d", "%d-%m-%Y"):
+                try:
+                    d = datetime.strptime(raw, fmt).date()
+                    if d >= today - timedelta(days=1):
+                        future_dates.append(d)
+                    break
+                except ValueError:
+                    continue
+        return min(future_dates) if future_dates else None
+    except Exception as exc:
+        _log.debug("NSE earnings date failed for %s: %r", symbol, exc)
+        return None
+
+
+def _fetch_screener_earnings_date(symbol: str) -> date | None:
+    """Scrape Screener company page for next scheduled result date."""
+    try:
+        import re
+        r = _requests.get(
+            f"https://www.screener.in/company/{symbol}/",
+            headers={"User-Agent": "Mozilla/5.0", "Accept": "text/html"},
+            timeout=15,
+        )
+        if r.status_code != 200:
+            return None
+        today = date.today()
+        text = r.text
+        for pat in (
+            r"[Rr]esult\s+[Dd]ate[:\s]+(\d{1,2}\s+\w+\s+\d{4})",
+            r"[Bb]oard\s+[Mm]eeting[:\s]+(\d{1,2}\s+\w+\s+\d{4})",
+            r"[Nn]ext\s+[Rr]esult[:\s]+(\d{1,2}\s+\w+\s+\d{4})",
+        ):
+            m = re.search(pat, text)
+            if m:
+                try:
+                    d = datetime.strptime(m.group(1).strip(), "%d %b %Y").date()
+                    if d >= today - timedelta(days=1):
+                        return d
+                except ValueError:
+                    continue
+        return None
+    except Exception as exc:
+        _log.debug("Screener earnings date failed for %s: %r", symbol, exc)
+        return None
+
+
+def _fetch_yfinance_earnings_date(symbol: str) -> date | None:
+    """Use yfinance ticker.calendar to get the next earnings date."""
+    try:
+        import yfinance as yf
+        ticker = yf.Ticker(f"{symbol}.NS")
+        cal = ticker.calendar
+        today = date.today()
+        if cal is None:
+            return None
+        if isinstance(cal, dict):
+            candidates = cal.get("Earnings Date", [])
+            if not isinstance(candidates, (list, tuple)):
+                candidates = [candidates]
+            for item in candidates:
+                try:
+                    d = item.date() if hasattr(item, "date") and callable(item.date) else item
+                    if isinstance(d, str):
+                        d = datetime.strptime(d[:10], "%Y-%m-%d").date()
+                    if isinstance(d, date) and d >= today - timedelta(days=1):
+                        return d
+                except Exception:
+                    continue
+        elif hasattr(cal, "columns"):
+            for col in cal.columns:
+                try:
+                    d = col.date() if hasattr(col, "date") and callable(col.date) else col
+                    if isinstance(d, date) and d >= today - timedelta(days=1):
+                        return d
+                except Exception:
+                    continue
+        return None
+    except Exception as exc:
+        _log.debug("yfinance earnings date failed for %s: %r", symbol, exc)
+        return None
+
+
+_EARNINGS_DATE_SOURCES: list[tuple[str, Any]] = [
+    ("nse_event_calendar", _fetch_nse_earnings_date),
+    ("screener", _fetch_screener_earnings_date),
+    ("yfinance_calendar", _fetch_yfinance_earnings_date),
+]
+
+
+def _get_next_earnings_date(symbol: str) -> tuple[date | None, str]:
+    """
+    Fail-closed: returns (None, "unavailable") when no source confirms a future date.
+    Caller MUST block BUY MORE on None — never assume safe to proceed.
+    """
+    today = date.today()
+    for name, fetcher in _EARNINGS_DATE_SOURCES:
+        try:
+            d = fetcher(symbol)
+            if d is not None and d >= today - timedelta(days=1):
+                _log.info("EARNINGS_DATE %s: %s from %s", symbol, d, name)
+                return d, name
+        except Exception as exc:
+            _log.warning("EARNINGS_DATE %s: %s failed: %r", symbol, name, exc)
+    _log.warning("EARNINGS_DATE %s: ALL SOURCES FAILED — blocking BUY MORE", symbol)
+    return None, "unavailable"
+
+
+# ── Fix 13: Rationale rebuilder ───────────────────────────────────────────────
+
+def _rebuild_rationale(
+    result: dict,
+    changes: list[str],
+    pnl_pct: float | None,
+    quant: float,
+    held_days: int | None,
+) -> str:
+    """
+    Construct a clean structured rationale when any consistency rule fires.
+    Replaces the previous string-append approach so stale text (e.g. "Thesis intact")
+    cannot survive after a rule has mutated thesis_status.
+    """
+    thesis = result.get("thesis_status", "INTACT").lower()
+    parts = [f"Thesis {thesis} (quant {quant:.2f})"]
+    if pnl_pct is not None:
+        sign = "+" if pnl_pct >= 0 else ""
+        parts.append(f"P&L: {sign}{pnl_pct:.1f}%")
+    if held_days is not None:
+        parts.append(f"Held {held_days}d")
+    if changes:
+        parts.append(f"[AUTO: {'; '.join(changes)}]")
+    return " | ".join(parts)
+
+
+# ── Fix 5 / Fix 9 / Fix 13: Field consistency enforcer ───────────────────────
 
 def _enforce_field_consistency(result: dict) -> dict:
     """
     Catches internal contradictions — mandatory LAST step before DB write.
     Never call before all other transformations (valuation floor, blackout, winner).
+    When any rule fires, rationale is fully reconstructed via _rebuild_rationale
+    so stale phrases ("Thesis intact") cannot survive in the output.
     """
-    quant    = result.get("quant_score", 0.5)
-    thesis   = result.get("thesis_status", "INTACT")
-    severity = result.get("severity", "LOW")
-    action   = result.get("action", "HOLD")
-    pnl_pct  = result.get("pnl_pct", 0) or 0
+    quant     = result.get("quant_score", 0.5)
+    thesis    = result.get("thesis_status", "INTACT")
+    severity  = result.get("severity", "LOW")
+    action    = result.get("action", "HOLD")
+    pnl_pct   = result.get("pnl_pct", 0) or 0
+    held_days = result.get("held_days")
+
+    changes: list[str] = []
 
     # Rule 1: quant <0.45 cannot be thesis INTACT
     if quant < 0.45 and thesis == "INTACT":
         result["thesis_status"] = "WEAKENED"
         thesis = "WEAKENED"
-        result["rationale"] = result.get("rationale", "") + (
-            f" [AUTO-CORRECT: quant {quant:.2f} inconsistent "
-            f"with thesis INTACT, downgraded to WEAKENED]"
-        )
+        changes.append(f"quant {quant:.2f} → thesis WEAKENED")
 
     # Rule 2: quant <0.30 forces thesis BREACHED
     if quant < 0.30:
         result["thesis_status"] = "BREACHED"
         thesis = "BREACHED"
+        changes.append("quant critical → thesis BREACHED")
 
     # Rule 3 (strengthened): CRITICAL severity requires an actionable response.
-    # HOLD or BUY MORE with CRITICAL is always a contradiction.
     if severity == "CRITICAL" and not str(action).startswith(("EXIT", "TRIM", "REVIEW")):
+        old_action = action
         result["action"] = "REVIEW"
-        result["rationale"] = (
-            f"[AUTO-ESCALATED from {action}] " + result.get("rationale", "")
-        )
         action = "REVIEW"
+        changes.append(f"CRITICAL severity escalated from {old_action}")
 
-    # Rule 4 (new): WEAKENED/BREACHED thesis + large loss + HOLD = must escalate.
+    # Rule 4: WEAKENED/BREACHED thesis + large loss + HOLD = must escalate.
     if thesis in ("WEAKENED", "BREACHED") and pnl_pct < -30 and action == "HOLD":
         result["action"] = "REVIEW"
+        action = "REVIEW"
         current_rank = _SEVERITY_RANK.get(severity, 0)
         if current_rank < _SEVERITY_RANK["HIGH"]:
             result["severity"] = "HIGH"
-        result["rationale"] = result.get("rationale", "") + (
-            f" [AUTO-ESCALATE: thesis {thesis} + P&L {pnl_pct:.1f}% + HOLD is inconsistent]"
-        )
+            severity = "HIGH"
+        changes.append(f"thesis {thesis} + P&L {pnl_pct:.1f}% + HOLD escalated")
+
+    if changes:
+        result["rationale"] = _rebuild_rationale(result, changes, pnl_pct, quant, held_days)
 
     return result
 
@@ -854,27 +1021,13 @@ class MonitoringAgents:
                                      holding["symbol"])
                 except Exception as _pe_exc:
                     _log.warning("PE history fetch error for %s: %r", holding["symbol"], _pe_exc)
-            # Estimate next earnings date: last result + ~91 days (quarterly cycle)
-            _result_info = fetch_last_result_date(holding["symbol"])
-            _last_result_str = _result_info.get("result_date")
-            if _last_result_str:
-                try:
-                    _last_result = datetime.strptime(_last_result_str, "%Y-%m-%d").date()
-                    financials["next_earnings_date"] = _last_result + timedelta(days=91)
-                except (ValueError, TypeError):
-                    financials["next_earnings_date"] = None
-                    print(f"WARNING: next_earnings_date parse failed for {holding['symbol']}: {_last_result_str}")
-            else:
-                financials["next_earnings_date"] = None
-                print(f"WARNING: next_earnings_date unknown for {holding['symbol']} — result_date_fetcher returned no date")
             if idx < 3:
                 debug_monitoring_data(holding["symbol"], financials)
             if holding["symbol"] in _DIAG_SYMBOLS:
                 _log.info(
                     "=== DIAG %s FINANCIALS ==="
                     "\n  current_price=%s  pe_trailing=%s  pe_ratio=%s  pe_5yr_avg=%s"
-                    "\n  sector_pe=%s  week52_high=%s  week52_low=%s"
-                    "\n  next_earnings_date=%s",
+                    "\n  sector_pe=%s  week52_high=%s  week52_low=%s",
                     holding["symbol"],
                     financials.get("current_price"),
                     financials.get("pe_trailing"),
@@ -883,7 +1036,6 @@ class MonitoringAgents:
                     financials.get("sector_pe"),
                     financials.get("week52_high") or financials.get("fiftyTwoWeekHigh"),
                     financials.get("week52_low") or financials.get("fiftyTwoWeekLow"),
-                    financials.get("next_earnings_date"),
                 )
             scores.append(
                 {
@@ -1172,32 +1324,32 @@ class MonitoringAgents:
                     (_fin_w if winner_badge else {}).get("pe_5yr_avg"),
                 )
 
-            # ── Fix 4: Earnings blackout — block BUY MORE within 7d of results ─
+            # ── Fix 11: Earnings blackout — fail-closed, live forward-looking fetch ─
             _earnings_blackout_rationale = ""
             if action == "BUY MORE":
-                _fin_eb = quant_rows.get(symbol, {}).get("financials", {})
-                _next_earnings = _fin_eb.get("next_earnings_date")
-                if _next_earnings is None:
-                    import logging as _logging
-                    _logging.warning(
-                        "EARNINGS BLACKOUT: next_earnings_date unknown for %s "
-                        "— conservatively blocking BUY MORE", symbol
+                _next_earnings, _earnings_source = _get_next_earnings_date(symbol)
+                if symbol in _DIAG_SYMBOLS:
+                    _log.info(
+                        "=== DIAG %s EARNINGS_DATE: next=%s source=%s",
+                        symbol, _next_earnings, _earnings_source,
                     )
+                if _next_earnings is None:
                     action = "HOLD"
                     severity = "LOW"
                     urgency = "LOW"
                     _earnings_blackout_rationale = (
-                        " [EARNINGS BLACKOUT: next earnings date unknown — "
-                        "conservatively blocking BUY MORE]"
+                        " [EARNINGS BLACKOUT: next earnings date could not be confirmed "
+                        "from any source — conservatively blocking BUY MORE]"
                     )
                 elif _earnings_blackout_active({"next_earnings_date": _next_earnings}):
                     action = "HOLD"
                     severity = "LOW"
                     urgency = "LOW"
                     _earnings_blackout_rationale = (
-                        f" [EARNINGS BLACKOUT: Q4 results due "
-                        f"{_next_earnings.strftime('%d %b')}. "
-                        f"Review after results]"
+                        f" [EARNINGS BLACKOUT: results due "
+                        f"{_next_earnings.strftime('%d %b')} "
+                        f"(via {_earnings_source}). "
+                        "Review after results]"
                     )
 
             if symbol in _DIAG_SYMBOLS:
@@ -1412,8 +1564,9 @@ class MonitoringAgents:
                     row["severity"], (llm_result or {}).get("severity", "n/a"),
                     _det_rank > _llm_rank,
                 )
-            # ── Fix 5/9: Field consistency enforcement — MANDATORY last step ─
+            # ── Fix 5/9/13: Field consistency enforcement — MANDATORY last step ─
             _pnl_for_consistency = float((row.get("pnl") or {}).get("pnl_pct", 0) or 0)
+            _held_days_for_consistency = (row.get("pnl") or {}).get("days_held")
             _consistency_data = {
                 "action":       final_action,
                 "severity":     final_severity,
@@ -1421,6 +1574,7 @@ class MonitoringAgents:
                 "quant_score":  _quant_score_map.get(row["symbol"], 0.5),
                 "thesis_status": thesis["status"],
                 "pnl_pct":      _pnl_for_consistency,
+                "held_days":    _held_days_for_consistency,
             }
             _consistency_data = _enforce_field_consistency(_consistency_data)
             final_action   = _consistency_data["action"]
