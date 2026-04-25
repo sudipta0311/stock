@@ -1193,6 +1193,27 @@ class BuyAgents:
 
             fin_data = dict(item.get("live_financials") or {})
             fin_data.update({key: value for key, value in (item.get("financials") or {}).items() if value is not None})
+
+            if fin_data.get("exclude_from_recommendations"):
+                _log.warning(
+                    "DATA_QUALITY EXCLUDED %s: yoy_confidence=%s yoy_source=%s",
+                    item["symbol"],
+                    fin_data.get("yoy_confidence", "LOW"),
+                    fin_data.get("yoy_source", "unknown"),
+                )
+                gov_skipped.append({
+                    "symbol": item["symbol"],
+                    "status": "DATA_QUALITY_LOW",
+                    "resolved_symbol": item["symbol"],
+                    "reason": (
+                        f"Unresolvable YoY revenue disagreement across all sources "
+                        f"(confidence={fin_data.get('yoy_confidence','LOW')}, "
+                        f"source={fin_data.get('yoy_source','unknown')}). "
+                        "Stock excluded to avoid buy ideas on questionable numbers."
+                    ),
+                })
+                continue
+
             _current_pe = fin_data.get("pe_ratio") or (
                 current_price / fin_data["eps"]
                 if fin_data.get("eps") and float(fin_data["eps"]) > 0
