@@ -812,26 +812,155 @@ def fetch_recent_results(symbol: str) -> dict[str, Any]:
         return {}
 
 
-def _cross_validate_revenue_yoy(
+def fetch_bse_quarterly(symbol: str) -> dict | None:
+    """
+    BSE corporate filings — most authoritative source when accessible.
+    Returns latest and prior-year quarterly revenue/PAT, or None if unavailable.
+
+    NOTE: api.bseindia.com is session-gated. From cloud servers it typically
+    returns empty tables. This works reliably only when run locally where a
+    browser session has set BSE cookies. Graceful None return on any failure.
+    """
+    from stock_platform.utils.bse_codes import SYMBOL_TO_BSE_CODE
+
+    bse_code = SYMBOL_TO_BSE_CODE.get(symbol)
+    if not bse_code:
+        return None
+
+    url = (
+        f"https://api.bseindia.com/BseIndiaAPI/api/AnnGetData/w"
+        f"?strCat=Result&strScrip={bse_code}&strType=C"
+    )
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (compatible; portfolio-app/1.0)",
+        "Referer": "https://www.bseindia.com/",
+    }
+    try:
+        response = requests.get(url, headers=headers, timeout=8)
+        if response.status_code != 200:
+            return None
+        data = response.json()
+        table = data.get("Table") or []
+        if not table:
+            return None
+        latest = table[0]
+        prior = table[4] if len(table) > 4 else None
+        return {
+            "latest": {
+                "revenue": _clean_number(str(latest.get("Revenue") or latest.get("SALES") or "")),
+                "pat": _clean_number(str(latest.get("PAT") or latest.get("NET_PROFIT") or "")),
+                "period_end": latest.get("PERIOD_END") or latest.get("TO_DATE"),
+                "source": "BSE_FILING",
+            },
+            "prior_year": {
+                "revenue": _clean_number(str(prior.get("Revenue") or prior.get("SALES") or "")) if prior else None,
+                "pat": _clean_number(str(prior.get("PAT") or prior.get("NET_PROFIT") or "")) if prior else None,
+                "period_end": prior.get("PERIOD_END") or prior.get("TO_DATE") if prior else None,
+            } if prior else None,
+        }
+    except Exception as exc:
+        _log.warning("BSE fetch failed %s: %s", symbol, exc)
+        return None
+
+
+def _compute_yoy_from_bse(bse_data: dict) -> float | None:
+    """Compute YoY revenue growth from BSE filing data (latest vs prior-year quarter)."""
+    latest = (bse_data or {}).get("latest") or {}
+    prior = (bse_data or {}).get("prior_year") or {}
+    rev_latest = _as_float(latest.get("revenue"))
+    rev_prior = _as_float(prior.get("revenue"))
+    if rev_latest is None or rev_prior in (None, 0):
+        return None
+    return round((rev_latest - rev_prior) / abs(rev_prior) * 100.0, 1)
+
+
+def resolve_yoy_disagreement(
     symbol: str,
-    yfinance_pct: float | None,
-    screener_pct: float | None,
-) -> bool:
+    yfinance_yoy: float | None,
+    screener_yoy: float | None,
+    standalone_yoy: float | None = None,
+    tolerance: float = 5.0,
+) -> dict:
     """
-    Compare YoY revenue growth from yfinance vs Screener.in HTML.
-    Logs an error if they disagree by more than 5 pp and returns False.
-    Returns True if values agree or one source is unavailable.
+    Resolve YoY revenue growth when sources disagree.
+
+    Source hierarchy (practical):
+      1. If yfinance + Screener consolidated agree (≤ tolerance) → average → HIGH
+      2. If they disagree → use Screener standalone as tiebreaker (3rd source)
+         - If 2-of-3 agree → use the majority value → MEDIUM
+      3. Fetch BSE filings as authoritative 4th source (accessible locally only)
+         - If BSE available → use BSE directly → HIGH
+      4. No tiebreaker available → conservative minimum → LOW,
+         exclude_from_recommendations = True
     """
-    if yfinance_pct is None or screener_pct is None:
-        return True
-    if abs(yfinance_pct - screener_pct) > 5:
-        _log.error(
-            "YoY DISAGREEMENT %s: yfinance %.1f%% vs Screener %.1f%% — "
-            "using yfinance but flag for manual review",
-            symbol, yfinance_pct, screener_pct,
+    available = {
+        k: v for k, v in {
+            "yfinance": yfinance_yoy,
+            "screener_consolidated": screener_yoy,
+            "screener_standalone": standalone_yoy,
+        }.items() if v is not None
+    }
+
+    if not available:
+        return {"yoy_pct": None, "source": "no_data", "confidence": "LOW",
+                "exclude_from_recommendations": True}
+
+    if len(available) == 1:
+        src, val = next(iter(available.items()))
+        return {"yoy_pct": val, "source": src, "confidence": "MEDIUM"}
+
+    values = list(available.values())
+    max_spread = max(values) - min(values)
+
+    # Step 1: all available sources agree → average → HIGH
+    if max_spread <= tolerance:
+        avg = round(sum(values) / len(values), 1)
+        return {"yoy_pct": avg, "source": "+".join(available) + "_avg", "confidence": "HIGH"}
+
+    # Step 2: try 2-of-3 majority when 3 sources present
+    if len(available) == 3:
+        srcs = list(available.items())
+        for i, (s_a, v_a) in enumerate(srcs):
+            for j, (s_b, v_b) in enumerate(srcs):
+                if i >= j:
+                    continue
+                if abs(v_a - v_b) <= tolerance:
+                    avg_pair = round((v_a + v_b) / 2, 1)
+                    _log.info(
+                        "YoY 2-OF-3 AGREE %s: %s=%.1f%% and %s=%.1f%% agree "
+                        "(spread %.1fpp) — using %.1f%%",
+                        symbol, s_a, v_a, s_b, v_b, abs(v_a - v_b), avg_pair,
+                    )
+                    return {"yoy_pct": avg_pair,
+                            "source": f"{s_a}+{s_b}_majority",
+                            "confidence": "MEDIUM"}
+
+    # Step 3: try BSE as authoritative tiebreaker
+    bse_data = fetch_bse_quarterly(symbol)
+    bse_yoy = _compute_yoy_from_bse(bse_data) if bse_data else None
+    if bse_yoy is not None:
+        _log.info(
+            "YoY RESOLVED via BSE %s: yf=%s, sc=%s, standalone=%s → BSE=%.1f%%",
+            symbol, yfinance_yoy, screener_yoy, standalone_yoy, bse_yoy,
         )
-        return False
-    return True
+        return {"yoy_pct": bse_yoy, "source": "BSE_FILING", "confidence": "HIGH"}
+
+    # Step 4: no tiebreaker — conservative minimum, flag for exclusion
+    chosen = min(v for v in values)
+    chosen_src = min(available, key=lambda k: available[k])
+    _log.error(
+        "YoY UNRESOLVABLE %s: yf=%s, sc_consol=%s, sc_standalone=%s, BSE unavailable. "
+        "Using conservative %.1f%% (exclude from recommendations)",
+        symbol, yfinance_yoy, screener_yoy, standalone_yoy, chosen,
+    )
+    return {
+        "yoy_pct": chosen,
+        "source": f"{chosen_src}_conservative_fallback",
+        "confidence": "LOW",
+        "exclude_from_recommendations": True,
+    }
+
 
 
 def fetch_screener_data(nse_symbol: str) -> dict[str, Any]:
@@ -916,15 +1045,40 @@ def fetch_screener_data(nse_symbol: str) -> dict[str, Any]:
     )
     quarterly_stmt = _fetch_quarterly_income_stmt(clean_symbol)
     revenue_momentum = compute_revenue_momentum(clean_symbol, {}, quarterly_income_stmt=quarterly_stmt)
-    _screener_html_momentum = (
-        _parse_recent_results_from_soup(consolidated_soup)
-        or _parse_recent_results_from_soup(standalone_soup)
-    )
+    # Parse consolidated and standalone Screener HTML independently (both soups already fetched).
+    _sc_consol_momentum = _parse_recent_results_from_soup(consolidated_soup) or {}
+    _sc_standalone_momentum = _parse_recent_results_from_soup(standalone_soup) or {}
     _yf_pct = revenue_momentum.get("growth_pct") if revenue_momentum.get("status") != "DATA_ERROR" else None
-    _sc_pct = (_screener_html_momentum or {}).get("revenue_yoy_growth_pct")
-    _cross_validate_revenue_yoy(clean_symbol, _yf_pct, _sc_pct)
-    if revenue_momentum.get("growth_pct") is None:
-        revenue_momentum = _screener_html_momentum or {}
+    _sc_consol_pct = _sc_consol_momentum.get("revenue_yoy_growth_pct")
+    _sc_standalone_pct = _sc_standalone_momentum.get("revenue_yoy_growth_pct")
+
+    # 3-source resolution: yfinance + Screener consolidated + Screener standalone.
+    # Falls back to BSE filing when all three disagree (works locally; silently
+    # returns None in cloud environments where BSE API is session-gated).
+    _yoy_resolution = resolve_yoy_disagreement(
+        clean_symbol, _yf_pct, _sc_consol_pct, _sc_standalone_pct
+    )
+    _resolved_yoy = _yoy_resolution.get("yoy_pct")
+    _yoy_confidence = _yoy_resolution.get("confidence", "HIGH")
+    _yoy_source = _yoy_resolution.get("source", "unknown")
+    _exclude_for_data_quality = bool(_yoy_resolution.get("exclude_from_recommendations"))
+
+    # Pick the best revenue_momentum dict to drive downstream labels.
+    if _yf_pct is not None:
+        revenue_momentum = revenue_momentum  # yfinance preferred when valid
+    elif _sc_consol_momentum:
+        revenue_momentum = _sc_consol_momentum
+    else:
+        revenue_momentum = _sc_standalone_momentum
+
+    # Overwrite the YoY figure in whichever momentum dict we chose.
+    if _resolved_yoy is not None:
+        revenue_momentum = dict(revenue_momentum)
+        revenue_momentum["revenue_yoy_growth_pct"] = _resolved_yoy
+        revenue_momentum["growth_pct"] = _resolved_yoy
+        revenue_momentum["yoy_source"] = _yoy_source
+        revenue_momentum["yoy_confidence"] = _yoy_confidence
+
     revenue_growth_latest_qtr = (
         revenue_momentum.get("growth_pct")
         if revenue_momentum.get("growth_pct") is not None
@@ -978,6 +1132,9 @@ def fetch_screener_data(nse_symbol: str) -> dict[str, Any]:
         "resolved_symbol": resolve_nse_symbol(clean_symbol),
         "consolidated_available": consolidated_soup is not None,
         "standalone_available": standalone_soup is not None,
+        "exclude_from_recommendations": _exclude_for_data_quality,
+        "yoy_confidence": _yoy_confidence,
+        "yoy_source": _yoy_source,
     }
     print(
         f"Screener.in {clean_symbol}: ROCE={result['roce_pct']}%, "
