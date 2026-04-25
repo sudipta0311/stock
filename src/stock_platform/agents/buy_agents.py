@@ -81,16 +81,20 @@ def _compute_aggressive_gaps(
         )
         if sector not in result:
             result[sector] = {
-                "sector":         sector,
+                "sector":          sector,
                 "underweight_pct": gap_pct,
-                "conviction":     conviction,
-                "score":          score,
-                "reason":         reason,
+                "gap_pct":         gap_pct,
+                "target_pct":      target_pct,
+                "conviction":      conviction,
+                "score":           score,
+                "reason":          reason,
             }
         else:
-            # Update existing entry with aggressive-calibrated reason and score
-            result[sector]["reason"] = reason
-            result[sector]["score"] = max(result[sector].get("score", 0.0), score)
+            # Update existing entry with aggressive-calibrated reason, score, and target
+            result[sector]["reason"]     = reason
+            result[sector]["target_pct"] = target_pct
+            result[sector]["gap_pct"]    = max(result[sector].get("gap_pct", 0.0), gap_pct)
+            result[sector]["score"]      = max(result[sector].get("score", 0.0), score)
 
     return result
 
@@ -1255,7 +1259,18 @@ class BuyAgents:
                     item["symbol"], evidence["score"],
                 )
 
-            sector_gap_row = gaps_by_sector.get(item.get("sector", ""), {})
+            _item_sector = item.get("sector", "")
+            sector_gap_row = gaps_by_sector.get(_item_sector, {})
+            _log.debug(
+                "GAP_TRACE %s: sector=%r, gap_found=%s, target_pct=%.1f, gap_pct=%.1f, "
+                "known_sectors=%s",
+                item["symbol"],
+                _item_sector,
+                bool(sector_gap_row),
+                sector_gap_row.get("target_pct", 0.0),
+                sector_gap_row.get("gap_pct", 0.0),
+                sorted(gaps_by_sector.keys()) if not sector_gap_row else "—",
+            )
             _snap = build_factual_snapshot(
                 symbol=item["symbol"],
                 fin_data=fin_data,

@@ -82,6 +82,20 @@ def build_factual_snapshot(
         recent_results.get("rev_pat_divergence"),
         False,
     ))
+    revenue_qoq_pct = _normalise_pct(_first_present(
+        fin_data.get("revenue_qoq_pct"),
+        (fin_data.get("revenue_momentum") or {}).get("revenue_qoq_pct"),
+        recent_results.get("revenue_qoq_pct"),
+    ))
+    pat_qoq_pct = _normalise_pct(_first_present(
+        pat_block.get("pat_qoq_pct"),
+        recent_results.get("pat_qoq_pct"),
+    ))
+    qoq_pat_collapse = bool(_first_present(
+        pat_block.get("qoq_pat_collapse"),
+        recent_results.get("qoq_pat_collapse"),
+        pat_qoq_pct is not None and pat_qoq_pct < -50,
+    ))
 
     roce = (
         fin_data.get("roce_pct")
@@ -116,6 +130,9 @@ def build_factual_snapshot(
         "pat_qualifier": pat_qualifier,
         "pat_abs_cr": pat_abs_cr,
         "rev_pat_divergence": rev_pat_divergence,
+        "revenue_qoq_pct": revenue_qoq_pct,
+        "pat_qoq_pct": pat_qoq_pct,
+        "qoq_pat_collapse": qoq_pat_collapse,
         "roce": roce,
         "debt_to_equity": de,
         "week52_low": fin_data.get("week52_low") or fin_data.get("fiftyTwoWeekLow"),
@@ -294,6 +311,12 @@ def format_snapshot_for_prompt(snapshot: dict) -> str:
             "  Revenue/PAT divergence: YES - revenue is growing while PAT is deteriorating. "
             "Identify whether this is one-time or structural before recommending entry.\n"
             if s.get("rev_pat_divergence")
+            else ""
+        )
+        + (
+            f"  QoQ PAT collapse: {float(s['pat_qoq_pct']):+.1f}% — possible seasonality, "
+            "one-time gain in prior quarter, or operational issue. Verify before entry.\n"
+            if s.get("qoq_pat_collapse") and s.get("pat_qoq_pct") is not None
             else ""
         )
         + val_section

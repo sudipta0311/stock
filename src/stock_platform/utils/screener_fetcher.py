@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any
 
@@ -7,6 +8,8 @@ import requests
 from bs4 import BeautifulSoup
 
 from stock_platform.utils.symbol_resolver import normalize_input_symbol, resolve_nse_symbol, resolve_symbol_base
+
+_log = logging.getLogger(__name__)
 
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; portfolio-app/1.0)"}
@@ -188,6 +191,16 @@ def _ordered_statement_columns(statement: Any) -> list[Any]:
     return columns
 
 
+def _extract_fiscal_quarter_number(label: str | None) -> str | None:
+    """Return 'Q1'/'Q2'/'Q3'/'Q4' from a label like 'Q3 FY26', or None."""
+    if not label:
+        return None
+    for q in ("Q1", "Q2", "Q3", "Q4"):
+        if label.startswith(q):
+            return q
+    return None
+
+
 def find_yoy_column(columns: list[Any], base_col_idx: int = 0) -> int | None:
     """
     Find the same-quarter-last-year column by date proximity, not fixed offset.
@@ -292,20 +305,47 @@ def compute_revenue_momentum(
     if q0 is None or q4 in (None, 0):
         return {"momentum": "UNKNOWN", "growth_pct": None}
 
+    # Validate: same fiscal quarter (Q1/Q2/Q3/Q4 must match)
+    latest_label = _format_fy_quarter_from_column(q0_col)
+    prior_label = _format_fy_quarter_from_column(q4_col)
+    q0_qnum = _extract_fiscal_quarter_number(latest_label)
+    q4_qnum = _extract_fiscal_quarter_number(prior_label)
+    if q0_qnum and q4_qnum and q0_qnum != q4_qnum:
+        _log.error(
+            "YoY MISMATCH %s: comparing %s vs %s — must be same fiscal Q. "
+            "Returning DATA_ERROR to prevent wrong momentum label.",
+            clean_symbol, latest_label, prior_label,
+        )
+        return {
+            "momentum": "UNKNOWN",
+            "growth_pct": None,
+            "status": "DATA_ERROR",
+            "note": f"YoY quarter mismatch: {latest_label} vs {prior_label}",
+        }
+
     growth = ((q0 - q4) / abs(q4)) * 100.0
+
+    if abs(growth) > 200:
+        _log.warning(
+            "YoY OUTLIER %s: %.1f%% — verify data (latest=%.4g, prior=%.4g)",
+            clean_symbol, growth, q0, q4,
+        )
+
     signal = (
         "STRONG" if growth >= 20 else
         "MODERATE" if growth >= 10 else
         "WEAK" if growth >= 0 else
         "DECLINING"
     )
-    latest_label = _format_fy_quarter_from_column(q0_col)
-    prior_label = _format_fy_quarter_from_column(q4_col)
     period = (
         f"{latest_label} vs {prior_label}"
         if latest_label and prior_label
         else "latest quarter vs same quarter last year"
     )
+
+    revenue_qoq_pct: float | None = None
+    if q1 is not None and q1 != 0:
+        revenue_qoq_pct = round(((q0 - q1) / abs(q1)) * 100.0, 1)
 
     return {
         "momentum": signal,
@@ -315,6 +355,7 @@ def compute_revenue_momentum(
         "prev_quarter_revenue": q1,
         "same_quarter_last_year_revenue": q4,
         "revenue_yoy_growth_pct": round(growth, 1),
+        "revenue_qoq_pct": revenue_qoq_pct,
         "comparison_label": period,
         "source": "yfinance_quarterly_income_stmt",
     }
@@ -348,10 +389,17 @@ def compute_pat_momentum(
     q4_col = columns[yoy_idx]
     pat_q0 = _as_float(statement.at[pat_row, q0_col])
     pat_q4 = _as_float(statement.at[pat_row, q4_col])
+    pat_q1 = _as_float(statement.at[pat_row, columns[1]]) if len(columns) > 1 else None
     if pat_q0 is None or pat_q4 in (None, 0):
         return {"pat_momentum": "UNKNOWN"}
 
     pat_growth = ((pat_q0 - pat_q4) / abs(pat_q4)) * 100.0
+
+    # QoQ PAT
+    pat_qoq_pct: float | None = None
+    if pat_q1 is not None and pat_q1 != 0:
+        pat_qoq_pct = round(((pat_q0 - pat_q1) / abs(pat_q1)) * 100.0, 1)
+
     signal = (
         "STRONG" if pat_growth >= 20 else
         "MODERATE" if pat_growth >= 5 else
@@ -378,15 +426,29 @@ def compute_pat_momentum(
         or _as_float(fin_data.get("revenue_growth_pct"))
         or 0.0
     )
-    divergence = rev_growth > 10 and pat_growth < -15
+    # YoY divergence: revenue growing but PAT collapsing
+    yoy_divergence = rev_growth > 10 and pat_growth < -15
+    # QoQ collapse: PAT dropped >50% vs prior quarter (catches seasonal/one-time spikes)
+    qoq_pat_collapse = pat_qoq_pct is not None and pat_qoq_pct < -50
+    divergence = yoy_divergence or qoq_pat_collapse
+
+    if qoq_pat_collapse:
+        _log.warning(
+            "QoQ PAT COLLAPSE %s: %.1f%% — possible seasonality or one-time prior-quarter gain. "
+            "Verify before entry.",
+            clean_symbol, pat_qoq_pct,
+        )
 
     return {
         "pat_momentum": signal,
         "pat_growth_pct": round(pat_growth, 1),
+        "pat_qoq_pct": pat_qoq_pct,
         "period": period,
         "qualifier": qualifier,
         "pat_abs_cr": round(pat_abs_cr, 1),
         "rev_pat_divergence": divergence,
+        "yoy_divergence": yoy_divergence,
+        "qoq_pat_collapse": qoq_pat_collapse,
         "source": "yfinance_quarterly_income_stmt",
     }
 
@@ -750,6 +812,28 @@ def fetch_recent_results(symbol: str) -> dict[str, Any]:
         return {}
 
 
+def _cross_validate_revenue_yoy(
+    symbol: str,
+    yfinance_pct: float | None,
+    screener_pct: float | None,
+) -> bool:
+    """
+    Compare YoY revenue growth from yfinance vs Screener.in HTML.
+    Logs an error if they disagree by more than 5 pp and returns False.
+    Returns True if values agree or one source is unavailable.
+    """
+    if yfinance_pct is None or screener_pct is None:
+        return True
+    if abs(yfinance_pct - screener_pct) > 5:
+        _log.error(
+            "YoY DISAGREEMENT %s: yfinance %.1f%% vs Screener %.1f%% — "
+            "using yfinance but flag for manual review",
+            symbol, yfinance_pct, screener_pct,
+        )
+        return False
+    return True
+
+
 def fetch_screener_data(nse_symbol: str) -> dict[str, Any]:
     """
     Fetch standardized Indian-equity fundamentals from Screener.in.
@@ -832,8 +916,15 @@ def fetch_screener_data(nse_symbol: str) -> dict[str, Any]:
     )
     quarterly_stmt = _fetch_quarterly_income_stmt(clean_symbol)
     revenue_momentum = compute_revenue_momentum(clean_symbol, {}, quarterly_income_stmt=quarterly_stmt)
+    _screener_html_momentum = (
+        _parse_recent_results_from_soup(consolidated_soup)
+        or _parse_recent_results_from_soup(standalone_soup)
+    )
+    _yf_pct = revenue_momentum.get("growth_pct") if revenue_momentum.get("status") != "DATA_ERROR" else None
+    _sc_pct = (_screener_html_momentum or {}).get("revenue_yoy_growth_pct")
+    _cross_validate_revenue_yoy(clean_symbol, _yf_pct, _sc_pct)
     if revenue_momentum.get("growth_pct") is None:
-        revenue_momentum = _parse_recent_results_from_soup(consolidated_soup) or _parse_recent_results_from_soup(standalone_soup)
+        revenue_momentum = _screener_html_momentum or {}
     revenue_growth_latest_qtr = (
         revenue_momentum.get("growth_pct")
         if revenue_momentum.get("growth_pct") is not None
