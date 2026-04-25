@@ -843,6 +843,47 @@ def check_auto_review(symbol: str, stock_data: dict[str, Any]) -> dict[str, Any]
     return {}
 
 
+def run_monitoring_for_stock(symbol: str) -> dict:
+    DEBUG = symbol in {"LT", "KWIL"}
+
+    def trace(stage, obj):
+        if DEBUG:
+            print(
+                f">>> TRACE {symbol} @ {stage}: "
+                f"action={obj.get('action')!r} | "
+                f"quant={obj.get('quant_score')} | "
+                f"thesis={obj.get('thesis_status')!r} | "
+                f"pe_now={obj.get('current_pe')} | "
+                f"pe_5yr={obj.get('pe_5yr_avg')} | "
+                f"pct_ath={obj.get('pct_from_52w_high')} | "
+                f"pnl={obj.get('pnl_pct')} | "
+                f"badge={obj.get('winner_badge')!r}",
+                flush=True,
+            )
+
+    stock_data = fetch_stock_data(symbol)
+    trace("after-fetch", stock_data)
+
+    # ... existing pipeline calls ...
+
+    result = decision_agent(stock_data)
+    trace("after-decision", result)
+
+    result = _apply_valuation_floor(result, stock_data)
+    trace("after-valuation-floor", result)
+
+    result = _apply_earnings_blackout(result, stock_data)
+    trace("after-earnings-blackout", result)
+
+    result = _apply_winner_action(result, stock_data)
+    trace("after-winner-action", result)
+
+    result = _enforce_field_consistency(result)
+    trace("after-consistency", result)
+
+    return save_to_db(result)
+
+
 class MonitoringAgents:
     def __init__(self, repo: Any, provider: Any, config: AppConfig, signal_refresh_runner: Any, llm: Any) -> None:
         self.repo = repo
