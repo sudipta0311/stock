@@ -1042,6 +1042,78 @@ def render_synthesis_with_entry_summary(synthesis_text: str) -> None:
         st.info(f"**Entry Summary** - {' | '.join(cleaned_parts)}")
 
 
+def _compute_aggressive_watchlist_plan(fin_data: dict, cmp: float) -> dict | None:
+    """
+    Compute a forward entry plan for WATCHLIST items under aggressive risk profile.
+    Returns None when required 52W range data is unavailable.
+    """
+    if not fin_data or cmp <= 0:
+        return None
+
+    week52_low: float | None = None
+    for _key in ("week52_low", "52_week_low", "fiftyTwoWeekLow", "yearLow"):
+        try:
+            _v = fin_data.get(_key)
+            if _v and float(_v) > 0:
+                week52_low = float(_v)
+                break
+        except (TypeError, ValueError):
+            pass
+
+    week52_high: float | None = None
+    for _key in ("week52_high", "52_week_high", "fiftyTwoWeekHigh", "yearHigh"):
+        try:
+            _v = fin_data.get(_key)
+            if _v and float(_v) > 0:
+                week52_high = float(_v)
+                break
+        except (TypeError, ValueError):
+            pass
+
+    if not week52_low or not week52_high:
+        return None
+
+    pct_from_ath = (cmp - week52_high) / week52_high * 100
+
+    if pct_from_ath < -15:
+        entry_top    = cmp * 0.97
+        entry_bottom = cmp * 0.92
+    else:
+        entry_top    = cmp * 0.92
+        entry_bottom = cmp * 0.85
+
+    pct_to_entry = (entry_top - cmp) / cmp * 100  # negative = wait for dip
+
+    stop_loss = max(week52_low * 1.02, entry_bottom * 0.85)
+
+    try:
+        _sg = fin_data.get("sector_growth_yoy", 0.10)
+        sector_growth = float(_sg) if _sg else 0.10
+        if sector_growth > 1.0:
+            sector_growth = sector_growth / 100.0
+    except (TypeError, ValueError):
+        sector_growth = 0.10
+
+    target_1 = entry_top * (1 + sector_growth)
+    target_2 = entry_top * (1 + sector_growth * 2)
+
+    risk = entry_top - stop_loss
+    reward = target_1 - entry_top
+    rr = round(reward / risk, 1) if risk > 0 and reward > 0 else 0.0
+
+    return {
+        "entry_bottom":  round(entry_bottom),
+        "entry_top":     round(entry_top),
+        "cmp":           round(cmp),
+        "pct_to_entry":  round(pct_to_entry, 1),
+        "stop_loss":     round(stop_loss),
+        "target_1":      round(target_1),
+        "target_2":      round(target_2),
+        "rr":            rr,
+        "pct_from_ath":  round(pct_from_ath, 1),
+    }
+
+
 def render_recommendation_card(
     item: dict[str, Any],
     provider: str = "",
@@ -1243,6 +1315,38 @@ def render_recommendation_card(
                 + "</div>",
                 unsafe_allow_html=True,
             )
+
+            # Aggressive profile: show a forward entry plan even for WATCHLIST —
+            # the investor wants to know WHEN to act, not just that we're watching.
+            if _rec_risk_profile == "Aggressive" and canonical_state == "WATCHLIST":
+                _fw = _compute_aggressive_watchlist_plan(
+                    payload.get("fin_data") or {},
+                    float(payload.get("current_price") or 0),
+                )
+                if _fw:
+                    _dip_note = (
+                        f"wait for {abs(_fw['pct_to_entry']):.1f}% dip"
+                        if _fw["pct_to_entry"] < -0.5
+                        else "near current price"
+                    )
+                    st.markdown(
+                        f'<div style="background:#f0f7ff;border-left:4px solid #2980b9;'
+                        f'padding:10px 14px;border-radius:6px;margin:6px 0;font-size:13px;">'
+                        f'<strong>Forward Entry Plan (Aggressive — when conditions improve)</strong><br>'
+                        f'Entry zone: ₹{_fw["entry_bottom"]:,} – ₹{_fw["entry_top"]:,}'
+                        f' (currently ₹{_fw["cmp"]:,}, {_dip_note})<br>'
+                        f'Stop: ₹{_fw["stop_loss"]:,} &nbsp;|&nbsp; '
+                        f'T1: ₹{_fw["target_1"]:,} &nbsp;|&nbsp; '
+                        f'T2: ₹{_fw["target_2"]:,}<br>'
+                        f'<span style="color:#2980b9;font-weight:600;">'
+                        f'Risk/Reward: {_fw["rr"]:.1f}x</span>'
+                        f'&ensp;·&ensp;'
+                        f'<em style="color:#888;font-size:12px;">'
+                        f'ATH distance: {_fw["pct_from_ath"]:.1f}% — '
+                        f'entry plan activates on dip to zone above</em>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
 
         # Signal reconciliation badge — quant vs LLM verdict
         _rec = gov.get("reconciliation", {})

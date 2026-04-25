@@ -8,6 +8,123 @@ from uuid import uuid4
 
 _log = logging.getLogger(__name__)
 
+# Ideal sector allocation targets for an aggressive growth-oriented portfolio.
+# Used to override index-composition-based targets when risk_profile is "Aggressive",
+# ensuring gap analysis reflects what an aggressive investor should hold — not just
+# what the index holds.
+AGGRESSIVE_SECTOR_TARGETS: dict[str, float] = {
+    "Capital Goods":            12.0,
+    "Defence":                  10.0,
+    "Industrials":              10.0,
+    "Chemicals":                 8.0,
+    "Auto":                      8.0,
+    "Auto Components":           5.0,
+    "Banking":                  20.0,
+    "Financial Services":       15.0,
+    "IT":                       15.0,
+    "Technology":               15.0,
+    "FMCG":                      8.0,
+    "Consumer":                  8.0,
+    "Healthcare":                6.0,
+    "Pharma":                    6.0,
+    "Energy":                    5.0,
+    "Infrastructure":            8.0,
+    "Metals":                    5.0,
+    "Real Estate":               4.0,
+    "Telecom":                   4.0,
+    "Power":                     6.0,
+    "Cement":                    4.0,
+}
+
+
+def _compute_aggressive_gaps(
+    identified_gaps: list[dict],
+    sector_weights: dict[str, float] | None = None,
+) -> dict[str, dict]:
+    """
+    Re-derive gap entries for an aggressive portfolio using AGGRESSIVE_SECTOR_TARGETS.
+    Supplements existing gap entries; sectors already present keep their scores.
+    Returns a dict keyed by sector.
+    """
+    result: dict[str, dict] = {g["sector"]: g for g in identified_gaps}
+
+    # Build a minimal sector_weights map from what's already in gap entries
+    _existing_exposure: dict[str, float] = {}
+    for g in identified_gaps:
+        _existing_exposure[g["sector"]] = g.get("underweight_pct", 0.0)
+    if sector_weights:
+        _existing_exposure.update(sector_weights)
+
+    for sector, target_pct in AGGRESSIVE_SECTOR_TARGETS.items():
+        existing_pct = _existing_exposure.get(sector, 0.0)
+        gap_pct = round(max(0.0, target_pct - existing_pct), 2)
+        gap_status = (
+            "WIDE" if gap_pct > 5
+            else "MODERATE" if gap_pct > 2
+            else "MINIMAL"
+        )
+        if gap_pct == 0 and existing_pct == 0:
+            _log.warning(
+                "GAP_ANOMALY %s: target sector has 0 portfolio exposure and 0 gap — "
+                "check sector classification in holdings data",
+                sector,
+            )
+        overlap_note = (
+            f"GAP: only {existing_pct:.1f}% existing — {gap_status} opportunity"
+        )
+        reason = f"{overlap_note} | target {target_pct:.1f}% (aggressive) | gap {gap_pct:.1f}%"
+        score = round(min(1.0, gap_pct / max(target_pct, 1.0)), 3)
+        conviction = (
+            "STRONG_BUY" if gap_pct > 5
+            else "BUY" if gap_pct > 2
+            else "NEUTRAL"
+        )
+        if sector not in result:
+            result[sector] = {
+                "sector":         sector,
+                "underweight_pct": gap_pct,
+                "conviction":     conviction,
+                "score":          score,
+                "reason":         reason,
+            }
+        else:
+            # Update existing entry with aggressive-calibrated reason and score
+            result[sector]["reason"] = reason
+            result[sector]["score"] = max(result[sector].get("score", 0.0), score)
+
+    return result
+
+
+def _track_quant_llm_disagreement(results: list[dict]) -> None:
+    """Log a warning when quant and LLM verdicts disagree systematically."""
+    if not results:
+        return
+    disagreements = [
+        r for r in results
+        if r.get("quant_verdict") and r.get("llm_verdict")
+        and r["quant_verdict"] != r["llm_verdict"]
+    ]
+    if not disagreements:
+        return
+    ratio = len(disagreements) / len(results)
+    if ratio > 0.5:
+        _log.warning(
+            "QUANT_LLM_MISCALIBRATION: %d/%d stocks disagree (%d%%). "
+            "One model is systematically biased — review prompts.",
+            len(disagreements), len(results), int(ratio * 100),
+        )
+    quant_more_aggressive = sum(
+        1 for r in disagreements
+        if r.get("quant_verdict") in {"ACCUMULATE GRADUALLY", "ACCUMULATE", "SMALL INITIAL"}
+        and r.get("llm_verdict") in {"WATCHLIST", "WAIT"}
+    )
+    if disagreements and quant_more_aggressive / len(disagreements) > 0.7:
+        _log.warning(
+            "QUANT consistently more aggressive than LLM (%d/%d disagreements). "
+            "Either quant scoring threshold is too low or LLM prompt is too cautious.",
+            quant_more_aggressive, len(disagreements),
+        )
+
 from stock_platform.config import AppConfig
 from stock_platform.models import RecommendationRecord
 from stock_platform.agents.quant_model import apply_freshness_cap, compute_quality_score as compute_quality_score_v2
@@ -218,11 +335,17 @@ def compute_position_size(
     conviction_score: float,
     direct_equity_corpus: float,
     conviction_multiplier: float = 1.0,
+    risk_profile: str = "Balanced",
 ) -> dict[str, Any]:
     """
     Returns initial_tranche_pct and target_pct separately.
     Initial tranche is what to deploy NOW.
     Target is the full intended position over 2-3 months.
+
+    Profile sizing multipliers:
+      Conservative — smaller initial tranches, lower target caps (preservation over growth)
+      Balanced     — standard sizing (1× base)
+      Aggressive   — larger initial tranches, higher target caps (concentration tolerated)
     """
     # Map timing signals from assess_timing to conviction tiers
     signal_map = {
@@ -233,25 +356,39 @@ def compute_position_size(
     }
     conviction_key = signal_map.get(entry_signal, "ACCUMULATE")
 
+    # Base sizing rules (Balanced / default)
     sizing_rules: dict[str, dict[str, float]] = {
         "STRONG_BUY": {"initial": 0.10, "target": 0.28},
         "BUY":        {"initial": 0.08, "target": 0.22},
         "ACCUMULATE": {"initial": 0.06, "target": 0.18},
         "WAIT":       {"initial": 0.00, "target": 0.10},
     }
+
+    # Profile-specific size scaling and per-position caps
+    _PROFILE_SCALE: dict[str, dict[str, float]] = {
+        "Conservative": {"initial_scale": 0.65, "target_scale": 0.75, "hard_cap_pct": 20.0},
+        "Balanced":     {"initial_scale": 1.00, "target_scale": 1.00, "hard_cap_pct": 25.0},
+        "Aggressive":   {"initial_scale": 1.30, "target_scale": 1.20, "hard_cap_pct": 30.0},
+    }
+    profile_cfg = _PROFILE_SCALE.get(risk_profile, _PROFILE_SCALE["Balanced"])
+
     rule = sizing_rules.get(conviction_key, {"initial": 0.05, "target": 0.10})
 
     conviction_multiplier = max(0.0, conviction_multiplier) * (0.85 + (conviction_score * 0.30))
 
-    initial_pct = round(rule["initial"] * conviction_multiplier * 100, 1)
-    target_pct  = round(rule["target"]  * conviction_multiplier * 100, 1)
+    initial_pct = round(
+        rule["initial"] * conviction_multiplier * profile_cfg["initial_scale"] * 100, 1
+    )
+    target_pct = round(
+        rule["target"] * conviction_multiplier * profile_cfg["target_scale"] * 100, 1
+    )
+
+    hard_cap_pct = profile_cfg["hard_cap_pct"]
+    initial_pct = min(initial_pct, hard_cap_pct)
+    target_pct  = min(target_pct,  hard_cap_pct)
 
     initial_amount = round(direct_equity_corpus * initial_pct / 100, 0)
     target_amount  = round(direct_equity_corpus * target_pct  / 100, 0)
-
-    hard_cap_pct = 30.0
-    initial_pct = min(initial_pct, hard_cap_pct)
-    target_pct  = min(target_pct,  hard_cap_pct)
 
     return {
         "initial_tranche_pct": initial_pct,
@@ -477,6 +614,7 @@ class BuyAgents:
         }
 
     def filter_risk(self, state: dict[str, Any]) -> dict[str, Any]:
+        from stock_platform.utils.risk_profiles import get_risk_config
         sector_weights: dict[str, float] = {}
         for row in state["portfolio_context"]["normalized_exposure"]:
             sector_weights[row["sector"]] = sector_weights.get(row["sector"], 0.0) + row["total_weight"]
@@ -484,6 +622,13 @@ class BuyAgents:
         filtered = []
         universe_size = len(state.get("universe", []))
         scored_size = len(state.get("scored_candidates", []))
+
+        risk_profile = state["request"].get("risk_profile", "Balanced")
+        _risk_cfg = get_risk_config(risk_profile)
+        _preferred_min_roce   = float(_risk_cfg.get("preferred_min_roce", 18))
+        _preferred_max_de     = float(_risk_cfg.get("preferred_max_de", 0.5))
+        _preferred_max_pe_pct = float(_risk_cfg.get("preferred_max_pe_vs_median_pct", 25))
+        _preferred_min_rev_gr = float(_risk_cfg.get("preferred_min_revenue_growth", 12))
 
         for candidate in state["scored_candidates"]:
             risk = self.provider.get_risk_metrics(candidate["symbol"])
@@ -526,7 +671,65 @@ class BuyAgents:
                 continue
             if unified.get(candidate["sector"], {}).get("conviction") == "STRONG_AVOID":
                 continue
-            filtered.append(candidate | {"risk_metrics": risk})
+
+            # ── TIER 2: PROFILE SCORING MODIFIERS (never exclude — only downgrade score) ─
+            # Penalties are larger for Conservative, smaller for Aggressive — reflecting
+            # how strictly each profile cares about these quality thresholds.
+            _penalty_scale = {"Conservative": 0.08, "Balanced": 0.05, "Aggressive": 0.02}
+            _penalty = _penalty_scale.get(risk_profile, 0.05)
+            _profile_score_adj = 0.0
+
+            _roce = fin.get("roce") or fin.get("return_on_capital_employed")
+            if _roce is not None:
+                try:
+                    if float(_roce) < _preferred_min_roce:
+                        _profile_score_adj -= _penalty
+                except (TypeError, ValueError):
+                    pass
+
+            if _de is not None:
+                try:
+                    if float(_de) > _preferred_max_de:
+                        _profile_score_adj -= _penalty
+                except (TypeError, ValueError):
+                    pass
+
+            _rev_gr = (
+                fin.get("revenue_growth_yoy")
+                or fin.get("revenue_yoy_growth_pct")
+                or (fin.get("recent_results") or {}).get("revenue_yoy_growth_pct")
+            )
+            if _rev_gr is not None:
+                try:
+                    if float(_rev_gr) < _preferred_min_rev_gr:
+                        _profile_score_adj -= _penalty * 0.5
+                except (TypeError, ValueError):
+                    pass
+
+            # PE premium vs median — only apply when PE history is meaningful
+            _pe_signal = (candidate.get("pe_signal") or "").upper()
+            if _pe_signal == "EXPENSIVE_VS_HISTORY":
+                _pe_premium = fin.get("pe_premium_vs_median_pct")
+                if _pe_premium is not None:
+                    try:
+                        if float(_pe_premium) > _preferred_max_pe_pct:
+                            _profile_score_adj -= _penalty
+                    except (TypeError, ValueError):
+                        pass
+
+            _adj_selection_score = round(
+                clamp(candidate.get("selection_score", candidate.get("quality_score", 0.0)) + _profile_score_adj, 0.0, 1.0),
+                3,
+            )
+
+            filtered.append(
+                candidate
+                | {
+                    "risk_metrics": risk,
+                    "profile_score_adj": round(_profile_score_adj, 3),
+                    "selection_score": _adj_selection_score,
+                }
+            )
 
         _log.info(
             "filter_risk: universe=%d scored=%d post_exclusion=%d",
@@ -741,6 +944,7 @@ class BuyAgents:
     def size_positions(self, state: dict[str, Any]) -> dict[str, Any]:
         prefs = state["portfolio_context"]["user_preferences"]
         corpus = float(prefs.get("direct_equity_corpus", 0) or 0) or 100.0
+        risk_profile = state["request"].get("risk_profile", "Balanced")
         allocations = []
         for item in state["timing_assessments"]:
             sizing = compute_position_size(
@@ -748,6 +952,7 @@ class BuyAgents:
                 item["quality_score"],
                 corpus,
                 conviction_multiplier=float(item.get("lock_in_multiplier", 1.0) or 1.0),
+                risk_profile=risk_profile,
             )
             allocations.append(
                 item
@@ -908,10 +1113,11 @@ class BuyAgents:
                 except Exception as _ae:
                     _log.warning("analyst target pre-fetch %s: %s", _asym, _ae)
 
-        gaps_by_sector = {
-            g["sector"]: g
-            for g in state["portfolio_context"].get("identified_gaps", [])
-        }
+        _raw_gaps = state["portfolio_context"].get("identified_gaps", [])
+        if risk_profile == "Aggressive":
+            gaps_by_sector = _compute_aggressive_gaps(_raw_gaps)
+        else:
+            gaps_by_sector = {g["sector"]: g for g in _raw_gaps}
 
         # ── Phase 1: serial gate checks + context prep (no LLM calls) ─────────
         _prepared: list[dict[str, Any]] = []
@@ -1287,6 +1493,18 @@ class BuyAgents:
                 "Final recommendation count %d below requested Top N %d after filtering.",
                 len(recommendations), requested_top_n,
             )
+
+        # Diagnose systematic quant vs LLM disagreement (logged as warning; no behaviour change).
+        if risk_profile == "Aggressive":
+            _disagreement_input = [
+                {
+                    "quant_verdict": rec.payload.get("entry_signal", ""),
+                    "llm_verdict":   rec.action,
+                }
+                for rec in recommendations
+            ]
+            _track_quant_llm_disagreement(_disagreement_input)
+
         self.repo.save_recommendations(run_id, recommendations)
         # Merge validation-gate skips (ValidationResult objects) + governance-filter skips (dicts).
         validation_skipped: list[ValidationResult] = state.get("skipped_candidates", [])
