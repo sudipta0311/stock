@@ -540,6 +540,16 @@ If no material risks are found, return exactly:
             )
         )
 
+        # ── Horizon context ──────────────────────────────────────────────────
+        horizon_months = int(item.get("horizon_months", 24))
+        tax_label = "LTCG (12.5%)" if horizon_months >= 12 else "STCG (20%)"
+        horizon_block = (
+            f"\n\nINVESTMENT HORIZON: {horizon_months} months "
+            f"(tax on exit: {tax_label}). "
+            "All return projections, catalysts, and price targets must be evaluated "
+            f"within this {horizon_months}-month window."
+        )
+
         # ── Risk profile instruction block ───────────────────────────────────
         risk_profile      = item.get("risk_profile", "Balanced")
         _risk_cfg         = get_risk_config(risk_profile)
@@ -692,6 +702,7 @@ If no material risks are found, return exactly:
                 f"QUALITY SCORE: {quality_score:.2f} | ENTRY SIGNAL: {entry_signal}\n"
                 f"ANALYST TARGET: {target_line}\n"
                 f"{low_val_warning}"
+                f"{horizon_block}"
                 f"{risk_profile_block}"
                 f"{macro_flow_block}"
                 f"{news_block}"
@@ -717,14 +728,14 @@ If no material risks are found, return exactly:
             "technical strength, entry timing) — your job is to find the trigger that re-rates "
             "it upward. "
             "You are NOT a general assistant.\n\n"
-            "YOUR ANALYSIS MUST ANSWER ALL FOUR:\n"
+            f"YOUR ANALYSIS MUST ANSWER ALL FOUR:\n"
             "1. What is the specific near-term catalyst (earnings, order win, policy event) "
             "that closes the valuation gap?\n"
             "2. Why is the market underpricing this catalyst today?\n"
-            "3. What does the stock look like in 18 months if the catalyst fires?\n"
+            f"3. What does the stock look like in {horizon_months} months if the catalyst fires?\n"
             "4. At what price does the risk/reward become compelling?\n\n"
-            "Only recommend WATCHLIST or AVOID if you cannot identify a credible catalyst "
-            "within the investment horizon.\n\n"
+            f"Only recommend WATCHLIST or AVOID if you cannot identify a credible catalyst "
+            f"within the {horizon_months}-month investment horizon.\n\n"
             "RULES YOU MUST FOLLOW:\n"
             "1. Start from the factual snapshot only. Do not invent or estimate numbers.\n"
             "2. Clearly label: FACT / DERIVED / MY INFERENCE\n"
@@ -738,8 +749,8 @@ If no material risks are found, return exactly:
             "### What the facts show\n"
             "[2-3 sentences citing only measured data]\n\n"
             "### Bull case\n"
-            "[Answer all four questions above: specific catalyst with timing, why market is "
-            "underpricing it, 18-month scenario if catalyst fires, compelling entry price]\n\n"
+            f"[Answer all four questions above: specific catalyst with timing, why market is "
+            f"underpricing it, {horizon_months}-month scenario if catalyst fires, compelling entry price]\n\n"
             "### Operating leverage / earnings path\n"
             "[How catalyst converts to earnings, with numbers]\n\n"
             "### Exit signal\n"
@@ -752,6 +763,7 @@ If no material risks are found, return exactly:
             f"QUALITY SCORE: {quality_score:.2f} | ENTRY SIGNAL: {entry_signal}\n"
             f"ANALYST TARGET: {target_line}\n"
             f"{low_val_warning}"
+            f"{horizon_block}"
             f"{risk_profile_block}"
             f"{macro_flow_block}"
             f"{news_block}"
