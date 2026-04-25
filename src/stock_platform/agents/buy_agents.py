@@ -971,12 +971,20 @@ class BuyAgents:
         return {"allocations": allocations}
 
     def assess_tax_costs(self, state: dict[str, Any]) -> dict[str, Any]:
+        horizon_months = int(state["request"].get("horizon_months", 24))
+        applicable_rate = 12.5 if horizon_months >= 12 else 20.0
+        tax_regime = "LTCG (12.5%)" if horizon_months >= 12 else "STCG (20%)"
         return {
             "tax_assessment": {
                 "stcg_rate": 20.0,
                 "ltcg_rate": 12.5,
+                "applicable_rate": applicable_rate,
+                "horizon_months": horizon_months,
                 "cost_drag_pct": 0.15,
-                "note": "New-buy flow applies entry-side cost drag only because no exit is required.",
+                "note": (
+                    f"Horizon {horizon_months}m → {tax_regime} applies on exit. "
+                    "New-buy flow applies entry-side cost drag only."
+                ),
             }
         }
 
@@ -1028,6 +1036,7 @@ class BuyAgents:
         confidence_band = state["confidence"]["band"]
         requested_top_n = int(state["request"]["top_n"])
         risk_profile    = state["request"].get("risk_profile", "Balanced")
+        horizon_months  = int(state["request"].get("horizon_months", 24))
         _risk_cfg       = get_risk_config(risk_profile)
         _min_rr         = float(_risk_cfg["min_rr_ratio"])
         run_id = f"buy-{uuid4().hex[:10]}"
@@ -1156,7 +1165,7 @@ class BuyAgents:
                 or fetch_analyst_consensus_target(item["symbol"], current_price)
             )
             price_ctx["analyst_target"] = analyst_target
-            net_return_pct = compute_net_return(current_price, analyst_target, holding_months=24)
+            net_return_pct = compute_net_return(current_price, analyst_target, holding_months=horizon_months)
 
             if net_return_pct is None or net_return_pct <= 0:
                 _log.warning(
@@ -1407,6 +1416,7 @@ class BuyAgents:
                     "analyst_target":        prep["analyst_target"],
                     "macro_flow":            macro_flow,
                     "risk_profile":          prep["risk_profile"],
+                    "horizon_months":        horizon_months,
                     "news_context":          prep.get("news_context", ""),
                 },
                 state["portfolio_context"],
@@ -1472,6 +1482,7 @@ class BuyAgents:
                 "tariff_signal": prep["tariff_signal"],
                 "tariff_warning": prep["tariff_warning"],
                 "net_of_tax_return_pct": prep["net_return_pct"],
+                "horizon_months": horizon_months,
                 # Legacy key for backward compat.
                 "net_of_tax_return_projection": round(prep["net_return_pct"] / 100, 4),
                 "confidence_band": confidence_band,
