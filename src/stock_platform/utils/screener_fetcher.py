@@ -889,10 +889,135 @@ def _compute_yoy_from_bse(bse_data: dict) -> float | None:
     return round((rev_latest - rev_prior) / abs(rev_prior) * 100.0, 1)
 
 
+def compute_yoy_from_quarterly(data: dict) -> float | None:
+    """Compute YoY revenue growth from quarterly filing data (latest vs prior-year quarter).
+
+    Accepts the {'latest': {'revenue': X}, 'prior_year': {'revenue': Y}} shape
+    returned by fetch_nse_quarterly (and historically fetch_bse_quarterly).
+    """
+    latest = (data or {}).get("latest") or {}
+    prior = (data or {}).get("prior_year") or {}
+    rev_latest = _as_float(latest.get("revenue"))
+    rev_prior = _as_float(prior.get("revenue"))
+    if rev_latest is None or rev_prior in (None, 0):
+        return None
+    return round((rev_latest - rev_prior) / abs(rev_prior) * 100.0, 1)
+
+
+def fetch_nse_quarterly(symbol: str) -> dict | None:
+    """
+    NSE corporate filings — authoritative tiebreaker for YoY disagreements.
+    Replaced fetch_bse_quarterly (2026-04-26) after BSE API silently started
+    returning empty Table responses on all symbols.
+
+    Two-call flow:
+      1. List endpoint  → find most-recent consolidated quarterly + same-quarter prior year
+      2. Detail endpoint → extract re_net_sale for each filing
+
+    Returns {'latest': {'revenue': X, 'period_end': ...},
+             'prior_year': {'revenue': Y, 'period_end': ...}}
+    or None if unavailable.
+    """
+    import datetime as _dt
+
+    _headers = {
+        "Accept": "application/json, text/plain, */*",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://www.nseindia.com/",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    try:
+        session = requests.Session()
+        session.headers.update(_headers)
+        session.get("https://www.nseindia.com/", timeout=10)
+
+        r = session.get(
+            f"https://www.nseindia.com/api/corporates-financial-results"
+            f"?index=equities&symbol={symbol}&period=Quarterly",
+            timeout=15,
+        )
+        if r.status_code != 200:
+            _log.debug("NSE list endpoint HTTP %s for %s", r.status_code, symbol)
+            return None
+        items = r.json()
+        if not isinstance(items, list) or not items:
+            return None
+
+        consol = [
+            x for x in items
+            if x.get("consolidated") == "Consolidated"
+            and x.get("cumulative") == "Non-cumulative"
+        ]
+        if len(consol) < 2:
+            _log.debug("NSE: insufficient consolidated quarterly filings for %s (%d)", symbol, len(consol))
+            return None
+
+        latest_item = consol[0]
+        latest_end = _dt.datetime.strptime(latest_item["toDate"], "%d-%b-%Y")
+        yoy_target = latest_end.replace(year=latest_end.year - 1)
+
+        prior_candidates = [
+            x for x in consol[1:]
+            if _dt.datetime.strptime(x["toDate"], "%d-%b-%Y") < latest_end - _dt.timedelta(days=300)
+        ]
+        if not prior_candidates:
+            _log.debug("NSE: no prior-year quarter found for %s", symbol)
+            return None
+        prior_item = min(
+            prior_candidates,
+            key=lambda x: abs((_dt.datetime.strptime(x["toDate"], "%d-%b-%Y") - yoy_target).days),
+        )
+
+        def _nse_revenue(item: dict) -> dict | None:
+            rd = session.get(
+                f"https://www.nseindia.com/api/corporates-financial-results-data"
+                f"?index=equities"
+                f"&params={item['params']}"
+                f"&seq_id={item['seqNumber']}"
+                f"&industry={item.get('industry', '-')}"
+                f"&ind=C"
+                f"&format={item.get('format', 'New')}",
+                timeout=15,
+            )
+            if rd.status_code != 200:
+                return None
+            d = rd.json()
+            results = d.get("resultsData2") or d.get("resultsData") or {}
+            net_sale = (
+                results.get("re_net_sale")
+                or results.get("re_income_rev_op")
+                or results.get("re_income")
+            )
+            if net_sale is None:
+                return None
+            return {
+                "revenue": _as_float(str(net_sale)),
+                "period_end": item.get("toDate"),
+                "source": "NSE_FILING",
+            }
+
+        latest_data = _nse_revenue(latest_item)
+        if not latest_data or not latest_data.get("revenue"):
+            _log.debug("NSE: could not extract revenue for %s latest quarter", symbol)
+            return None
+
+        prior_data = _nse_revenue(prior_item)
+        _log.info(
+            "NSE filing fetched for %s: latest=%s rev=%.0f, prior=%s rev=%s",
+            symbol, latest_item.get("toDate"), latest_data["revenue"],
+            prior_item.get("toDate"), prior_data.get("revenue") if prior_data else "N/A",
+        )
+        return {"latest": latest_data, "prior_year": prior_data}
+
+    except Exception as exc:
+        _log.debug("NSE quarterly fetch failed for %s: %s", symbol, exc)
+        return None
+
+
 def resolve_yoy_disagreement(
     symbol: str,
     yfinance_yoy: float | None,
-    screener_yoy: float | None,
+    screener_consol_yoy: float | None,
     standalone_yoy: float | None = None,
     tolerance: float = 5.0,  # unused in new logic; kept for call-site compat
 ) -> dict:
@@ -901,15 +1026,15 @@ def resolve_yoy_disagreement(
 
     Priority:
       1. consolidated + yfinance agree within 15pp → average → HIGH
-      2. consolidated + yfinance disagree → try BSE filing → HIGH
-      3. consolidated + yfinance disagree, BSE unavailable → exclude → LOW
+      2. consolidated + yfinance disagree → try NSE filing → HIGH
+      3. consolidated + yfinance disagree, NSE unavailable → exclude → LOW
       4. only consolidated available → MEDIUM (no exclude)
       5. only yfinance available → MEDIUM (no exclude)
       6. only standalone available → LOW, exclude
       7. no data → exclude
     """
     yf = yfinance_yoy
-    sc_consol = screener_yoy
+    sc_consol = screener_consol_yoy
     sc_standalone = standalone_yoy
 
     # Priority 1–3: both primary sources present
@@ -919,32 +1044,32 @@ def resolve_yoy_disagreement(
             return {
                 "yoy_pct": avg,
                 "source": "yf+consolidated_avg",
-                "confidence": "HIGH",
+                "yoy_confidence": "HIGH",
                 "exclude_from_recommendations": False,
             }
-        # Disagree >15pp — try BSE as authoritative tiebreaker
-        bse_data = fetch_bse_quarterly(symbol)
-        bse_yoy = _compute_yoy_from_bse(bse_data) if bse_data else None
-        if bse_yoy is not None:
+        # Disagree >15pp — try NSE filing as authoritative tiebreaker
+        nse_data = fetch_nse_quarterly(symbol)
+        nse_yoy = compute_yoy_from_quarterly(nse_data) if nse_data else None
+        if nse_yoy is not None:
             _log.info(
-                "YoY RESOLVED via BSE %s: yf=%.1f%% vs sc_consol=%.1f%% disagree — BSE=%.1f%%",
-                symbol, yf, sc_consol, bse_yoy,
+                "YoY RESOLVED via NSE %s: yf=%.1f%% vs sc_consol=%.1f%% disagree — NSE=%.1f%%",
+                symbol, yf, sc_consol, nse_yoy,
             )
             return {
-                "yoy_pct": bse_yoy,
-                "source": "BSE_FILING",
-                "confidence": "HIGH",
+                "yoy_pct": nse_yoy,
+                "source": "NSE_FILING",
+                "yoy_confidence": "HIGH",
                 "exclude_from_recommendations": False,
             }
         _log.warning(
             "YoY EXCLUDED %s: yf=%.1f%% vs sc_consol=%.1f%% disagree by %.1fpp — "
-            "BSE unavailable. Excluding from recommendations.",
+            "NSE unavailable. Excluding from recommendations.",
             symbol, yf, sc_consol, abs(yf - sc_consol),
         )
         return {
             "yoy_pct": min(yf, sc_consol),
             "source": "disagree_excluded",
-            "confidence": "LOW",
+            "yoy_confidence": "LOW",
             "exclude_from_recommendations": True,
         }
 
@@ -953,7 +1078,7 @@ def resolve_yoy_disagreement(
         return {
             "yoy_pct": sc_consol,
             "source": "consolidated_only",
-            "confidence": "MEDIUM",
+            "yoy_confidence": "MEDIUM",
             "exclude_from_recommendations": False,
         }
 
@@ -962,7 +1087,7 @@ def resolve_yoy_disagreement(
         return {
             "yoy_pct": yf,
             "source": "yfinance_only",
-            "confidence": "MEDIUM",
+            "yoy_confidence": "MEDIUM",
             "exclude_from_recommendations": False,
         }
 
@@ -972,14 +1097,14 @@ def resolve_yoy_disagreement(
         return {
             "yoy_pct": sc_standalone,
             "source": "standalone_only",
-            "confidence": "LOW",
+            "yoy_confidence": "LOW",
             "exclude_from_recommendations": True,
         }
 
     return {
         "yoy_pct": None,
         "source": "no_data",
-        "confidence": "NONE",
+        "yoy_confidence": "NONE",
         "exclude_from_recommendations": True,
     }
 
@@ -1075,13 +1200,12 @@ def fetch_screener_data(nse_symbol: str) -> dict[str, Any]:
     _sc_standalone_pct = _sc_standalone_momentum.get("revenue_yoy_growth_pct")
 
     # 3-source resolution: yfinance + Screener consolidated + Screener standalone.
-    # Falls back to BSE filing when all three disagree (works locally; silently
-    # returns None in cloud environments where BSE API is session-gated).
+    # Falls back to NSE filing when primary sources disagree >15pp.
     _yoy_resolution = resolve_yoy_disagreement(
         clean_symbol, _yf_pct, _sc_consol_pct, _sc_standalone_pct
     )
     _resolved_yoy = _yoy_resolution.get("yoy_pct")
-    _yoy_confidence = _yoy_resolution.get("confidence", "HIGH")
+    _yoy_confidence = _yoy_resolution.get("yoy_confidence", "HIGH")
     _yoy_source = _yoy_resolution.get("source", "unknown")
     _exclude_for_data_quality = bool(_yoy_resolution.get("exclude_from_recommendations"))
 
