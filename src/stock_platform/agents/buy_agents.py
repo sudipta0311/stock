@@ -1646,6 +1646,7 @@ class BuyAgents:
             "run_summary": {
                 "run_id": run_id,
                 "recommendation_count": len(recommendations),
+                "requested_top_n": requested_top_n,
                 "blocked_reason": blocked_reason,
                 "pipeline_stats": _pipeline_stats,
             },

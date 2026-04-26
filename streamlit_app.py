@@ -1682,7 +1682,7 @@ def _render_skipped_stocks(skipped: list[dict[str, Any]], run_summary: dict[str,
     """Show the skipped-stocks transparency panel below recommendation cards."""
     _INVESTMENT_CRITERIA_STATUSES = {
         "NEGATIVE_NET_RETURN", "LOW_RISK_REWARD", "GOVERNANCE_RISK",
-        "WEAK_EVIDENCE", "NO_PRICE", "OVERLAP_FILTERED",
+        "WEAK_EVIDENCE", "NO_PRICE", "OVERLAP_FILTERED", "DATA_QUALITY_LOW",
     }
     _DATA_VALIDATION_STATUSES = {
         "NOT_FOUND", "NO_DATA", "PRICE_MISSING", "DEMERGED", "DELISTED", "STALE_DATA",
@@ -1728,6 +1728,7 @@ def _render_skipped_stocks(skipped: list[dict[str, Any]], run_summary: dict[str,
             "WEAK_EVIDENCE":       "Evidence too stale or thin for this risk profile",
             "NO_PRICE":            "Current price unavailable",
             "OVERLAP_FILTERED":    "Already >3% represented via MF/ETF look-through",
+            "DATA_QUALITY_LOW":    "Unresolvable YoY revenue disagreement across sources",
         }
         with st.expander(
             f"⚠️ {len(investment_gated)} stock(s) excluded by investment criteria", expanded=True
@@ -2582,6 +2583,13 @@ with tabs[2]:
                 render_empty_panel("No Anthropic recommendations were generated.")
             else:
                 for item in a_data["recommendations"]:
+                    if item.get("payload", {}).get("fin_data", {}).get("exclude_from_recommendations"):
+                        st.error(
+                            f"⚠️ {item.get('symbol')} appeared in shortlist but is flagged for exclusion "
+                            f"({item.get('payload', {}).get('fin_data', {}).get('yoy_source', 'data quality')}). "
+                            "This is a pipeline bug — please report."
+                        )
+                        continue
                     render_recommendation_card(
                         item, provider="anthropic", comparison_map=agreement,
                         synthesis_text=synthesis_map.get(item.get("symbol", ""), ""),
@@ -2597,6 +2605,13 @@ with tabs[2]:
                 render_empty_panel("No OpenAI recommendations were generated.")
             else:
                 for item in o_data["recommendations"]:
+                    if item.get("payload", {}).get("fin_data", {}).get("exclude_from_recommendations"):
+                        st.error(
+                            f"⚠️ {item.get('symbol')} appeared in shortlist but is flagged for exclusion "
+                            f"({item.get('payload', {}).get('fin_data', {}).get('yoy_source', 'data quality')}). "
+                            "This is a pipeline bug — please report."
+                        )
+                        continue
                     render_recommendation_card(
                         item, provider="openai", comparison_map=agreement,
                         synthesis_text=synthesis_map.get(item.get("symbol", ""), ""),
@@ -2612,7 +2627,33 @@ with tabs[2]:
             st.warning(f"**No recommendations — market signals too weak.**\n\n{_blocked}")
         elif recommendations:
             for item in recommendations:
+                if item.get("payload", {}).get("fin_data", {}).get("exclude_from_recommendations"):
+                    st.error(
+                        f"⚠️ {item.get('symbol')} appeared in shortlist but is flagged for exclusion "
+                        f"({item.get('payload', {}).get('fin_data', {}).get('yoy_source', 'data quality')}). "
+                        "This is a pipeline bug — please report."
+                    )
+                    continue
                 render_recommendation_card(item)
+            _run_sum = st.session_state.get("buy_run_summary", {})
+            _rec_count = _run_sum.get("recommendation_count", len(recommendations))
+            _req_top_n = _run_sum.get("requested_top_n", 0)
+            if _req_top_n and _rec_count < _req_top_n:
+                _skipped = st.session_state.get("buy_skipped_stocks", [])
+                _data_excl = sum(1 for s in _skipped if s.get("status") == "DATA_QUALITY_LOW")
+                _rr_excl = sum(1 for s in _skipped if s.get("status") in ("LOW_RISK_REWARD", "NEGATIVE_NET_RETURN"))
+                _pipeline = _run_sum.get("pipeline_stats", {})
+                _universe = _pipeline.get("universe_size", "?")
+                _final_pool = _pipeline.get("shortlist_count", "?")
+                st.info(
+                    f"Returned **{_rec_count}** of **{_req_top_n}** requested. Pipeline:\n"
+                    f"- Universe size: {_universe}\n"
+                    f"- Excluded for data quality: {_data_excl}\n"
+                    f"- Excluded by R/R filter: {_rr_excl}\n"
+                    f"- Final pool (shortlist): {_final_pool}\n\n"
+                    "To get more candidates: switch to Aggressive risk profile (R/R 1.5×) or "
+                    "wait for data refresh (BSE ground truth source not yet wired)."
+                )
         else:
             render_empty_panel("Run the buy workflow to populate the recommendation feed.")
         _render_skipped_stocks(

@@ -880,84 +880,92 @@ def resolve_yoy_disagreement(
     yfinance_yoy: float | None,
     screener_yoy: float | None,
     standalone_yoy: float | None = None,
-    tolerance: float = 5.0,
+    tolerance: float = 5.0,  # unused in new logic; kept for call-site compat
 ) -> dict:
     """
-    Resolve YoY revenue growth when sources disagree.
+    Resolve YoY revenue growth across sources.
 
-    Source hierarchy (practical):
-      1. If yfinance + Screener consolidated agree (≤ tolerance) → average → HIGH
-      2. If they disagree → use Screener standalone as tiebreaker (3rd source)
-         - If 2-of-3 agree → use the majority value → MEDIUM
-      3. Fetch BSE filings as authoritative 4th source (accessible locally only)
-         - If BSE available → use BSE directly → HIGH
-      4. No tiebreaker available → conservative minimum → LOW,
-         exclude_from_recommendations = True
+    Priority:
+      1. consolidated + yfinance agree within 15pp → average → HIGH
+      2. consolidated + yfinance disagree → try BSE filing → HIGH
+      3. consolidated + yfinance disagree, BSE unavailable → exclude → LOW
+      4. only consolidated available → MEDIUM (no exclude)
+      5. only yfinance available → MEDIUM (no exclude)
+      6. only standalone available → LOW, exclude
+      7. no data → exclude
     """
-    available = {
-        k: v for k, v in {
-            "yfinance": yfinance_yoy,
-            "screener_consolidated": screener_yoy,
-            "screener_standalone": standalone_yoy,
-        }.items() if v is not None
-    }
+    yf = yfinance_yoy
+    sc_consol = screener_yoy
+    sc_standalone = standalone_yoy
 
-    if not available:
-        return {"yoy_pct": None, "source": "no_data", "confidence": "LOW",
-                "exclude_from_recommendations": True}
-
-    if len(available) == 1:
-        src, val = next(iter(available.items()))
-        return {"yoy_pct": val, "source": src, "confidence": "MEDIUM"}
-
-    values = list(available.values())
-    max_spread = max(values) - min(values)
-
-    # Step 1: all available sources agree → average → HIGH
-    if max_spread <= tolerance:
-        avg = round(sum(values) / len(values), 1)
-        return {"yoy_pct": avg, "source": "+".join(available) + "_avg", "confidence": "HIGH"}
-
-    # Step 2: try 2-of-3 majority when 3 sources present
-    if len(available) == 3:
-        srcs = list(available.items())
-        for i, (s_a, v_a) in enumerate(srcs):
-            for j, (s_b, v_b) in enumerate(srcs):
-                if i >= j:
-                    continue
-                if abs(v_a - v_b) <= tolerance:
-                    avg_pair = round((v_a + v_b) / 2, 1)
-                    _log.info(
-                        "YoY 2-OF-3 AGREE %s: %s=%.1f%% and %s=%.1f%% agree "
-                        "(spread %.1fpp) — using %.1f%%",
-                        symbol, s_a, v_a, s_b, v_b, abs(v_a - v_b), avg_pair,
-                    )
-                    return {"yoy_pct": avg_pair,
-                            "source": f"{s_a}+{s_b}_majority",
-                            "confidence": "MEDIUM"}
-
-    # Step 3: try BSE as authoritative tiebreaker
-    bse_data = fetch_bse_quarterly(symbol)
-    bse_yoy = _compute_yoy_from_bse(bse_data) if bse_data else None
-    if bse_yoy is not None:
-        _log.info(
-            "YoY RESOLVED via BSE %s: yf=%s, sc=%s, standalone=%s → BSE=%.1f%%",
-            symbol, yfinance_yoy, screener_yoy, standalone_yoy, bse_yoy,
+    # Priority 1–3: both primary sources present
+    if sc_consol is not None and yf is not None:
+        if abs(yf - sc_consol) <= 15:
+            avg = round((yf + sc_consol) / 2, 1)
+            return {
+                "yoy_pct": avg,
+                "source": "yf+consolidated_avg",
+                "confidence": "HIGH",
+                "exclude_from_recommendations": False,
+            }
+        # Disagree >15pp — try BSE as authoritative tiebreaker
+        bse_data = fetch_bse_quarterly(symbol)
+        bse_yoy = _compute_yoy_from_bse(bse_data) if bse_data else None
+        if bse_yoy is not None:
+            _log.info(
+                "YoY RESOLVED via BSE %s: yf=%.1f%% vs sc_consol=%.1f%% disagree — BSE=%.1f%%",
+                symbol, yf, sc_consol, bse_yoy,
+            )
+            return {
+                "yoy_pct": bse_yoy,
+                "source": "BSE_FILING",
+                "confidence": "HIGH",
+                "exclude_from_recommendations": False,
+            }
+        _log.warning(
+            "YoY EXCLUDED %s: yf=%.1f%% vs sc_consol=%.1f%% disagree by %.1fpp — "
+            "BSE unavailable. Excluding from recommendations.",
+            symbol, yf, sc_consol, abs(yf - sc_consol),
         )
-        return {"yoy_pct": bse_yoy, "source": "BSE_FILING", "confidence": "HIGH"}
+        return {
+            "yoy_pct": min(yf, sc_consol),
+            "source": "disagree_excluded",
+            "confidence": "LOW",
+            "exclude_from_recommendations": True,
+        }
 
-    # Step 4: no tiebreaker — conservative minimum, flag for exclusion
-    chosen = min(v for v in values)
-    chosen_src = min(available, key=lambda k: available[k])
-    _log.error(
-        "YoY UNRESOLVABLE %s: yf=%s, sc_consol=%s, sc_standalone=%s, BSE unavailable. "
-        "Using conservative %.1f%% (exclude from recommendations)",
-        symbol, yfinance_yoy, screener_yoy, standalone_yoy, chosen,
-    )
+    # Priority 4: only consolidated available (holding companies, multi-segment)
+    if sc_consol is not None:
+        return {
+            "yoy_pct": sc_consol,
+            "source": "consolidated_only",
+            "confidence": "MEDIUM",
+            "exclude_from_recommendations": False,
+        }
+
+    # Priority 5: only yfinance available
+    if yf is not None:
+        return {
+            "yoy_pct": yf,
+            "source": "yfinance_only",
+            "confidence": "MEDIUM",
+            "exclude_from_recommendations": False,
+        }
+
+    # Priority 6: standalone only — unreliable for holding companies / multi-segment
+    if sc_standalone is not None:
+        _log.info("%s: only standalone available — using with low confidence", symbol)
+        return {
+            "yoy_pct": sc_standalone,
+            "source": "standalone_only",
+            "confidence": "LOW",
+            "exclude_from_recommendations": True,
+        }
+
     return {
-        "yoy_pct": chosen,
-        "source": f"{chosen_src}_conservative_fallback",
-        "confidence": "LOW",
+        "yoy_pct": None,
+        "source": "no_data",
+        "confidence": "NONE",
         "exclude_from_recommendations": True,
     }
 
