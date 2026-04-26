@@ -812,14 +812,28 @@ def fetch_recent_results(symbol: str) -> dict[str, Any]:
         return {}
 
 
+def _parse_bse_table_row(row: dict) -> dict:
+    """Extract revenue/PAT from a BSE filing table row, handling varied field names."""
+    revenue = _clean_number(str(
+        row.get("Revenue") or row.get("SALES") or row.get("NetSales")
+        or row.get("NET_SALES") or row.get("Income") or ""
+    ))
+    pat = _clean_number(str(
+        row.get("PAT") or row.get("NET_PROFIT") or row.get("NetProfit")
+        or row.get("Profit") or ""
+    ))
+    period = row.get("PERIOD_END") or row.get("TO_DATE") or row.get("QuarterEnded") or row.get("PeriodEnd")
+    return {"revenue": revenue, "pat": pat, "period_end": period, "source": "BSE_FILING"}
+
+
 def fetch_bse_quarterly(symbol: str) -> dict | None:
     """
     BSE corporate filings — most authoritative source when accessible.
     Returns latest and prior-year quarterly revenue/PAT, or None if unavailable.
 
-    NOTE: api.bseindia.com is session-gated. From cloud servers it typically
-    returns empty tables. This works reliably only when run locally where a
-    browser session has set BSE cookies. Graceful None return on any failure.
+    Tries two endpoints in order:
+      1. AnnSubCategoryGetData (quarterly results, less session-gated)
+      2. AnnGetData (legacy, session-gated on cloud)
     """
     from stock_platform.utils.bse_codes import SYMBOL_TO_BSE_CODE
 
@@ -827,41 +841,41 @@ def fetch_bse_quarterly(symbol: str) -> dict | None:
     if not bse_code:
         return None
 
-    url = (
-        f"https://api.bseindia.com/BseIndiaAPI/api/AnnGetData/w"
-        f"?strCat=Result&strScrip={bse_code}&strType=C"
-    )
+    endpoints = [
+        (
+            f"https://api.bseindia.com/BseIndiaAPI/api/AnnSubCategoryGetData/w"
+            f"?strCat=Result&strScrip={bse_code}&strType=C&strPType=Quarterly"
+        ),
+        (
+            f"https://api.bseindia.com/BseIndiaAPI/api/AnnGetData/w"
+            f"?strCat=Result&strScrip={bse_code}&strType=C"
+        ),
+    ]
     headers = {
         "Accept": "application/json",
-        "User-Agent": "Mozilla/5.0 (compatible; portfolio-app/1.0)",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         "Referer": "https://www.bseindia.com/",
+        "Origin": "https://www.bseindia.com",
     }
-    try:
-        response = requests.get(url, headers=headers, timeout=8)
-        if response.status_code != 200:
-            return None
-        data = response.json()
-        table = data.get("Table") or []
-        if not table:
-            return None
-        latest = table[0]
-        prior = table[4] if len(table) > 4 else None
-        return {
-            "latest": {
-                "revenue": _clean_number(str(latest.get("Revenue") or latest.get("SALES") or "")),
-                "pat": _clean_number(str(latest.get("PAT") or latest.get("NET_PROFIT") or "")),
-                "period_end": latest.get("PERIOD_END") or latest.get("TO_DATE"),
-                "source": "BSE_FILING",
-            },
-            "prior_year": {
-                "revenue": _clean_number(str(prior.get("Revenue") or prior.get("SALES") or "")) if prior else None,
-                "pat": _clean_number(str(prior.get("PAT") or prior.get("NET_PROFIT") or "")) if prior else None,
-                "period_end": prior.get("PERIOD_END") or prior.get("TO_DATE") if prior else None,
-            } if prior else None,
-        }
-    except Exception as exc:
-        _log.warning("BSE fetch failed %s: %s", symbol, exc)
-        return None
+    for url in endpoints:
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            if response.status_code != 200:
+                continue
+            data = response.json()
+            table = data.get("Table") or data.get("Table1") or []
+            if not table:
+                continue
+            latest = _parse_bse_table_row(table[0])
+            prior = _parse_bse_table_row(table[4]) if len(table) > 4 else None
+            if latest.get("revenue") is None:
+                continue
+            _log.info("BSE filing fetched for %s via %s", symbol, url.split("?")[0].split("/")[-1])
+            return {"latest": latest, "prior_year": prior}
+        except Exception as exc:
+            _log.debug("BSE endpoint failed %s (%s): %s", symbol, url.split("?")[0].split("/")[-1], exc)
+    _log.warning("BSE fetch unavailable for %s — both endpoints returned no data", symbol)
+    return None
 
 
 def _compute_yoy_from_bse(bse_data: dict) -> float | None:
