@@ -936,6 +936,60 @@ class TestExclusionGate(unittest.TestCase):
                 self.assertNotIn(symbol, rec_symbols, f"{symbol} leaked — same bug as 2026-04-26")
 
 
+class TestExchangeFetcher:
+    """Regression tests for the BSE→NSE migration on 2026-04-26 after BSE API
+    silently started returning empty Table responses."""
+
+    def test_nse_fetcher_returns_quarterly_data(self) -> None:
+        """NSE fetcher must return populated dict for a known-good symbol (BEL).
+        Production smoke check — fails loudly if NSE changes their API."""
+        from stock_platform.utils.screener_fetcher import fetch_nse_quarterly
+        import pytest
+        result = fetch_nse_quarterly("BEL")
+        if result is None:
+            pytest.skip("NSE unavailable — re-run later")
+        assert "latest" in result
+        assert "prior_year" in result
+        assert result["latest"].get("revenue", 0) > 0, (
+            "Revenue is zero or missing — NSE parser regression"
+        )
+
+    def test_nse_yoy_resolves_bel_disagreement(self) -> None:
+        """Real-world case from 2026-04-26 — yfinance said +24%, Screener said −0.2%,
+        both wrong.  NSE should give ~38.6%."""
+        from stock_platform.utils.screener_fetcher import fetch_nse_quarterly, compute_yoy_from_quarterly
+        import pytest
+        data = fetch_nse_quarterly("BEL")
+        if data is None:
+            pytest.skip("NSE unavailable — re-run later")
+        yoy = compute_yoy_from_quarterly(data)
+        assert yoy is not None
+        assert 30 < yoy < 50, (
+            f"BEL Q3 FY25 YoY expected ~38.6%, got {yoy:.1f}% — NSE parser may have regressed"
+        )
+
+    def test_resolve_yoy_uses_nse_when_available(self) -> None:
+        """When NSE returns a definitive answer, resolve_yoy_disagreement must use NSE and
+        NOT exclude the stock, even if yfinance and Screener disagree by >15pp."""
+        from unittest.mock import patch
+        from stock_platform.utils.screener_fetcher import resolve_yoy_disagreement
+        with patch("stock_platform.utils.screener_fetcher.fetch_nse_quarterly") as mock_nse:
+            mock_nse.return_value = {
+                "latest":     {"revenue": 13860},
+                "prior_year": {"revenue": 10000},
+            }
+            result = resolve_yoy_disagreement(
+                symbol="BEL",
+                yfinance_yoy=24.0,
+                screener_consol_yoy=-0.2,
+                standalone_yoy=None,
+            )
+        assert result["exclude_from_recommendations"] is False
+        assert result["source"] == "NSE_FILING"
+        assert result["yoy_confidence"] == "HIGH"
+        assert 35 < result["yoy_pct"] < 42
+
+
 class EntryCalculatorTests(unittest.TestCase):
     def test_buy_signal_calculates_entry_stop_and_tranches(self) -> None:
         entry = calculate_entry_levels(

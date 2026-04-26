@@ -690,9 +690,12 @@ def run_buy_workflow(
         else:
             status.write("Recommendation cards are ready to review.")
             status.update(label="Recommendations ready", state="complete", expanded=False)
-    # Persist skipped stocks and pipeline stats so the display section can show them.
-    st.session_state["buy_skipped_stocks"] = (result or {}).get("skipped_stocks", [])
+    # Persist skipped stocks and pipeline stats — both session state (fast path)
+    # and DB (survives page reloads where session state is cleared).
+    _skipped = (result or {}).get("skipped_stocks", [])
+    st.session_state["buy_skipped_stocks"] = _skipped
     st.session_state["buy_run_summary"] = run_summary
+    engine.repo.set_state("buy_last_run_meta", {"skipped_stocks": _skipped, "run_summary": run_summary})
     engine.repo.set_state("buy_comparison_result", {})
     return {"run_summary": run_summary} if run_summary.get("blocked_reason") else None
 
@@ -2644,13 +2647,15 @@ with tabs[2]:
                     )
                     continue
                 render_recommendation_card(item)
-            _run_sum = st.session_state.get("buy_run_summary", {})
+            # Reload run meta from DB when session state was cleared (page reload).
+            _last_meta = engine.repo.get_state("buy_last_run_meta", {})
+            _run_sum = st.session_state.get("buy_run_summary") or _last_meta.get("run_summary", {})
+            _skipped_stocks = st.session_state.get("buy_skipped_stocks") or _last_meta.get("skipped_stocks", [])
             _rec_count = _run_sum.get("recommendation_count", len(recommendations))
             _req_top_n = _run_sum.get("requested_top_n", 0)
             if _req_top_n and _rec_count < _req_top_n:
-                _skipped = st.session_state.get("buy_skipped_stocks", [])
-                _data_excl = sum(1 for s in _skipped if s.get("status") == "DATA_QUALITY_LOW")
-                _rr_excl = sum(1 for s in _skipped if s.get("status") in ("LOW_RISK_REWARD", "NEGATIVE_NET_RETURN"))
+                _data_excl = sum(1 for s in _skipped_stocks if s.get("status") == "DATA_QUALITY_LOW")
+                _rr_excl = sum(1 for s in _skipped_stocks if s.get("status") in ("LOW_RISK_REWARD", "NEGATIVE_NET_RETURN"))
                 _pipeline = _run_sum.get("pipeline_stats", {})
                 _universe = _pipeline.get("universe_size", "?")
                 _final_pool = _pipeline.get("shortlist_count", "?")
@@ -2661,13 +2666,14 @@ with tabs[2]:
                     f"- Excluded by R/R filter: {_rr_excl}\n"
                     f"- Final pool (shortlist): {_final_pool}\n\n"
                     "To get more candidates: switch to Aggressive risk profile (R/R 1.5×) or "
-                    "wait for data refresh (BSE ground truth source not yet wired)."
+                    "wait for data refresh (NSE filing tiebreaker may be slow on first run)."
                 )
         else:
             render_empty_panel("Run the buy workflow to populate the recommendation feed.")
+        _last_meta = engine.repo.get_state("buy_last_run_meta", {})
         _render_skipped_stocks(
-            st.session_state.get("buy_skipped_stocks", []),
-            run_summary=st.session_state.get("buy_run_summary"),
+            st.session_state.get("buy_skipped_stocks") or _last_meta.get("skipped_stocks", []),
+            run_summary=st.session_state.get("buy_run_summary") or _last_meta.get("run_summary"),
         )
 
 with tabs[3]:
