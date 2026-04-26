@@ -809,6 +809,133 @@ class BuyQualityScoreTests(unittest.TestCase):
         self.assertEqual(payload["entry_levels"]["tranche_1_pct"], 28)
 
 
+class TestExclusionGate(unittest.TestCase):
+    """
+    Regression tests for the exclusion-leak bug (2026-04-26).
+    exclude_from_recommendations is set inside screener_fetcher but was silently
+    dropped at get_financials() in live.py, meaning the gate in
+    finalize_recommendation() never fired.  The fix (adding the three fields to the
+    get_financials() result dict) is what makes these tests pass.  If they regress,
+    the bug has returned.
+    """
+
+    def _base_item(self, symbol: str) -> dict:
+        return {
+            "symbol": symbol,
+            "company_name": "Test Co",
+            "sector": "Defence",
+            "quality_score": 0.8,
+            "gap_reason": "Gap fill",
+            "overlap_pct": 0.0,
+            "fund_attribution": [],
+            "initial_tranche_pct": 8.0,
+            "target_pct": 20.0,
+            "initial_amount_inr": 8000.0,
+            "target_amount_inr": 20000.0,
+            "allocation_pct": 8.0,
+            "allocation_amount": 8000.0,
+            "tranches": 3,
+            "differentiation_score": 0.8,
+            "entry_signal": "ACCUMULATE",
+            "news": {"headline": "Update"},
+            "price_context": {"price": 100.0, "analyst_target": 140.0},
+            "live_financials": {"currentPrice": 100.0},
+        }
+
+    def _run_finalize(self, agent, items):
+        return agent.finalize_recommendation({
+            "request": {"top_n": len(items)},
+            "confidence": {"band": "GREEN"},
+            "portfolio_context": {"normalized_exposure": []},
+            "allocations": items,
+        })
+
+    @patch("stock_platform.agents.buy_agents.fetch_analyst_consensus_target", return_value=140.0)
+    @patch("stock_platform.agents.buy_agents.governance_risk_blocks", return_value=(False, ""))
+    def test_excluded_stock_absent_from_recommendations(self, _gov, _target) -> None:
+        item = self._base_item("TESTCO")
+        item["live_financials"]["exclude_from_recommendations"] = True
+        item["live_financials"]["yoy_source"] = "disagree_excluded"
+        item["live_financials"]["yoy_confidence"] = "LOW"
+        agent = BuyAgents(StubRepo(), StubProvider(), AppConfig(**LOCAL_DB_CONFIG), StaticLLM())
+
+        result = self._run_finalize(agent, [item])
+
+        rec_symbols = [r["symbol"] for r in result["recommendations"]]
+        self.assertNotIn("TESTCO", rec_symbols, "Excluded stock leaked into recommendations")
+
+    @patch("stock_platform.agents.buy_agents.fetch_analyst_consensus_target", return_value=140.0)
+    @patch("stock_platform.agents.buy_agents.governance_risk_blocks", return_value=(False, ""))
+    def test_excluded_stock_in_skipped_with_status_data_quality_low(self, _gov, _target) -> None:
+        item = self._base_item("TESTCO")
+        item["live_financials"]["exclude_from_recommendations"] = True
+        item["live_financials"]["yoy_source"] = "disagree_excluded"
+        agent = BuyAgents(StubRepo(), StubProvider(), AppConfig(**LOCAL_DB_CONFIG), StaticLLM())
+
+        result = self._run_finalize(agent, [item])
+
+        skipped = result.get("skipped_stocks", [])
+        entry = next((s for s in skipped if s["symbol"] == "TESTCO"), None)
+        self.assertIsNotNone(entry, "Excluded stock should appear in skipped_stocks")
+        self.assertEqual(entry["status"], "DATA_QUALITY_LOW")
+
+    @patch("stock_platform.agents.buy_agents.fetch_analyst_consensus_target", return_value=140.0)
+    @patch("stock_platform.agents.buy_agents.governance_risk_blocks", return_value=(False, ""))
+    def test_yoy_fields_propagate_into_fin_data(self, _gov, _target) -> None:
+        """yoy_source + yoy_confidence must reach fin_data so UI confidence rendering works."""
+        item = self._base_item("BEL")
+        item["live_financials"].update({
+            "exclude_from_recommendations": False,
+            "yoy_source": "BSE_FILING",
+            "yoy_confidence": "HIGH",
+            "week52_low": 80.0,
+        })
+        agent = BuyAgents(StubRepo(), StubProvider(), AppConfig(**LOCAL_DB_CONFIG), StaticLLM())
+
+        result = self._run_finalize(agent, [item])
+
+        self.assertEqual(len(result["recommendations"]), 1)
+        fin_data = result["recommendations"][0]["payload"]["fin_data"]
+        self.assertEqual(fin_data.get("yoy_source"), "BSE_FILING")
+        self.assertEqual(fin_data.get("yoy_confidence"), "HIGH")
+
+    @patch("stock_platform.agents.buy_agents.fetch_analyst_consensus_target", return_value=140.0)
+    @patch("stock_platform.agents.buy_agents.governance_risk_blocks", return_value=(False, ""))
+    def test_low_confidence_passes_but_carries_marker(self, _gov, _target) -> None:
+        """exclude_from_recommendations=False with LOW confidence passes through so the UI can warn."""
+        item = self._base_item("BEL")
+        item["live_financials"].update({
+            "exclude_from_recommendations": False,
+            "yoy_confidence": "LOW",
+            "week52_low": 80.0,
+        })
+        agent = BuyAgents(StubRepo(), StubProvider(), AppConfig(**LOCAL_DB_CONFIG), StaticLLM())
+
+        result = self._run_finalize(agent, [item])
+
+        recs = result["recommendations"]
+        bel = next((r for r in recs if r["symbol"] == "BEL"), None)
+        self.assertIsNotNone(bel, "Stock with exclude=False should pass even with LOW confidence")
+        self.assertEqual(bel["payload"]["fin_data"].get("yoy_confidence"), "LOW")
+
+    @patch("stock_platform.agents.buy_agents.fetch_analyst_consensus_target", return_value=140.0)
+    @patch("stock_platform.agents.buy_agents.governance_risk_blocks", return_value=(False, ""))
+    def test_real_world_leak_symbols(self, _gov, _target) -> None:
+        """Direct regression for the three stocks that leaked on 2026-04-26."""
+        agent = BuyAgents(StubRepo(), StubProvider(), AppConfig(**LOCAL_DB_CONFIG), StaticLLM())
+        for symbol in ("HAL", "ASHOKLEY", "ADANIENSOL"):
+            with self.subTest(symbol=symbol):
+                item = self._base_item(symbol)
+                item["live_financials"]["exclude_from_recommendations"] = True
+                item["live_financials"]["yoy_source"] = "disagree_excluded"
+                item["live_financials"]["yoy_confidence"] = "LOW"
+
+                result = self._run_finalize(agent, [item])
+
+                rec_symbols = [r["symbol"] for r in result["recommendations"]]
+                self.assertNotIn(symbol, rec_symbols, f"{symbol} leaked — same bug as 2026-04-26")
+
+
 class EntryCalculatorTests(unittest.TestCase):
     def test_buy_signal_calculates_entry_stop_and_tranches(self) -> None:
         entry = calculate_entry_levels(

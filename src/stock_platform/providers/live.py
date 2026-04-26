@@ -831,6 +831,9 @@ class LiveMarketDataProvider:
             "dma_50": screener.get("dma_50"),
             "recent_results": screener.get("recent_results") or {},
             "negative_pat_quarters": None,
+            "exclude_from_recommendations": screener.get("exclude_from_recommendations", False),
+            "yoy_source": screener.get("yoy_source"),
+            "yoy_confidence": screener.get("yoy_confidence"),
         }
 
         # Populate last_result_date via NSE official → Tickertape → yfinance chain.
