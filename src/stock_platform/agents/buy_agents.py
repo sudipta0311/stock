@@ -1194,12 +1194,21 @@ class BuyAgents:
             fin_data = dict(item.get("live_financials") or {})
             fin_data.update({key: value for key, value in (item.get("financials") or {}).items() if value is not None})
 
-            if fin_data.get("exclude_from_recommendations"):
+            # Guard against stale cached data that pre-dates the exclusion flag:
+            # check both the explicit flag AND the yoy_source field.  Stale cache
+            # entries lacking the flag but carrying a bad yoy_source are still caught.
+            _yoy_src = fin_data.get("yoy_source", "")
+            _data_excluded = (
+                bool(fin_data.get("exclude_from_recommendations"))
+                or _yoy_src in ("disagree_excluded", "standalone_only", "no_data")
+            )
+            if _data_excluded:
                 _log.warning(
-                    "DATA_QUALITY EXCLUDED %s: yoy_confidence=%s yoy_source=%s",
+                    "DATA_QUALITY EXCLUDED %s: flag=%s yoy_source=%s yoy_confidence=%s",
                     item["symbol"],
-                    fin_data.get("yoy_confidence", "LOW"),
-                    fin_data.get("yoy_source", "unknown"),
+                    fin_data.get("exclude_from_recommendations"),
+                    _yoy_src or "unknown",
+                    fin_data.get("yoy_confidence", "unknown"),
                 )
                 gov_skipped.append({
                     "symbol": item["symbol"],
@@ -1207,8 +1216,8 @@ class BuyAgents:
                     "resolved_symbol": item["symbol"],
                     "reason": (
                         f"Unresolvable YoY revenue disagreement across all sources "
-                        f"(confidence={fin_data.get('yoy_confidence','LOW')}, "
-                        f"source={fin_data.get('yoy_source','unknown')}). "
+                        f"(confidence={fin_data.get('yoy_confidence', 'LOW')}, "
+                        f"source={_yoy_src or 'unknown'}). "
                         "Stock excluded to avoid buy ideas on questionable numbers."
                     ),
                 })
@@ -1493,6 +1502,8 @@ class BuyAgents:
                     if prep.get("entry_withheld")
                     else prep["entry_levels"]
                 ),
+                "entry_plan_withheld": bool(prep.get("entry_withheld")),
+                "entry_withheld_note": prep.get("entry_withheld_note"),
                 # Legacy key kept for backward compatibility with stored recommendations.
                 "allocation_pct": prep["allocation_pct"],
                 "allocation_amount": prep["allocation_amount"],
@@ -1551,6 +1562,22 @@ class BuyAgents:
                 for rec in recommendations
             ]
             _track_quant_llm_disagreement(_disagreement_input)
+
+        # Leak detection: log an error if any excluded stock reached this point.
+        for _r in recommendations:
+            _r_fin = (_r.payload or {}).get("fin_data", {})
+            _r_yoy_src = _r_fin.get("yoy_source", "")
+            if (
+                _r_fin.get("exclude_from_recommendations")
+                or _r_yoy_src in ("disagree_excluded", "standalone_only", "no_data")
+            ):
+                _log.error(
+                    "EXCLUSION LEAK: %s reached recommendations "
+                    "(flag=%s yoy_source=%s) — pipeline bug",
+                    _r.symbol,
+                    _r_fin.get("exclude_from_recommendations"),
+                    _r_yoy_src,
+                )
 
         self.repo.save_recommendations(run_id, recommendations)
         # Merge validation-gate skips (ValidationResult objects) + governance-filter skips (dicts).

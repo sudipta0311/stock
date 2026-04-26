@@ -1527,8 +1527,17 @@ def render_recommendation_card(
             )
 
         # ── Trade mechanics: conditional on actionability ─────────────────────
-        if entry and entry.get("withheld"):
-            st.warning(entry.get("withheld_note") or "⚠️ Entry plan withheld — insufficient evidence quality.")
+        # Check top-level payload flag first (set by pipeline for WEAK evidence /
+        # data divergence), then fall through to entry_levels.withheld for legacy
+        # stored recommendations.
+        _withheld = payload.get("entry_plan_withheld") or (entry and entry.get("withheld"))
+        if _withheld:
+            _withheld_note = (
+                payload.get("entry_withheld_note")
+                or (entry or {}).get("withheld_note")
+                or "⚠️ Entry plan withheld — insufficient evidence quality."
+            )
+            st.warning(_withheld_note)
             entry = None
         if show_trade_plan and entry:
             if is_degraded:
