@@ -2363,12 +2363,26 @@ with tabs[2]:
         _dii  = _flow.get("dii_net_5d_cr") or 0
         _src  = _flow.get("source", "")
         _asof = _flow.get("as_of", "")
+        _cached_at = _flow.get("cached_at", "")
         _fii_str = f"+\u20b9{abs(_fii):,.0f}Cr" if _fii >= 0 else f"-\u20b9{abs(_fii):,.0f}Cr"
         _dii_str = f"+\u20b9{abs(_dii):,.0f}Cr" if _dii >= 0 else f"-\u20b9{abs(_dii):,.0f}Cr"
+        # Show when data was last pulled from NSE so staleness is visible
+        if _src == "cache" and _cached_at:
+            try:
+                import datetime as _dt
+                _ca = _dt.datetime.fromisoformat(_cached_at)
+                _age_h = (_dt.datetime.now(_dt.timezone.utc) - _ca).total_seconds() / 3600
+                _freshness = f"cached {_age_h:.0f}h ago"
+            except Exception:
+                _freshness = "cache"
+        elif _src == "nse_api":
+            _freshness = "live"
+        else:
+            _freshness = _src
         _flow_msg = (
             f"Market Flow ({_asof}):  "
             f"FII {_fii_str}  |  DII {_dii_str}  |  "
-            f"Signal: {_msig}  |  via {_src}"
+            f"Signal: {_msig}  |  {_freshness}"
         )
         _badge_fn = {
             "RISK_ON":  st.success,

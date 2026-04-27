@@ -60,7 +60,9 @@ def _load_cache(conn: Any, key: str) -> dict[str, Any] | None:
         age_hours = (datetime.now(timezone.utc) - fetched_at).total_seconds() / 3600
         if age_hours > _CACHE_TTL_HOURS:
             return None
-        return json.loads(row["payload"])
+        result = json.loads(row["payload"])
+        result["cached_at"] = fetched_at.isoformat()
+        return result
     except Exception:
         return None
 
