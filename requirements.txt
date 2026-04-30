@@ -1,5 +1,5 @@
 langgraph>=0.2.67
-streamlit>=1.42.0
+streamlit>=1.42.0,<1.43.0
 pandas>=2.2.3
 pdfplumber>=0.11.4
 anthropic>=0.40.0
