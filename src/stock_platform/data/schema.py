@@ -150,6 +150,41 @@ _DDL_SQLITE = [
         fetched_at TEXT NOT NULL
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS recommendation_history (
+        id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id                TEXT    NOT NULL,
+        run_date              TEXT    NOT NULL,
+        symbol                TEXT    NOT NULL,
+        sector                TEXT,
+        risk_profile          TEXT,
+        verdict               TEXT,
+        confidence            TEXT,
+        quant_score           REAL,
+        rr_ratio              REAL,
+        entry_zone_low        REAL,
+        entry_zone_high       REAL,
+        stop_loss             REAL,
+        target_1              REAL,
+        target_2              REAL,
+        cmp_at_recommendation REAL,
+        pe_at_recommendation  REAL,
+        fii_flow_cr           REAL,
+        market_signal         TEXT,
+        rationale_summary     TEXT,
+        llm_provider          TEXT,
+        llm_models            TEXT,
+        llm_agreement         TEXT,
+        user_acted            INTEGER DEFAULT 0,
+        user_action_date      TEXT,
+        user_entry_price      REAL,
+        user_notes            TEXT,
+        UNIQUE(run_id, symbol)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_history_symbol   ON recommendation_history(symbol)",
+    "CREATE INDEX IF NOT EXISTS idx_history_date     ON recommendation_history(run_date)",
+    "CREATE INDEX IF NOT EXISTS idx_history_provider ON recommendation_history(llm_provider)",
 ]
 
 _DDL_PG = [
@@ -293,6 +328,41 @@ _DDL_PG = [
         fetched_at TEXT NOT NULL
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS recommendation_history (
+        id                    BIGSERIAL PRIMARY KEY,
+        run_id                TEXT             NOT NULL,
+        run_date              TEXT             NOT NULL,
+        symbol                TEXT             NOT NULL,
+        sector                TEXT,
+        risk_profile          TEXT,
+        verdict               TEXT,
+        confidence            TEXT,
+        quant_score           DOUBLE PRECISION,
+        rr_ratio              DOUBLE PRECISION,
+        entry_zone_low        DOUBLE PRECISION,
+        entry_zone_high       DOUBLE PRECISION,
+        stop_loss             DOUBLE PRECISION,
+        target_1              DOUBLE PRECISION,
+        target_2              DOUBLE PRECISION,
+        cmp_at_recommendation DOUBLE PRECISION,
+        pe_at_recommendation  DOUBLE PRECISION,
+        fii_flow_cr           DOUBLE PRECISION,
+        market_signal         TEXT,
+        rationale_summary     TEXT,
+        llm_provider          TEXT,
+        llm_models            TEXT,
+        llm_agreement         TEXT,
+        user_acted            BOOLEAN          DEFAULT FALSE,
+        user_action_date      TEXT,
+        user_entry_price      DOUBLE PRECISION,
+        user_notes            TEXT,
+        UNIQUE(run_id, symbol)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_history_symbol   ON recommendation_history(symbol)",
+    "CREATE INDEX IF NOT EXISTS idx_history_date     ON recommendation_history(run_date)",
+    "CREATE INDEX IF NOT EXISTS idx_history_provider ON recommendation_history(llm_provider)",
 ]
 
 

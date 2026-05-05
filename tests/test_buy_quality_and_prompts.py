@@ -140,6 +140,9 @@ class StubRepo:
     def save_recommendations(self, run_id: str, rows: list[object]) -> None:
         self.saved_recommendations = rows
 
+    def persist_recommendation_history(self, **kwargs) -> None:  # noqa: ARG002
+        pass
+
 
 class StubProvider:
     def __init__(self) -> None:
@@ -407,6 +410,7 @@ class BuyQualityScoreTests(unittest.TestCase):
 
         result = agent.assess_timing(
             {
+                "request": {},
                 "differentiated_shortlist": [{"symbol": "TMCV", "sector": "Defence", "quality_score": 0.8}],
             }
         )
@@ -436,6 +440,7 @@ class BuyQualityScoreTests(unittest.TestCase):
 
         result = agent.assess_timing(
             {
+                "request": {},
                 "differentiated_shortlist": [
                     {
                         "symbol": "BEL",
@@ -444,6 +449,8 @@ class BuyQualityScoreTests(unittest.TestCase):
                         "financials": {
                             "recent_results": {"revenue_yoy_growth_pct": 42.0, "momentum": "STRONG"},
                             "week52_low": 80.0,
+                            "last_result_date": "2026-04-01",
+                            "result_days_stale": 30,
                         },
                     }
                 ],
@@ -1280,6 +1287,153 @@ class BuyPromptTests(unittest.TestCase):
         request = FakeOpenAIChat.last_request or {}
         self.assertEqual(request.get("model"), self.config.openai_fast_model)
         self.assertEqual(request.get("timeout"), self.config.openai_timeout_seconds)
+
+
+class TestRecommendationHistory(unittest.TestCase):
+    """Regression tests for the history persistence layer."""
+
+    def _make_repo(self):
+        import tempfile
+        from stock_platform.data.repository import PlatformRepository
+        tmp = tempfile.mkdtemp()
+        repo = PlatformRepository(Path(tmp) / "test.db")
+        repo.initialize()
+        return repo
+
+    def _make_rec(self, symbol: str = "TESTCO", verdict: str = "ACCUMULATE GRADUALLY"):
+        from stock_platform.models import RecommendationRecord
+        return RecommendationRecord(
+            symbol=symbol,
+            company_name="Test Co Ltd",
+            sector="TestSector",
+            action=verdict,
+            score=0.75,
+            confidence_band="GREEN",
+            rationale="Test rationale",
+            payload={
+                "current_price": 100.0,
+                "entry_levels": {
+                    "entry_zone_low": 95.0,
+                    "entry_zone_high": 100.0,
+                    "stop_loss": 88.0,
+                    "risk_reward": 2.0,
+                    "analyst_target": 130.0,
+                },
+                "fin_data": {"pe_ratio": 20.0},
+            },
+        )
+
+    def test_history_persisted_on_run(self):
+        repo = self._make_repo()
+        rec = self._make_rec()
+        repo.persist_recommendation_history(
+            run_id="buy-test001",
+            recommendations=[rec],
+            request={"risk_profile": "Aggressive"},
+            macro_flow={"flow_signal": "RISK_ON", "fii_net_5d_cr": 500},
+            llm_provider="anthropic",
+            llm_models_json='{"anthropic_fast": "claude-haiku-4-5-20251001"}',
+        )
+        rows = repo.fetch_recommendation_history_rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["verdict"], "ACCUMULATE GRADUALLY")
+        self.assertEqual(rows[0]["llm_provider"], "anthropic")
+        self.assertEqual(rows[0]["llm_agreement"], "SINGLE_PROVIDER")
+        self.assertAlmostEqual(rows[0]["fii_flow_cr"], 500.0)
+        self.assertEqual(rows[0]["market_signal"], "RISK_ON")
+
+    def test_duplicate_run_id_symbol_ignored(self):
+        repo = self._make_repo()
+        rec = self._make_rec()
+        for _ in range(2):
+            repo.persist_recommendation_history(
+                run_id="buy-dup001",
+                recommendations=[rec],
+                request={"risk_profile": "Balanced"},
+                macro_flow={},
+                llm_provider="anthropic",
+                llm_models_json="{}",
+            )
+        rows = repo.fetch_recommendation_history_rows()
+        self.assertEqual(len(rows), 1)
+
+    def test_lifecycle_aggregates_across_runs(self):
+        repo = self._make_repo()
+        for i in range(3):
+            repo.persist_recommendation_history(
+                run_id=f"buy-run{i:03d}",
+                recommendations=[self._make_rec()],
+                request={"risk_profile": "Balanced"},
+                macro_flow={},
+                llm_provider="anthropic",
+                llm_models_json="{}",
+            )
+        rows = repo.fetch_recommendation_history_rows()
+        self.assertEqual(len(rows), 3)
+        symbols = [r["symbol"] for r in rows]
+        self.assertEqual(symbols.count("TESTCO"), 3)
+
+    def test_provider_filter_works(self):
+        repo = self._make_repo()
+        repo.persist_recommendation_history(
+            run_id="buy-a001",
+            recommendations=[self._make_rec("AAA")],
+            request={},
+            macro_flow={},
+            llm_provider="anthropic",
+            llm_models_json="{}",
+        )
+        repo.persist_recommendation_history(
+            run_id="buy-o001",
+            recommendations=[self._make_rec("OOO")],
+            request={},
+            macro_flow={},
+            llm_provider="openai",
+            llm_models_json="{}",
+        )
+        anthropic_rows = repo.fetch_recommendation_history_rows(provider_filter="anthropic")
+        openai_rows = repo.fetch_recommendation_history_rows(provider_filter="openai")
+        self.assertEqual([r["symbol"] for r in anthropic_rows], ["AAA"])
+        self.assertEqual([r["symbol"] for r in openai_rows], ["OOO"])
+
+    def test_mark_acted_updates_all_rows_for_symbol(self):
+        repo = self._make_repo()
+        for i in range(2):
+            repo.persist_recommendation_history(
+                run_id=f"buy-act{i}",
+                recommendations=[self._make_rec("ACTCO")],
+                request={},
+                macro_flow={},
+                llm_provider="anthropic",
+                llm_models_json="{}",
+            )
+        repo.mark_recommendation_acted("ACTCO", 102.5, "bought on dip", "2026-05-05")
+        rows = repo.fetch_recommendation_history_rows()
+        for r in rows:
+            self.assertTrue(r["user_acted"])
+            self.assertAlmostEqual(r["user_entry_price"], 102.5)
+            self.assertEqual(r["user_notes"], "bought on dip")
+
+    def test_entry_levels_stored_correctly(self):
+        repo = self._make_repo()
+        rec = self._make_rec()
+        repo.persist_recommendation_history(
+            run_id="buy-el001",
+            recommendations=[rec],
+            request={},
+            macro_flow={},
+            llm_provider="anthropic",
+            llm_models_json="{}",
+        )
+        rows = repo.fetch_recommendation_history_rows()
+        r = rows[0]
+        self.assertAlmostEqual(r["entry_zone_low"], 95.0)
+        self.assertAlmostEqual(r["entry_zone_high"], 100.0)
+        self.assertAlmostEqual(r["stop_loss"], 88.0)
+        self.assertAlmostEqual(r["rr_ratio"], 2.0)
+        self.assertAlmostEqual(r["target_1"], 130.0)
+        self.assertAlmostEqual(r["cmp_at_recommendation"], 100.0)
+        self.assertAlmostEqual(r["pe_at_recommendation"], 20.0)
 
 
 if __name__ == "__main__":

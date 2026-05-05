@@ -47,10 +47,11 @@ def test_earnings_blackout_does_not_block_past_date():
 #    (regression: silent-fail returned (past_date, ...) → blackout missed)
 # ===========================================================================
 def test_get_next_earnings_date_fail_closed():
-    with (
-        patch("stock_platform.agents.monitor_agents._fetch_nse_earnings_date", return_value=None),
-        patch("stock_platform.agents.monitor_agents._fetch_screener_earnings_date", return_value=None),
-        patch("stock_platform.agents.monitor_agents._fetch_yfinance_earnings_date", return_value=None),
+    # Patch the source list directly — the list captures function references at
+    # import time, so patching individual function names has no effect.
+    with patch(
+        "stock_platform.agents.monitor_agents._EARNINGS_DATE_SOURCES",
+        [("stub_1", lambda _: None), ("stub_2", lambda _: None), ("stub_3", lambda _: None)],
     ):
         d, source = _get_next_earnings_date("TESTSTOCK")
     assert d is None
