@@ -1807,6 +1807,273 @@ def build_render_checks(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_current_price_cached(symbol: str) -> float | None:
+    try:
+        import yfinance as yf
+        info = yf.Ticker(f"{symbol}.NS").info
+        price = info.get("currentPrice") or info.get("regularMarketPrice")
+        return float(price) if price and float(price) > 0 else None
+    except Exception:
+        return None
+
+
+def render_change_log(repo: Any) -> None:
+    rows = repo.fetch_recommendation_history_rows()
+    if not rows:
+        return
+
+    # Group rows by run_date, keep the two most-recent distinct dates.
+    dates_seen: list[str] = []
+    by_date: dict[str, dict[str, dict]] = {}
+    for r in rows:
+        d = r.get("run_date", "")
+        if d not in by_date:
+            by_date[d] = {}
+            dates_seen.append(d)
+        by_date[d][r["symbol"]] = r
+    dates_seen.sort(reverse=True)
+
+    if len(dates_seen) < 2:
+        return
+
+    today_symbols = by_date[dates_seen[0]]
+    yesterday_symbols = by_date[dates_seen[1]]
+
+    new_picks = set(today_symbols) - set(yesterday_symbols)
+    dropped = set(yesterday_symbols) - set(today_symbols)
+    upgrades = [
+        {"symbol": sym, "from": yesterday_symbols[sym]["verdict"], "to": today_symbols[sym]["verdict"]}
+        for sym in set(today_symbols) & set(yesterday_symbols)
+        if today_symbols[sym].get("verdict") != yesterday_symbols[sym].get("verdict")
+    ]
+
+    if not (new_picks or dropped or upgrades):
+        return
+
+    st.markdown("### What changed since yesterday")
+    cols = st.columns(3)
+
+    _provider_badge: dict[str, str] = {
+        "anthropic": "Claude",
+        "openai":    "GPT",
+        "both":      "Both",
+    }
+
+    with cols[0]:
+        if new_picks:
+            st.markdown("**New picks**")
+            for sym in sorted(new_picks):
+                rec = today_symbols[sym]
+                badge = _provider_badge.get(rec.get("llm_provider", ""), "")
+                agr = rec.get("llm_agreement", "")
+                badge_str = f" ({agr})" if agr and agr != "SINGLE_PROVIDER" else ""
+                st.markdown(f"- **{sym}**: {rec.get('verdict', '—')}  {badge}{badge_str}")
+
+    with cols[1]:
+        if upgrades:
+            st.markdown("**Status changes**")
+            for u in upgrades:
+                st.markdown(f"- **{u['symbol']}**: {u['from']} → {u['to']}")
+
+    with cols[2]:
+        if dropped:
+            st.markdown("**Dropped**")
+            for sym in sorted(dropped):
+                st.markdown(f"- {sym}")
+
+    # Market signal change detection.
+    if today_symbols and yesterday_symbols:
+        t_sig = next(iter(today_symbols.values())).get("market_signal")
+        y_sig = next(iter(yesterday_symbols.values())).get("market_signal")
+        if t_sig and y_sig and t_sig != y_sig:
+            st.warning(f"Market signal changed: {y_sig} → {t_sig}")
+
+
+def render_lifecycle_view(repo: Any) -> None:
+    with st.expander("Recommendation history & performance", expanded=False):
+        col_pf, col_af = st.columns(2)
+        with col_pf:
+            provider_filter = st.selectbox(
+                "Filter by LLM provider",
+                ["All", "anthropic", "openai", "both"],
+                key="hist_provider_filter",
+            )
+        with col_af:
+            agreement_filter = st.selectbox(
+                "Filter by agreement",
+                ["All", "AGREE", "PARTIAL_AGREE", "DISAGREE", "SINGLE_PROVIDER"],
+                key="hist_agreement_filter",
+            )
+
+        rows = repo.fetch_recommendation_history_rows(
+            provider_filter=provider_filter if provider_filter != "All" else None,
+            agreement_filter=agreement_filter if agreement_filter != "All" else None,
+        )
+        if not rows:
+            st.info("No recommendation history yet.")
+            return
+
+        # Aggregate per (symbol, sector) in Python for cross-dialect compatibility.
+        groups: dict[str, dict] = {}
+        for r in rows:
+            sym = r["symbol"]
+            if sym not in groups:
+                groups[sym] = {
+                    "symbol": sym,
+                    "sector": r.get("sector"),
+                    "first_seen": r["run_date"],
+                    "last_seen": r["run_date"],
+                    "times_surfaced": 0,
+                    "max_verdict_score": 0,
+                    "entry_lows": [],
+                    "entry_highs": [],
+                    "first_cmp": r.get("cmp_at_recommendation"),
+                    "providers": set(),
+                    "agreements": set(),
+                    "user_acted": False,
+                    "user_entry_price": None,
+                }
+            g = groups[sym]
+            g["times_surfaced"] += 1
+            g["last_seen"] = max(g["last_seen"], r["run_date"])
+            g["first_seen"] = min(g["first_seen"], r["run_date"])
+            score = {"BUY MORE": 3, "ACCUMULATE GRADUALLY": 2, "WATCHLIST": 1}.get(r.get("verdict", ""), 0)
+            g["max_verdict_score"] = max(g["max_verdict_score"], score)
+            if r.get("entry_zone_low"):
+                g["entry_lows"].append(float(r["entry_zone_low"]))
+            if r.get("entry_zone_high"):
+                g["entry_highs"].append(float(r["entry_zone_high"]))
+            if r.get("llm_provider"):
+                g["providers"].add(r["llm_provider"])
+            if r.get("llm_agreement"):
+                g["agreements"].add(r["llm_agreement"])
+            if r.get("user_acted"):
+                g["user_acted"] = True
+                g["user_entry_price"] = r.get("user_entry_price")
+
+        _verdict_map = {3: "BUY MORE", 2: "ACCUMULATE", 1: "WATCHLIST", 0: "—"}
+        records = []
+        for g in groups.values():
+            records.append({
+                "symbol":            g["symbol"],
+                "sector":            g["sector"],
+                "first_seen":        g["first_seen"],
+                "last_seen":         g["last_seen"],
+                "times_surfaced":    g["times_surfaced"],
+                "max_verdict":       _verdict_map[g["max_verdict_score"]],
+                "max_verdict_score": g["max_verdict_score"],
+                "avg_entry_low":     round(sum(g["entry_lows"]) / len(g["entry_lows"]), 1) if g["entry_lows"] else None,
+                "avg_entry_high":    round(sum(g["entry_highs"]) / len(g["entry_highs"]), 1) if g["entry_highs"] else None,
+                "first_cmp":         g["first_cmp"],
+                "providers_seen":    ", ".join(sorted(g["providers"])),
+                "agreement_states":  ", ".join(sorted(g["agreements"])),
+                "user_acted":        g["user_acted"],
+                "user_entry_price":  g["user_entry_price"],
+            })
+
+        records.sort(key=lambda x: (x["last_seen"] or "", x["times_surfaced"]), reverse=True)
+        df = pd.DataFrame(records)
+
+        # Fetch current prices (cached 1h, best-effort).
+        df["current_price"] = df["symbol"].apply(_fetch_current_price_cached)
+        df["pct_change_since_first"] = df.apply(
+            lambda row: (
+                round((row["current_price"] - row["first_cmp"]) / row["first_cmp"] * 100, 1)
+                if row["current_price"] and row["first_cmp"] and float(row["first_cmp"]) > 0
+                else None
+            ),
+            axis=1,
+        )
+
+        # Top-line metrics.
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Unique stocks tracked", len(df))
+        m2.metric("Acted on", int(df["user_acted"].sum()))
+        valid_changes = df["pct_change_since_first"].dropna()
+        if len(valid_changes) > 0:
+            m3.metric("Avg move since first surfaced", f"{valid_changes.mean():.1f}%")
+        upgraded = df[df["max_verdict_score"] >= 2]["pct_change_since_first"].dropna()
+        if len(upgraded) > 0:
+            m4.metric("ACCUMULATE-or-better avg move", f"{upgraded.mean():.1f}%")
+
+        display_cols = [
+            "symbol", "sector", "max_verdict", "first_seen", "last_seen",
+            "times_surfaced", "first_cmp", "current_price",
+            "pct_change_since_first", "providers_seen", "agreement_states", "user_acted",
+        ]
+        st.dataframe(df[display_cols], use_container_width=True, hide_index=True)
+
+        # Provider performance.
+        st.markdown("### Provider performance")
+        prov_perf: dict[str, dict] = {}
+        for r in rows:
+            p = r.get("llm_provider") or "unknown"
+            if p not in prov_perf:
+                prov_perf[p] = {"unique_symbols": set(), "actionable": 0, "total": 0}
+            prov_perf[p]["unique_symbols"].add(r["symbol"])
+            prov_perf[p]["total"] += 1
+            if r.get("verdict") in ("ACCUMULATE GRADUALLY", "BUY MORE"):
+                prov_perf[p]["actionable"] += 1
+        perf_rows = [
+            {
+                "llm_provider": p,
+                "unique_picks": len(v["unique_symbols"]),
+                "total_recommendations": v["total"],
+                "actionable_rate_pct": round(v["actionable"] / v["total"] * 100, 1) if v["total"] else 0,
+            }
+            for p, v in prov_perf.items()
+        ]
+        if perf_rows:
+            st.dataframe(pd.DataFrame(perf_rows), use_container_width=True, hide_index=True)
+            st.caption(
+                "actionable_rate_pct = % of picks rated ACCUMULATE or stronger. "
+                "Track over 30+ days before drawing conclusions."
+            )
+
+        # Agreement-stratified performance (both-provider runs only).
+        both_rows = [r for r in rows if r.get("llm_provider") == "both"]
+        if both_rows:
+            st.markdown("**When both providers ran:**")
+            agr_perf: dict[str, dict] = {}
+            for r in both_rows:
+                a = r.get("llm_agreement") or "unknown"
+                if a not in agr_perf:
+                    agr_perf[a] = {"unique_symbols": set(), "actionable": 0, "total": 0}
+                agr_perf[a]["unique_symbols"].add(r["symbol"])
+                agr_perf[a]["total"] += 1
+                if r.get("verdict") in ("ACCUMULATE GRADUALLY", "BUY MORE"):
+                    agr_perf[a]["actionable"] += 1
+            agr_rows = [
+                {
+                    "llm_agreement": a,
+                    "unique_picks": len(v["unique_symbols"]),
+                    "actionable_rate_pct": round(v["actionable"] / v["total"] * 100, 1) if v["total"] else 0,
+                }
+                for a, v in agr_perf.items()
+            ]
+            st.dataframe(pd.DataFrame(agr_rows), use_container_width=True, hide_index=True)
+            st.caption(
+                "AGREE picks should outperform DISAGREE when dual-provider validation adds signal. "
+                "Track over 30+ days before drawing conclusions."
+            )
+
+        # Mark as acted.
+        st.markdown("### Mark stocks you acted on")
+        sym_list = df["symbol"].tolist()
+        col_sym, col_price = st.columns([1, 1])
+        with col_sym:
+            action_symbol = st.selectbox("Symbol", sym_list, key="action_sym")
+        with col_price:
+            action_price = st.number_input("Entry price (₹)", min_value=0.0, key="action_price")
+        action_notes = st.text_input("Notes (optional)", key="action_notes")
+        if st.button("Mark as acted", key="mark_acted_btn"):
+            _today_str = datetime.utcnow().strftime("%Y-%m-%d")
+            repo.mark_recommendation_acted(action_symbol, action_price, action_notes, _today_str)
+            st.success(f"Marked {action_symbol} as acted.")
+            st.rerun()
+
+
 # ── Auth gate ────────────────────────────────────────────────────────────────
 _use_auth = _auth_configured()
 if _use_auth and not st.user.is_logged_in:
@@ -2480,6 +2747,8 @@ with tabs[2]:
             else:
                 st.rerun()
 
+    render_change_log(engine.repo)
+
     if "comparison_result" in st.session_state:
         st.subheader("Provider Comparison")
         comp: dict[str, Any] = st.session_state["comparison_result"]
@@ -2689,6 +2958,8 @@ with tabs[2]:
             st.session_state.get("buy_skipped_stocks") or _last_meta.get("skipped_stocks", []),
             run_summary=st.session_state.get("buy_run_summary") or _last_meta.get("run_summary"),
         )
+
+    render_lifecycle_view(engine.repo)
 
 with tabs[3]:
     render_section_header(

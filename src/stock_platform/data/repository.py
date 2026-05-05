@@ -663,6 +663,114 @@ class PlatformRepository:
             "direct_equity_holdings": self.list_direct_equity_holdings(),
         }
 
+    def persist_recommendation_history(
+        self,
+        run_id: str,
+        recommendations: list[Any],
+        request: dict[str, Any],
+        macro_flow: dict[str, Any],
+        llm_provider: str,
+        llm_models_json: str,
+    ) -> None:
+        import logging as _logging
+        _hlog = _logging.getLogger(__name__)
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
+        with self.connect() as connection:
+            for rec in recommendations:
+                entry_levels = (rec.payload or {}).get("entry_levels", {})
+                fin_data = (rec.payload or {}).get("fin_data", {})
+                try:
+                    connection.execute(
+                        """
+                        INSERT INTO recommendation_history (
+                            run_id, run_date, symbol, sector, risk_profile,
+                            verdict, confidence, quant_score, rr_ratio,
+                            entry_zone_low, entry_zone_high, stop_loss,
+                            target_1, target_2, cmp_at_recommendation,
+                            pe_at_recommendation, fii_flow_cr, market_signal,
+                            rationale_summary, llm_provider, llm_models, llm_agreement
+                        ) VALUES (
+                            ?, ?, ?, ?, ?,
+                            ?, ?, ?, ?,
+                            ?, ?, ?,
+                            ?, ?, ?,
+                            ?, ?, ?,
+                            ?, ?, ?, ?
+                        )
+                        ON CONFLICT(run_id, symbol) DO NOTHING
+                        """,
+                        (
+                            run_id,
+                            today,
+                            rec.symbol,
+                            rec.sector,
+                            request.get("risk_profile"),
+                            rec.action,
+                            rec.confidence_band,
+                            rec.score,
+                            entry_levels.get("risk_reward"),
+                            entry_levels.get("entry_zone_low"),
+                            entry_levels.get("entry_zone_high"),
+                            entry_levels.get("stop_loss"),
+                            entry_levels.get("analyst_target"),
+                            None,
+                            (rec.payload or {}).get("current_price"),
+                            fin_data.get("pe_ratio"),
+                            macro_flow.get("fii_net_5d_cr"),
+                            macro_flow.get("flow_signal"),
+                            (rec.rationale or "")[:500],
+                            llm_provider,
+                            llm_models_json,
+                            "SINGLE_PROVIDER",
+                        ),
+                    )
+                except Exception as _e:
+                    _hlog.warning("Failed to persist history for %s: %s", rec.symbol, _e)
+
+    def fetch_recommendation_history_rows(
+        self,
+        provider_filter: str | None = None,
+        agreement_filter: str | None = None,
+    ) -> list[dict[str, Any]]:
+        conditions: list[str] = []
+        params: list[Any] = []
+        if provider_filter and provider_filter != "All":
+            conditions.append("llm_provider = ?")
+            params.append(provider_filter)
+        if agreement_filter and agreement_filter != "All":
+            conditions.append("llm_agreement = ?")
+            params.append(agreement_filter)
+        where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+        try:
+            with self.connect() as connection:
+                rows = connection.execute(
+                    f"SELECT * FROM recommendation_history{where} ORDER BY run_date DESC, symbol",
+                    params,
+                ).fetchall()
+            return [dict(row) for row in rows]
+        except Exception:
+            return []
+
+    def mark_recommendation_acted(
+        self,
+        symbol: str,
+        entry_price: float,
+        notes: str,
+        action_date: str,
+    ) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE recommendation_history
+                SET user_acted = 1,
+                    user_action_date = ?,
+                    user_entry_price = ?,
+                    user_notes = ?
+                WHERE UPPER(TRIM(symbol)) = UPPER(TRIM(?))
+                """,
+                (action_date, entry_price, notes, symbol),
+            )
+
     def load_portfolio_context(self) -> dict[str, Any]:
         portfolio_meta = self.get_state("portfolio_meta", {})
         normalized_exposure = self.list_normalized_exposure()

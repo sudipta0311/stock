@@ -198,6 +198,7 @@ class MonitoringTaxLogicTests(unittest.TestCase):
         self.assertEqual(row["urgency"], "MEDIUM")
 
     def test_quality_stock_in_loss_switches_to_buy_more(self) -> None:
+        from datetime import timedelta
         agent = MonitoringAgents(StubRepo(), StubProvider(), AppConfig(**LOCAL_DB_CONFIG), lambda **kwargs: None, StubLLM())
         state = {
             "portfolio_context": {
@@ -217,7 +218,12 @@ class MonitoringTaxLogicTests(unittest.TestCase):
             "quant_scores": [{"symbol": "ASIANPAINT", "quant_score": 0.80}],
         }
 
-        result = agent.decide_actions(state)
+        safe_earnings_date = date.today() + timedelta(days=60)
+        with (
+            patch("stock_platform.agents.monitor_agents.fetch_analyst_consensus_target", return_value=3200.0),
+            patch("stock_platform.agents.monitor_agents._get_next_earnings_date", return_value=(safe_earnings_date, "test")),
+        ):
+            result = agent.decide_actions(state)
         row = result["actions"][0]
 
         self.assertEqual(row["action"], "BUY MORE")
@@ -243,7 +249,8 @@ class MonitoringTaxLogicTests(unittest.TestCase):
             "quant_scores": [{"symbol": "SBICARD", "quant_score": 0.62}],
         }
 
-        result = agent.decide_actions(state)
+        with patch("stock_platform.agents.monitor_agents.fetch_analyst_consensus_target", return_value=750.0):
+            result = agent.decide_actions(state)
         row = result["actions"][0]
 
         self.assertEqual(row["action"], "HOLD - review next quarter")
@@ -375,7 +382,8 @@ class MonitoringTaxLogicTests(unittest.TestCase):
             result = agent.decide_actions(state)
 
         row = result["actions"][0]
-        self.assertEqual(row["action"], "HOLD - strong winner")
+        self.assertEqual(row["winner_badge"], "big_gainer")
+        self.assertEqual(row["action"], "HOLD")
         self.assertEqual(row["urgency"], "LOW")
 
     def test_overlap_suppresses_buy_more_signal(self) -> None:
@@ -423,7 +431,8 @@ class MonitoringTaxLogicTests(unittest.TestCase):
                 "quant_scores": [{"symbol": "ASIANPAINT", "quant_score": 0.80}],
             }
 
-            result = agent.decide_actions(state)
+            with patch("stock_platform.agents.monitor_agents.fetch_analyst_consensus_target", return_value=3200.0):
+                result = agent.decide_actions(state)
             row = result["actions"][0]
 
             self.assertEqual(row["action"], "HOLD - already in MFs")

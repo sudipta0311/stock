@@ -1548,7 +1548,7 @@ class MonitoringAgents:
             else "No replacement cycle needed.",
         }
         run_id = f"monitor-{uuid4().hex[:10]}"
-        _quant_score_map = {r["symbol"]: (r["quant_score"] or 0.5) for r in state["quant_scores"]}
+        _quant_score_map = {r["symbol"]: (r["quant_score"] or 0.5) for r in state.get("quant_scores", [])}
         rows = []
         for row in state["actions"]:
             thesis = next(item for item in state["thesis_reviews"] if item["symbol"] == row["symbol"])

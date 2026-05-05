@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import asdict
 from datetime import timedelta
@@ -1580,6 +1581,27 @@ class BuyAgents:
                 )
 
         self.repo.save_recommendations(run_id, recommendations)
+
+        # Persist history for every surviving recommendation (fail-safe).
+        try:
+            _llm_provider = getattr(self.llm, "provider", "anthropic")
+            _llm_models_json = json.dumps({
+                "anthropic_fast":      self.config.llm_fast_model,
+                "anthropic_reasoning": self.config.llm_reasoning_model,
+                "openai_fast":         self.config.openai_fast_model,
+                "openai_reasoning":    self.config.openai_reasoning_model,
+            })
+            self.repo.persist_recommendation_history(
+                run_id=run_id,
+                recommendations=recommendations,
+                request=state["request"],
+                macro_flow=macro_flow,
+                llm_provider=_llm_provider,
+                llm_models_json=_llm_models_json,
+            )
+        except Exception as _hist_exc:
+            _log.warning("History persistence failed: %s", _hist_exc)
+
         # Merge validation-gate skips (ValidationResult objects) + governance-filter skips (dicts).
         validation_skipped: list[ValidationResult] = state.get("skipped_candidates", [])
         overlap_filtered: list[str] = state.get("overlap_filtered", [])
