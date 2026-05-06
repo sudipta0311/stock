@@ -161,6 +161,8 @@ class RejectingLLM:
 
 
 class StaticLLM:
+    provider = "anthropic"
+
     def buy_rationale(self, item, portfolio_context):
         return f"{item['symbol']} still clears the final gate."
 
@@ -274,7 +276,7 @@ class BuyQualityScoreTests(unittest.TestCase):
         self.assertEqual(buffered_top_n(3), 3 * FINAL_BUFFER_MULTIPLIER)
         self.assertEqual(buffered_top_n(1), 1 * FINAL_BUFFER_MULTIPLIER)
 
-    @patch("stock_platform.agents.buy_agents.fetch_analyst_consensus_target", return_value=120.0)
+    @patch("stock_platform.agents.buy_agents.fetch_analyst_consensus_target", return_value=140.0)
     @patch("stock_platform.agents.buy_agents.governance_risk_blocks", return_value=(False, ""))
     def test_finalize_recommendation_backfills_after_do_not_enter(self, _gov_mock, _target_mock) -> None:
         repo = StubRepo()
@@ -295,7 +297,7 @@ class BuyQualityScoreTests(unittest.TestCase):
             "tranches": 3,
             "differentiation_score": 0.8,
             "news": {"headline": "Positive update"},
-            "price_context": {"price": 100.0, "analyst_target": 120.0},
+            "price_context": {"price": 100.0, "analyst_target": 140.0},
             "live_financials": {"currentPrice": 100.0},
         }
         state = {
@@ -316,7 +318,7 @@ class BuyQualityScoreTests(unittest.TestCase):
         self.assertEqual(len(repo.saved_recommendations), 3)
         first_payload = repo.saved_recommendations[0].payload
         self.assertEqual(first_payload["current_price"], 100.0)
-        self.assertEqual(first_payload["analyst_target"], 120.0)
+        self.assertEqual(first_payload["analyst_target"], 140.0)
         self.assertEqual(first_payload["fin_data"]["currentPrice"], 100.0)
         self.assertGreaterEqual(first_payload["entry_levels"]["risk_reward"], MINIMUM_RR_RATIO)
 
@@ -366,10 +368,12 @@ class BuyQualityScoreTests(unittest.TestCase):
         self.assertIn("minimum risk/reward gate", result["run_summary"]["blocked_reason"])
 
     def test_filter_by_risk_reward_returns_only_valid_candidates(self) -> None:
+        # MINIMUM_RR_RATIO is 1.2 and the gate is strictly-less-than, so 1.2 itself
+        # passes.  Use 1.1 to produce a candidate that is genuinely below the gate.
         valid, excluded = filter_by_risk_reward(
             [
-                {"symbol": "LOW", "entry_levels": {"risk_reward": 1.2}},
-                {"symbol": "EDGE", "entry_levels": {"risk_reward": 1.5}},
+                {"symbol": "LOW",  "entry_levels": {"risk_reward": 1.1}},
+                {"symbol": "EDGE", "entry_levels": {"risk_reward": 1.2}},
                 {"symbol": "HIGH", "entry_levels": {"risk_reward": 2.1}},
             ]
         )
@@ -382,7 +386,7 @@ class BuyQualityScoreTests(unittest.TestCase):
         agent = BuyAgents(repo, StubProvider(), AppConfig(**LOCAL_DB_CONFIG), StaticLLM())
         captured: dict[str, int] = {}
 
-        def fake_replacement(scored_candidates, n, skipped_symbols, db_path):
+        def fake_replacement(scored_candidates, n, skipped_symbols, db_path, **_kwargs):
             del scored_candidates, skipped_symbols, db_path
             captured["n"] = n
             return []
@@ -1187,8 +1191,8 @@ class BuyPromptTests(unittest.TestCase):
         request = FakeAnthropicClient.last_request or {}
         system_text = request["system"][0]["text"]  # type: ignore[index]
         user_text = request["messages"][0]["content"]  # type: ignore[index]
-        self.assertIn("COMBINED VERDICT", system_text)
-        self.assertIn("ACCUMULATE GRADUALLY", user_text)
+        self.assertIn("VERDICT:", system_text)
+        self.assertIn("ACCUMULATE GRADUALLY", system_text)
 
     def test_synthesis_prompt_includes_news_alert_block(self) -> None:
         fake_module = types.SimpleNamespace(Anthropic=FakeAnthropicClient)
