@@ -7,9 +7,18 @@ from __future__ import annotations
 import sys
 import types
 from datetime import date, timedelta
+from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
+
+# ---------------------------------------------------------------------------
+# Ensure src/ is on sys.path (mirrors test_monitoring_tax_logic.py pattern).
+# ---------------------------------------------------------------------------
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
 
 # ---------------------------------------------------------------------------
 # Import the pure functions under test — no I/O, no network, no DB.
@@ -22,6 +31,7 @@ from stock_platform.agents.monitor_agents import (
     _valuation_floor_active,
     _ltcg_guard,
     _get_next_earnings_date,
+    _check_data_quality_flags,
 )
 
 
@@ -114,3 +124,93 @@ def test_enforce_consistency_weak_quant_rebuilds_rationale():
     assert "weakened" in result["rationale"].lower()
     # The old stale prefix must NOT survive verbatim in the rebuilt rationale.
     assert "Thesis intact (quant 0.40)" not in result["rationale"]
+
+
+# ===========================================================================
+# 7. _check_data_quality_flags — disagree_excluded source → LOW quality
+#    (regression: ICICIBANK/KOTAKBANK/JIOFIN received confident HOLD verdicts
+#    despite YoY data disputes flagged in financial layer — 2026-05-06)
+# ===========================================================================
+class TestMonitoringDataQualityGate:
+
+    def test_low_confidence_data_is_detected(self):
+        """When data layer flags YoY as unresolved, is_low_quality must be True."""
+        financials = {
+            "symbol": "ICICIBANK",
+            "current_price": 1351,
+            "yoy_confidence": "LOW",
+            "yoy_source": "disagree_excluded",
+            "exclude_from_recommendations": True,
+            "revenue_yoy_pct": -19.2,
+        }
+        is_low, yoy_conf = _check_data_quality_flags(financials)
+        assert is_low is True, (
+            "ICICIBANK: data quality flag not detected — same architectural bug as 2026-05-06"
+        )
+        assert yoy_conf == "LOW"
+
+    def test_high_confidence_data_passes_through(self):
+        """Clean data must not be flagged as low quality."""
+        financials = {
+            "symbol": "TESTCO",
+            "current_price": 100,
+            "yoy_confidence": "HIGH",
+            "yoy_source": "BSE_FILING",
+            "exclude_from_recommendations": False,
+            "revenue_yoy_pct": 12,
+        }
+        is_low, yoy_conf = _check_data_quality_flags(financials)
+        assert is_low is False
+        assert yoy_conf == "HIGH"
+
+    def test_exclude_flag_alone_triggers_low_quality(self):
+        """exclude_from_recommendations=True is sufficient even without yoy_confidence."""
+        financials = {"exclude_from_recommendations": True}
+        is_low, _ = _check_data_quality_flags(financials)
+        assert is_low is True
+
+    def test_standalone_only_source_triggers_low_quality(self):
+        """standalone_only is an unreliable source for holding companies."""
+        financials = {
+            "yoy_source": "standalone_only",
+            "yoy_confidence": "LOW",
+            "exclude_from_recommendations": True,
+        }
+        is_low, _ = _check_data_quality_flags(financials)
+        assert is_low is True
+
+    def test_no_data_source_triggers_low_quality(self):
+        """no_data means we have nothing — must flag as low quality."""
+        financials = {
+            "yoy_source": "no_data",
+            "yoy_confidence": "NONE",
+            "exclude_from_recommendations": True,
+        }
+        is_low, _ = _check_data_quality_flags(financials)
+        assert is_low is True
+
+    def test_empty_financials_does_not_flag_low_quality(self):
+        """Missing flags default to clean — do not block when data provider is absent."""
+        is_low, yoy_conf = _check_data_quality_flags({})
+        assert is_low is False
+        assert yoy_conf == ""
+
+    @pytest.mark.parametrize("symbol", ["ICICIBANK", "KOTAKBANK", "JIOFIN"])
+    def test_real_world_bank_holdings_with_data_disputes(self, symbol):
+        """
+        The three holdings that triggered this fix on 2026-05-06.
+        When the financial layer marks YoY as disputed, the data quality
+        gate must detect it — preventing a confident HOLD on bad numbers.
+        """
+        financials = {
+            "symbol": symbol,
+            "yoy_confidence": "LOW",
+            "yoy_source": "disagree_excluded",
+            "exclude_from_recommendations": True,
+        }
+        is_low, _ = _check_data_quality_flags(financials)
+        assert is_low is True, (
+            f"{symbol}: data quality gate failed to detect disputed YoY data — "
+            "same architectural bug as 2026-05-06 (ICICIBANK/KOTAKBANK/JIOFIN "
+            "received confident HOLD verdicts despite flagged data)"
+        )

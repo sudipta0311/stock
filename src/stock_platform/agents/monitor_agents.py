@@ -84,6 +84,24 @@ def _metric_ratio(stock_data: dict[str, Any], *keys: str) -> float | None:
     return None
 
 
+_BAD_YOY_SOURCES: frozenset[str] = frozenset({"disagree_excluded", "standalone_only", "no_data"})
+
+
+def _check_data_quality_flags(financials: dict) -> tuple[bool, str]:
+    """
+    Returns (is_low_quality, yoy_confidence) for a financials dict.
+
+    Mirrors the exclusion logic in buy_agents.py so both pipelines treat
+    data quality consistently.  is_low_quality is True when the financial
+    layer flagged the YoY revenue figure as unreliable.
+    """
+    _exclude = bool(financials.get("exclude_from_recommendations"))
+    _yoy_src = str(financials.get("yoy_source") or "")
+    _yoy_conf = str(financials.get("yoy_confidence") or "")
+    _low = _exclude or _yoy_src in _BAD_YOY_SOURCES or _yoy_conf in ("LOW", "NONE")
+    return _low, _yoy_conf
+
+
 def _metric_float(stock_data: dict[str, Any], *keys: str) -> float | None:
     for key in keys:
         numeric = _as_float(stock_data.get(key))
@@ -1484,6 +1502,29 @@ class MonitoringAgents:
                     rationale += ltcg_addendum
                 if _earnings_blackout_rationale:
                     rationale += _earnings_blackout_rationale
+
+            # ── Data quality gate (Option B) ─────────────────────────────────
+            # Mirrors the buy-ideas exclusion check (buy_agents.py:1199-1224).
+            # When the financial layer flagged YoY revenue as unreliable:
+            #   • EXIT/TRIM: downgrade to HOLD — the signal driving the action
+            #     may itself be based on the bad number.
+            #   • HOLD/BUY MORE: keep verdict but mark confidence LOW.
+            # Sets data_confidence field so UI and tests can inspect it.
+            _dq_fin = quant_rows.get(symbol, {}).get("financials", {})
+            _dq_low, _dq_conf = _check_data_quality_flags(_dq_fin)
+            data_confidence = "LOW" if _dq_low else "HIGH"
+            if _dq_low:
+                _dq_src = str(_dq_fin.get("yoy_source") or "unknown")
+                _action_upper_dq = str(action).upper()
+                if "EXIT" in _action_upper_dq or "TRIM" in _action_upper_dq:
+                    action = "HOLD"
+                    severity = "LOW"
+                    urgency = "LOW"
+                rationale += (
+                    f" [DATA UNCERTAIN: yoy_confidence={_dq_conf} source={_dq_src}."
+                    " Manual verification recommended before acting on TRIM/EXIT signals.]"
+                )
+
             actions.append(
                 {
                     "symbol": symbol,
@@ -1498,6 +1539,7 @@ class MonitoringAgents:
                     "caution_flag": caution_flag,
                     "auto_review": auto,
                     "winner_badge": winner_badge,
+                    "data_confidence": data_confidence,
                 }
             )
         return {"actions": actions}
