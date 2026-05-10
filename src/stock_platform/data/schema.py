@@ -185,6 +185,70 @@ _DDL_SQLITE = [
     "CREATE INDEX IF NOT EXISTS idx_history_symbol   ON recommendation_history(symbol)",
     "CREATE INDEX IF NOT EXISTS idx_history_date     ON recommendation_history(run_date)",
     "CREATE INDEX IF NOT EXISTS idx_history_provider ON recommendation_history(llm_provider)",
+    # ── Backtest tables ───────────────────────────────────────────────────────
+    """
+    CREATE TABLE IF NOT EXISTS historical_fundamentals (
+        -- Quarterly fundamental snapshots used by backtest replay.
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        symbol           TEXT    NOT NULL,
+        snapshot_date    TEXT    NOT NULL,
+        roce             REAL,
+        eps              REAL,
+        debt_equity      REAL,
+        revenue_growth   REAL,
+        promoter_holding REAL,
+        source           TEXT    NOT NULL DEFAULT 'yfinance',
+        UNIQUE(symbol, snapshot_date)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS historical_prices (
+        -- Daily/weekly close prices used for forward-return computation.
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        symbol       TEXT    NOT NULL,
+        date         TEXT    NOT NULL,
+        close_price  REAL    NOT NULL,
+        volume       REAL,
+        UNIQUE(symbol, date)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS backtest_runs (
+        -- Summary row written by scorer.py after each replay+score cycle.
+        run_id                TEXT PRIMARY KEY,
+        start_date            TEXT NOT NULL,
+        end_date              TEXT NOT NULL,
+        weights_hash          TEXT,
+        total_recommendations INTEGER DEFAULT 0,
+        hit_rate_3m           REAL,
+        hit_rate_6m           REAL,
+        hit_rate_12m          REAL,
+        alpha_3m              REAL,
+        alpha_6m              REAL,
+        alpha_12m             REAL,
+        created_at            TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS backtest_recommendations (
+        -- Per-symbol per-date recommendations from replay.py.
+        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+        run_id              TEXT    NOT NULL,
+        symbol              TEXT    NOT NULL,
+        recommendation_date TEXT    NOT NULL,
+        action              TEXT    NOT NULL,
+        confidence_band     TEXT,
+        quality_score       REAL,
+        forward_return_3m   REAL,
+        forward_return_6m   REAL,
+        forward_return_12m  REAL,
+        hit                 INTEGER,
+        UNIQUE(run_id, symbol, recommendation_date)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_hist_fund_symbol ON historical_fundamentals(symbol)",
+    "CREATE INDEX IF NOT EXISTS idx_hist_price_symbol ON historical_prices(symbol)",
+    "CREATE INDEX IF NOT EXISTS idx_bt_rec_run ON backtest_recommendations(run_id)",
 ]
 
 _DDL_PG = [
@@ -363,6 +427,70 @@ _DDL_PG = [
     "CREATE INDEX IF NOT EXISTS idx_history_symbol   ON recommendation_history(symbol)",
     "CREATE INDEX IF NOT EXISTS idx_history_date     ON recommendation_history(run_date)",
     "CREATE INDEX IF NOT EXISTS idx_history_provider ON recommendation_history(llm_provider)",
+    # ── Backtest tables ───────────────────────────────────────────────────────
+    """
+    CREATE TABLE IF NOT EXISTS historical_fundamentals (
+        -- Quarterly fundamental snapshots used by backtest replay.
+        id               BIGSERIAL PRIMARY KEY,
+        symbol           TEXT             NOT NULL,
+        snapshot_date    TEXT             NOT NULL,
+        roce             DOUBLE PRECISION,
+        eps              DOUBLE PRECISION,
+        debt_equity      DOUBLE PRECISION,
+        revenue_growth   DOUBLE PRECISION,
+        promoter_holding DOUBLE PRECISION,
+        source           TEXT             NOT NULL DEFAULT 'yfinance',
+        UNIQUE(symbol, snapshot_date)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS historical_prices (
+        -- Daily/weekly close prices used for forward-return computation.
+        id           BIGSERIAL PRIMARY KEY,
+        symbol       TEXT             NOT NULL,
+        date         TEXT             NOT NULL,
+        close_price  DOUBLE PRECISION NOT NULL,
+        volume       DOUBLE PRECISION,
+        UNIQUE(symbol, date)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS backtest_runs (
+        -- Summary row written by scorer.py after each replay+score cycle.
+        run_id                TEXT PRIMARY KEY,
+        start_date            TEXT NOT NULL,
+        end_date              TEXT NOT NULL,
+        weights_hash          TEXT,
+        total_recommendations INTEGER DEFAULT 0,
+        hit_rate_3m           DOUBLE PRECISION,
+        hit_rate_6m           DOUBLE PRECISION,
+        hit_rate_12m          DOUBLE PRECISION,
+        alpha_3m              DOUBLE PRECISION,
+        alpha_6m              DOUBLE PRECISION,
+        alpha_12m             DOUBLE PRECISION,
+        created_at            TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS backtest_recommendations (
+        -- Per-symbol per-date recommendations from replay.py.
+        id                  BIGSERIAL PRIMARY KEY,
+        run_id              TEXT    NOT NULL,
+        symbol              TEXT    NOT NULL,
+        recommendation_date TEXT    NOT NULL,
+        action              TEXT    NOT NULL,
+        confidence_band     TEXT,
+        quality_score       DOUBLE PRECISION,
+        forward_return_3m   DOUBLE PRECISION,
+        forward_return_6m   DOUBLE PRECISION,
+        forward_return_12m  DOUBLE PRECISION,
+        hit                 BOOLEAN,
+        UNIQUE(run_id, symbol, recommendation_date)
+    )
+    """,
+    "CREATE INDEX IF NOT EXISTS idx_hist_fund_symbol ON historical_fundamentals(symbol)",
+    "CREATE INDEX IF NOT EXISTS idx_hist_price_symbol ON historical_prices(symbol)",
+    "CREATE INDEX IF NOT EXISTS idx_bt_rec_run ON backtest_recommendations(run_id)",
 ]
 
 

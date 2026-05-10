@@ -169,7 +169,9 @@ class StaticLLM:
 
 class BuyQualityScoreTests(unittest.TestCase):
     def test_missing_data_returns_unknown_not_perfect(self) -> None:
-        self.assertEqual(compute_quality_score("TATAMOTORS", {}), 0.5)
+        score, dq = compute_quality_score("TATAMOTORS", {})
+        self.assertEqual(score, 0.5)
+        self.assertEqual(dq, "DEGRADED")
 
     def test_expected_screener_rule_bands_for_tmcv_and_bel(self) -> None:
         tmcv_facts = {
@@ -189,8 +191,10 @@ class BuyQualityScoreTests(unittest.TestCase):
             "debt_to_equity": 0.003,
         }
 
-        self.assertLess(compute_quality_score("TATAMOTORS", tmcv_facts), 0.5)
-        self.assertGreater(compute_quality_score("BEL", bel_facts), 0.6)
+        tmcv_score, _ = compute_quality_score("TATAMOTORS", tmcv_facts)
+        bel_score, _  = compute_quality_score("BEL", bel_facts)
+        self.assertLess(tmcv_score, 0.5)
+        self.assertGreater(bel_score, 0.6)
 
     def test_perfect_score_requires_all_five_rules(self) -> None:
         almost_perfect_live = {
@@ -201,8 +205,14 @@ class BuyQualityScoreTests(unittest.TestCase):
         }
         all_rules_live = almost_perfect_live | {"promoter_holding": 60}
 
-        self.assertEqual(compute_quality_score("BEL", almost_perfect_live, {}), 1.0)
-        self.assertEqual(compute_quality_score("IDEAL", all_rules_live, {}), 1.0)
+        score1, dq1 = compute_quality_score("BEL", almost_perfect_live, {})
+        score2, dq2 = compute_quality_score("IDEAL", all_rules_live, {})
+        self.assertEqual(score1, 1.0)
+        self.assertEqual(score2, 1.0)
+        # 4/5 fields present → 1 default → PARTIAL
+        self.assertEqual(dq1, "PARTIAL")
+        # All 5 fields present → CLEAN
+        self.assertEqual(dq2, "CLEAN")
 
     def test_negative_eps_caps_quality_score(self) -> None:
         stressed = {
@@ -212,7 +222,47 @@ class BuyQualityScoreTests(unittest.TestCase):
             "promoter_holding": 40,
             "debt_to_equity": 0.4,
         }
-        self.assertEqual(compute_quality_score("LOSSMAKER", stressed), 0.35)
+        score, dq = compute_quality_score("LOSSMAKER", stressed)
+        self.assertEqual(score, 0.35)
+        self.assertEqual(dq, "CLEAN")
+
+    def test_data_quality_label_from_provenance(self) -> None:
+        # All FETCHED → CLEAN
+        fin_all = {
+            "roce_pct": 20, "eps": 5, "revenue_growth_pct": 15,
+            "promoter_holding": 55, "debt_to_equity": 0.3,
+            "_data_provenance": {
+                "roce_pct": "FETCHED", "eps": "FETCHED",
+                "revenue_growth_pct": "FETCHED", "promoter_holding": "FETCHED",
+                "debt_to_equity": "FETCHED",
+            },
+        }
+        _, dq = compute_quality_score("X", fin_all)
+        self.assertEqual(dq, "CLEAN")
+
+        # 2 DEFAULT → PARTIAL
+        fin_partial = {
+            "roce_pct": 20, "eps": 5,
+            "_data_provenance": {
+                "roce_pct": "FETCHED", "eps": "FETCHED",
+                "revenue_growth_pct": "DEFAULT", "promoter_holding": "DEFAULT",
+                "debt_to_equity": "FETCHED",
+            },
+        }
+        _, dq2 = compute_quality_score("X", fin_partial)
+        self.assertEqual(dq2, "PARTIAL")
+
+        # 3 DEFAULT → DEGRADED
+        fin_degraded = {
+            "roce_pct": 20,
+            "_data_provenance": {
+                "roce_pct": "FETCHED", "eps": "DEFAULT",
+                "revenue_growth_pct": "DEFAULT", "promoter_holding": "DEFAULT",
+                "debt_to_equity": "FETCHED",
+            },
+        }
+        _, dq3 = compute_quality_score("X", fin_degraded)
+        self.assertEqual(dq3, "DEGRADED")
 
     def test_compute_net_return_never_returns_none(self) -> None:
         self.assertEqual(compute_net_return(0.0, None), 0.0)

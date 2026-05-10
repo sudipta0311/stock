@@ -134,6 +134,7 @@ from stock_platform.config import AppConfig
 from stock_platform.models import RecommendationRecord
 from stock_platform.agents.quant_model import apply_freshness_cap, compute_quality_score as compute_quality_score_v2
 from stock_platform.utils.risk_profiles import UNIVERSAL_HARD_EXCLUDE, get_risk_config
+from stock_platform.utils.source_health import assert_source_health
 from stock_platform.utils.entry_calculator import (
     KNOWN_ANALYST_TARGETS,
     apply_momentum_override,
@@ -498,6 +499,12 @@ class BuyAgents:
             raise ValueError(
                 f"Portfolio data is older than {self.config.max_portfolio_age_days} days. Refresh ingestion first."
             )
+        # Source health pre-flight (production Neon runs only — skipped in local SQLite mode).
+        if self.config.neon_enabled:
+            health = assert_source_health(self.repo)
+            if health and health.get("overall_status") == "DEGRADED":
+                context["source_health_warning"] = "DEGRADED"
+                context["source_health_report"] = health
         return {"portfolio_context": context}
 
     def discover_universe(self, state: dict[str, Any]) -> dict[str, Any]:
@@ -592,7 +599,7 @@ class BuyAgents:
                 print(f"SKIPPED {candidate['symbol']}: {vr.reason}")
                 continue
 
-            base_score = compute_quality_score_v2(candidate["symbol"], live_facts)
+            base_score, data_quality = compute_quality_score_v2(candidate["symbol"], live_facts)
 
             # Technical timing signals — 20% blend on top of fundamental quality.
             tech = compute_technical_signal(candidate["symbol"], live_facts, current_price or 0.0)
@@ -605,6 +612,7 @@ class BuyAgents:
             selection_score = clamp(blended_quality + geo_bonus + flow_bonus, 0.0, 1.0)
             scored.append(candidate | {
                 "quality_score": round(base_score, 3),
+                "data_quality": data_quality,
                 "selection_score": round(selection_score, 3),
                 "technical_signals": tech["signals"],
                 "technical_score": tech["technical_score"],
@@ -625,6 +633,7 @@ class BuyAgents:
             sector_weights[row["sector"]] = sector_weights.get(row["sector"], 0.0) + row["total_weight"]
         unified = {row["sector"]: row for row in self.repo.list_signals("unified")}
         filtered = []
+        degraded_watchlist: list[dict[str, Any]] = []
         universe_size = len(state.get("universe", []))
         scored_size = len(state.get("scored_candidates", []))
 
@@ -636,6 +645,12 @@ class BuyAgents:
         _preferred_min_rev_gr = float(_risk_cfg.get("preferred_min_revenue_growth", 12))
 
         for candidate in state["scored_candidates"]:
+            # ── DATA QUALITY GATE: DEGRADED data → WATCHLIST only, never BUY ──
+            if candidate.get("data_quality") == "DEGRADED":
+                degraded_watchlist.append(candidate | {"exclude_reason": "Insufficient fundamental data (DEGRADED)"})
+                _log.info("filter_risk: %s excluded from BUY pool (data_quality=DEGRADED)", candidate["symbol"])
+                continue
+
             risk = self.provider.get_risk_metrics(candidate["symbol"])
 
             # ── TIER 1: UNIVERSAL HARD EXCLUSIONS (same for all profiles) ─────
@@ -737,15 +752,17 @@ class BuyAgents:
             )
 
         _log.info(
-            "filter_risk: universe=%d scored=%d post_exclusion=%d",
-            universe_size, scored_size, len(filtered),
+            "filter_risk: universe=%d scored=%d post_exclusion=%d degraded_watchlist=%d",
+            universe_size, scored_size, len(filtered), len(degraded_watchlist),
         )
         return {
             "risk_filtered_candidates": filtered,
+            "degraded_watchlist": degraded_watchlist,
             "pipeline_stats": {
                 "universe_size": universe_size,
                 "post_scoring_count": scored_size,
                 "post_exclusion_count": len(filtered),
+                "degraded_data_count": len(degraded_watchlist),
             },
         }
 
@@ -781,6 +798,16 @@ class BuyAgents:
         return {"shortlist": full_shortlist}
 
     def validate_qualitative(self, state: dict[str, Any]) -> dict[str, Any]:
+        # Backtest mode: skip LLM call, approve all candidates with neutral confidence.
+        if state.get("request", {}).get("skip_llm_nodes"):
+            approved = [
+                c | {"validation_confidence": c.get("quality_score", 0.5),
+                     "news": {"symbol": c["symbol"], "sentiment_score": 0.0, "headline": "[backtest]"},
+                     "validation_reasoning": "[backtest — LLM skipped]"}
+                for c in state.get("shortlist", [])
+            ]
+            return {"shortlist": approved}
+
         unified = {row["sector"]: row for row in self.repo.list_signals("unified")}
         top_n = int(state["request"]["top_n"])
         target_pool_size = buffered_top_n(top_n)
@@ -1041,6 +1068,29 @@ class BuyAgents:
         _risk_cfg       = get_risk_config(risk_profile)
         _min_rr         = float(_risk_cfg["min_rr_ratio"])
         run_id = f"buy-{uuid4().hex[:10]}"
+
+        # Backtest mode: skip all LLM calls and serial gate checks; return lightweight recs.
+        if state.get("request", {}).get("skip_llm_nodes"):
+            recs = []
+            for item in state.get("allocations", [])[:requested_top_n]:
+                recs.append(RecommendationRecord(
+                    symbol=item["symbol"],
+                    company_name=item.get("company_name", item["symbol"]),
+                    sector=item.get("sector", "Unknown"),
+                    action=item.get("entry_signal", "WAIT"),
+                    score=round(float(item.get("quality_score", 0.5)), 3),
+                    confidence_band=confidence_band,
+                    rationale="[backtest — LLM skipped]",
+                    payload={"data_quality": item.get("data_quality", "PARTIAL"),
+                             "quality_score": item.get("quality_score", 0.5)},
+                ))
+            self.repo.save_recommendations(run_id, recs)
+            return {
+                "recommendations": recs,
+                "skipped_stocks": [],
+                "run_summary": {"run_id": run_id, "recommendation_count": len(recs), "backtest_mode": True},
+            }
+
         # Pre-load unified signals once for the whole loop (used by evidence scoring).
         unified_by_sector = {row["sector"]: row for row in self.repo.list_signals("unified")}
 
@@ -1509,6 +1559,9 @@ class BuyAgents:
                 "allocation_pct": prep["allocation_pct"],
                 "allocation_amount": prep["allocation_amount"],
                 "quality_score": item["quality_score"],
+                "data_quality": item.get("data_quality", "PARTIAL"),
+                "data_quality_warning": item.get("data_quality") in ("PARTIAL", "DEGRADED")
+                    or state.get("portfolio_context", {}).get("source_health_warning") == "DEGRADED",
                 "technical_signals": item.get("technical_signals", []),
                 "technical_score": item.get("technical_score"),
                 "pe_context": prep["pe_context"],
