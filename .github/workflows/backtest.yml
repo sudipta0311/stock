@@ -25,8 +25,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          ref: streamlit-multi-agent
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
@@ -35,7 +33,7 @@ jobs:
           cache: "pip"
 
       - name: Install dependencies
-        run: pip install -e . --quiet
+        run: pip install -e . psycopg2-binary --quiet
 
       - name: Compute start date
         id: dates
