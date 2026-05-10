@@ -21,6 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 turso = ["libsql>=0.1.8"]
+neon  = ["psycopg2-binary>=2.9.0"]
 
 [build-system]
 requires = ["setuptools>=68.0"]
