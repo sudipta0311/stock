@@ -490,6 +490,12 @@ class BuyAgents:
         self.llm = llm
 
     def load_portfolio_gate(self, state: dict[str, Any]) -> dict[str, Any]:
+        # Backtest replay injects portfolio_context directly into initial state —
+        # respect it and skip the DB load + staleness check.
+        injected = state.get("portfolio_context")
+        if injected and injected.get("normalized_exposure"):
+            return {"portfolio_context": injected}
+
         context = self.repo.load_portfolio_context()
         updated = parse_iso_datetime(context["portfolio_meta"].get("portfolio_last_updated"))
         cutoff = self.provider.today - timedelta(days=self.config.max_portfolio_age_days)

@@ -33,7 +33,7 @@ jobs:
           cache: "pip"
 
       - name: Install dependencies
-        run: pip install -e . --quiet
+        run: pip install -e . psycopg2-binary --quiet
 
       - name: Compute start date
         id: dates
