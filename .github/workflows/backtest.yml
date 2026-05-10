@@ -32,8 +32,8 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Install dependencies
-        run: pip install -e . psycopg2-binary --quiet
+      - name: Install project dependencies
+        run: pip install -e ".[neon]"
 
       - name: Compute start date
         id: dates
