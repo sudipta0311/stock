@@ -1,0 +1,98 @@
+﻿name: Weekly Backtest
+
+on:
+  schedule:
+    - cron: "0 2 * * 0"   # Sunday 02:00 UTC
+  workflow_dispatch:
+    inputs:
+      start_date:
+        description: "Backtest start date (YYYY-MM-DD). Defaults to 24 months ago."
+        required: false
+        default: ""
+      hit_rate_floor:
+        description: "Minimum acceptable 6m hit rate (e.g. 0.45)"
+        required: false
+        default: "0.45"
+
+jobs:
+  backtest:
+    name: Run backtest harness
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -e . --quiet
+
+      - name: Compute start date
+        id: dates
+        run: |
+          if [ -n "${{ github.event.inputs.start_date }}" ]; then
+            echo "start_date=${{ github.event.inputs.start_date }}" >> $GITHUB_OUTPUT
+          else
+            echo "start_date=$(date -d '24 months ago' +%Y-%m-%d)" >> $GITHUB_OUTPUT
+          fi
+          echo "end_date=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
+          echo "timestamp=$(date +%Y%m%d_%H%M%S)" >> $GITHUB_OUTPUT
+
+      - name: Run backtest (snapshot → replay → score)
+        id: backtest
+        env:
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          python -m backtest.run_backtest \
+            --mode full \
+            --start-date ${{ steps.dates.outputs.start_date }} \
+            --end-date   ${{ steps.dates.outputs.end_date }} \
+            --hit-rate-floor ${{ github.event.inputs.hit_rate_floor || '0.45' }} \
+            2>&1 | tee backtest_output.json
+        continue-on-error: true   # We capture the exit code manually below.
+
+      - name: Capture exit code
+        id: result
+        run: echo "exit_code=${{ steps.backtest.outcome == 'success' && '0' || '1' }}" >> $GITHUB_OUTPUT
+
+      - name: Write summary markdown
+        if: always()
+        run: |
+          mkdir -p backtest/results
+          SUMMARY_FILE="backtest/results/backtest_${{ steps.dates.outputs.timestamp }}.md"
+          cat > "$SUMMARY_FILE" << 'MDEOF'
+          # Backtest Summary — ${{ steps.dates.outputs.end_date }}
+
+          | Field | Value |
+          |-------|-------|
+          | Run date | ${{ steps.dates.outputs.end_date }} |
+          | Window | ${{ steps.dates.outputs.start_date }} → ${{ steps.dates.outputs.end_date }} |
+          | Outcome | ${{ steps.backtest.outcome }} |
+
+          ## Raw output (last 60 lines)
+
+          ```json
+          MDEOF
+          tail -60 backtest_output.json >> "$SUMMARY_FILE" || true
+          echo '```' >> "$SUMMARY_FILE"
+
+      - name: Commit summary markdown
+        if: always()
+        uses: EndBug/add-and-commit@v9
+        with:
+          add: "backtest/results/"
+          message: "ci: backtest summary ${{ steps.dates.outputs.timestamp }}"
+          default_author: github_actions
+
+      - name: Fail job on hit-rate regression
+        if: steps.backtest.outcome == 'failure'
+        run: |
+          echo "::error::Backtest hit rate fell below floor or run failed. Check backtest/results/ for details."
+          exit 1
