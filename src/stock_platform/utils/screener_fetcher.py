@@ -1245,6 +1245,16 @@ def fetch_screener_data(nse_symbol: str) -> dict[str, Any]:
         recent_results.update(pat_momentum)
     pledge_data = _parse_pledge_data(consolidated_soup) or _parse_pledge_data(standalone_soup)
 
+    # Build provenance before None-filter: track which of the 5 scored fields
+    # came from real Screener data vs were absent (DEFAULT).
+    _provenance = {
+        "roce_pct":           "FETCHED" if roce_pct          is not None else "DEFAULT",
+        "eps":                "FETCHED" if eps               is not None else "DEFAULT",
+        "revenue_growth_pct": "FETCHED" if revenue_growth_pct is not None else "DEFAULT",
+        "promoter_holding":   "FETCHED" if promoter_holding  is not None else "DEFAULT",
+        "debt_to_equity":     "FETCHED" if debt_to_equity    is not None else "DEFAULT",
+    }
+
     result = {
         "roce_pct": roce_pct,
         "roe_pct": roe_pct,
@@ -1281,6 +1291,8 @@ def fetch_screener_data(nse_symbol: str) -> dict[str, Any]:
         "exclude_from_recommendations": _exclude_for_data_quality,
         "yoy_confidence": _yoy_confidence,
         "yoy_source": _yoy_source,
+        # _data_provenance is always a dict (never None) so it survives the filter below.
+        "_data_provenance": _provenance,
     }
     print(
         f"Screener.in {clean_symbol}: ROCE={result['roce_pct']}%, "

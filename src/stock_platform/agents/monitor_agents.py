@@ -11,6 +11,7 @@ from stock_platform.data.db import database_connection
 from stock_platform.models import MonitoringAction
 from stock_platform.utils.entry_calculator import fetch_analyst_consensus_target
 from stock_platform.utils.pe_history_fetcher import get_pe_history
+from stock_platform.utils.source_health import assert_source_health
 from utils.tax_calculator import calculate_pnl, should_exit
 import requests as _requests
 
@@ -915,7 +916,17 @@ class MonitoringAgents:
         return {}
 
     def load_context(self, state: dict[str, Any]) -> dict[str, Any]:
+        # Source health pre-flight (production Neon runs only — skipped in local SQLite mode).
+        health = None
+        if getattr(self.config, "neon_enabled", False):
+            health = assert_source_health(self.repo)
+            if health and health.get("overall_status") == "DEGRADED":
+                _log.warning("Data sources DEGRADED — monitoring will proceed with reduced confidence")
+
         ctx = self.repo.load_portfolio_context()
+        if health and health.get("overall_status") == "DEGRADED":
+            ctx["source_health_warning"] = "DEGRADED"
+            ctx["source_health_report"] = health
         print(
             "Portfolio context loaded: "
             f"{len(ctx.get('direct_equity_holdings', []))} direct holdings, "

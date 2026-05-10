@@ -23,10 +23,13 @@ A production-grade Indian equity recommendation and portfolio monitoring platfor
 11. [Utility Modules](#11-utility-modules)
 12. [Streamlit UI Portal](#12-streamlit-ui-portal)
 13. [Engine & Orchestration](#13-engine--orchestration)
-14. [Complete File Tree](#14-complete-file-tree)
-15. [Run Locally](#15-run-locally)
-16. [Streamlit Cloud Deployment](#16-streamlit-cloud-deployment)
-17. [Supported Inputs](#17-supported-inputs)
+14. [Source Health Monitoring](#14-source-health-monitoring)
+15. [Backtesting](#15-backtesting)
+16. [Walk-Forward Weight Calibration](#16-walk-forward-weight-calibration)
+17. [Complete File Tree](#17-complete-file-tree)
+18. [Run Locally](#18-run-locally)
+19. [Streamlit Cloud Deployment](#19-streamlit-cloud-deployment)
+20. [Supported Inputs](#20-supported-inputs)
 
 ---
 
@@ -419,13 +422,18 @@ Dependencies: `LiveMarketDataProvider`, `PlatformLLM`, `PlatformRepository`, `Ta
 ### `QuantModel` — `agents/quant_model.py`
 
 ```python
-def compute_quality_score(financials: dict) -> float
-def apply_freshness_cap(score: float, result_date: str, risk_profile: str) -> float
+def compute_quality_score(symbol, fin_data, _unused=None) -> tuple[float, str]
+# Returns: (score, data_quality)
+#   score        — float in [0.0, 1.0]
+#   data_quality — "CLEAN" | "PARTIAL" | "DEGRADED"
+
+def apply_freshness_cap(entry_signal, fin_data, risk_profile) -> str
+# Caps entry signal based on data staleness + risk profile
 ```
 
 **Quality Score Formula (5 rules, weighted):**
 
-| Metric | Weight | Rules |
+| Metric | Default Weight | Rules |
 |---|---|---|
 | ROCE % | 25% | > 18 → 1.0 · > 10 → 0.6 · > 0 → 0.0 · < 0 → −0.5 |
 | EPS | 25% | > 0 → 1.0 · ≤ 0 → 0.0 |
@@ -433,10 +441,21 @@ def apply_freshness_cap(score: float, result_date: str, risk_profile: str) -> fl
 | Promoter Holding % | 15% | > 50 → 1.0 · > 35 → 0.7 · ≤ 35 → 0.3 |
 | D/E Ratio | 15% | < 0.5 → 1.0 · < 1.0 → 0.5 · < 2.0 → 0.1 · ≥ 2.0 → 0.0 |
 
+Weights are loaded at import time from `rules/quality_weights.yaml` (written by the calibration step); falls back to the defaults above if the file is absent.
+
+**Data quality labels (from `_data_provenance` in fin_data):**
+
+| Label | Condition |
+|---|---|
+| `CLEAN` | All 5 scored fields fetched live (0 defaults) |
+| `PARTIAL` | 1–2 fields defaulted |
+| `DEGRADED` | 3+ fields defaulted / no provenance dict |
+
 **Hard rules:**
 - Unknown data → `0.5` (never defaults to `1.0`)
 - Negative EPS → final score hard-capped at `0.35`
 - De-merged / sparse data → capped at `0.45`
+- `DEGRADED` stocks excluded from BUY pool in `filter_risk` (appear on WATCHLIST only)
 
 **Freshness cap (`apply_freshness_cap`):**
 - Conservative/Balanced + no result date → converts to `WAIT` (hard stop, no recommendation)
@@ -1120,7 +1139,208 @@ class PlatformEngine:
 
 ---
 
-## 14. Complete File Tree
+## 14. Source Health Monitoring
+
+**File:** `src/stock_platform/utils/source_health.py`  
+**Class:** `SourceHealthChecker`
+
+A pre-flight gate that probes all three live data sources before FLOW 2 (buy recommendations) and FLOW 3 (monitoring) run. The check is gated on `config.neon_enabled` — it runs only in production (Neon DB configured); local/SQLite environments skip it automatically.
+
+### How it works
+
+```
+get_source_health(repo)
+  │
+  ├─► probe_screener()   — 10 known-good symbols, fetch via screener_fetcher
+  ├─► probe_yfinance()   — 10 known-good symbols, yf.Ticker.fast_info.last_price
+  └─► probe_nse_csv()    — HEAD request to NSE NIFTY50 CSV URL
+       │
+       └─► overall_status = HEALTHY / DEGRADED / FAILED
+```
+
+Results cached for 30 minutes in `cache_entries` (key `source_health_v1`).
+
+### Status thresholds
+
+| Status | Condition | Effect |
+|---|---|---|
+| `HEALTHY` | ≥ 80% probes pass across all sources | Run proceeds normally |
+| `DEGRADED` | ≥ 50% probes pass | Run proceeds; all recommendations flagged `data_quality_warning: true` |
+| `FAILED` | < 50% probes pass | `ValueError` raised — run aborted before any LLM calls |
+
+### Public API
+
+```python
+from stock_platform.utils.source_health import get_source_health, assert_source_health
+
+report = get_source_health(repo)
+# report["overall_status"] → "HEALTHY" | "DEGRADED" | "FAILED"
+# report["screener"]       → {"status": ..., "pass_rate": 0.9, "sampled": 10, "passed": 9}
+# report["yfinance"]       → {"status": ..., "pass_rate": ...}
+# report["nse_csv"]        → {"status": ..., "pass_rate": ...}
+
+assert_source_health(repo)   # raises ValueError on FAILED; returns report otherwise
+```
+
+### Payload impact
+
+When DEGRADED, `finalize_recommendation` attaches:
+```json
+{"data_quality_warning": true}
+```
+to every recommendation payload. The Streamlit UI can surface this as a caution badge.
+
+---
+
+## 15. Backtesting
+
+**Package:** `backtest/`  
+**Entry point:** `python -m backtest.run_backtest`  
+**Full documentation:** [backtest/README.md](backtest/README.md)
+
+The backtest harness replays FLOW 2 (buy recommendations) against 2 years of historical NSE price and fundamental snapshots to measure how well the quant pipeline performs against the NIFTY benchmark.
+
+### Architecture
+
+```
+backtest/
+├── __init__.py
+├── snapshot.py      # Fetch & store 2y weekly prices + quarterly fundamentals
+├── replay.py        # HistoricalDataProvider + per-Monday replay loop
+├── scorer.py        # Forward-return computation, hit rates, alpha vs NIFTY
+├── run_backtest.py  # CLI entry point (argparse, JSON logging, exit codes)
+├── calibrate.py     # Walk-forward weight calibration (grid search)
+└── README.md        # Full documentation
+```
+
+### Four new database tables
+
+| Table | Purpose |
+|---|---|
+| `historical_fundamentals` | Quarterly ROCE, EPS, D/E, revenue growth snapshots |
+| `historical_prices` | Daily/weekly close prices (includes `NIFTY` benchmark row) |
+| `backtest_runs` | Summary per replay run (hit rates, alpha, weights hash) |
+| `backtest_recommendations` | Per-symbol per-date recommendations with forward returns |
+
+Migration: `repo.initialize()` creates all tables with `CREATE TABLE IF NOT EXISTS` — just restart the engine on an existing DB.
+
+### Hit rate definition
+
+```
+hit = (stock_forward_return - nifty_forward_return) > 2.0%
+```
+
+Measured at 3m (13w), 6m (26w), and 12m (52w) windows from recommendation date.
+
+### CLI usage
+
+```bash
+# Full pipeline: snapshot → replay → score
+python -m backtest.run_backtest \
+  --mode full \
+  --start-date 2024-05-09 \
+  --end-date   2026-05-09
+
+# Individual phases
+python -m backtest.run_backtest --mode snapshot
+python -m backtest.run_backtest --mode replay  --start-date 2024-05-09 --end-date 2026-05-09
+python -m backtest.run_backtest --mode score   --run-id <run_id>
+
+# Fail CI if 6-month hit rate below floor
+python -m backtest.run_backtest --mode full --hit-rate-floor 0.45
+# Exit code 1 if hit_rate_6m < 0.45; exit code 2 on any unhandled exception
+```
+
+### HistoricalDataProvider
+
+`replay.py` defines `HistoricalDataProvider`, a drop-in replacement for `LiveMarketDataProvider` that reads from the snapshot tables.
+
+```python
+provider = HistoricalDataProvider(repo, replay_date=start_date)
+for monday in mondays:
+    provider.today = monday          # MUST update before each iteration
+    provider._price_cache.clear()   # MUST clear to avoid stale prices
+    # ... invoke graph ...
+```
+
+### LLM nodes in backtest mode
+
+`request["skip_llm_nodes"] = True` short-circuits:
+- `validate_qualitative` — all candidates approved (quality_score as confidence)
+- `finalize_recommendation` — lightweight record written without LLM rationale
+
+Token cost: zero. Replay is fully deterministic.
+
+### GitHub Actions
+
+`.github/workflows/backtest.yml` runs weekly on Sunday 02:00 UTC (or manually via `workflow_dispatch`). Requires `NEON_DATABASE_URL` secret. Commits a summary markdown to `backtest/results/` after each run.
+
+---
+
+## 16. Walk-Forward Weight Calibration
+
+**File:** `backtest/calibrate.py`  
+**Entry point:** `python -m backtest.calibrate --run-id <run_id>`  
+**Output:** `rules/quality_weights.yaml`
+
+After a full backtest run, calibration finds the 5 quality-score weights (ROCE, EPS, revenue growth, promoter, D/E) that maximise the 6-month hit rate on a training window, then validates against a held-out window to catch overfitting.
+
+### Algorithm
+
+```
+1. Load backtest_recommendations for a completed run
+2. Split: first 18 months = train, remaining = validate
+3. Grid-search over 5 weights in 0.05 increments, sum == 1.0
+   (~10,626 valid combinations — C(24,4), no scipy needed)
+4. For each combination: recompute quality scores, re-rank, compute hit rate vs NIFTY
+5. Report top-10 by train hit rate; flag any where val < train − 5pp (overfit)
+6. Best = highest train hit rate that is NOT overfit
+7. Write best config to rules/quality_weights.yaml
+```
+
+### Output file (`rules/quality_weights.yaml`)
+
+```yaml
+version: "v20260510"
+calibrated_at: "2026-05-10T00:00:00Z"
+weights_hash: "a1b2c3d4"
+train_period:    ["2024-05-09", "2025-11-09"]
+validate_period: ["2025-11-09", "2026-05-09"]
+train_hit_rate_6m:    0.54
+validate_hit_rate_6m: 0.51
+weights:
+  roce:           0.30
+  eps:            0.25
+  revenue_growth: 0.20
+  promoter:       0.15
+  debt_equity:    0.10
+```
+
+### How weights are loaded at runtime
+
+`quant_model.py` reads the YAML at import time:
+
+```python
+_WEIGHTS = _load_weights()   # reads rules/quality_weights.yaml; falls back to defaults
+```
+
+Weights take effect immediately on the next engine restart — no code change required. A weights hash is stored in `backtest_runs` for reproducibility.
+
+### Running calibration
+
+```bash
+# After a completed full backtest run:
+python -m backtest.calibrate --run-id <run_id_from_replay>
+
+# Optional: change training window (default 18 months)
+python -m backtest.calibrate --run-id <run_id> --train-months 12
+```
+
+The calibration result (best weights + top-10 table) is printed as JSON and the YAML is written automatically.
+
+---
+
+## 17. Complete File Tree
 
 ```
 stock-langgraph-platform/
@@ -1185,20 +1405,40 @@ stock-langgraph-platform/
         ├── result_date_fetcher.py       # Earnings result dates (chain: Neon → Tickertape → yfinance)
         ├── risk_profiles.py             # Risk config + RISK_PROMPT_HINTS
         ├── rules.py                     # clamp, conviction_from_score, parse_iso_datetime
-        ├── screener_fetcher.py          # Screener.in fundamentals scraper
+        ├── screener_fetcher.py          # Screener.in fundamentals scraper (+ _data_provenance)
         ├── sector_config.py             # SECTOR_GEO_OVERRIDES + governance_risk_blocks
         ├── signal_sources.py            # Tariff signal definitions
+        ├── source_health.py             # Pre-flight source health gate (NEW)
         ├── stock_context.py             # Factual snapshot builder for LLM prompts
         ├── stock_validator.py           # 4-gate validation (NOT_FOUND / NO_DATA / PRICE_MISSING)
         ├── symbol_resolver.py           # De-merged symbol resolution
         ├── tax_calculator.py            # LTCG/STCG P&L + should_exit() guidance
         ├── technical_signals.py         # 52W momentum + DMA strength
         └── valuation_reliability.py     # PE reliability label
+│
+├── backtest/                            # NEW — backtest harness package
+│   ├── __init__.py
+│   ├── snapshot.py                      # 2y price + quarterly fundamental snapshots
+│   ├── replay.py                        # HistoricalDataProvider + replay loop
+│   ├── scorer.py                        # Forward-return computation + hit rates
+│   ├── run_backtest.py                  # CLI entry point (--mode snapshot|replay|score|full)
+│   ├── calibrate.py                     # Walk-forward weight calibration (grid search)
+│   └── README.md                        # Backtest-specific documentation
+│
+├── rules/                               # NEW — calibrated model config
+│   └── quality_weights.yaml             # YAML weight config (written by calibrate.py)
+│
+├── .github/workflows/
+│   └── backtest.yml                     # NEW — weekly backtest cron + workflow_dispatch
+│
+└── tests/
+    ├── test_source_health.py            # NEW — 15 unit tests for source_health.py
+    └── test_backtest_scorer.py          # NEW — forward-return, hit-rate, calibration tests
 ```
 
 ---
 
-## 15. Run Locally
+## 18. Run Locally
 
 ### Prerequisites
 
@@ -1241,7 +1481,7 @@ If no API keys are set, the platform runs with deterministic text fallbacks for 
 
 ---
 
-## 16. Streamlit Cloud Deployment
+## 19. Streamlit Cloud Deployment
 
 This repo deploys on Streamlit Community Cloud with `streamlit_app.py` as the entrypoint.
 
@@ -1285,7 +1525,7 @@ Add these exact redirect URIs to the Google OAuth client:
 
 ---
 
-## 17. Supported Inputs
+## 20. Supported Inputs
 
 | Format | Description |
 |---|---|
