@@ -41,7 +41,8 @@ jobs:
           if [ -n "${{ github.event.inputs.start_date }}" ]; then
             echo "start_date=${{ github.event.inputs.start_date }}" >> $GITHUB_OUTPUT
           else
-            echo "start_date=$(date -d '24 months ago' +%Y-%m-%d)" >> $GITHUB_OUTPUT
+            # yfinance returns ~8 quarters of fundamentals; 15 months ago is safely within that window.
+            echo "start_date=$(date -d '15 months ago' +%Y-%m-%d)" >> $GITHUB_OUTPUT
           fi
           echo "end_date=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
           echo "timestamp=$(date +%Y%m%d_%H%M%S)" >> $GITHUB_OUTPUT
