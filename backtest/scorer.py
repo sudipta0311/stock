@@ -102,7 +102,7 @@ def score_run(repo: PlatformRepository, run_id: str) -> dict[str, Any]:
                 stock_ret   = _forward_return(entry_price,  fwd_price)
                 nifty_ret   = _forward_return(nifty_entry, nifty_fwd)
                 alpha       = round(stock_ret - nifty_ret, 4) if (stock_ret is not None and nifty_ret is not None) else None
-                hit         = int(alpha is not None and alpha > _HIT_ALPHA_THRESHOLD_PCT)
+                hit         = bool(alpha is not None and alpha > _HIT_ALPHA_THRESHOLD_PCT)
                 row[f"forward_return_{window_label}"] = stock_ret
                 row[f"alpha_{window_label}"]          = alpha
                 row[f"hit_{window_label}"]            = hit
@@ -138,7 +138,12 @@ def score_run(repo: PlatformRepository, run_id: str) -> dict[str, Any]:
         alphas = [r[f"alpha_{window}"] for r in rows if r.get(f"alpha_{window}") is not None]
         return round(sum(alphas) / len(alphas), 4) if alphas else None
 
-    buy_results = [r for r in results if r["action"] in ("ACCUMULATE", "STRONG ENTER", "SMALL INITIAL")]
+    # In backtest mode all emitted recs are the top-N candidates (LLM action labels
+    # are skipped), so score all of them rather than filtering on action string.
+    # For production runs with real action labels, WAIT recs are excluded by the filter below.
+    buy_actions = {"ACCUMULATE", "STRONG ENTER", "SMALL INITIAL"}
+    has_buy_actions = any(r["action"] in buy_actions for r in results)
+    buy_results = results if not has_buy_actions else [r for r in results if r["action"] in buy_actions]
 
     summary: dict[str, Any] = {
         "run_id":               run_id,
