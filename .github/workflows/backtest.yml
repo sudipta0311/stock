@@ -18,7 +18,7 @@ jobs:
   backtest:
     name: Run backtest harness
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 240
     permissions:
       contents: write
 
@@ -41,8 +41,8 @@ jobs:
           if [ -n "${{ github.event.inputs.start_date }}" ]; then
             echo "start_date=${{ github.event.inputs.start_date }}" >> $GITHUB_OUTPUT
           else
-            # yfinance returns ~8 quarters of fundamentals; 15 months ago is safely within that window.
-            echo "start_date=$(date -d '15 months ago' +%Y-%m-%d)" >> $GITHUB_OUTPUT
+            # 12-month default keeps weekly CI well within the 240-minute timeout.
+            echo "start_date=$(date -d '12 months ago' +%Y-%m-%d)" >> $GITHUB_OUTPUT
           fi
           echo "end_date=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
           echo "timestamp=$(date +%Y%m%d_%H%M%S)" >> $GITHUB_OUTPUT
