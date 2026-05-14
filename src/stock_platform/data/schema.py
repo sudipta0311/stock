@@ -198,6 +198,7 @@ _DDL_SQLITE = [
         revenue_growth   REAL,
         promoter_holding REAL,
         source           TEXT    NOT NULL DEFAULT 'yfinance',
+        fetched_source   TEXT,
         UNIQUE(symbol, snapshot_date)
     )
     """,
@@ -440,6 +441,7 @@ _DDL_PG = [
         revenue_growth   DOUBLE PRECISION,
         promoter_holding DOUBLE PRECISION,
         source           TEXT             NOT NULL DEFAULT 'yfinance',
+        fetched_source   TEXT,
         UNIQUE(symbol, snapshot_date)
     )
     """,
@@ -529,4 +531,5 @@ def initialize_schema(connection: Any) -> None:
     for statement in _get_ddl(connection):
         connection.execute(statement)
     _ensure_column(connection, "monitoring_actions", "urgency", "TEXT NOT NULL DEFAULT 'LOW'")
+    _ensure_column(connection, "historical_fundamentals", "fetched_source", "TEXT")
     connection.commit()
