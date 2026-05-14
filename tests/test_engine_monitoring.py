@@ -6,6 +6,19 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+
+def _mf_api_reachable(timeout: float = 5.0) -> bool:
+    try:
+        import urllib.request
+        req = urllib.request.Request(
+            "https://mfdata.in/api/v1/search?q=HDFC",
+            headers={"User-Agent": "pytest-health-check"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
@@ -37,6 +50,7 @@ class EngineMonitoringTests(unittest.TestCase):
         except sqlite3.OperationalError as exc:
             self.skipTest(f"SQLite unavailable in this environment: {exc}")
 
+    @unittest.skipUnless(_mf_api_reachable(), "mfdata.in unreachable — skipping MF integration test")
     def test_ingest_clears_stale_monitoring_results(self) -> None:
         self.engine.seed_demo_data()
         self.engine.run_monitoring(llm_provider="anthropic")
@@ -53,6 +67,7 @@ class EngineMonitoringTests(unittest.TestCase):
         self.assertEqual(refreshed_snapshot["monitoring_actions"], [])
         self.assertEqual(refreshed_snapshot["run_meta"]["monitoring"], {})
 
+    @unittest.skipUnless(_mf_api_reachable(), "mfdata.in unreachable — skipping MF integration test")
     def test_monitoring_uses_current_pdf_direct_holdings(self) -> None:
         payload = self.engine.parse_portfolio_pdf(
             ROOT / "tests" / "NSDLe-CAS_109102284_FEB_2026.PDF",
@@ -162,7 +177,11 @@ class EngineMonitoringTests(unittest.TestCase):
         with (
             patch.object(engine.repo, "list_signals", return_value=[{"sector": "Defence"}]),
             patch.object(engine, "run_buy_analysis", side_effect=fake_run_buy_analysis),
+            patch("stock_platform.services.engine.PlatformLLM.fetch_critical_news",
+                  return_value={"material_risks_found": False, "flags": [],
+                                "revised_verdict_suggestion": "no_change", "summary": ""}),
             patch("stock_platform.services.engine.PlatformLLM.synthesise_comparison", side_effect=fake_synthesise),
+            patch("stock_platform.services.engine.time.sleep"),
         ):
             result = engine.run_buy_analysis_comparison(
                 {"index_name": "NIFTY 200", "horizon_months": 18, "risk_profile": "Aggressive", "top_n": 4}

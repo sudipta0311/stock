@@ -1,4 +1,4 @@
-﻿name: Weekly Backtest
+name: Weekly Backtest
 
 on:
   schedule:
@@ -6,19 +6,23 @@ on:
   workflow_dispatch:
     inputs:
       start_date:
-        description: "Backtest start date (YYYY-MM-DD). Defaults to 24 months ago."
+        description: "Backtest start date (YYYY-MM-DD). Defaults to 15 months ago."
         required: false
         default: ""
       hit_rate_floor:
         description: "Minimum acceptable 6m hit rate (e.g. 0.45)"
         required: false
         default: "0.45"
+      enrich_screener:
+        description: "Fill NULL ROCE/promoter from Screener.in after snapshot (true/false)"
+        required: false
+        default: "true"
 
 jobs:
   backtest:
     name: Run backtest harness
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     permissions:
       contents: write
 
@@ -47,14 +51,19 @@ jobs:
           echo "end_date=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
           echo "timestamp=$(date +%Y%m%d_%H%M%S)" >> $GITHUB_OUTPUT
 
-      - name: Run backtest (snapshot → replay → score)
+      - name: Run backtest (snapshot → enrich → replay → score)
         id: backtest
         env:
           NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
+          ENRICH_FLAG=""
+          if [ "${{ github.event.inputs.enrich_screener || 'true' }}" = "true" ]; then
+            ENRICH_FLAG="--enrich-screener"
+          fi
           python -m backtest.run_backtest \
             --mode full \
+            $ENRICH_FLAG \
             --start-date ${{ steps.dates.outputs.start_date }} \
             --end-date   ${{ steps.dates.outputs.end_date }} \
             --hit-rate-floor ${{ github.event.inputs.hit_rate_floor || '0.45' }} \
