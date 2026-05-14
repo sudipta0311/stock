@@ -3,13 +3,14 @@ run_backtest.py — CLI entry point for the backtest harness.
 
 Usage:
     python -m backtest.run_backtest --mode full \\
-        --start-date 2024-05-09 --end-date 2026-05-09
+        --start-date 2024-10-07 --end-date 2024-10-14
 
 Modes:
     snapshot  — fetch and store historical prices + fundamentals
     replay    — replay FLOW 2 against snapshots, write backtest_recommendations
     score     — compute hit rates from an existing replay run
     full      — snapshot → replay → score in sequence
+    coverage  — print field null-rate report (no snapshot or replay)
 
 Exit codes:
     0 — success (or hit rate above floor)
@@ -33,7 +34,7 @@ if str(_SRC) not in sys.path:
 from stock_platform.config import AppConfig, load_app_env
 from stock_platform.data.repository import PlatformRepository
 
-from backtest.snapshot import run_snapshot
+from backtest.snapshot import get_coverage_counts, report_coverage, run_snapshot
 from backtest.replay import replay
 from backtest.scorer import score_run
 
@@ -59,8 +60,10 @@ def _parse_date(s: str) -> date:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Stock platform backtester")
     parser.add_argument(
-        "--mode", choices=["snapshot", "replay", "score", "full"], default="full",
-        help="Which phase(s) to run",
+        "--mode",
+        choices=["snapshot", "replay", "score", "full", "coverage"],
+        default="full",
+        help="Which phase(s) to run (coverage = null-rate report only)",
     )
     parser.add_argument("--start-date", type=_parse_date, required=False,
                         help="Backtest start date (YYYY-MM-DD)")
@@ -74,6 +77,15 @@ def main(argv: list[str] | None = None) -> int:
                         help="Minimum acceptable 6m hit rate before exit code 1")
     parser.add_argument("--weights-version", default=None,
                         help="Override quality_weights.yaml version label")
+    parser.add_argument(
+        "--enrich-screener",
+        action="store_true",
+        default=False,
+        help=(
+            "After snapshot, fill NULL roce/promoter_holding from Screener.in. "
+            "Rate-limited to 5 s per symbol. Only runs in snapshot or full mode."
+        ),
+    )
     args = parser.parse_args(argv)
 
     # ── environment + repo setup ──────────────────────────────────────────────
@@ -97,14 +109,39 @@ def main(argv: list[str] | None = None) -> int:
 
     run_id = args.run_id
 
+    # ── coverage-only mode ────────────────────────────────────────────────────
+    if args.mode == "coverage":
+        report_coverage(repo)
+        _emit("DONE", run_id=None)
+        return 0
+
     # ── snapshot ──────────────────────────────────────────────────────────────
     if args.mode in ("snapshot", "full"):
+        # Capture BEFORE counts for the audit trail
+        before_coverage = get_coverage_counts(repo)
+
         try:
             counts = run_snapshot(repo)
             _emit("SNAPSHOT_DONE", **counts)
         except Exception as exc:
             _emit("SNAPSHOT_ERROR", error=str(exc))
             return 2
+
+        # Screener enrichment (first-non-null wins, 5 s/symbol rate limit)
+        if args.enrich_screener:
+            try:
+                from backtest.screener_history_fetcher import enrich_from_screener
+                _emit("SCREENER_ENRICH_START")
+                enrich_summary = enrich_from_screener(repo, delay=5.0)
+                _emit("SCREENER_ENRICH_DONE",
+                      symbols_processed=len(enrich_summary),
+                      symbols_with_data=sum(1 for v in enrich_summary.values() if v > 0))
+            except Exception as exc:
+                _emit("SCREENER_ENRICH_ERROR", error=str(exc))
+                # Non-fatal — continue with replay
+
+        # Print before/after coverage report
+        report_coverage(repo, before=before_coverage)
 
     # ── replay ────────────────────────────────────────────────────────────────
     if args.mode in ("replay", "full"):
@@ -134,7 +171,6 @@ def main(argv: list[str] | None = None) -> int:
             _emit("SCORE_ERROR", error=str(exc))
             return 2
 
-        # Exit non-zero if hit rate is below floor.
         hit_rate_6m = summary.get("hit_rate_6m")
         if hit_rate_6m is not None and hit_rate_6m < args.hit_rate_floor:
             _emit(

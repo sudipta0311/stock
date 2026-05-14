@@ -18,13 +18,73 @@
 | README + SUMMARY.md | ✅ COMPLETE | 3 new sections in README; SUMMARY.md created |
 | **Final test run** | ✅ COMPLETE | 148 passed, 2 skipped (MF API down), 0 failed |
 | **GitHub Actions backtest** | ✅ WORKING | Neon connected, 5 recs/week verified locally |
+| **Session 5 — Fundamentals quality** | ✅ COMPLETE | ROCE/D/E/RevGrowth fixed in snapshot.py; Screener enrichment; coverage report |
 
-**All tasks complete. Backtest harness verified end-to-end against Neon. No further action needed.**
+**Session 5 complete. Neon fundamentals quality vastly improved. See SESSION 5 section below.**
 
 To re-run backtest locally (one week, diagnostic):
 ```
 $env:NEON_DATABASE_URL="<your-neon-url>"
 .venv\Scripts\python.exe -m backtest.run_backtest --mode replay --start-date 2024-10-07 --end-date 2024-10-14
+```
+
+---
+
+---
+
+## SESSION 5 — 2026-05-14: Fundamentals Data Quality Improvement
+
+### Goal
+Backtest harness was producing degenerate results because `snapshot.py` left ROCE, promoter_holding always NULL, used a single scalar for revenue_growth, and had a balance-sheet column alignment bug in D/E.
+
+### Files created / modified
+
+| File | Change |
+|------|--------|
+| `src/stock_platform/data/schema.py` | Added `fetched_source TEXT` column to `historical_fundamentals` DDL (both dialects). Added `_ensure_column` call in `initialize_schema()` for Neon migration. |
+| `backtest/snapshot.py` | Full rewrite of `snapshot_fundamentals()`: ROCE from income+balance sheet, per-quarter YoY revenue growth, D/E balance-sheet column alignment, `fetched_source="yfinance"`. Added `get_coverage_counts()` and `report_coverage()`. |
+| `backtest/screener_history_fetcher.py` | **NEW** — `fetch_screener_history()`: parses #quarterly-shp for promoter holding, #quarters P&L for ROCE estimate (OP×4/TotalAssets×100, tagged `screener_computed`), #top-ratios for current ROCE. `enrich_from_screener()`: first-non-null-wins UPDATE, 5 s/symbol rate limit. |
+| `backtest/run_backtest.py` | Added `--enrich-screener` flag (fills NULLs after snapshot), `--mode coverage` (print coverage table only). Before/after coverage captured whenever snapshot runs. |
+
+### Coverage results (Neon DB, 2026-05-14)
+
+Three-pass summary — starting state was all five fields 100% NULL:
+
+| Field | After yfinance snapshot | After Screener enrich | Final NULL% |
+|---|---|---|---|
+| ROCE | 24.8% | 14.4% | **14.4%** |
+| EPS | 14.8% | 14.8% | **14.8%** |
+| D/E | 5.6% | 5.6% | **5.6%** |
+| RevGrowth | 81.1% | 81.1% | **81.1%** (window limit†) |
+| Promoter | 100.0% | 6.7% | **6.7%** |
+
+†RevGrowth requires same-quarter prior year (index i+4). With avg 5.4 quarters stored, most symbols only get 1 YoY pair. Fix: use `period="5y"` in snapshot to store 20 quarters.
+
+**Remaining ROCE nulls (14.4%):** Banks and insurance companies (HDFCBANK, ICICIBANK, SBIN, AXISBANK, KOTAKBANK, INDUSINDBK, BAJFINANCE, BAJAJFINSV, HDFCLIFE, SBILIFE) — yfinance has no "Operating Income" for financials; Screener P&L similarly has no traditional operating profit row. Known limitation.
+
+**fetched_source values in DB:**
+- `"yfinance"` — populated by snapshot.py
+- `"screener"` — directly reported (promoter from quarterly-shp, current ROCE from top-ratios)
+- `"screener_computed"` — ROCE estimated as (OP × 4) / Total_Assets × 100 from quarterly P&L
+
+### Key design decisions enforced (amendments)
+
+1. Targets Neon Postgres only — NeonWrapper used throughout
+2. Screener ROCE for older quarters: computed from #quarters P&L table (operating_margin × asset_turnover approximation), tagged `screener_computed`
+3. First-non-null-wins: Screener enrichment uses `WHERE field IS NULL` in every UPDATE
+4. Rate limit: 5.0 s per symbol (hardcoded, non-negotiable)
+5. Before/after coverage captured in every snapshot run for audit trail
+
+### To run enrichment again (after fresh snapshot)
+```
+$env:NEON_DATABASE_URL="<url>"
+.venv\Scripts\python.exe -m backtest.run_backtest --mode snapshot --enrich-screener
+```
+
+### To check current coverage without re-snapshotting
+```
+$env:NEON_DATABASE_URL="<url>"
+.venv\Scripts\python.exe -m backtest.run_backtest --mode coverage
 ```
 
 ---
