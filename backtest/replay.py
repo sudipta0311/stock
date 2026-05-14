@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import time
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
@@ -77,6 +78,7 @@ class HistoricalDataProvider:
         self.repo  = repo
         self.today = replay_date   # updated per-iteration by the replay loop
         self._price_cache: dict[str, float | None] = {}
+        self._external_call_count: int = 0  # increments when snapshot has no data (live fallback risk)
 
     # ── price helpers ──────────────────────────────────────────────────────────
 
@@ -90,6 +92,8 @@ class HistoricalDataProvider:
                 (symbol, self.today.isoformat()),
             ).fetchone()
         price = float(row["close_price"]) if row else None
+        if price is None:
+            self._external_call_count += 1
         self._price_cache[key] = price
         return price
 
@@ -104,6 +108,7 @@ class HistoricalDataProvider:
                 (symbol, self.today.isoformat()),
             ).fetchone()
         if not row:
+            self._external_call_count += 1
             return {}
         return dict(row)
 
@@ -250,10 +255,13 @@ def replay(
     total_recs = 0
 
     for replay_date in mondays:
+        t_start = time.perf_counter()
+
+        # ── Phase (a): provider setup ─────────────────────────────────────────
         provider.today = replay_date          # ← critical: update per iteration
         provider._price_cache.clear()         # evict stale per-date cache
+        provider._external_call_count = 0     # reset per-week counter
 
-        # Build a portfolio_meta that appears fresh relative to this replay date.
         ctx = dict(_SEED_PORTFOLIO_CONTEXT)
         ctx["portfolio_meta"] = {
             "portfolio_last_updated": (replay_date - timedelta(days=1)).isoformat()
@@ -273,15 +281,21 @@ def replay(
             "portfolio_context": ctx,
         }
 
+        t_setup_done = time.perf_counter()
+
+        # ── Phase (b): graph execution ────────────────────────────────────────
         try:
             result = graph.invoke(initial_state)
         except Exception as exc:
             _log.warning("replay %s on %s: %r", run_id, replay_date, exc)
             continue
 
+        t_graph_done = time.perf_counter()
+
         recs = result.get("recommendations", [])
         confidence = result.get("confidence", {}).get("band", "YELLOW")
 
+        # ── Phase (c): DB writes ──────────────────────────────────────────────
         for rec in recs:
             symbol = getattr(rec, "symbol", None) or rec.get("symbol") if isinstance(rec, dict) else rec.symbol
             action = getattr(rec, "action", None) or rec.get("action", "WAIT") if isinstance(rec, dict) else rec.action
@@ -300,7 +314,18 @@ def replay(
                 conn.commit()
             total_recs += 1
 
-        _log.info("replay %s: %s → %d recs (confidence=%s)", run_id, replay_date, len(recs), confidence)
+        t_db_done = time.perf_counter()
+
+        _log.info(
+            "replay %s: %s → %d recs (confidence=%s)  "
+            "total=%.1fs setup=%.3fs graph=%.1fs db=%.3fs http_fallbacks=%d",
+            run_id, replay_date, len(recs), confidence,
+            t_db_done   - t_start,
+            t_setup_done - t_start,
+            t_graph_done - t_setup_done,
+            t_db_done   - t_graph_done,
+            provider._external_call_count,
+        )
 
     # Write summary stub to backtest_runs (scorer.py fills in hit rates later).
     created_at = __import__("datetime").datetime.now(__import__("datetime").UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
