@@ -38,6 +38,103 @@ from stock_platform.services.llm import PlatformLLM
 
 _log = logging.getLogger(__name__)
 
+# ── Step 3: Sector-rotation multiplier ───────────────────────────────────────
+# Known sectors for the NIFTY200 backtest universe. The graph returns sector
+# "Unknown" for all HistoricalDataProvider stocks; this map lets replay.py
+# apply per-sector conviction boosts to the within-week confidence ranking
+# WITHOUT touching buy_agents or quant_model.
+#
+# Multiplier is applied to quality_score ONLY for band-rank ordering.
+# The stored quality_score column is left unchanged (raw quant model output).
+_SECTOR_MAP: dict[str, str] = {
+    # Capital Goods / Industrials
+    "BEL":        "Capital Goods",
+    "ABB":        "Capital Goods",
+    "BHEL":       "Capital Goods",
+    "SIEMENS":    "Capital Goods",
+    "LTIM":       "Capital Goods",
+    "LT":         "Capital Goods",
+    "CUMMINSIND": "Capital Goods",
+    "THERMAX":    "Capital Goods",
+    # Auto
+    "MARUTI":     "Auto",
+    "TATAMOTORS": "Auto",
+    "M&M":        "Auto",
+    "BAJAJ-AUTO": "Auto",
+    "EICHERMOT":  "Auto",
+    "HEROMOTOCO": "Auto",
+    "BALKRISIND": "Auto",
+    # IT
+    "TCS":        "IT",
+    "INFY":       "IT",
+    "WIPRO":      "IT",
+    "HCLTECH":    "IT",
+    "TECHM":      "IT",
+    "MPHASIS":    "IT",
+    "COFORGE":    "IT",
+    # FMCG
+    "ITC":        "FMCG",
+    "HINDUNILVR": "FMCG",
+    "NESTLEIND":  "FMCG",
+    "DABUR":      "FMCG",
+    "MARICO":     "FMCG",
+    "COLPAL":     "FMCG",
+    "BRITANNIA":  "FMCG",
+    # Healthcare / Pharma
+    "SUNPHARMA":  "Healthcare",
+    "DRREDDY":    "Healthcare",
+    "CIPLA":      "Healthcare",
+    "DIVISLAB":   "Healthcare",
+    "APOLLOHOSP": "Healthcare",
+    "MAXHEALTH":  "Healthcare",
+    # Chemicals
+    "PIDILITIND": "Chemicals",
+    "SRF":        "Chemicals",
+    "AARTIIND":   "Chemicals",
+    "DEEPAKNTR":  "Chemicals",
+    # Banking / Finance
+    "HDFCBANK":   "Banking",
+    "ICICIBANK":  "Banking",
+    "KOTAKBANK":  "Banking",
+    "AXISBANK":   "Banking",
+    "SBIN":       "Banking",
+    "INDUSINDBK": "Banking",
+    "BAJFINANCE": "Banking",
+    "BAJAJFINSV": "Banking",
+    "HDFCLIFE":   "Banking",
+    "SBILIFE":    "Banking",
+    # Energy / O&G
+    "RELIANCE":   "Energy",
+    "ONGC":       "Energy",
+    "BPCL":       "Energy",
+    "IOC":        "Energy",
+    "NTPC":       "Energy",
+    "POWERGRID":  "Energy",
+    "TATAPOWER":  "Energy",
+    # Metals / Mining
+    "TATASTEEL":  "Metals",
+    "JSWSTEEL":   "Metals",
+    "HINDALCO":   "Metals",
+    "VEDL":       "Metals",
+    "COALINDIA":  "Metals",
+    # Telecom
+    "BHARTIARTL": "Telecom",
+}
+
+# Build a conviction → multiplier lookup from the seed portfolio's identified_gaps.
+# Derived at module load time so the overhead is paid once.
+_CONVICTION_MULT: dict[str, float] = {
+    "BUY":         1.10,
+    "POSITIVE":    1.05,
+    "NEUTRAL":     1.00,
+    "AVOID":       0.90,
+    "STRONG_AVOID": 0.85,
+}
+
+# Precompute sector → multiplier from _SEED_PORTFOLIO_CONTEXT (populated below).
+_SECTOR_MULTIPLIER: dict[str, float] = {}   # filled after _SEED_PORTFOLIO_CONTEXT is defined
+
+
 # Simple seeded test portfolio — enough to drive sector-gap logic.
 _SEED_PORTFOLIO_CONTEXT = {
     "portfolio_meta": {"portfolio_last_updated": "2020-01-01T00:00:00Z"},
@@ -64,6 +161,10 @@ _SEED_PORTFOLIO_CONTEXT = {
     "direct_equity_holdings": [],
     "source_health_warning": None,
 }
+
+# Populate sector → multiplier from the seed gaps defined above.
+for _gap in _SEED_PORTFOLIO_CONTEXT["identified_gaps"]:
+    _SECTOR_MULTIPLIER[_gap["sector"]] = _CONVICTION_MULT.get(_gap["conviction"], 1.0)
 
 
 class HistoricalDataProvider:
@@ -305,14 +406,30 @@ def replay(
         #   ranks 4+    → RED
         _RANK_BANDS = ["GREEN", "YELLOW", "YELLOW", "RED", "RED"]
 
-        score_log: list[tuple[str, float]] = []
-        for rank, rec in enumerate(recs):
-            symbol = getattr(rec, "symbol", None) or rec.get("symbol") if isinstance(rec, dict) else rec.symbol
-            action = getattr(rec, "action", None) or rec.get("action", "WAIT") if isinstance(rec, dict) else rec.action
-            score  = getattr(rec, "score", 0.5) if hasattr(rec, "score") else rec.get("score", 0.5) if isinstance(rec, dict) else 0.5
+        # Step 3: apply sector multiplier to quality_score for band ordering.
+        # quality_score stored to DB remains the raw quant value; only the
+        # sort key used to assign confidence_band uses the adjusted score.
+        def _sector_adjusted(sym: str, raw_score: float) -> float:
+            sector = _SECTOR_MAP.get(sym, "Unknown")
+            mult   = _SECTOR_MULTIPLIER.get(sector, _SECTOR_MULTIPLIER.get("Unknown", 1.0))
+            return min(1.0, raw_score * mult)
+
+        # Extract (symbol, action, score) for all recs, sort by sector-adjusted score.
+        rec_tuples: list[tuple[str, str, float]] = []
+        for rec in recs:
+            sym = getattr(rec, "symbol", None) or rec.get("symbol") if isinstance(rec, dict) else rec.symbol
+            act = getattr(rec, "action", None) or rec.get("action", "WAIT") if isinstance(rec, dict) else rec.action
+            scr = getattr(rec, "score", 0.5) if hasattr(rec, "score") else rec.get("score", 0.5) if isinstance(rec, dict) else 0.5
+            rec_tuples.append((sym, act, float(scr)))
+
+        rec_tuples.sort(key=lambda t: _sector_adjusted(t[0], t[2]), reverse=True)
+
+        score_log: list[tuple[str, float, float]] = []
+        for rank, (symbol, action, score) in enumerate(rec_tuples):
+            adj   = round(_sector_adjusted(symbol, score), 3)
             rec_band = _RANK_BANDS[rank] if rank < len(_RANK_BANDS) else "RED"
 
-            score_log.append((symbol, round(float(score), 3)))
+            score_log.append((symbol, round(score, 3), adj))
             with repo.connect() as conn:
                 conn.execute(
                     """
@@ -331,12 +448,12 @@ def replay(
         _log.info(
             "replay %s: %s → %d recs (market_band=%s)  "
             "total=%.1fs setup=%.3fs graph=%.1fs db=%.3fs http_fallbacks=%d  "
-            "quality_scores=%s",
-            run_id, replay_date, len(recs), market_band,
-            t_db_done   - t_start,
+            "scores(raw,adj)=%s",
+            run_id, replay_date, len(rec_tuples), market_band,
+            t_db_done    - t_start,
             t_setup_done - t_start,
             t_graph_done - t_setup_done,
-            t_db_done   - t_graph_done,
+            t_db_done    - t_graph_done,
             provider._external_call_count,
             score_log,
         )
