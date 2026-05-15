@@ -1,12 +1,17 @@
-version: "v1"
-calibrated_at: "2026-05-10T00:00:00Z"
-train_period: ["2024-05-10", "2025-11-10"]
-validate_period: ["2025-11-10", "2026-05-10"]
-train_hit_rate_6m: 0.52
-validate_hit_rate_6m: 0.49
+version: v20260515
+calibrated_at: '2026-05-15T09:54:24Z'
+weights_hash: a0c93de2
+train_period:
+- '2025-05-14'
+- '2025-09-15'
+validate_period:
+- '2025-09-15'
+- '2025-11-10'
+train_hit_rate_6m: 0.4111
+validate_hit_rate_6m: 0.475
 weights:
-  roce: 0.25
-  eps: 0.25
-  revenue_growth: 0.20
-  promoter: 0.15
-  debt_equity: 0.15
+  roce: 0.0
+  eps: 0.0
+  revenue_growth: 0.0
+  promoter: 0.0
+  debt_equity: 1.0
