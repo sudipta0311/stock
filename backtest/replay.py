@@ -293,14 +293,26 @@ def replay(
         t_graph_done = time.perf_counter()
 
         recs = result.get("recommendations", [])
-        confidence = result.get("confidence", {}).get("band", "YELLOW")
+        market_band = result.get("confidence", {}).get("band", "YELLOW")
 
         # ── Phase (c): DB writes ──────────────────────────────────────────────
-        for rec in recs:
+        # check_confidence returns a single market-level band (same for every rec in
+        # the week). In backtest the production DB always satisfies signal_count≥5 so
+        # every week is GREEN. Derive per-rec confidence_band from within-week rank
+        # instead (recs are already sorted desc by quality_score by the graph):
+        #   rank 1      → GREEN   (best pick of the week)
+        #   ranks 2–3   → YELLOW
+        #   ranks 4+    → RED
+        _RANK_BANDS = ["GREEN", "YELLOW", "YELLOW", "RED", "RED"]
+
+        score_log: list[tuple[str, float]] = []
+        for rank, rec in enumerate(recs):
             symbol = getattr(rec, "symbol", None) or rec.get("symbol") if isinstance(rec, dict) else rec.symbol
             action = getattr(rec, "action", None) or rec.get("action", "WAIT") if isinstance(rec, dict) else rec.action
             score  = getattr(rec, "score", 0.5) if hasattr(rec, "score") else rec.get("score", 0.5) if isinstance(rec, dict) else 0.5
+            rec_band = _RANK_BANDS[rank] if rank < len(_RANK_BANDS) else "RED"
 
+            score_log.append((symbol, round(float(score), 3)))
             with repo.connect() as conn:
                 conn.execute(
                     """
@@ -309,7 +321,7 @@ def replay(
                     VALUES (?, ?, ?, ?, ?, ?)
                     ON CONFLICT(run_id, symbol, recommendation_date) DO NOTHING
                     """,
-                    (run_id, symbol, replay_date.isoformat(), action, confidence, score),
+                    (run_id, symbol, replay_date.isoformat(), action, rec_band, score),
                 )
                 conn.commit()
             total_recs += 1
@@ -317,14 +329,16 @@ def replay(
         t_db_done = time.perf_counter()
 
         _log.info(
-            "replay %s: %s → %d recs (confidence=%s)  "
-            "total=%.1fs setup=%.3fs graph=%.1fs db=%.3fs http_fallbacks=%d",
-            run_id, replay_date, len(recs), confidence,
+            "replay %s: %s → %d recs (market_band=%s)  "
+            "total=%.1fs setup=%.3fs graph=%.1fs db=%.3fs http_fallbacks=%d  "
+            "quality_scores=%s",
+            run_id, replay_date, len(recs), market_band,
             t_db_done   - t_start,
             t_setup_done - t_start,
             t_graph_done - t_setup_done,
             t_db_done   - t_graph_done,
             provider._external_call_count,
+            score_log,
         )
 
     # Write summary stub to backtest_runs (scorer.py fills in hit rates later).
