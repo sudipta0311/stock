@@ -1023,6 +1023,13 @@ class BuyAgents:
         }
 
     def check_confidence(self, state: dict[str, Any]) -> dict[str, Any]:
+        """Assign a market-level confidence band for the entire buy run.
+
+        GREEN is the strongest / most supportive backdrop for issuing buy ideas.
+        YELLOW means conditions are mixed or breadth is limited.
+        RED is the weakest state and blocks new recommendations entirely.
+        This band is shared by the whole run; it is not a per-stock rank.
+        """
         unified = self.repo.list_signals("unified")
         signal_count = len(unified)
         exposure_count = len(state["portfolio_context"]["normalized_exposure"])
@@ -1100,7 +1107,7 @@ class BuyAgents:
         # Pre-load unified signals once for the whole loop (used by evidence scoring).
         unified_by_sector = {row["sector"]: row for row in self.repo.list_signals("unified")}
 
-        # RED band: market signals too weak — save empty run and return early.
+        # RED is the weakest market-level band and is the only state that blocks buys.
         if confidence_band == "RED":
             self.repo.save_recommendations(run_id, [])
             return {
