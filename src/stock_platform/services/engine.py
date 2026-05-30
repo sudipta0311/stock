@@ -154,16 +154,21 @@ class PlatformEngine:
         # Activate LangSmith tracing — explicit tracer injection is more reliable
         # than relying on env-var auto-detection inside Streamlit Cloud.
         self._ls_tracer: Any = None
+        print(
+            f"[LangSmith] enabled={self.config.langsmith_enabled} "
+            f"key={'SET(' + self.config.langsmith_api_key[:12] + '...)' if self.config.langsmith_api_key else 'NOT SET'} "
+            f"project={self.config.langsmith_project!r} "
+            f"tracing={self.config.langsmith_tracing}"
+        )
         if self.config.langsmith_enabled:
-            # Also set env vars so any langchain-core code that checks them works.
-            os.environ.setdefault("LANGSMITH_TRACING", "true")
-            os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
-            os.environ.setdefault("LANGSMITH_API_KEY", self.config.langsmith_api_key)
-            os.environ.setdefault("LANGCHAIN_API_KEY", self.config.langsmith_api_key)
-            os.environ.setdefault("LANGSMITH_PROJECT", self.config.langsmith_project)
-            os.environ.setdefault("LANGCHAIN_PROJECT", self.config.langsmith_project)
+            os.environ["LANGSMITH_TRACING"] = "true"
+            os.environ["LANGCHAIN_TRACING_V2"] = "true"
+            os.environ["LANGSMITH_API_KEY"] = self.config.langsmith_api_key
+            os.environ["LANGCHAIN_API_KEY"] = self.config.langsmith_api_key
+            os.environ["LANGSMITH_PROJECT"] = self.config.langsmith_project
+            os.environ["LANGCHAIN_PROJECT"] = self.config.langsmith_project
             if self.config.langsmith_endpoint:
-                os.environ.setdefault("LANGSMITH_ENDPOINT", self.config.langsmith_endpoint)
+                os.environ["LANGSMITH_ENDPOINT"] = self.config.langsmith_endpoint
             try:
                 from langsmith import Client as _LSClient
                 from langchain_core.tracers import LangChainTracer as _LCTracer
@@ -172,13 +177,9 @@ class PlatformEngine:
                     project_name=self.config.langsmith_project,
                     client=_client,
                 )
-                _log.info(
-                    "LangSmith tracing active — project=%r endpoint=%s",
-                    self.config.langsmith_project,
-                    self.config.langsmith_endpoint or "https://api.smith.langchain.com",
-                )
+                print(f"[LangSmith] tracer OK — project={self.config.langsmith_project!r}")
             except Exception as exc:
-                _log.warning("LangSmith tracer init failed (tracing disabled): %s", exc)
+                print(f"[LangSmith] tracer FAILED: {exc}")
         self.pdf_parser = NSDLCASParser()
         self._signal_graph = None
         self._portfolio_graph = None
