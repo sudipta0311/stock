@@ -214,6 +214,59 @@ class BuyQualityScoreTests(unittest.TestCase):
         # All 5 fields present → CLEAN
         self.assertEqual(dq2, "CLEAN")
 
+class ConfigurableSignalRepo(StubRepo):
+    def __init__(self, unified_signals: list[dict]) -> None:
+        super().__init__()
+        self._unified_signals = unified_signals
+
+    def list_signals(self, family: str):
+        if family == "unified":
+            return self._unified_signals
+        return []
+
+
+class CheckConfidenceSemanticsTests(unittest.TestCase):
+    def _agent_with_signals(self, unified_signals: list[dict]) -> BuyAgents:
+        repo = ConfigurableSignalRepo(unified_signals)
+        return BuyAgents(repo, StubProvider(), AppConfig(**LOCAL_DB_CONFIG), StaticLLM())
+
+    def test_check_confidence_green_is_supportive_highest_band(self) -> None:
+        agent = self._agent_with_signals(
+            [
+                {"sector": "Defence", "conviction": "BUY", "score": 0.72},
+                {"sector": "Banks", "conviction": "BUY", "score": 0.68},
+                {"sector": "Capital Goods", "conviction": "NEUTRAL", "score": 0.61},
+                {"sector": "Auto", "conviction": "BUY", "score": 0.66},
+                {"sector": "Healthcare", "conviction": "NEUTRAL", "score": 0.58},
+            ]
+        )
+
+        result = agent.check_confidence(
+            {"portfolio_context": {"normalized_exposure": [{"symbol": "INFY", "weight_pct": 12.0}]}}
+        )
+
+        self.assertEqual(result["confidence"]["band"], "GREEN")
+        self.assertGreaterEqual(result["confidence"]["avg_market_score"], 0.35)
+
+    def test_check_confidence_red_is_weakest_and_blocks_recommendations(self) -> None:
+        agent = self._agent_with_signals(
+            [
+                {"sector": "Defence", "conviction": "AVOID", "score": 0.20},
+                {"sector": "Banks", "conviction": "AVOID", "score": 0.22},
+                {"sector": "IT", "conviction": "STRONG_AVOID", "score": 0.18},
+                {"sector": "Auto", "conviction": "AVOID", "score": 0.24},
+                {"sector": "FMCG", "conviction": "NEUTRAL", "score": 0.30},
+            ]
+        )
+
+        result = agent.check_confidence(
+            {"portfolio_context": {"normalized_exposure": [{"symbol": "INFY", "weight_pct": 12.0}]}}
+        )
+
+        self.assertEqual(result["confidence"]["band"], "RED")
+        self.assertIn("too weak", result["confidence"]["market_note"].lower())
+
+class BuyQualityScoreMoreTests(unittest.TestCase):
     def test_negative_eps_caps_quality_score(self) -> None:
         stressed = {
             "roce_pct": 22,

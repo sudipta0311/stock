@@ -215,7 +215,7 @@ START
   │
   ├─► assess_tax_costs           ─► [LTCG/STCG net return calculation]
   │
-  ├─► check_confidence           ─► [confidence band: HIGH / MEDIUM / LOW / AVOID]
+  ├─► check_confidence           ─► [market-level confidence band: GREEN / YELLOW / RED]
   │
   └─► finalize_recommendation    ─► [LLM rationale + entry snapshot + analyst verdict]
         │
@@ -389,6 +389,14 @@ class BuyAgents:
 ```
 
 Constants: `AGGRESSIVE_SECTOR_TARGETS`, `PROMOTER_GROUPS`, `SHORTLIST_BUFFER_MULTIPLIER = 8`
+
+**Buy Confidence Band Semantics**
+
+- `check_confidence()` in `src/stock_platform/agents/buy_agents.py` assigns one market-level band for the full buy run, not a per-stock ranking.
+- `GREEN` is the strongest / highest-conviction state: market breadth is supportive enough to allow normal buy recommendations.
+- `YELLOW` is a mixed or limited-support state: recommendations may still be produced, but conditions are less robust than `GREEN`.
+- `RED` is the weakest state: market signals are too poor, and the run exits without new buy recommendations.
+- In backtests, `backtest/replay.py` separately derives per-stock `GREEN / YELLOW / RED` labels by within-week rank for analytics; there too, `GREEN` is the best pick, not the worst.
 
 Dependencies: `LiveMarketDataProvider`, `PlatformLLM`, `PlatformRepository`, `AppConfig`
 
@@ -1034,7 +1042,7 @@ class RecommendationRecord:
     sector: str
     action: str          # "STRONG BUY" | "ACCUMULATE" | "WATCHLIST" | "AVOID"
     score: float
-    confidence_band: str # "HIGH" | "MEDIUM" | "LOW"
+    confidence_band: str # "GREEN" | "YELLOW" | "RED" (GREEN = strongest)
     rationale: str
     payload: dict        # entry_levels, analyst_target, entry_signal, tax_notes, etc.
 
