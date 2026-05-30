@@ -26,8 +26,8 @@ import os as _os, tomllib as _tomllib
 # Pass 1: Streamlit Cloud dashboard secrets
 try:
     for _sk, _sv in st.secrets.items():
-        if isinstance(_sv, str) and _sk not in _os.environ:
-            _os.environ[_sk] = _sv
+        if isinstance(_sv, (str, int, float, bool)) and _sk not in _os.environ:
+            _os.environ[_sk] = str(_sv)
 except Exception:
     pass
 
@@ -2002,7 +2002,7 @@ def render_lifecycle_view(repo: Any) -> None:
             "times_surfaced", "first_cmp", "current_price",
             "pct_change_since_first", "providers_seen", "agreement_states", "user_acted",
         ]
-        st.dataframe(df[display_cols], use_container_width=True, hide_index=True)
+        st.dataframe(df[display_cols], width='stretch', hide_index=True)
 
         # Provider performance.
         st.markdown("### Provider performance")
@@ -2025,7 +2025,7 @@ def render_lifecycle_view(repo: Any) -> None:
             for p, v in prov_perf.items()
         ]
         if perf_rows:
-            st.dataframe(pd.DataFrame(perf_rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(perf_rows), width='stretch', hide_index=True)
             st.caption(
                 "actionable_rate_pct = % of picks rated ACCUMULATE or stronger. "
                 "Track over 30+ days before drawing conclusions."
@@ -2052,7 +2052,7 @@ def render_lifecycle_view(repo: Any) -> None:
                 }
                 for a, v in agr_perf.items()
             ]
-            st.dataframe(pd.DataFrame(agr_rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(agr_rows), width='stretch', hide_index=True)
             st.caption(
                 "AGREE picks should outperform DISAGREE when dual-provider validation adds signal. "
                 "Track over 30+ days before drawing conclusions."
@@ -2094,7 +2094,7 @@ if _use_auth and not st.user.is_logged_in:
     )
     _, mid, _ = st.columns([1, 2, 1])
     with mid:
-        if st.button("Sign in with Google", use_container_width=True, type="primary"):
+        if st.button("Sign in with Google", width='stretch', type="primary"):
             st.login("google")
     st.stop()
 
@@ -2210,7 +2210,7 @@ with _hero_col:
 with _logout_col:
     if _use_auth:
         st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("Sign out", use_container_width=True):
+        if st.button("Sign out", width='stretch'):
             st.logout()
 
 summary_cols = st.columns(4)
@@ -2293,14 +2293,14 @@ with tabs[0]:
         st.subheader("Portfolio Exposure")
         exposure_frame = _df(portfolio["normalized_exposure"], ["symbol", "company_name", "sector", "total_weight"])
         if len(exposure_frame):
-            st.dataframe(exposure_frame, use_container_width=True, hide_index=True)
+            st.dataframe(exposure_frame, width='stretch', hide_index=True)
         else:
             render_empty_panel("No normalized exposure yet. Load the sample portfolio or upload a statement to populate this view.")
     with top_cols[1]:
         st.subheader("Sector Gaps")
         gap_frame = _df(portfolio["identified_gaps"], ["sector", "underweight_pct", "conviction", "score", "reason"])
         if len(gap_frame):
-            st.dataframe(gap_frame, use_container_width=True, hide_index=True)
+            st.dataframe(gap_frame, width='stretch', hide_index=True)
         else:
             render_empty_panel("Gap analysis will appear after portfolio ingestion and signal refresh.")
 
@@ -2357,7 +2357,7 @@ with tabs[0]:
                         f"{_skipped} already cached, {_failed} failed "
                         f"(out of {_PE_CACHE_JOB['count']} unique symbols)."
                     )
-            if st.button("Refresh Again", key="pe_cache_refresh_again_btn", use_container_width=True):
+            if st.button("Refresh Again", key="pe_cache_refresh_again_btn", width='stretch'):
                 _PE_CACHE_JOB.update({
                     "running": False, "done": False,
                     "count": 0, "saved": 0, "skipped": 0, "failed": 0,
@@ -2368,7 +2368,7 @@ with tabs[0]:
             if st.button(
                 "Refresh PE Cache — All Indices",
                 key="pe_cache_refresh_btn",
-                use_container_width=True,
+                width='stretch',
                 help="Fetches historical PE data for every stock in all selectable indices.",
             ):
                 _all_symbols: set[str] = set()
@@ -2496,7 +2496,7 @@ with tabs[1]:
             st.success(f"Saved {saved} holdings with buying prices")
             preview_df = pd.DataFrame(holdings)[["symbol", "quantity", "avg_buy_price", "buy_date"]]
             preview_df.columns = ["Symbol", "Qty", "Avg Buy Rs", "Buy Date"]
-            st.dataframe(preview_df, use_container_width=True, hide_index=True)
+            st.dataframe(preview_df, width='stretch', hide_index=True)
         else:
             st.warning("Could not parse the broker statement. Check the detected columns below.")
             if broker_file.name.lower().endswith(".csv"):
@@ -2542,7 +2542,7 @@ with tabs[1]:
         st.subheader("Saved Buying Prices")
         deh_df = pd.DataFrame(deh)[["symbol", "quantity", "avg_buy_price", "buy_date"]]
         deh_df.columns = ["Symbol", "Qty", "Avg Buy Rs", "Buy Date"]
-        st.dataframe(deh_df, use_container_width=True, hide_index=True)
+        st.dataframe(deh_df, width='stretch', hide_index=True)
 
     existing_prefs = portfolio["user_preferences"]
     default_payload = uploaded_payload or {
@@ -2571,21 +2571,21 @@ with tabs[1]:
             mf_df = st.data_editor(
                 _df(default_payload.get("mutual_funds", []), ["instrument_name", "market_value"]),
                 num_rows="dynamic",
-                use_container_width=True,
+                width='stretch',
                 key="mf_editor",
             )
             st.caption("ETFs")
             etf_df = st.data_editor(
                 _df(default_payload.get("etfs", []), ["instrument_name", "market_value"]),
                 num_rows="dynamic",
-                use_container_width=True,
+                width='stretch',
                 key="etf_editor",
             )
             st.caption("Direct equities")
             direct_df = st.data_editor(
                 _df(default_payload.get("direct_equities", []), ["instrument_name", "symbol", "quantity", "avg_buy_price", "market_value"]),
                 num_rows="dynamic",
-                use_container_width=True,
+                width='stretch',
                 key="direct_editor",
             )
             st.caption(
@@ -2593,7 +2593,7 @@ with tabs[1]:
                 "Your portfolio is already saved from the CSV upload — click this only to re-run the analysis "
                 "after editing the tables above."
             )
-            submitted = st.form_submit_button("Save And Ingest Portfolio", use_container_width=True)
+            submitted = st.form_submit_button("Save And Ingest Portfolio", width='stretch')
             if submitted:
                 ingest_payload = {
                     "macro_thesis": thesis,
@@ -2715,7 +2715,7 @@ with tabs[2]:
             "OpenAI GPT": "Generate Buy Ideas",
             "Compare Both": "Compare Both Providers",
         }[provider_choice]
-        run_buy = st.form_submit_button(btn_label, use_container_width=True)
+        run_buy = st.form_submit_button(btn_label, width='stretch')
 
         if run_buy:
             buy_request = {
@@ -2997,7 +2997,7 @@ with tabs[3]:
             "Portfolio context missing. Please upload a CAMS statement first "
             "so overlap scores can be computed before monitoring runs."
         )
-    if st.button("Run Monitoring For Current Portfolio", use_container_width=True, key="monitoring_tab_run_btn"):
+    if st.button("Run Monitoring For Current Portfolio", width='stretch', key="monitoring_tab_run_btn"):
         try:
             provider_for_mon = st.session_state.get("monitoring_llm_provider", "anthropic")
             provider_label = "Anthropic Claude" if provider_for_mon == "anthropic" else "OpenAI GPT"
@@ -3052,7 +3052,7 @@ with tabs[3]:
                     }
                     for r in direct_holdings
                 ]),
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
             )
         else:
@@ -3071,7 +3071,7 @@ with tabs[3]:
                     }
                     for r in watchlist
                 ]),
-                use_container_width=True,
+                width='stretch',
                 hide_index=True,
             )
             remove_sym = st.selectbox(
@@ -3098,7 +3098,7 @@ with tabs[3]:
                 wl_sector = st.text_input("Sector (optional)")
             with wl_c4:
                 wl_note = st.text_input("Note (optional)")
-            if st.form_submit_button("Add to Watchlist", use_container_width=True):
+            if st.form_submit_button("Add to Watchlist", width='stretch'):
                 sym_clean = wl_symbol.strip().upper()
                 name_clean = wl_name.strip()
                 if not sym_clean or not name_clean:
@@ -3143,7 +3143,7 @@ with tabs[3]:
         )
         st.dataframe(
             monitor_frame,
-            use_container_width=True,
+            width='stretch',
             hide_index=True,
             height=min(600, len(monitor_frame) * 35 + 38),
         )
@@ -3158,7 +3158,7 @@ with tabs[4]:
         "Macro Signal Feed",
         "Refresh and inspect the signal families that shape gap analysis, monitoring, and recommendation runs.",
     )
-    if st.button("Refresh Signals", use_container_width=True):
+    if st.button("Refresh Signals", width='stretch'):
         try:
             engine.run_signal_refresh(trigger="manual")
             push_notice("Signals refreshed.", "success")
@@ -3173,7 +3173,7 @@ with tabs[4]:
     )
     signal_frame = _df(signals[signal_family], ["sector", "conviction", "score", "source", "horizon", "detail"])
     if len(signal_frame):
-        st.dataframe(signal_frame, use_container_width=True, hide_index=True)
+        st.dataframe(signal_frame, width='stretch', hide_index=True)
     else:
         render_empty_panel("No signals available yet. Refresh signals or load the sample portfolio.")
 
