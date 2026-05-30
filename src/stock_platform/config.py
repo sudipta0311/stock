@@ -69,6 +69,15 @@ class AppConfig:
     mf_api_base_url: str = field(default_factory=lambda: os.getenv("MF_API_BASE_URL", "https://mfdata.in/api/v1"))
     mf_holdings_timeout_seconds: int = field(default_factory=lambda: int(os.getenv("MF_HOLDINGS_TIMEOUT_SECONDS", "20")))
 
+    # ── LangSmith tracing ──────────────────────────────────────────────────
+    # Set LANGCHAIN_TRACING_V2=true and LANGCHAIN_API_KEY in .env to enable.
+    # All LangGraph runs are traced automatically when enabled.
+    langsmith_api_key: str = field(default_factory=lambda: os.getenv("LANGCHAIN_API_KEY", ""))
+    langsmith_project: str = field(default_factory=lambda: os.getenv("LANGCHAIN_PROJECT", "stock-platform"))
+    langsmith_tracing: bool = field(
+        default_factory=lambda: os.getenv("LANGCHAIN_TRACING_V2", "").lower() == "true"
+    )
+
     @property
     def anthropic_enabled(self) -> bool:
         return bool(self.anthropic_api_key)
@@ -81,6 +90,10 @@ class AppConfig:
     def llm_enabled(self) -> bool:
         """True if at least one provider has a configured key."""
         return self.anthropic_enabled or self.openai_enabled
+
+    @property
+    def langsmith_enabled(self) -> bool:
+        return bool(self.langsmith_api_key) and self.langsmith_tracing
 
     @property
     def neon_enabled(self) -> bool:
