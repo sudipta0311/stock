@@ -23,23 +23,37 @@ ROOT = Path(__file__).resolve().parent
 # AppConfig is a frozen dataclass — reads os.getenv() once at construction.
 import os as _os, tomllib as _tomllib
 
-# Pass 1: Streamlit Cloud dashboard secrets
+# Pass 1: Streamlit Cloud dashboard secrets — flatten ALL levels.
+# IMPORTANT: TOML boolean true → Python True; must map to lowercase "true" so
+# langchain-core's env-var checks ("true" / "false") work correctly.
+def _flatten_secrets(mapping: Any, target: dict) -> None:
+    """Recursively walk st.secrets (or a TOML dict) and collect scalar leaves."""
+    for k, v in mapping.items():
+        if isinstance(v, bool):
+            target.setdefault(k, "true" if v else "false")
+        elif isinstance(v, (str, int, float)):
+            target.setdefault(k, str(v))
+        elif hasattr(v, "items"):  # nested AttrDict / TOML section
+            _flatten_secrets(v, target)
+
+_flat: dict[str, str] = {}
 try:
-    for _sk, _sv in st.secrets.items():
-        if isinstance(_sv, (str, int, float, bool)) and _sk not in _os.environ:
-            _os.environ[_sk] = str(_sv)
+    _flatten_secrets(st.secrets, _flat)
 except Exception:
     pass
+for _sk, _sv in _flat.items():
+    _os.environ.setdefault(_sk, _sv)
 
-# Pass 2: Read .streamlit/secrets.toml directly (bypasses st.secrets parsing)
+# Pass 2: Read .streamlit/secrets.toml directly (covers local dev).
 try:
     _secrets_toml = ROOT / ".streamlit" / "secrets.toml"
     if _secrets_toml.exists():
         with _secrets_toml.open("rb") as _sf:
             _toml_data = _tomllib.load(_sf)
-        for _sk, _sv in _toml_data.items():
-            if isinstance(_sv, str) and _sk not in _os.environ:
-                _os.environ[_sk] = _sv
+        _flat2: dict[str, str] = {}
+        _flatten_secrets(_toml_data, _flat2)
+        for _sk, _sv in _flat2.items():
+            _os.environ.setdefault(_sk, _sv)
 except Exception:
     pass
 # ─────────────────────────────────────────────────────────────────────────────
