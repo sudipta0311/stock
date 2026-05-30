@@ -15,6 +15,7 @@ Coverage helpers:
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,6 +28,7 @@ if str(_SRC) not in sys.path:
 
 import pandas as pd
 import yfinance as yf
+from yfinance import cache as yf_cache
 
 from stock_platform.config import AppConfig, load_app_env
 from stock_platform.data.repository import PlatformRepository
@@ -50,6 +52,18 @@ _NIFTY200_SAMPLE = [
 
 def _nse_ticker(symbol: str) -> str:
     return symbol.replace("&", "") + ".NS"
+
+
+def _configure_yfinance_cache() -> None:
+    cache_dir = _ROOT / "data" / "yfinance-cache" / f"pid-{os.getpid()}"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        yf.set_tz_cache_location(str(cache_dir))
+    except Exception as exc:
+        _log.debug("yfinance cache setup skipped: %r", exc)
+    yf_cache._TzCacheManager._tz_cache = yf_cache._TzCacheDummy()
+    yf_cache._CookieCacheManager._Cookie_cache = yf_cache._CookieCacheDummy()
+    yf_cache._ISINCacheManager._isin_cache = yf_cache._ISINCacheDummy()
 
 
 # ── DataFrame helpers ─────────────────────────────────────────────────────────
@@ -92,6 +106,7 @@ def snapshot_prices(
     Includes the NIFTY index (^NSEI) for benchmark forward-return calculation.
     Returns the number of rows written.
     """
+    _configure_yfinance_cache()
     universe = symbols or _NIFTY200_SAMPLE
     tickers  = [_nse_ticker(s) for s in universe] + [NIFTY_TICKER]
 
@@ -102,6 +117,7 @@ def snapshot_prices(
         interval=interval,
         auto_adjust=True,
         progress=False,
+        threads=False,
     )
 
     if raw.empty:
@@ -161,6 +177,7 @@ def snapshot_fundamentals(
 
     fetched_source is set to "yfinance" for all rows written here.
     """
+    _configure_yfinance_cache()
     universe     = symbols or _NIFTY200_SAMPLE
     rows_written = 0
 
@@ -249,7 +266,10 @@ def snapshot_fundamentals(
                             eps=excluded.eps,
                             debt_equity=excluded.debt_equity,
                             revenue_growth=excluded.revenue_growth,
-                            promoter_holding=excluded.promoter_holding,
+                            promoter_holding=COALESCE(
+                                excluded.promoter_holding,
+                                historical_fundamentals.promoter_holding
+                            ),
                             source=excluded.source,
                             fetched_source=excluded.fetched_source
                         """,
