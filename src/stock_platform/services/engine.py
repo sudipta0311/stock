@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -147,6 +148,12 @@ class PlatformEngine:
         )
         # Default LLM uses Anthropic; provider-keyed buy graphs are built on demand.
         self.llm = PlatformLLM(self.config, provider="anthropic")
+        # Activate LangSmith tracing if configured. LangGraph picks up these
+        # env vars automatically — no SDK call required.
+        if self.config.langsmith_enabled:
+            os.environ["LANGCHAIN_TRACING_V2"] = "true"
+            os.environ["LANGCHAIN_API_KEY"] = self.config.langsmith_api_key
+            os.environ["LANGCHAIN_PROJECT"] = self.config.langsmith_project
         self.pdf_parser = NSDLCASParser()
         self._signal_graph = None
         self._portfolio_graph = None
@@ -202,12 +209,18 @@ class PlatformEngine:
         self.provider._index_cache.pop("NIFTY50", None)
         self.provider._index_cache.pop("NIFTYNEXT50", None)
         graph = self._build_signal_graph()
-        return graph.invoke({"trigger": trigger, "macro_thesis": macro_thesis or ""})
+        return graph.invoke(
+            {"trigger": trigger, "macro_thesis": macro_thesis or ""},
+            {"run_name": f"signal_refresh/{trigger}", "tags": ["signal"], "metadata": {"trigger": trigger}},
+        )
 
     def ingest_portfolio(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.run_signal_refresh(trigger="ingestion", macro_thesis=payload.get("macro_thesis", ""))
         graph = self._build_portfolio_graph()
-        result = graph.invoke({"payload": payload})
+        result = graph.invoke(
+            {"payload": payload},
+            {"run_name": "ingest_portfolio", "tags": ["portfolio"]},
+        )
         # Buy and monitoring outputs are portfolio-dependent. Clear them after
         # a successful ingest so the UI cannot show stale actions from an older statement.
         self.repo.clear_recommendations()
@@ -232,7 +245,11 @@ class PlatformEngine:
         if not self.repo.list_signals("unified"):
             self.run_signal_refresh(trigger="buy-precheck")
         graph = self._build_buy_graph(llm_provider=llm_provider)
-        result = graph.invoke({"request": request})
+        result = graph.invoke(
+            {"request": request},
+            {"run_name": f"buy_analysis/{llm_provider}", "tags": ["buy", llm_provider],
+             "metadata": {"llm_provider": llm_provider, "top_n": request.get("top_n")}},
+        )
         elapsed = time.perf_counter() - start
         print(
             f"Buy flow completed in {elapsed:.1f}s "
@@ -460,7 +477,11 @@ class PlatformEngine:
         prefs["monitoring_runs_today"] = int(prefs.get("monitoring_runs_today", 0)) + 1
         self.repo.set_state("user_preferences", prefs)
         graph = self._build_monitor_graph(llm_provider=llm_provider)
-        result = graph.invoke({"request": request or {}})
+        result = graph.invoke(
+            {"request": request or {}},
+            {"run_name": f"monitoring/{llm_provider}", "tags": ["monitoring", llm_provider],
+             "metadata": {"llm_provider": llm_provider}},
+        )
         last_monitor_run = self.repo.get_state("last_monitor_run", {})
         last_monitor_run["llm_provider"] = llm_provider
         last_monitor_run["llm_label"] = "Anthropic Claude" if llm_provider == "anthropic" else "OpenAI GPT"
