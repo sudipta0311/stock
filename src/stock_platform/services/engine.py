@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import os
 import time
 from pathlib import Path
 from typing import Any
+
+_log = logging.getLogger(__name__)
 
 from stock_platform.agents import BuyAgents, MonitoringAgents, PortfolioAgents, SignalAgents
 from stock_platform.agents.buy_agents import MINIMUM_RR_RATIO
@@ -148,19 +151,34 @@ class PlatformEngine:
         )
         # Default LLM uses Anthropic; provider-keyed buy graphs are built on demand.
         self.llm = PlatformLLM(self.config, provider="anthropic")
-        # Activate LangSmith tracing if configured. LangGraph picks up these
-        # env vars automatically — no SDK call required.
+        # Activate LangSmith tracing — explicit tracer injection is more reliable
+        # than relying on env-var auto-detection inside Streamlit Cloud.
+        self._ls_tracer: Any = None
         if self.config.langsmith_enabled:
-            os.environ["LANGSMITH_TRACING"] = "true"
-            os.environ["LANGCHAIN_TRACING_V2"] = "true"
-            os.environ["LANGSMITH_API_KEY"] = self.config.langsmith_api_key
-            os.environ["LANGCHAIN_API_KEY"] = self.config.langsmith_api_key
-            os.environ["LANGSMITH_PROJECT"] = self.config.langsmith_project
-            os.environ["LANGCHAIN_PROJECT"] = self.config.langsmith_project
+            # Also set env vars so any langchain-core code that checks them works.
+            os.environ.setdefault("LANGSMITH_TRACING", "true")
+            os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
+            os.environ.setdefault("LANGSMITH_API_KEY", self.config.langsmith_api_key)
+            os.environ.setdefault("LANGCHAIN_API_KEY", self.config.langsmith_api_key)
+            os.environ.setdefault("LANGSMITH_PROJECT", self.config.langsmith_project)
+            os.environ.setdefault("LANGCHAIN_PROJECT", self.config.langsmith_project)
             if self.config.langsmith_endpoint:
-                os.environ["LANGSMITH_ENDPOINT"] = self.config.langsmith_endpoint
-            if self.config.langsmith_workspace_id:
-                os.environ["LANGSMITH_WORKSPACE_ID"] = self.config.langsmith_workspace_id
+                os.environ.setdefault("LANGSMITH_ENDPOINT", self.config.langsmith_endpoint)
+            try:
+                from langsmith import Client as _LSClient
+                from langchain_core.tracers import LangChainTracer as _LCTracer
+                _client = _LSClient(api_key=self.config.langsmith_api_key)
+                self._ls_tracer = _LCTracer(
+                    project_name=self.config.langsmith_project,
+                    client=_client,
+                )
+                _log.info(
+                    "LangSmith tracing active — project=%r endpoint=%s",
+                    self.config.langsmith_project,
+                    self.config.langsmith_endpoint or "https://api.smith.langchain.com",
+                )
+            except Exception as exc:
+                _log.warning("LangSmith tracer init failed (tracing disabled): %s", exc)
         self.pdf_parser = NSDLCASParser()
         self._signal_graph = None
         self._portfolio_graph = None
@@ -168,6 +186,24 @@ class PlatformEngine:
         # can coexist in the same session without being rebuilt each time.
         self._buy_graphs: dict[str, Any] = {}
         self._monitor_graphs: dict[str, Any] = {}
+
+    # ── Tracing helper ───────────────────────────────────────────────────────
+
+    def _trace_config(
+        self,
+        run_name: str,
+        tags: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Build a RunnableConfig for graph.invoke() with LangSmith callbacks when enabled."""
+        cfg: dict[str, Any] = {"run_name": run_name}
+        if tags:
+            cfg["tags"] = tags
+        if metadata:
+            cfg["metadata"] = {k: v for k, v in metadata.items() if v is not None}
+        if self._ls_tracer is not None:
+            cfg["callbacks"] = [self._ls_tracer]
+        return cfg
 
     # ── Graph builders ───────────────────────────────────────────────────────
 
@@ -218,7 +254,7 @@ class PlatformEngine:
         graph = self._build_signal_graph()
         return graph.invoke(
             {"trigger": trigger, "macro_thesis": macro_thesis or ""},
-            {"run_name": f"signal_refresh/{trigger}", "tags": ["signal"], "metadata": {"trigger": trigger}},
+            self._trace_config(f"signal_refresh/{trigger}", ["signal"], {"trigger": trigger}),
         )
 
     def ingest_portfolio(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -226,7 +262,7 @@ class PlatformEngine:
         graph = self._build_portfolio_graph()
         result = graph.invoke(
             {"payload": payload},
-            {"run_name": "ingest_portfolio", "tags": ["portfolio"]},
+            self._trace_config("ingest_portfolio", ["portfolio"]),
         )
         # Buy and monitoring outputs are portfolio-dependent. Clear them after
         # a successful ingest so the UI cannot show stale actions from an older statement.
@@ -254,8 +290,10 @@ class PlatformEngine:
         graph = self._build_buy_graph(llm_provider=llm_provider)
         result = graph.invoke(
             {"request": request},
-            {"run_name": f"buy_analysis/{llm_provider}", "tags": ["buy", llm_provider],
-             "metadata": {"llm_provider": llm_provider, "top_n": request.get("top_n")}},
+            self._trace_config(
+                f"buy_analysis/{llm_provider}", ["buy", llm_provider],
+                {"llm_provider": llm_provider, "top_n": request.get("top_n")},
+            ),
         )
         elapsed = time.perf_counter() - start
         print(
@@ -486,8 +524,10 @@ class PlatformEngine:
         graph = self._build_monitor_graph(llm_provider=llm_provider)
         result = graph.invoke(
             {"request": request or {}},
-            {"run_name": f"monitoring/{llm_provider}", "tags": ["monitoring", llm_provider],
-             "metadata": {"llm_provider": llm_provider}},
+            self._trace_config(
+                f"monitoring/{llm_provider}", ["monitoring", llm_provider],
+                {"llm_provider": llm_provider},
+            ),
         )
         last_monitor_run = self.repo.get_state("last_monitor_run", {})
         last_monitor_run["llm_provider"] = llm_provider
