@@ -151,9 +151,16 @@ class PlatformEngine:
         # Activate LangSmith tracing if configured. LangGraph picks up these
         # env vars automatically — no SDK call required.
         if self.config.langsmith_enabled:
+            os.environ["LANGSMITH_TRACING"] = "true"
             os.environ["LANGCHAIN_TRACING_V2"] = "true"
+            os.environ["LANGSMITH_API_KEY"] = self.config.langsmith_api_key
             os.environ["LANGCHAIN_API_KEY"] = self.config.langsmith_api_key
+            os.environ["LANGSMITH_PROJECT"] = self.config.langsmith_project
             os.environ["LANGCHAIN_PROJECT"] = self.config.langsmith_project
+            if self.config.langsmith_endpoint:
+                os.environ["LANGSMITH_ENDPOINT"] = self.config.langsmith_endpoint
+            if self.config.langsmith_workspace_id:
+                os.environ["LANGSMITH_WORKSPACE_ID"] = self.config.langsmith_workspace_id
         self.pdf_parser = NSDLCASParser()
         self._signal_graph = None
         self._portfolio_graph = None

@@ -8,6 +8,22 @@ import tomllib
 from dotenv import load_dotenv
 
 
+def _env_first(*names: str, default: str = "") -> str:
+    for name in names:
+        value = os.getenv(name, "")
+        if value:
+            return value
+    return default
+
+
+def _env_truthy(*names: str) -> bool:
+    for name in names:
+        value = os.getenv(name, "")
+        if value:
+            return value.lower() == "true"
+    return False
+
+
 def load_app_env(root_dir: Path | None = None) -> None:
     env_root = root_dir or Path(__file__).resolve().parents[2]
     load_dotenv(env_root / ".env", override=False)
@@ -70,12 +86,22 @@ class AppConfig:
     mf_holdings_timeout_seconds: int = field(default_factory=lambda: int(os.getenv("MF_HOLDINGS_TIMEOUT_SECONDS", "20")))
 
     # ── LangSmith tracing ──────────────────────────────────────────────────
-    # Set LANGCHAIN_TRACING_V2=true and LANGCHAIN_API_KEY in .env to enable.
+    # Supports both the legacy LANGCHAIN_* names and the current LANGSMITH_* names.
     # All LangGraph runs are traced automatically when enabled.
-    langsmith_api_key: str = field(default_factory=lambda: os.getenv("LANGCHAIN_API_KEY", ""))
-    langsmith_project: str = field(default_factory=lambda: os.getenv("LANGCHAIN_PROJECT", "stock-platform"))
+    langsmith_api_key: str = field(
+        default_factory=lambda: _env_first("LANGSMITH_API_KEY", "LANGCHAIN_API_KEY")
+    )
+    langsmith_project: str = field(
+        default_factory=lambda: _env_first(
+            "LANGSMITH_PROJECT", "LANGCHAIN_PROJECT", default="stock-platform"
+        )
+    )
+    langsmith_endpoint: str = field(default_factory=lambda: os.getenv("LANGSMITH_ENDPOINT", ""))
+    langsmith_workspace_id: str = field(
+        default_factory=lambda: os.getenv("LANGSMITH_WORKSPACE_ID", "")
+    )
     langsmith_tracing: bool = field(
-        default_factory=lambda: os.getenv("LANGCHAIN_TRACING_V2", "").lower() == "true"
+        default_factory=lambda: _env_truthy("LANGSMITH_TRACING", "LANGCHAIN_TRACING_V2")
     )
 
     @property
