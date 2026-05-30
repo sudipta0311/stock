@@ -26,8 +26,8 @@ import os as _os, tomllib as _tomllib
 # Pass 1: Streamlit Cloud dashboard secrets
 try:
     for _sk, _sv in st.secrets.items():
-        if isinstance(_sv, str) and _sk not in _os.environ:
-            _os.environ[_sk] = _sv
+        if isinstance(_sv, (str, int, float, bool)) and _sk not in _os.environ:
+            _os.environ[_sk] = str(_sv)
 except Exception:
     pass
 
