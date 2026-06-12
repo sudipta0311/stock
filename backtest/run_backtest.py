@@ -78,6 +78,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--weights-version", default=None,
                         help="Override quality_weights.yaml version label")
     parser.add_argument(
+        "--rebalance",
+        choices=["weekly", "monthly"],
+        default="weekly",
+        help="Rebalance frequency: weekly (every Monday) or monthly (first Monday of month)",
+    )
+    parser.add_argument(
         "--enrich-screener",
         action="store_true",
         default=False,
@@ -176,6 +182,7 @@ def main(argv: list[str] | None = None) -> int:
                 start_date=start,
                 end_date=end,
                 top_n=args.top_n,
+                freq=args.rebalance,
             )
             _emit("REPLAY_DONE", run_id=run_id)
         except Exception as exc:

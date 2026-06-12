@@ -13,6 +13,10 @@ on:
         description: "Minimum acceptable 6m hit rate (e.g. 0.45)"
         required: false
         default: "0.45"
+      rebalance:
+        description: "Rebalance frequency: weekly or monthly"
+        required: false
+        default: "weekly"
       enrich_screener:
         description: "Fill NULL ROCE/promoter from Screener.in after snapshot (true/false)"
         required: false
@@ -64,8 +68,9 @@ jobs:
           python -m backtest.run_backtest \
             --mode full \
             $ENRICH_FLAG \
-            --start-date ${{ steps.dates.outputs.start_date }} \
-            --end-date   ${{ steps.dates.outputs.end_date }} \
+            --start-date  ${{ steps.dates.outputs.start_date }} \
+            --end-date    ${{ steps.dates.outputs.end_date }} \
+            --rebalance   ${{ github.event.inputs.rebalance || 'weekly' }} \
             --hit-rate-floor ${{ github.event.inputs.hit_rate_floor || '0.45' }} \
             2>&1 | tee backtest_output.json
         continue-on-error: true   # We capture the exit code manually below.
