@@ -91,15 +91,17 @@ def compute_evidence_strength(
     components["sector_signal"] = sect_score
 
     # 6. Technical signal (0-0.10)
-    tech_score = 0.05  # default neutral
+    # Momentum-positive: far from 52w low = sustained strength.
+    # The contrarian bonus (near 52w low = good) was empirically anti-predictive.
     try:
         pct_from_low = float(tech_signals.get("pct_from_52w_low") or 50)
     except (TypeError, ValueError):
         pct_from_low = 50.0
-    if pct_from_low < 15:
-        tech_score = 0.10  # near 52W low — contrarian support
-    elif pct_from_low > 80:
-        tech_score = 0.02  # near 52W high — stretched
+    tech_score = (
+        0.10 if pct_from_low > 60 else
+        0.05 if pct_from_low > 30 else
+        0.02
+    )
     score += tech_score
     components["technical"] = tech_score
 

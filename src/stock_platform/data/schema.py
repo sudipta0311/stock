@@ -241,6 +241,10 @@ _DDL_SQLITE = [
         action              TEXT    NOT NULL,
         confidence_band     TEXT,
         quality_score       REAL,
+        composite_score     REAL,
+        quality_pct         REAL,
+        valuation_pct       REAL,
+        momentum_pct        REAL,
         forward_return_3m   REAL,
         forward_return_6m   REAL,
         forward_return_12m  REAL,
@@ -480,12 +484,16 @@ _DDL_PG = [
     CREATE TABLE IF NOT EXISTS backtest_recommendations (
         -- Per-symbol per-date recommendations from replay.py.
         id                  BIGSERIAL PRIMARY KEY,
-        run_id              TEXT    NOT NULL,
-        symbol              TEXT    NOT NULL,
-        recommendation_date TEXT    NOT NULL,
-        action              TEXT    NOT NULL,
+        run_id              TEXT             NOT NULL,
+        symbol              TEXT             NOT NULL,
+        recommendation_date TEXT             NOT NULL,
+        action              TEXT             NOT NULL,
         confidence_band     TEXT,
         quality_score       DOUBLE PRECISION,
+        composite_score     DOUBLE PRECISION,
+        quality_pct         DOUBLE PRECISION,
+        valuation_pct       DOUBLE PRECISION,
+        momentum_pct        DOUBLE PRECISION,
         forward_return_3m   DOUBLE PRECISION,
         forward_return_6m   DOUBLE PRECISION,
         forward_return_12m  DOUBLE PRECISION,
@@ -537,4 +545,8 @@ def initialize_schema(connection: Any) -> None:
     _ensure_column(connection, "monitoring_actions", "urgency", "TEXT NOT NULL DEFAULT 'LOW'")
     _ensure_column(connection, "historical_fundamentals", "fetched_source", "TEXT")
     _ensure_column(connection, "historical_fundamentals", "available_date", "TEXT")
+    _ensure_column(connection, "backtest_recommendations", "composite_score", "REAL")
+    _ensure_column(connection, "backtest_recommendations", "quality_pct",    "REAL")
+    _ensure_column(connection, "backtest_recommendations", "valuation_pct",  "REAL")
+    _ensure_column(connection, "backtest_recommendations", "momentum_pct",   "REAL")
     connection.commit()
