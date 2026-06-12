@@ -203,8 +203,8 @@ class HistoricalDataProvider:
             row = conn.execute(
                 """
                 SELECT * FROM historical_fundamentals
-                WHERE symbol = ? AND snapshot_date <= ?
-                ORDER BY snapshot_date DESC LIMIT 1
+                WHERE symbol = ? AND available_date <= ?
+                ORDER BY available_date DESC LIMIT 1
                 """,
                 (symbol, self.today.isoformat()),
             ).fetchone()

@@ -116,6 +116,56 @@ the impact is limited and acceptable for v1. Fix in v2 by routing date through p
 
 ---
 
+## Point-in-time (PIT) fundamentals
+
+### The look-ahead leak (fixed in this branch)
+
+Before this fix, `_get_fundamentals()` in `replay.py` queried:
+```sql
+WHERE symbol = ? AND snapshot_date <= ?
+ORDER BY snapshot_date DESC LIMIT 1
+```
+
+`snapshot_date` is the **quarter-end date** (e.g. 2023-12-31).  
+Indian companies publish quarterly results **30–60 days after quarter-end**.  
+So using `snapshot_date <= replay_date` allowed the replay to use Q4 2023 results
+while replaying a date of 2024-01-05 — data that was not publicly available then.
+
+### The fix
+
+Each row in `historical_fundamentals` now carries an `available_date` column:
+```
+available_date = snapshot_date + 60 days  (conservative publication lag)
+```
+
+`_get_fundamentals()` now queries:
+```sql
+WHERE symbol = ? AND available_date <= ?
+ORDER BY available_date DESC LIMIT 1
+```
+
+This prevents any fundamental row from appearing in replay before it would
+realistically have been available to investors.
+
+### Migration for existing databases
+
+If you have a `historical_fundamentals` table populated before this fix, run:
+```bash
+python -m backtest.run_backtest --mode migrate-pit
+```
+
+This backfills `available_date = snapshot_date + 60d` for all rows where
+`available_date IS NULL`.
+
+### Backward-incompatibility warning
+
+**Backtest results produced before this fix are NOT comparable to results produced
+after it.** The look-ahead leak inflated hit rates and alpha — particularly for the
+most recent quarters in the snapshot window. Always re-run the full pipeline after
+migrating.
+
+---
+
 ## Hit rate definition
 
 A recommendation is a **hit** if the stock beat NIFTY by more than **2 percentage points**

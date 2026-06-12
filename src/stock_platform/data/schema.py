@@ -192,6 +192,7 @@ _DDL_SQLITE = [
         id               INTEGER PRIMARY KEY AUTOINCREMENT,
         symbol           TEXT    NOT NULL,
         snapshot_date    TEXT    NOT NULL,
+        available_date   TEXT,
         roce             REAL,
         eps              REAL,
         debt_equity      REAL,
@@ -248,6 +249,7 @@ _DDL_SQLITE = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_hist_fund_symbol ON historical_fundamentals(symbol)",
+    "CREATE INDEX IF NOT EXISTS idx_hist_fund_avail  ON historical_fundamentals(symbol, available_date)",
     "CREATE INDEX IF NOT EXISTS idx_hist_price_symbol ON historical_prices(symbol)",
     "CREATE INDEX IF NOT EXISTS idx_bt_rec_run ON backtest_recommendations(run_id)",
 ]
@@ -435,6 +437,7 @@ _DDL_PG = [
         id               BIGSERIAL PRIMARY KEY,
         symbol           TEXT             NOT NULL,
         snapshot_date    TEXT             NOT NULL,
+        available_date   TEXT,
         roce             DOUBLE PRECISION,
         eps              DOUBLE PRECISION,
         debt_equity      DOUBLE PRECISION,
@@ -491,6 +494,7 @@ _DDL_PG = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_hist_fund_symbol ON historical_fundamentals(symbol)",
+    "CREATE INDEX IF NOT EXISTS idx_hist_fund_avail  ON historical_fundamentals(symbol, available_date)",
     "CREATE INDEX IF NOT EXISTS idx_hist_price_symbol ON historical_prices(symbol)",
     "CREATE INDEX IF NOT EXISTS idx_bt_rec_run ON backtest_recommendations(run_id)",
 ]
@@ -532,4 +536,5 @@ def initialize_schema(connection: Any) -> None:
         connection.execute(statement)
     _ensure_column(connection, "monitoring_actions", "urgency", "TEXT NOT NULL DEFAULT 'LOW'")
     _ensure_column(connection, "historical_fundamentals", "fetched_source", "TEXT")
+    _ensure_column(connection, "historical_fundamentals", "available_date", "TEXT")
     connection.commit()
