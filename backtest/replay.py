@@ -227,6 +227,31 @@ def _monday_range(start: date, end: date) -> list[date]:
     return mondays
 
 
+def _rebalance_dates(start: date, end: date, freq: str = "weekly") -> list[date]:
+    """
+    Return rebalance dates between start (inclusive) and end (exclusive).
+
+    freq="weekly"  : every Monday (same as _monday_range)
+    freq="monthly" : first Monday of each calendar month
+    """
+    if freq not in ("weekly", "monthly"):
+        raise ValueError(f"freq must be 'weekly' or 'monthly', got {freq!r}")
+
+    all_mondays = _monday_range(start, end)
+    if freq == "weekly":
+        return all_mondays
+
+    # Monthly: keep only the first Monday of each (year, month) pair.
+    seen: set[tuple[int, int]] = set()
+    result: list[date] = []
+    for d in all_mondays:
+        key = (d.year, d.month)
+        if key not in seen:
+            seen.add(key)
+            result.append(d)
+    return result
+
+
 def replay(
     repo: PlatformRepository,
     config: AppConfig,
@@ -235,16 +260,23 @@ def replay(
     run_id: str | None = None,
     top_n: int = 5,
     index_name: str = "NIFTY200",
+    freq: str = "weekly",
 ) -> str:
     """
-    Replay FLOW 2 for every Monday in [start_date, end_date).
+    Replay FLOW 2 for each rebalance date in [start_date, end_date).
+
+    freq="weekly"  : rebalance every Monday
+    freq="monthly" : rebalance on the first Monday of each month
 
     Returns the backtest run_id (written to backtest_runs).
     LLM nodes are skipped; only the quant pipeline runs.
     """
     run_id = run_id or f"bt-{uuid4().hex[:10]}"
-    mondays = _monday_range(start_date, end_date)
-    _log.info("replay: run_id=%s  %d weeks (%s → %s)", run_id, len(mondays), start_date, end_date)
+    mondays = _rebalance_dates(start_date, end_date, freq=freq)
+    _log.info(
+        "replay: run_id=%s  freq=%s  %d dates (%s → %s)",
+        run_id, freq, len(mondays), start_date, end_date,
+    )
 
     provider = HistoricalDataProvider(repo, replay_date=start_date)
     llm      = _NoOpLLM()
