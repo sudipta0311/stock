@@ -257,13 +257,13 @@ def score_run(repo: PlatformRepository, run_id: str) -> dict[str, Any]:
         "alpha_6m":              _alpha_mean(buy_results, "6m"),
         "alpha_12m":             _alpha_mean(buy_results, "12m") if report_12m else None,
         "median_alpha_6m":       _alpha_median(buy_results, "6m"),
-        "by_confidence":         {},
+        "by_rank_band":          {},
     }
 
     for band in ("GREEN", "YELLOW", "RED"):
         band_rows = [r for r in buy_results if r["confidence_band"] == band]
         if band_rows:
-            summary["by_confidence"][band] = {
+            summary["by_rank_band"][band] = {
                 "count":       len(band_rows),
                 "hit_rate_6m": _rate(band_rows, "6m"),
                 "alpha_6m":    _alpha_mean(band_rows, "6m"),

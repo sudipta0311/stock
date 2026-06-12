@@ -177,3 +177,80 @@ hit = (stock_forward_return - nifty_forward_return) > 2.0%
 
 Forward prices are fetched from `historical_prices` — the first available date
 at or after `recommendation_date + window_weeks`.
+
+---
+
+## Alpha model v2 — composite scoring & rank-IC evaluation
+
+### What changed from v1
+
+| Dimension | v1 (broken) | v2 (this branch) |
+|-----------|-------------|------------------|
+| Ranking signal | `_sector_adjusted()` ad-hoc multipliers | Three-pillar cross-sectional percentile |
+| Evaluation metric | Hit rate (binary, noisy) | Spearman rank IC (continuous, unbiased) |
+| Regression gate | `hit_rate_6m < 0.45` | `mean_ic_6m ≤ 0 OR decile_spread_6m ≤ 0` |
+| Look-ahead bias | `snapshot_date ≤ replay_date` | `available_date ≤ replay_date` (+60d lag) |
+| Pillar weights | Hardcoded | Walk-forward calibrated → `rules/composite_weights.yaml` |
+
+### Composite score formula
+
+```
+composite_score = w_q * quality_pct + w_v * valuation_pct + w_m * momentum_pct
+```
+
+where each pillar is a **cross-sectional percentile rank** (0→1, higher is better):
+
+| Pillar | Raw signal | Direction |
+|--------|-----------|-----------|
+| Quality | `roce × 0.6 + (1/(de+0.01)) × 0.4` | Higher ROCE, lower D/E → better |
+| Valuation | `-pe_trailing` | Lower PE → better (inverted) |
+| Momentum | `revenue_growth_pct` | Higher growth → better |
+
+- Ranks are **sector-neutral** when ≥5 peers share the same sector; universe-wide otherwise.
+- Winsorize ±3σ before ranking to clip outliers.
+- Missing values → replaced with 0.5 (middle rank, no signal).
+- When PE coverage < 30%, valuation weight is redistributed to quality.
+
+Default weights (written to `rules/composite_weights.yaml`):
+```yaml
+weights:
+  quality: 0.50
+  valuation: 0.25
+  momentum: 0.25
+```
+
+### Rank IC (Spearman) metrics
+
+`scorer.py` computes and writes to `backtest_runs`:
+
+| Column | Formula | Interpretation |
+|--------|---------|----------------|
+| `mean_ic_6m` | mean weekly Spearman ρ(composite, alpha_6m) | > 0 = signal exists |
+| `ic_tstat` | mean_ic / (std_ic / √n_weeks) | > 2 = statistically significant |
+| `icir` | mean_ic / std_ic | > 0.5 = consistent signal |
+| `decile_spread_6m` | avg alpha of top decile − bottom decile | > 0 = monotone ranking |
+| `median_alpha_6m` | median per-rec 6m alpha | robustness check vs mean |
+
+### Walk-forward calibration
+
+`calibrate.py` searches the 66 (w_q, w_v, w_m) triples (0.1-step grid, sum=1.0) using
+expanding-window folds (min 26-week train, 13-week validation step, ≥3 folds required):
+
+```bash
+python -m backtest.calibrate --run-id <run_id>
+```
+
+Selection rule: **highest mean validation IC, with positive IC in every fold**.
+If no combo qualifies, current `composite_weights.yaml` is left unchanged (NO_ROBUST_WINNER).
+
+### Confidence band vs rank band
+
+The DB column `confidence_band` stores composite score rank:
+- **GREEN** = rank 1–2 (highest composite score)
+- **YELLOW** = rank 3–4
+- **RED** = rank 5+
+
+The `SCORE_BY_RANK_BAND` event in run_backtest output reports per-band hit rates and alpha.
+The DB column name is retained for backward compatibility with production Streamlit flows.
+
+---

@@ -130,11 +130,11 @@ class TestScorerByConfidenceBand(unittest.TestCase):
             _insert_rec(conn, self.run_id, "YEL1",   self.base, "ACCUMULATE", "YELLOW", 0.55)
             conn.commit()
 
-    def test_by_confidence_populated(self):
+    def test_by_rank_band_populated(self):
         from backtest.scorer import score_run
         summary = score_run(self.repo, self.run_id)
-        self.assertIn("by_confidence", summary)
-        bands = summary["by_confidence"]
+        self.assertIn("by_rank_band", summary)
+        bands = summary["by_rank_band"]
         # GREEN band: GREEN1 beats NIFTY by >2% → hit
         if "GREEN" in bands:
             self.assertGreater(bands["GREEN"]["hit_rate_6m"] or 0, 0.0)
@@ -142,18 +142,17 @@ class TestScorerByConfidenceBand(unittest.TestCase):
 
 class TestWeightCombinations(unittest.TestCase):
     def test_all_sum_to_one(self):
-        from backtest.calibrate import _weight_combinations
-        combos = _weight_combinations()
-        self.assertGreater(len(combos), 100)
-        for combo in combos[:50]:   # spot-check first 50
+        from backtest.calibrate import _weight_grid
+        combos = _weight_grid(step=10)
+        self.assertEqual(len(combos), 66)
+        for combo in combos:
             self.assertAlmostEqual(sum(combo), 1.0, places=10)
 
     def test_count_reasonable(self):
-        from backtest.calibrate import _weight_combinations
-        combos = _weight_combinations()
-        # C(24,4) = 10626 valid 5-tuples in {0,0.05,...,1.0} summing to 1.0
-        self.assertGreater(len(combos), 500)
-        self.assertLess(len(combos), 15000)
+        from backtest.calibrate import _weight_grid
+        combos = _weight_grid(step=10)
+        # step=10 → 11 values per dimension → C(12,2) = 66 triples summing to 1.0
+        self.assertEqual(len(combos), 66)
 
 
 if __name__ == "__main__":

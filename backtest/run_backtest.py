@@ -196,8 +196,8 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         try:
             summary = score_run(repo=repo, run_id=run_id)
-            _emit("SCORE_DONE", **{k: v for k, v in summary.items() if k != "by_confidence"})
-            _emit("SCORE_BY_CONFIDENCE", by_confidence=summary.get("by_confidence", {}))
+            _emit("SCORE_DONE", **{k: v for k, v in summary.items() if k != "by_rank_band"})
+            _emit("SCORE_BY_RANK_BAND", by_rank_band=summary.get("by_rank_band", {}))
         except Exception as exc:
             _emit("SCORE_ERROR", error=str(exc))
             return 2
