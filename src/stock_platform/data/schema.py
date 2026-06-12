@@ -228,6 +228,11 @@ _DDL_SQLITE = [
         alpha_3m              REAL,
         alpha_6m              REAL,
         alpha_12m             REAL,
+        mean_ic_6m            REAL,
+        ic_tstat              REAL,
+        icir                  REAL,
+        decile_spread_6m      REAL,
+        median_alpha_6m       REAL,
         created_at            TEXT NOT NULL
     )
     """,
@@ -477,6 +482,11 @@ _DDL_PG = [
         alpha_3m              DOUBLE PRECISION,
         alpha_6m              DOUBLE PRECISION,
         alpha_12m             DOUBLE PRECISION,
+        mean_ic_6m            DOUBLE PRECISION,
+        ic_tstat              DOUBLE PRECISION,
+        icir                  DOUBLE PRECISION,
+        decile_spread_6m      DOUBLE PRECISION,
+        median_alpha_6m       DOUBLE PRECISION,
         created_at            TEXT NOT NULL
     )
     """,
@@ -549,4 +559,9 @@ def initialize_schema(connection: Any) -> None:
     _ensure_column(connection, "backtest_recommendations", "quality_pct",    "REAL")
     _ensure_column(connection, "backtest_recommendations", "valuation_pct",  "REAL")
     _ensure_column(connection, "backtest_recommendations", "momentum_pct",   "REAL")
+    _ensure_column(connection, "backtest_runs", "mean_ic_6m",       "REAL")
+    _ensure_column(connection, "backtest_runs", "ic_tstat",         "REAL")
+    _ensure_column(connection, "backtest_runs", "icir",             "REAL")
+    _ensure_column(connection, "backtest_runs", "decile_spread_6m", "REAL")
+    _ensure_column(connection, "backtest_runs", "median_alpha_6m",  "REAL")
     connection.commit()
