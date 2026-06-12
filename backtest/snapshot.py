@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -199,7 +199,11 @@ def snapshot_fundamentals(
 
                 n_sym = 0
                 for i, col in enumerate(qis_cols[:8]):
-                    snapshot_date = pd.Timestamp(col).strftime("%Y-%m-%d")
+                    snapshot_date  = pd.Timestamp(col).strftime("%Y-%m-%d")
+                    # Indian quarterly results publish 30–60 days after quarter-end.
+                    # Use 60 days as a conservative point-in-time available_date so
+                    # backtest replay cannot use data before it was publicly available.
+                    available_date = (pd.Timestamp(col) + timedelta(days=60)).strftime("%Y-%m-%d")
 
                     # Nearest balance sheet quarter (may differ from income stmt quarter)
                     bs_col = _nearest_col(col, qbs_cols)
@@ -258,10 +262,11 @@ def snapshot_fundamentals(
                     conn.execute(
                         """
                         INSERT INTO historical_fundamentals
-                            (symbol, snapshot_date, roce, eps, debt_equity,
+                            (symbol, snapshot_date, available_date, roce, eps, debt_equity,
                              revenue_growth, promoter_holding, source, fetched_source)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(symbol, snapshot_date) DO UPDATE SET
+                            available_date=excluded.available_date,
                             roce=excluded.roce,
                             eps=excluded.eps,
                             debt_equity=excluded.debt_equity,
@@ -273,7 +278,7 @@ def snapshot_fundamentals(
                             source=excluded.source,
                             fetched_source=excluded.fetched_source
                         """,
-                        (symbol, snapshot_date, roce, eps, debt_equity,
+                        (symbol, snapshot_date, available_date, roce, eps, debt_equity,
                          rev_growth, None, "yfinance", "yfinance"),
                     )
                     n_sym += 1

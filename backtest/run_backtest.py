@@ -61,9 +61,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Stock platform backtester")
     parser.add_argument(
         "--mode",
-        choices=["snapshot", "replay", "score", "full", "coverage"],
+        choices=["snapshot", "replay", "score", "full", "coverage", "migrate-pit"],
         default="full",
-        help="Which phase(s) to run (coverage = null-rate report only)",
+        help="Which phase(s) to run (coverage = null-rate report only; migrate-pit = backfill available_date)",
     )
     parser.add_argument("--start-date", type=_parse_date, required=False,
                         help="Backtest start date (YYYY-MM-DD)")
@@ -112,6 +112,30 @@ def main(argv: list[str] | None = None) -> int:
     # ── coverage-only mode ────────────────────────────────────────────────────
     if args.mode == "coverage":
         report_coverage(repo)
+        _emit("DONE", run_id=None)
+        return 0
+
+    # ── migrate-pit: backfill available_date = snapshot_date + 60d ───────────
+    if args.mode == "migrate-pit":
+        try:
+            from datetime import timedelta
+            with repo.connect() as conn:
+                rows = conn.execute(
+                    "SELECT symbol, snapshot_date FROM historical_fundamentals WHERE available_date IS NULL"
+                ).fetchall()
+                updated = 0
+                for row in rows:
+                    avail = (date.fromisoformat(row["snapshot_date"]) + timedelta(days=60)).isoformat()
+                    conn.execute(
+                        "UPDATE historical_fundamentals SET available_date = ? WHERE symbol = ? AND snapshot_date = ?",
+                        (avail, row["symbol"], row["snapshot_date"]),
+                    )
+                    updated += 1
+                conn.commit()
+            _emit("MIGRATE_PIT_DONE", rows_updated=updated)
+        except Exception as exc:
+            _emit("MIGRATE_PIT_ERROR", error=str(exc))
+            return 2
         _emit("DONE", run_id=None)
         return 0
 

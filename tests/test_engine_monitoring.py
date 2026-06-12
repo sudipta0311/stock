@@ -101,7 +101,7 @@ class EngineMonitoringTests(unittest.TestCase):
 
     def test_ingest_clears_persisted_buy_comparison_result(self) -> None:
         self.engine.repo.set_state("buy_comparison_result", {"anthropic": {"recommendations": [{"symbol": "BEL"}]}})
-        fake_graph = type("FakeGraph", (), {"invoke": lambda self, _: {"normalized_exposure": []}})()
+        fake_graph = type("FakeGraph", (), {"invoke": lambda self, *a, **kw: {"normalized_exposure": []}})()
         with (
             patch.object(self.engine, "run_signal_refresh", return_value={}),
             patch.object(self.engine, "_build_portfolio_graph", return_value=fake_graph),
