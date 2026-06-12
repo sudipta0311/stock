@@ -317,6 +317,196 @@ def fetch_screener_history(symbol: str) -> dict[str, dict[str, Any]]:
     return result
 
 
+# ── Extended quarterly history (12 quarters of revenue, PAT, EPS) ────────────
+
+def _parse_quarterly_full(
+    soup: BeautifulSoup,
+) -> dict[str, dict[str, float | None]]:
+    """
+    Parse the Screener #quarters table for Revenue, PAT (net profit), and EPS.
+    Returns {snapshot_date: {revenue, pat, eps}} for up to 12 quarters.
+    Values are in Crores for revenue/PAT; EPS is rupees per share.
+    """
+    result: dict[str, dict[str, float | None]] = {}
+    rows = soup.select("#quarters table tr")
+    if len(rows) < 2:
+        return result
+
+    header_cells = rows[0].select("th, td")
+    date_strs = [
+        _quarter_label_to_date(c.get_text(" ", strip=True))
+        for c in header_cells[1:]
+    ]
+    if not any(date_strs):
+        return result
+
+    # Pre-populate result dict for all valid dates
+    for d in date_strs:
+        if d:
+            result[d] = {"revenue": None, "pat": None, "eps": None}
+
+    for row in rows[1:]:
+        cells = row.select("th, td")
+        if not cells:
+            continue
+        raw_label = cells[0].get_text(" ", strip=True).lower().replace("+", "").strip()
+
+        is_sales  = any(kw in raw_label for kw in ("sales", "revenue"))
+        is_pat    = any(kw in raw_label for kw in ("net profit", "profit after tax", "pat"))
+        is_eps    = "eps" in raw_label
+
+        if not (is_sales or is_pat or is_eps):
+            continue
+
+        for i, cell in enumerate(cells[1:]):
+            if i >= len(date_strs) or not date_strs[i]:
+                continue
+            val = _clean_number(cell.get_text(" ", strip=True))
+            d   = date_strs[i]
+            if val is None or d not in result:
+                continue
+            if is_sales and result[d]["revenue"] is None:
+                result[d]["revenue"] = val
+            elif is_pat and result[d]["pat"] is None:
+                result[d]["pat"] = val
+            elif is_eps and result[d]["eps"] is None:
+                result[d]["eps"] = val
+
+    return result
+
+
+def _parse_annual_de(soup: BeautifulSoup) -> float | None:
+    """
+    Get the most recent Debt/Equity from the balance-sheet section (annual).
+    Screener shows long-term borrowings and total equity; we approximate D/E.
+    Returns None when unavailable.
+    """
+    for section in soup.select("section"):
+        heading = section.select_one("h2")
+        if not heading or "Balance Sheet" not in heading.get_text():
+            continue
+        table = section.select_one("table")
+        if not table:
+            continue
+        rows = table.select("tr")
+        borrowings_row = equity_row = None
+        for row in rows:
+            cells = row.select("th, td")
+            if not cells:
+                continue
+            label = cells[0].get_text(" ", strip=True).lower()
+            if any(kw in label for kw in ("borrowing", "long term debt", "debt")):
+                borrowings_row = cells
+            elif any(kw in label for kw in ("equity", "net worth", "shareholders")):
+                equity_row = cells
+        if borrowings_row and equity_row:
+            # Use most recent column (last data cell)
+            for b_cell, e_cell in zip(reversed(borrowings_row[1:]), reversed(equity_row[1:])):
+                b = _clean_number(b_cell.get_text(" ", strip=True))
+                e = _clean_number(e_cell.get_text(" ", strip=True))
+                if b is not None and e is not None and e != 0:
+                    return round(b / e, 3)
+    return None
+
+
+def fetch_quarterly_history(
+    symbol: str,
+) -> dict[str, dict[str, Any]]:
+    """
+    Fetch up to 12 quarters of fundamental data from Screener.in for a symbol.
+
+    Returns {snapshot_date: {revenue_cr, pat_cr, eps, debt_equity}} where
+    snapshot_date is the quarter-end date string "YYYY-MM-DD".
+
+    Revenue and PAT are in Crores (raw from Screener).
+    EPS is rupees per share.
+    debt_equity is annual (forward-filled to all quarters).
+    """
+    soup = _get_soup(symbol)
+    if soup is None:
+        _log.warning("fetch_quarterly_history %s: page unavailable", symbol)
+        return {}
+
+    quarterly = _parse_quarterly_full(soup)
+    de        = _parse_annual_de(soup)
+
+    result: dict[str, dict[str, Any]] = {}
+    for date_str, vals in quarterly.items():
+        result[date_str] = {
+            "revenue_cr":  vals.get("revenue"),
+            "pat_cr":      vals.get("pat"),
+            "eps":         vals.get("eps"),
+            "debt_equity": de,     # annual, forward-filled to all quarters
+        }
+
+    return result
+
+
+def store_quarterly_history(
+    repo: PlatformRepository,
+    symbol: str,
+    history: dict[str, dict[str, Any]],
+) -> int:
+    """
+    Upsert quarterly history rows into historical_fundamentals.
+
+    Computes revenue_growth_pct as YoY if the same quarter 4 periods back exists.
+    Sets available_date = snapshot_date + 60d (conservative Indian disclosure lag).
+    Uses first-non-null-wins for all fields (never overwrites yfinance values).
+
+    Returns the number of rows written.
+    """
+    from datetime import date, timedelta
+
+    if not history:
+        return 0
+
+    sorted_dates = sorted(history.keys())
+    rows_written = 0
+
+    with repo.connect() as conn:
+        for i, snap_date_str in enumerate(sorted_dates):
+            data           = history[snap_date_str]
+            snap_date      = date.fromisoformat(snap_date_str)
+            avail_date_str = (snap_date + timedelta(days=60)).isoformat()
+
+            eps        = data.get("eps")
+            de         = data.get("debt_equity")
+            revenue    = data.get("revenue_cr")
+            rev_growth = None
+
+            # YoY revenue growth: compare to same quarter 4 periods back (≈ 1 year)
+            if revenue is not None and i >= 4:
+                prev_date_str = sorted_dates[i - 4]
+                prev_rev = history[prev_date_str].get("revenue_cr")
+                if prev_rev and abs(prev_rev) > 0:
+                    rev_growth = round((revenue - prev_rev) / abs(prev_rev) * 100, 2)
+
+            conn.execute(
+                """
+                INSERT INTO historical_fundamentals
+                    (symbol, snapshot_date, available_date, eps, debt_equity,
+                     revenue_growth, source, fetched_source)
+                VALUES (?, ?, ?, ?, ?, ?, 'screener', 'screener')
+                ON CONFLICT(symbol, snapshot_date) DO UPDATE SET
+                    available_date  = COALESCE(historical_fundamentals.available_date, excluded.available_date),
+                    eps             = COALESCE(historical_fundamentals.eps,            excluded.eps),
+                    debt_equity     = COALESCE(historical_fundamentals.debt_equity,    excluded.debt_equity),
+                    revenue_growth  = COALESCE(historical_fundamentals.revenue_growth, excluded.revenue_growth),
+                    fetched_source  = CASE
+                        WHEN historical_fundamentals.fetched_source IS NULL THEN 'screener'
+                        ELSE historical_fundamentals.fetched_source
+                    END
+                """,
+                (symbol, snap_date_str, avail_date_str, eps, de, rev_growth),
+            )
+            rows_written += 1
+
+        conn.commit()
+
+    return rows_written
+
+
 # ── DB enrichment ─────────────────────────────────────────────────────────────
 
 def enrich_from_screener(

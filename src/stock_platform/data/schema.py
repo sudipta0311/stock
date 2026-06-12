@@ -253,6 +253,7 @@ _DDL_SQLITE = [
         forward_return_3m   REAL,
         forward_return_6m   REAL,
         forward_return_12m  REAL,
+        alpha_6m            REAL,
         hit                 INTEGER,
         UNIQUE(run_id, symbol, recommendation_date)
     )
@@ -507,6 +508,7 @@ _DDL_PG = [
         forward_return_3m   DOUBLE PRECISION,
         forward_return_6m   DOUBLE PRECISION,
         forward_return_12m  DOUBLE PRECISION,
+        alpha_6m            DOUBLE PRECISION,
         hit                 BOOLEAN,
         UNIQUE(run_id, symbol, recommendation_date)
     )
@@ -559,6 +561,7 @@ def initialize_schema(connection: Any) -> None:
     _ensure_column(connection, "backtest_recommendations", "quality_pct",    "REAL")
     _ensure_column(connection, "backtest_recommendations", "valuation_pct",  "REAL")
     _ensure_column(connection, "backtest_recommendations", "momentum_pct",   "REAL")
+    _ensure_column(connection, "backtest_recommendations", "alpha_6m",       "REAL")
     _ensure_column(connection, "backtest_runs", "mean_ic_6m",       "REAL")
     _ensure_column(connection, "backtest_runs", "ic_tstat",         "REAL")
     _ensure_column(connection, "backtest_runs", "icir",             "REAL")

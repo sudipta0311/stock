@@ -200,18 +200,20 @@ def score_run(repo: PlatformRepository, run_id: str) -> dict[str, Any]:
 
             results.append(row)
 
-        # Write forward returns back to backtest_recommendations.
+        # Write forward returns (including alpha_6m) back to backtest_recommendations.
         for row in results:
             conn.execute(
                 """
                 UPDATE backtest_recommendations SET
-                    forward_return_3m=?, forward_return_6m=?, forward_return_12m=?, hit=?
+                    forward_return_3m=?, forward_return_6m=?, forward_return_12m=?,
+                    alpha_6m=?, hit=?
                 WHERE run_id=? AND symbol=? AND recommendation_date=?
                 """,
                 (
                     row.get("forward_return_3m"),
                     row.get("forward_return_6m"),
                     row.get("forward_return_12m"),
+                    row.get("alpha_6m"),
                     row.get("hit_6m"),
                     run_id, row["symbol"], row["recommendation_date"],
                 ),
