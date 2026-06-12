@@ -45,7 +45,7 @@ logging.basicConfig(
 )
 _log = logging.getLogger("backtest.run_backtest")
 
-_DEFAULT_HIT_RATE_FLOOR = 0.45
+_DEFAULT_HIT_RATE_FLOOR = 0.45  # legacy; superseded by IC gate below
 
 
 def _emit(event: str, **kwargs) -> None:
@@ -195,15 +195,34 @@ def main(argv: list[str] | None = None) -> int:
             _emit("SCORE_ERROR", error=str(exc))
             return 2
 
-        hit_rate_6m = summary.get("hit_rate_6m")
-        if hit_rate_6m is not None and hit_rate_6m < args.hit_rate_floor:
-            _emit(
-                "HIT_RATE_REGRESSION",
-                hit_rate_6m=hit_rate_6m,
-                floor=args.hit_rate_floor,
-                message=f"Hit rate {hit_rate_6m:.1%} < floor {args.hit_rate_floor:.1%}",
-            )
-            return 1
+        mean_ic_6m       = summary.get("mean_ic_6m")
+        decile_spread_6m = summary.get("decile_spread_6m")
+
+        # Primary regression gate: IC and decile spread must both be positive.
+        # If neither is available (insufficient data), fall back to hit-rate gate.
+        if mean_ic_6m is not None and decile_spread_6m is not None:
+            if mean_ic_6m <= 0 or decile_spread_6m <= 0:
+                _emit(
+                    "IC_REGRESSION",
+                    mean_ic_6m=mean_ic_6m,
+                    decile_spread_6m=decile_spread_6m,
+                    message=(
+                        f"Rank IC regression: mean_ic_6m={mean_ic_6m:.4f} "
+                        f"decile_spread_6m={decile_spread_6m:.4f} — both must be > 0"
+                    ),
+                )
+                return 1
+        else:
+            # Fallback: legacy hit-rate gate when not enough IC data.
+            hit_rate_6m = summary.get("hit_rate_6m")
+            if hit_rate_6m is not None and hit_rate_6m < args.hit_rate_floor:
+                _emit(
+                    "HIT_RATE_REGRESSION",
+                    hit_rate_6m=hit_rate_6m,
+                    floor=args.hit_rate_floor,
+                    message=f"Hit rate {hit_rate_6m:.1%} < floor {args.hit_rate_floor:.1%}",
+                )
+                return 1
 
     _emit("DONE", run_id=run_id)
     return 0
