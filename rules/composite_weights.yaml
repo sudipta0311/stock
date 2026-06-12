@@ -1,0 +1,11 @@
+version: v20260612
+calibrated_at: '2026-06-12T00:00:00Z'
+# Pillar weights for the three-factor composite score.
+# quality + valuation + momentum must sum to 1.0 (normalised internally if not).
+#
+# When valuation data coverage is <30% of universe (common in backtest mode),
+# the valuation weight is redistributed to quality automatically.
+weights:
+  quality:   0.50
+  valuation: 0.25
+  momentum:  0.25

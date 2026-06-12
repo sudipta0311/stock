@@ -31,6 +31,7 @@ if str(_SRC) not in sys.path:
 import pandas as pd
 
 from stock_platform.agents.buy_agents import BuyAgents
+from stock_platform.agents.composite_score import compute_composite_scores
 from stock_platform.config import AppConfig
 from stock_platform.data.repository import PlatformRepository
 from stock_platform.graphs.buy_graph import build_buy_graph
@@ -38,122 +39,23 @@ from stock_platform.services.llm import PlatformLLM
 
 _log = logging.getLogger(__name__)
 
-# ── Step 3: Sector-rotation multiplier ───────────────────────────────────────
-# Known sectors for the NIFTY200 backtest universe. The graph returns sector
-# "Unknown" for all HistoricalDataProvider stocks; this map lets replay.py
-# apply per-sector conviction boosts to the within-week confidence ranking
-# WITHOUT touching buy_agents or quant_model.
-#
-# Multiplier is applied to quality_score ONLY for band-rank ordering.
-# The stored quality_score column is left unchanged (raw quant model output).
-_SECTOR_MAP: dict[str, str] = {
-    # Capital Goods / Industrials
-    "BEL":        "Capital Goods",
-    "ABB":        "Capital Goods",
-    "BHEL":       "Capital Goods",
-    "SIEMENS":    "Capital Goods",
-    "LTIM":       "Capital Goods",
-    "LT":         "Capital Goods",
-    "CUMMINSIND": "Capital Goods",
-    "THERMAX":    "Capital Goods",
-    # Auto
-    "MARUTI":     "Auto",
-    "TATAMOTORS": "Auto",
-    "M&M":        "Auto",
-    "BAJAJ-AUTO": "Auto",
-    "EICHERMOT":  "Auto",
-    "HEROMOTOCO": "Auto",
-    "BALKRISIND": "Auto",
-    # IT
-    "TCS":        "IT",
-    "INFY":       "IT",
-    "WIPRO":      "IT",
-    "HCLTECH":    "IT",
-    "TECHM":      "IT",
-    "MPHASIS":    "IT",
-    "COFORGE":    "IT",
-    # FMCG
-    "ITC":        "FMCG",
-    "HINDUNILVR": "FMCG",
-    "NESTLEIND":  "FMCG",
-    "DABUR":      "FMCG",
-    "MARICO":     "FMCG",
-    "COLPAL":     "FMCG",
-    "BRITANNIA":  "FMCG",
-    # Healthcare / Pharma
-    "SUNPHARMA":  "Healthcare",
-    "DRREDDY":    "Healthcare",
-    "CIPLA":      "Healthcare",
-    "DIVISLAB":   "Healthcare",
-    "APOLLOHOSP": "Healthcare",
-    "MAXHEALTH":  "Healthcare",
-    # Chemicals
-    "PIDILITIND": "Chemicals",
-    "SRF":        "Chemicals",
-    "AARTIIND":   "Chemicals",
-    "DEEPAKNTR":  "Chemicals",
-    # Banking / Finance
-    "HDFCBANK":   "Banking",
-    "ICICIBANK":  "Banking",
-    "KOTAKBANK":  "Banking",
-    "AXISBANK":   "Banking",
-    "SBIN":       "Banking",
-    "INDUSINDBK": "Banking",
-    "BAJFINANCE": "Banking",
-    "BAJAJFINSV": "Banking",
-    "HDFCLIFE":   "Banking",
-    "SBILIFE":    "Banking",
-    # Energy / O&G
-    "RELIANCE":   "Energy",
-    "ONGC":       "Energy",
-    "BPCL":       "Energy",
-    "IOC":        "Energy",
-    "NTPC":       "Energy",
-    "POWERGRID":  "Energy",
-    "TATAPOWER":  "Energy",
-    # Metals / Mining
-    "TATASTEEL":  "Metals",
-    "JSWSTEEL":   "Metals",
-    "HINDALCO":   "Metals",
-    "VEDL":       "Metals",
-    "COALINDIA":  "Metals",
-    # Telecom
-    "BHARTIARTL": "Telecom",
-}
-
-# Build a conviction → multiplier lookup from the seed portfolio's identified_gaps.
-# Derived at module load time so the overhead is paid once.
-_CONVICTION_MULT: dict[str, float] = {
-    "BUY":         1.10,
-    "POSITIVE":    1.05,
-    "NEUTRAL":     1.00,
-    "AVOID":       0.90,
-    "STRONG_AVOID": 0.85,
-}
-
-# Precompute sector → multiplier from _SEED_PORTFOLIO_CONTEXT (populated below).
-_SECTOR_MULTIPLIER: dict[str, float] = {}   # filled after _SEED_PORTFOLIO_CONTEXT is defined
-
-
-# Simple seeded test portfolio — enough to drive sector-gap logic.
+# Minimal seed portfolio context — drives the buy graph's sector-gap analysis.
+# All backtest stocks return sector "Unknown" (HistoricalDataProvider), so only
+# the "Unknown" gap entry matters; it keeps the gap score high for every candidate.
 _SEED_PORTFOLIO_CONTEXT = {
     "portfolio_meta": {"portfolio_last_updated": "2020-01-01T00:00:00Z"},
     "raw_holdings": [],
     "normalized_exposure": [
-        {"symbol": "HDFCBANK",  "company_name": "HDFC Bank",  "sector": "Banking",           "total_weight": 8.0,  "source_mix_json": "{}", "attribution_json": "[]", "updated_at": "2020-01-01"},
-        {"symbol": "INFY",      "company_name": "Infosys",    "sector": "IT",                "total_weight": 6.0,  "source_mix_json": "{}", "attribution_json": "[]", "updated_at": "2020-01-01"},
-        {"symbol": "RELIANCE",  "company_name": "Reliance",   "sector": "Energy",            "total_weight": 7.0,  "source_mix_json": "{}", "attribution_json": "[]", "updated_at": "2020-01-01"},
+        {"symbol": "HDFCBANK", "company_name": "HDFC Bank", "sector": "Banking",
+         "total_weight": 8.0, "source_mix_json": "{}", "attribution_json": "[]", "updated_at": "2020-01-01"},
+        {"symbol": "INFY",     "company_name": "Infosys",   "sector": "IT",
+         "total_weight": 6.0, "source_mix_json": "{}", "attribution_json": "[]", "updated_at": "2020-01-01"},
+        {"symbol": "RELIANCE", "company_name": "Reliance",  "sector": "Energy",
+         "total_weight": 7.0, "source_mix_json": "{}", "attribution_json": "[]", "updated_at": "2020-01-01"},
     ],
     "overlap_scores": [],
     "identified_gaps": [
-        # "Unknown" catches all HistoricalDataProvider stocks (no live sector data in snapshots).
-        {"sector": "Unknown",       "underweight_pct": 20.0, "conviction": "BUY",      "score": 0.80, "reason": "Backtest universe"},
-        {"sector": "Capital Goods", "underweight_pct": 8.0,  "conviction": "BUY",      "score": 0.75, "reason": "Infra push"},
-        {"sector": "Healthcare",    "underweight_pct": 5.0,  "conviction": "POSITIVE",  "score": 0.60, "reason": "Pharma tailwinds"},
-        {"sector": "Auto",          "underweight_pct": 6.0,  "conviction": "POSITIVE",  "score": 0.65, "reason": "EV cycle"},
-        {"sector": "Chemicals",     "underweight_pct": 4.0,  "conviction": "NEUTRAL",   "score": 0.50, "reason": "Import substitution"},
-        {"sector": "FMCG",          "underweight_pct": 3.0,  "conviction": "POSITIVE",  "score": 0.55, "reason": "Rural demand"},
-        {"sector": "IT",            "underweight_pct": 3.0,  "conviction": "POSITIVE",  "score": 0.58, "reason": "AI exports"},
+        {"sector": "Unknown", "underweight_pct": 20.0, "conviction": "BUY", "score": 0.80, "reason": "Backtest universe"},
     ],
     "unified_signals": [],
     "user_preferences": {"macro_thesis": "India infra + domestic consumption"},
@@ -161,10 +63,6 @@ _SEED_PORTFOLIO_CONTEXT = {
     "direct_equity_holdings": [],
     "source_health_warning": None,
 }
-
-# Populate sector → multiplier from the seed gaps defined above.
-for _gap in _SEED_PORTFOLIO_CONTEXT["identified_gaps"]:
-    _SECTOR_MULTIPLIER[_gap["sector"]] = _CONVICTION_MULT.get(_gap["conviction"], 1.0)
 
 
 class HistoricalDataProvider:
@@ -396,49 +294,54 @@ def replay(
         recs = result.get("recommendations", [])
         market_band = result.get("confidence", {}).get("band", "YELLOW")
 
-        # ── Phase (c): DB writes ──────────────────────────────────────────────
-        # check_confidence returns a single market-level band (same for every rec in
-        # the week). In backtest the production DB always satisfies signal_count≥5 so
-        # every week is GREEN. Derive per-rec confidence_band from within-week rank
-        # instead (recs are already sorted desc by quality_score by the graph):
-        #   rank 1      → GREEN   (best pick of the week)
+        # ── Phase (c): composite scoring + DB writes ──────────────────────────
+        # Per-rec confidence_band is derived from within-week composite rank
+        # (not market-level band, which is GREEN for all backtest weeks):
+        #   rank 1      → GREEN
         #   ranks 2–3   → YELLOW
         #   ranks 4+    → RED
         _RANK_BANDS = ["GREEN", "YELLOW", "YELLOW", "RED", "RED"]
 
-        # Step 3: apply sector multiplier to quality_score for band ordering.
-        # quality_score stored to DB remains the raw quant value; only the
-        # sort key used to assign confidence_band uses the adjusted score.
-        def _sector_adjusted(sym: str, raw_score: float) -> float:
-            sector = _SECTOR_MAP.get(sym, "Unknown")
-            mult   = _SECTOR_MULTIPLIER.get(sector, _SECTOR_MULTIPLIER.get("Unknown", 1.0))
-            return min(1.0, raw_score * mult)
-
-        # Extract (symbol, action, score) for all recs, sort by sector-adjusted score.
-        rec_tuples: list[tuple[str, str, float]] = []
+        # Build a universe-of-week list for cross-sectional composite scoring.
+        # Each entry carries financials fetched from the snapshot tables.
+        week_candidates: list[dict[str, Any]] = []
         for rec in recs:
-            sym = getattr(rec, "symbol", None) or rec.get("symbol") if isinstance(rec, dict) else rec.symbol
-            act = getattr(rec, "action", None) or rec.get("action", "WAIT") if isinstance(rec, dict) else rec.action
-            scr = getattr(rec, "score", 0.5) if hasattr(rec, "score") else rec.get("score", 0.5) if isinstance(rec, dict) else 0.5
-            rec_tuples.append((sym, act, float(scr)))
+            sym = getattr(rec, "symbol", None) or (rec.get("symbol") if isinstance(rec, dict) else None)
+            act = getattr(rec, "action", None) or (rec.get("action", "WAIT") if isinstance(rec, dict) else "WAIT")
+            scr = getattr(rec, "score", 0.5) if hasattr(rec, "score") else (rec.get("score", 0.5) if isinstance(rec, dict) else 0.5)
+            if sym:
+                fin = provider.get_financials(sym)
+                week_candidates.append({
+                    "symbol":        sym,
+                    "action":        act,
+                    "quality_score": float(scr),
+                    "financials":    fin,
+                    "sector":        "Unknown",  # HistoricalDataProvider always returns Unknown
+                })
 
-        rec_tuples.sort(key=lambda t: _sector_adjusted(t[0], t[2]), reverse=True)
+        scored = compute_composite_scores(week_candidates)
+        scored.sort(key=lambda c: c.get("composite_score", 0.0), reverse=True)
 
-        score_log: list[tuple[str, float, float]] = []
-        for rank, (symbol, action, score) in enumerate(rec_tuples):
-            adj   = round(_sector_adjusted(symbol, score), 3)
+        for rank, cand in enumerate(scored):
             rec_band = _RANK_BANDS[rank] if rank < len(_RANK_BANDS) else "RED"
-
-            score_log.append((symbol, round(score, 3), adj))
             with repo.connect() as conn:
                 conn.execute(
                     """
                     INSERT INTO backtest_recommendations
-                        (run_id, symbol, recommendation_date, action, confidence_band, quality_score)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                        (run_id, symbol, recommendation_date, action, confidence_band,
+                         quality_score, composite_score, quality_pct, valuation_pct, momentum_pct)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(run_id, symbol, recommendation_date) DO NOTHING
                     """,
-                    (run_id, symbol, replay_date.isoformat(), action, rec_band, score),
+                    (
+                        run_id, cand["symbol"], replay_date.isoformat(),
+                        cand["action"], rec_band,
+                        cand["quality_score"],
+                        cand.get("composite_score"),
+                        cand.get("quality_pct"),
+                        cand.get("valuation_pct"),
+                        cand.get("momentum_pct"),
+                    ),
                 )
                 conn.commit()
             total_recs += 1
@@ -448,14 +351,14 @@ def replay(
         _log.info(
             "replay %s: %s → %d recs (market_band=%s)  "
             "total=%.1fs setup=%.3fs graph=%.1fs db=%.3fs http_fallbacks=%d  "
-            "scores(raw,adj)=%s",
-            run_id, replay_date, len(rec_tuples), market_band,
+            "composite_scores=%s",
+            run_id, replay_date, len(scored), market_band,
             t_db_done    - t_start,
             t_setup_done - t_start,
             t_graph_done - t_setup_done,
             t_db_done    - t_graph_done,
             provider._external_call_count,
-            score_log,
+            [(c["symbol"], round(c.get("composite_score", 0.0), 3)) for c in scored],
         )
 
     # Write summary stub to backtest_runs (scorer.py fills in hit rates later).
