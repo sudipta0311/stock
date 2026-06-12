@@ -98,12 +98,13 @@ def _nearest_col(target_col: Any, cols: list) -> Any | None:
 def snapshot_prices(
     repo: PlatformRepository,
     symbols: list[str] | None = None,
-    period: str = "2y",
+    period: str = "5y",
     interval: str = "1wk",
 ) -> int:
     """
     Bulk-download weekly price history via yfinance and upsert into historical_prices.
     Includes the NIFTY index (^NSEI) for benchmark forward-return calculation.
+    Default period extended to 5y to support IC-based walk-forward calibration.
     Returns the number of rows written.
     """
     _configure_yfinance_cache()
