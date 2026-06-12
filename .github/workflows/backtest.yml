@@ -81,24 +81,96 @@ jobs:
 
       - name: Write summary markdown
         if: always()
+        env:
+          TIMESTAMP: ${{ steps.dates.outputs.timestamp }}
+          END_DATE: ${{ steps.dates.outputs.end_date }}
+          START_DATE: ${{ steps.dates.outputs.start_date }}
+          OUTCOME: ${{ steps.backtest.outcome }}
         run: |
           mkdir -p backtest/results
-          SUMMARY_FILE="backtest/results/backtest_${{ steps.dates.outputs.timestamp }}.md"
-          cat > "$SUMMARY_FILE" << 'MDEOF'
-          # Backtest Summary — ${{ steps.dates.outputs.end_date }}
+          python - << 'PYEOF'
+          import json, os, pathlib
 
-          | Field | Value |
-          |-------|-------|
-          | Run date | ${{ steps.dates.outputs.end_date }} |
-          | Window | ${{ steps.dates.outputs.start_date }} → ${{ steps.dates.outputs.end_date }} |
-          | Outcome | ${{ steps.backtest.outcome }} |
+          raw = pathlib.Path("backtest_output.json").read_text(errors="replace").splitlines()
+          events = []
+          for line in raw:
+              line = line.strip()
+              try:
+                  obj = json.loads(line)
+                  if "event" in obj:
+                      events.append(obj)
+              except (json.JSONDecodeError, ValueError):
+                  pass
 
-          ## Raw output (last 60 lines)
+          def last_event(name):
+              for e in reversed(events):
+                  if e.get("event") == name:
+                      return e
+              return {}
 
-          ```json
-          MDEOF
-          tail -60 backtest_output.json >> "$SUMMARY_FILE" || true
-          echo '```' >> "$SUMMARY_FILE"
+          score   = last_event("SCORE_DONE")
+          bands   = last_event("SCORE_BY_RANK_BAND")
+
+          def fmt(v, suffix=""):
+              return f"{v}{suffix}" if v is not None else "—"
+
+          def pct(v):
+              return f"{float(v)*100:.1f}%" if v is not None else "—"
+
+          ts         = os.environ["TIMESTAMP"]
+          end_date   = os.environ["END_DATE"]
+          start_date = os.environ["START_DATE"]
+          outcome    = os.environ["OUTCOME"]
+          run_id     = score.get("run_id", "—")
+
+          md = [
+              f"# Backtest Summary — {end_date}",
+              "",
+              "| Field | Value |",
+              "|-------|-------|",
+              f"| Run date | {end_date} |",
+              f"| Window | {start_date} → {end_date} |",
+              f"| Run ID | `{run_id}` |",
+              f"| Outcome | {outcome} |",
+              "",
+              "## Alpha model metrics (6-month window)",
+              "",
+              "| Metric | Value |",
+              "|--------|-------|",
+              f"| Recommendations (total) | {fmt(score.get('total_recommendations'))} |",
+              f"| Buy recommendations | {fmt(score.get('buy_recommendations'))} |",
+              f"| Hit rate 6m | {pct(score.get('hit_rate_6m'))} |",
+              f"| Hit rate 3m | {pct(score.get('hit_rate_3m'))} |",
+              f"| Alpha 6m (mean) | {fmt(score.get('alpha_6m'), '%')} |",
+              f"| Alpha 6m (median) | {fmt(score.get('median_alpha_6m'), '%')} |",
+              f"| Mean IC 6m | {fmt(score.get('mean_ic_6m'))} |",
+              f"| IC t-stat | {fmt(score.get('ic_tstat'))} |",
+              f"| ICIR | {fmt(score.get('icir'))} |",
+              f"| Decile spread 6m | {fmt(score.get('decile_spread_6m'), '%')} |",
+              "",
+              "## By rank band",
+              "",
+              "| Band | Count | Hit rate 6m | Alpha 6m |",
+              "|------|-------|-------------|----------|",
+          ]
+          for band, info in (bands.get("by_rank_band") or {}).items():
+              md.append(
+                  f"| {band} | {info.get('count','—')} "
+                  f"| {pct(info.get('hit_rate_6m'))} "
+                  f"| {fmt(info.get('alpha_6m'), '%')} |"
+              )
+          md += [
+              "",
+              "## Structured events",
+              "",
+              "```json",
+          ]
+          for e in events:
+              md.append(json.dumps(e))
+          md.append("```")
+
+          pathlib.Path(f"backtest/results/backtest_{ts}.md").write_text("\n".join(md) + "\n")
+          PYEOF
 
       - name: Commit summary markdown
         if: always()
