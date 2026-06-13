@@ -82,13 +82,17 @@ class HistoricalDataProvider:
     # ── price helpers ──────────────────────────────────────────────────────────
 
     def _get_price(self, symbol: str) -> float | None:
-        key = f"{symbol}:{self.today}"
+        return self._get_price_at(symbol, self.today)
+
+    def _get_price_at(self, symbol: str, target_date: date) -> float | None:
+        """Fetch the most recent close price at or before target_date."""
+        key = f"{symbol}:{target_date}"
         if key in self._price_cache:
             return self._price_cache[key]
         with self.repo.connect() as conn:
             row = conn.execute(
                 "SELECT close_price FROM historical_prices WHERE symbol = ? AND date <= ? ORDER BY date DESC LIMIT 1",
-                (symbol, self.today.isoformat()),
+                (symbol, target_date.isoformat()),
             ).fetchone()
         price = float(row["close_price"]) if row else None
         if price is None:
@@ -343,6 +347,13 @@ def replay(
             scr = getattr(rec, "score", 0.5) if hasattr(rec, "score") else (rec.get("score", 0.5) if isinstance(rec, dict) else 0.5)
             if sym:
                 fin = provider.get_financials(sym)
+                # Price-based 6-month momentum: price(t-21 trading days) / price(t-126 trading days) - 1
+                # 21 td ≈ 30 calendar days (skip 1m reversal); 126 td ≈ 182 calendar days (6m lookback)
+                t = provider.today
+                p_near = provider._get_price_at(sym, t - timedelta(days=30))
+                p_far  = provider._get_price_at(sym, t - timedelta(days=182))
+                if p_near is not None and p_far is not None and p_far > 0:
+                    fin["price_momentum_6m"] = round(p_near / p_far - 1, 6)
                 week_candidates.append({
                     "symbol":        sym,
                     "action":        act,

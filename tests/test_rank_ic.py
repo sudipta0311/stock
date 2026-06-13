@@ -87,17 +87,18 @@ def test_spearman_perfect_negative():
 
 def test_spearman_none_pairs_excluded():
     from backtest.scorer import _spearman_ic
-    # 3 valid pairs (None entries are excluded from pairing)
-    scores = [1.0, None, 3.0, 4.0, 5.0]
-    alphas = [10.0, 20.0, None, 40.0, 50.0]
-    # Valid pairs: (1.0,10.0), (4.0,40.0), (5.0,50.0) → perfect positive correlation
+    # 4 valid pairs (None entries are excluded from pairing)
+    scores = [1.0, None, 3.0, 4.0, 5.0, 6.0]
+    alphas = [10.0, 20.0, None, 40.0, 50.0, 60.0]
+    # Valid pairs: (1.0,10.0), (4.0,40.0), (5.0,50.0), (6.0,60.0) → perfect positive correlation
     ic = _spearman_ic(scores, alphas)
     assert ic == pytest.approx(1.0)
 
 
 def test_spearman_returns_none_for_too_few():
     from backtest.scorer import _spearman_ic
-    assert _spearman_ic([1.0, 2.0], [3.0, 4.0]) is None
+    assert _spearman_ic([1.0, 2.0],       [3.0, 4.0])       is None  # 2 pairs < 4
+    assert _spearman_ic([1.0, 2.0, 3.0],  [3.0, 4.0, 5.0]) is None  # 3 pairs < 4
     assert _spearman_ic([], []) is None
 
 

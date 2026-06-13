@@ -80,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--rebalance",
         choices=["weekly", "monthly"],
-        default="weekly",
+        default="monthly",
         help="Rebalance frequency: weekly (every Monday) or monthly (first Monday of month)",
     )
     parser.add_argument(
@@ -218,7 +218,17 @@ def main(argv: list[str] | None = None) -> int:
                         f"decile_spread_6m={decile_spread_6m:.4f} — both must be > 0"
                     ),
                 )
-                return 1
+                return 2  # exit 2 = IC regression (distinguishable from fatal error)
+            elif mean_ic_6m < 0.03:
+                _emit(
+                    "IC_WEAK",
+                    mean_ic_6m=mean_ic_6m,
+                    message=(
+                        f"IC positive but weak ({mean_ic_6m:.4f} < 0.03) — "
+                        "monitor closely before deploying to live positions"
+                    ),
+                )
+                # warn only; do not fail the run
         else:
             # Fallback: legacy hit-rate gate when not enough IC data.
             hit_rate_6m = summary.get("hit_rate_6m")

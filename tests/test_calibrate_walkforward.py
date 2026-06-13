@@ -132,10 +132,12 @@ def test_mean_weekly_ic_positive():
     """When composite score order matches alpha order, IC should be positive."""
     from backtest.calibrate import _mean_weekly_ic
 
+    # 4 rows required (_MIN_IC_PAIRS = 4)
     week_rows = {
         "2024-01-08": [
             {"quality_pct": 0.9, "valuation_pct": 0.8, "momentum_pct": 0.7, "alpha_6m": 20.0},
             {"quality_pct": 0.7, "valuation_pct": 0.6, "momentum_pct": 0.5, "alpha_6m": 10.0},
+            {"quality_pct": 0.5, "valuation_pct": 0.4, "momentum_pct": 0.3, "alpha_6m":  2.0},
             {"quality_pct": 0.3, "valuation_pct": 0.2, "momentum_pct": 0.1, "alpha_6m": -5.0},
         ],
     }
@@ -151,7 +153,7 @@ def test_mean_weekly_ic_none_when_too_few():
             {"quality_pct": 0.1, "valuation_pct": None, "momentum_pct": None, "alpha_6m": None},
         ],
     }
-    # Only 1 pair with complete data — IC should be None (requires ≥ 3)
+    # Only 1 pair with complete data — IC should be None (requires ≥ 4)
     ic = _mean_weekly_ic(week_rows, w_q=1.0, w_v=0.0, w_m=0.0)
     assert ic is None
 

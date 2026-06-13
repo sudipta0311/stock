@@ -53,11 +53,11 @@ _MIN_12M_COVERAGE = 0.30
 def _spearman_ic(scores: list[float], alphas: list[float]) -> float | None:
     """
     Compute Spearman rank correlation (IC) between composite_scores and forward_alphas.
-    Returns None when fewer than 3 paired observations are available.
+    Returns None when fewer than 4 paired observations are available.
     """
     pairs = [(s, a) for s, a in zip(scores, alphas) if s is not None and a is not None]
     n = len(pairs)
-    if n < 3:
+    if n < 4:
         return None
 
     def _rank_list(vals: list[float]) -> list[float]:
