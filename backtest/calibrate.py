@@ -50,7 +50,7 @@ _log = logging.getLogger(__name__)
 
 _COMPOSITE_WEIGHTS_FILE = _ROOT / "rules" / "composite_weights.yaml"
 _MIN_FOLDS              = 3    # abort if fewer than this many valid folds
-_MIN_IC_PAIRS           = 3    # minimum pairs for a Spearman IC to be computed
+_MIN_IC_PAIRS           = 4    # minimum pairs for a Spearman IC to be computed
 
 
 # ── Pure-Python Spearman IC (no scipy dependency) ────────────────────────────
