@@ -11,6 +11,8 @@ export default defineConfig({
     setupFiles: ["./tests/setup.ts"],
     pool: "threads",
     maxWorkers: 1,
+    // Shared CI runners compile and render far slower than a dev machine.
+    testTimeout: 20_000,
     restoreMocks: true,
     clearMocks: true,
   },

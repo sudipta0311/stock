@@ -12,7 +12,11 @@ const outputPath = fileURLToPath(
 const featureOutputPath = fileURLToPath(
   new URL("../src/api/features.generated.ts", import.meta.url),
 );
-const openApiSource = await readFile(openApiPath, "utf8");
+// Hash LF text so Windows checkouts (core.autocrlf) and CI produce the same digest.
+const openApiSource = (await readFile(openApiPath, "utf8")).replace(
+  /\r\n/g,
+  "\n",
+);
 const openApiDocument = JSON.parse(openApiSource);
 const schema = await openapiTS(openApiDocument);
 const digest = createHash("sha256").update(openApiSource).digest("hex");

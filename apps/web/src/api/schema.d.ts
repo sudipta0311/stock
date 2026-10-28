@@ -1,4 +1,4 @@
-// OpenAPI SHA256: 6e5c09c890ef0c94e28a5111465bd4a915f89d42c676e6b1c74bfa43d579e624
+// OpenAPI SHA256: 9ded3fc8331253b57ac32ee8ea9eae079937f20bb4de28f0495f362a2635a17d
 export interface paths {
     "/healthz": {
         parameters: {
