@@ -1,0 +1,107 @@
+[
+  {
+    "canonical": "SBI",
+    "aliases": [
+      "SBI",
+      "State Bank of India"
+    ]
+  },
+  {
+    "canonical": "HDFC Bank",
+    "aliases": [
+      "HDFC",
+      "HDFC Bank"
+    ]
+  },
+  {
+    "canonical": "ICICI Bank",
+    "aliases": [
+      "ICICI",
+      "ICICI Bank"
+    ]
+  },
+  {
+    "canonical": "Axis Bank",
+    "aliases": [
+      "Axis",
+      "Axis Bank"
+    ]
+  },
+  {
+    "canonical": "Kotak",
+    "aliases": [
+      "Kotak",
+      "Kotak Mahindra"
+    ]
+  },
+  {
+    "canonical": "IDFC First",
+    "aliases": [
+      "IDFC First",
+      "IDFC"
+    ]
+  },
+  {
+    "canonical": "Post Office",
+    "aliases": [
+      "Post Office",
+      "India Post"
+    ]
+  },
+  {
+    "canonical": "LIC",
+    "aliases": [
+      "LIC",
+      "Life Insurance Corporation"
+    ]
+  },
+  {
+    "canonical": "HDFC Life",
+    "aliases": [
+      "HDFC Life"
+    ]
+  },
+  {
+    "canonical": "ICICI Prudential Life",
+    "aliases": [
+      "ICICI Prudential Life",
+      "ICICI Pru"
+    ]
+  },
+  {
+    "canonical": "SBI Life",
+    "aliases": [
+      "SBI Life"
+    ]
+  },
+  {
+    "canonical": "Max Life",
+    "aliases": [
+      "Max Life"
+    ]
+  },
+  {
+    "canonical": "Tata AIA",
+    "aliases": [
+      "Tata AIA"
+    ]
+  },
+  {
+    "canonical": "Star Health",
+    "aliases": [
+      "Star Health"
+    ]
+  },
+  {
+    "canonical": "Niva Bupa",
+    "aliases": [
+      "Niva Bupa"
+    ]
+  },
+  {
+    "canonical": "Care Health",
+    "aliases": [
+      "Care Health"
+    ]
+  }
+]

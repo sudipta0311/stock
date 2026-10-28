@@ -1,0 +1,169 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "annual_premium": {
+      "format": "decimal",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+      "type": "string",
+      "x-unit": "INR"
+    },
+    "asset_type": {
+      "const": "traditional_policy",
+      "title": "Asset Type",
+      "type": "string"
+    },
+    "bonus_accrued": {
+      "anyOf": [
+        {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Bonus Accrued"
+    },
+    "insurer": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Insurer",
+      "type": "string"
+    },
+    "joint": {
+      "default": false,
+      "title": "Joint",
+      "type": "boolean"
+    },
+    "label": {
+      "anyOf": [
+        {
+          "maxLength": 80,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Label"
+    },
+    "maturity_illustration": {
+      "anyOf": [
+        {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Maturity Illustration"
+    },
+    "member_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Member Id"
+    },
+    "notes": {
+      "anyOf": [
+        {
+          "maxLength": 500,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Notes"
+    },
+    "plan": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Plan",
+      "type": "string"
+    },
+    "policy_kind": {
+      "enum": [
+        "endowment",
+        "money_back",
+        "whole_life"
+      ],
+      "title": "Policy Kind",
+      "type": "string"
+    },
+    "premium_paying_term": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "maximum": 100,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Premium Paying Term"
+    },
+    "start_year": {
+      "maximum": 9999,
+      "minimum": 1900,
+      "title": "Start Year",
+      "type": "integer"
+    },
+    "sum_assured": {
+      "format": "decimal",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+      "type": "string",
+      "x-unit": "INR"
+    },
+    "surrender_value": {
+      "anyOf": [
+        {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Surrender Value"
+    },
+    "term_years": {
+      "exclusiveMinimum": 0,
+      "maximum": 100,
+      "title": "Term Years",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "asset_type",
+    "insurer",
+    "plan",
+    "policy_kind",
+    "sum_assured",
+    "annual_premium",
+    "start_year",
+    "term_years"
+  ],
+  "title": "TraditionalPolicyAsset",
+  "type": "object"
+}

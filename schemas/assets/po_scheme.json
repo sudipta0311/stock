@@ -1,0 +1,145 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "amount": {
+      "format": "decimal",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+      "type": "string",
+      "x-unit": "INR"
+    },
+    "annual_contribution": {
+      "anyOf": [
+        {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Annual Contribution"
+    },
+    "asset_type": {
+      "const": "po_scheme",
+      "title": "Asset Type",
+      "type": "string"
+    },
+    "balance_as_of": {
+      "anyOf": [
+        {
+          "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "joint": {
+      "default": false,
+      "title": "Joint",
+      "type": "boolean"
+    },
+    "label": {
+      "anyOf": [
+        {
+          "maxLength": 80,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Label"
+    },
+    "member_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Member Id"
+    },
+    "notes": {
+      "anyOf": [
+        {
+          "maxLength": 500,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Notes"
+    },
+    "purchase": {
+      "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+      "type": "string"
+    },
+    "rate_pct": {
+      "anyOf": [
+        {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]?)(\\.[0-9]{1,4})?$",
+          "type": "string",
+          "x-maximum": "30",
+          "x-minimum": "0"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Rate Pct"
+    },
+    "scheme": {
+      "enum": [
+        "nsc",
+        "kvp",
+        "scss",
+        "mis",
+        "td",
+        "rd",
+        "ssy"
+      ],
+      "title": "Scheme",
+      "type": "string"
+    },
+    "td_years": {
+      "anyOf": [
+        {
+          "enum": [
+            1,
+            2,
+            3,
+            5
+          ],
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Td Years"
+    }
+  },
+  "required": [
+    "asset_type",
+    "scheme",
+    "amount",
+    "purchase"
+  ],
+  "title": "PostOfficeAsset",
+  "type": "object"
+}

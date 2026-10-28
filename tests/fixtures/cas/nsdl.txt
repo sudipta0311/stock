@@ -1,0 +1,27 @@
+NSDL Consolidated Account Statement
+Statement for the period from 01-Jun-2026 to 30-Jun-2026
+Demat Account
+DP ID: IN300000 Client ID: 12345678
+Equity Shares
+ISIN
+INE000A01012
+SYNTOOLS.NSE
+Synthetic Tools Limited 10.00 20 100.00 2000.00
+ISIN
+INE001A01010
+FAKEBANK.BSE
+Synthetic Bank Limited 10.00 5 200.00 1000.00
+Sub Total
+Mutual Funds (M)
+INE002A01018 Synthetic Nifty ETF 10.000 100.00 1000.00
+INF000000002 Synthetic Balanced Fund 15.500 20.00 310.00
+Sub Total
+Mutual Fund Folios (F)
+INF000000010
+Folio No : 9876543210
+Synthetic Index Fund - Direct Growth 2.500 40.00 100.00
+Sub Total
+Corporate Bonds
+INE123A01012 Synthetic Taxable Bond 10 1000.00 10500.00
+INE123A01020 Synthetic Sovereign Gold Bond 5 7500.00 37500.00
+Sub Total

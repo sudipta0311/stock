@@ -1,0 +1,90 @@
+version: 1
+note: >-
+  Current small-savings rates are listed by India Post. The active period is Q3
+  FY 2026-27 (2026-10-01 through 2026-12-31), as confirmed by the Department of
+  Economic Affairs notice dated 2026-09-30. Every entry is unverified and must
+  be human-checked before production use.
+schemes:
+  nsc:
+    compounding: yearly
+    tenure_months: 60
+    periods:
+      - from: "2026-10-01"
+        to: "2026-12-31"
+        rate_pct: "7.7"
+        source_url: "https://www.indiapost.gov.in/banking-services/savings"
+        verified: false
+  kvp:
+    compounding: yearly
+    periods:
+      - from: "2026-10-01"
+        to: "2026-12-31"
+        rate_pct: "7.5"
+        maturity_months: 115
+        source_url: "https://www.indiapost.gov.in/banking-services/savings"
+        verified: false
+  td_1y:
+    compounding: quarterly
+    tenure_months: 12
+    periods: []
+  td_2y:
+    compounding: quarterly
+    tenure_months: 24
+    periods: []
+  td_3y:
+    compounding: quarterly
+    tenure_months: 36
+    periods: []
+  td_5y:
+    compounding: quarterly
+    tenure_months: 60
+    periods: []
+  rd_5y:
+    compounding: quarterly
+    tenure_months: 60
+    periods:
+      - from: "2026-10-01"
+        to: "2026-12-31"
+        rate_pct: "6.7"
+        source_url: "https://www.indiapost.gov.in/banking-services/savings"
+        verified: false
+  ppf:
+    compounding: yearly
+    periods:
+      - from: "2026-10-01"
+        to: "2026-12-31"
+        rate_pct: "7.1"
+        source_url: "https://www.indiapost.gov.in/banking-services/savings"
+        verified: false
+  scss:
+    compounding: simple
+    tenure_months: 60
+    periods:
+      - from: "2026-10-01"
+        to: "2026-12-31"
+        rate_pct: "8.2"
+        source_url: "https://www.indiapost.gov.in/banking-services/savings"
+        verified: false
+  mis:
+    compounding: simple
+    tenure_months: 60
+    periods:
+      - from: "2026-10-01"
+        to: "2026-12-31"
+        rate_pct: "7.4"
+        source_url: "https://www.indiapost.gov.in/banking-services/savings"
+        verified: false
+  ssy:
+    compounding: yearly
+    periods:
+      - from: "2026-10-01"
+        to: "2026-12-31"
+        rate_pct: "8.2"
+        source_url: "https://www.indiapost.gov.in/banking-services/savings"
+        verified: false
+epf:
+  periods:
+    - fy: "2024-25"
+      rate_pct: "8.25"
+      source_url: "https://www.epfindia.gov.in/site_docs/PDFs/Circulars/Y2025-2026/DeclarationOfROI_2024_25.pdf"
+      verified: false

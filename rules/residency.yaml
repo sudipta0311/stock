@@ -1,0 +1,486 @@
+version: 1
+last_checked: "2026-10-28"
+limits:
+  lrs_annual_usd: "250000"
+  lrs_tcs_threshold_inr: "1000000"
+  lrs_tcs_pct: "20"
+  ssy_annual_inr: "150000"
+instruments:
+  ppf:
+    source_url: "https://www.indiapost.gov.in/api/documents/file/U2FsdGVkX1-1PqMvBsuLMM0eiCWEbUcz0wgqxGoVqb_gv-g9e1NcXUMut0Ff8e_LwIuZ-ibUd8oKUXAdHZ1dwQ"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    by_status:
+      RI: {new: allowed, existing: continue}
+      NRI: {new: not_allowed, existing: continue_no_extension}
+      RNOR: {new: conditional, existing: conditional}
+    note_key: ppf_nri_eligibility
+  nsc:
+    source_url: "https://www.indiapost.gov.in/api/documents/file/U2FsdGVkX1-zms4urbtX2Mdj2MsQC3OfllSnJzdYRJpFQNn3uyYnnOVPElYQWECiaOjQWZIlb_FpUJrAYyHDPQ"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    by_status:
+      RI: {new: allowed, existing: continue}
+      NRI: {new: not_allowed, existing: conditional}
+      RNOR: {new: conditional, existing: conditional}
+    note_key: small_savings_nri_eligibility
+  kvp:
+    source_url: "https://www.indiapost.gov.in/api/documents/file/U2FsdGVkX1-1PqMvBsuLMM0eiCWEbUcz0wgqxGoVqb_gv-g9e1NcXUMut0Ff8e_LwIuZ-ibUd8oKUXAdHZ1dwQ"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    by_status:
+      RI: {new: allowed, existing: continue}
+      NRI: {new: not_allowed, existing: conditional}
+      RNOR: {new: conditional, existing: conditional}
+    note_key: small_savings_nri_eligibility
+  scss:
+    source_url: "https://www.indiapost.gov.in/api/documents/file/U2FsdGVkX1-1PqMvBsuLMM0eiCWEbUcz0wgqxGoVqb_gv-g9e1NcXUMut0Ff8e_LwIuZ-ibUd8oKUXAdHZ1dwQ"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    by_status:
+      RI: {new: allowed, existing: continue}
+      NRI: {new: not_allowed, existing: continue_no_extension}
+      RNOR: {new: conditional, existing: conditional}
+    note_key: small_savings_nri_eligibility
+  pomis:
+    source_url: "https://www.indiapost.gov.in/api/documents/file/U2FsdGVkX1-1PqMvBsuLMM0eiCWEbUcz0wgqxGoVqb_gv-g9e1NcXUMut0Ff8e_LwIuZ-ibUd8oKUXAdHZ1dwQ"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    by_status:
+      RI: {new: allowed, existing: continue}
+      NRI: {new: not_allowed, existing: continue_no_extension}
+      RNOR: {new: conditional, existing: conditional}
+    note_key: small_savings_nri_eligibility
+  po_td:
+    source_url: "https://www.indiapost.gov.in/api/documents/file/U2FsdGVkX1-1PqMvBsuLMM0eiCWEbUcz0wgqxGoVqb_gv-g9e1NcXUMut0Ff8e_LwIuZ-ibUd8oKUXAdHZ1dwQ"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    by_status:
+      RI: {new: allowed, existing: continue}
+      NRI: {new: not_allowed, existing: continue_no_extension}
+      RNOR: {new: conditional, existing: conditional}
+    note_key: small_savings_nri_eligibility
+  po_rd:
+    source_url: "https://www.indiapost.gov.in/api/documents/file/U2FsdGVkX1-1PqMvBsuLMM0eiCWEbUcz0wgqxGoVqb_gv-g9e1NcXUMut0Ff8e_LwIuZ-ibUd8oKUXAdHZ1dwQ"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    by_status:
+      RI: {new: allowed, existing: continue}
+      NRI: {new: not_allowed, existing: continue_no_extension}
+      RNOR: {new: conditional, existing: conditional}
+    note_key: small_savings_nri_eligibility
+  ssy:
+    source_url: "https://www.indiapost.gov.in/api/documents/file/U2FsdGVkX1-1PqMvBsuLMM0eiCWEbUcz0wgqxGoVqb_gv-g9e1NcXUMut0Ff8e_LwIuZ-ibUd8oKUXAdHZ1dwQ"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    by_status:
+      RI: {new: allowed, existing: continue}
+      NRI: {new: not_allowed, existing: conditional}
+      RNOR: {new: conditional, existing: conditional}
+    note_key: small_savings_nri_eligibility
+  epf:
+    source_url: "https://www.epfindia.gov.in/site_docs/PDFs/Downloads_PDFs/EPFScheme.pdf"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    by_status:
+      RI: {new: allowed, existing: continue}
+      NRI: {new: conditional, existing: continue}
+      RNOR: {new: conditional, existing: conditional}
+    note_key: epf_residency_review
+  vpf:
+    source_url: "https://www.epfindia.gov.in/site_docs/PDFs/Downloads_PDFs/EPFScheme.pdf"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    by_status:
+      RI: {new: allowed, existing: continue}
+      NRI: {new: conditional, existing: continue}
+      RNOR: {new: conditional, existing: conditional}
+    note_key: epf_residency_review
+  nps:
+    source_url: "https://pfrda.org.in/w/faqs/nps-all-citizen-model"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: false
+    by_status:
+      RI: {new: allowed, existing: continue}
+      NRI: {new: allowed, existing: continue}
+      RNOR: {new: conditional, existing: continue}
+    note_key: nps_nri_eligibility
+  bank_fd:
+    source_url: "https://www.rbi.org.in/commonman/Upload/English/FAQs/PDFs/Accountresidents16012025.pdf"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: false
+    by_status:
+      RI: {new: allowed, existing: continue}
+      NRI: {new: not_allowed, existing: conditional}
+      RNOR: {new: conditional, existing: continue}
+    note_key: bank_fd_residency_review
+  nre_fd:
+    source_url: "https://www.rbi.org.in/commonman/Upload/English/FAQs/PDFs/Accountresidents16012025.pdf"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: false
+    by_status:
+      RI: {new: not_allowed, existing: conditional}
+      NRI: {new: allowed, existing: continue}
+      RNOR: {new: conditional, existing: conditional}
+    note_key: nre_interest_exempt_in_india
+  fcnr_b:
+    source_url: "https://rbi.org.in/scripts/PublicationsView.aspx?id=13853"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    by_status:
+      RI: {new: not_allowed, existing: conditional}
+      NRI: {new: allowed, existing: continue}
+      RNOR: {new: conditional, existing: conditional}
+    note_key: fcnr_interest_exempt_in_india
+  nro_fd:
+    source_url: "https://www.rbi.org.in/commonman/Upload/English/FAQs/PDFs/Accountresidents16012025.pdf"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: false
+    by_status:
+      RI: {new: not_allowed, existing: conditional}
+      NRI: {new: allowed, existing: continue}
+      RNOR: {new: conditional, existing: conditional}
+    note_key: nro_interest_tds
+  in_equity_direct:
+    source_url: "https://www.rbi.org.in/commonman/Upload/English/Notification/PDFs/06FIC010714FL.pdf"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: false
+    by_status:
+      RI: {new: allowed, existing: continue}
+      NRI: {new: conditional, existing: continue}
+      RNOR: {new: conditional, existing: continue}
+    note_key: direct_equity_nri_pis
+  in_mf:
+    source_url: "https://www.rbi.org.in/commonman/Upload/English/Notification/PDFs/22MCFDI90701_F.pdf"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: false
+    by_status:
+      RI: {new: allowed, existing: continue}
+      NRI: {new: allowed, existing: continue}
+      RNOR: {new: conditional, existing: continue}
+    country_overrides:
+      DK:
+        NRI: {new: not_allowed, existing: continue}
+    note_key: nri_mutual_fund_eligibility
+  in_etf:
+    source_url: "https://www.rbi.org.in/commonman/Upload/English/Notification/PDFs/22MCFDI90701_F.pdf"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    by_status:
+      RI: {new: allowed, existing: continue}
+      NRI: {new: conditional, existing: continue}
+      RNOR: {new: conditional, existing: continue}
+    country_overrides:
+      DK:
+        NRI: {new: not_allowed, existing: continue}
+    note_key: nri_mutual_fund_eligibility
+  sgb:
+    source_url: "https://www.rbi.org.in/Commonman/English/scripts/Notification.aspx?Id=2858"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    by_status:
+      RI: {new: allowed, existing: continue}
+      NRI: {new: not_allowed, existing: conditional}
+      RNOR: {new: conditional, existing: conditional}
+    note_key: sgb_residency_review
+  rbi_retail_direct_gsec:
+    source_url: "https://systemhealth.rbi.org.in/Scripts/FAQDisplay.aspx_Id%3D145.html"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    by_status:
+      RI: {new: allowed, existing: continue}
+      NRI: {new: allowed, existing: continue}
+      RNOR: {new: conditional, existing: conditional}
+    note_key: gsec_nri_eligibility
+  rbi_frsb:
+    source_url: "https://dea.gov.in/files/press_release_documents/PressRelease_Floating_Rate_Saving_Bond_2020_Taxable_260620.pdf"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    by_status:
+      RI: {new: allowed, existing: continue}
+      NRI: {new: not_allowed, existing: conditional}
+      RNOR: {new: conditional, existing: conditional}
+    note_key: frsb_nri_eligibility
+  arbitrage_fund:
+    source_url: "https://www.rbi.org.in/commonman/Upload/English/Notification/PDFs/22MCFDI90701_F.pdf"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    by_status:
+      RI: {new: allowed, existing: continue}
+      NRI: {new: conditional, existing: continue}
+      RNOR: {new: conditional, existing: continue}
+    note_key: nri_mutual_fund_eligibility
+  liquid_fund:
+    source_url: "https://www.rbi.org.in/commonman/Upload/English/Notification/PDFs/22MCFDI90701_F.pdf"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    by_status:
+      RI: {new: allowed, existing: continue}
+      NRI: {new: conditional, existing: continue}
+      RNOR: {new: conditional, existing: continue}
+    note_key: nri_mutual_fund_eligibility
+  local_bank_deposit:
+    source_url: "https://www.finanstilsynet.dk/forbrugerinformation"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    countries: [DK]
+    by_status:
+      RI: {new: not_allowed, existing: conditional}
+      NRI: {new: allowed, existing: continue}
+      RNOR: {new: conditional, existing: conditional}
+    note_key: local_deposit_tax_review
+  ucits_global_etf:
+    source_url: "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32014R1286"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    by_status:
+      RI: {new: conditional, existing: continue}
+      NRI: {new: conditional, existing: continue}
+      RNOR: {new: conditional, existing: continue}
+    country_overrides:
+      DK:
+        NRI: {new: allowed, existing: continue}
+    note_key: eu_priips_kid
+tax_notes:
+  nri_capital_gains_tds:
+    source_url: "https://www.incometax.gov.in/iec/foportal/help/all-topics/e-filing-services/non-resident"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    note_key: nri_capital_gains_tds
+    short_term_listed_equity_pct: "20"
+    long_term_listed_equity_pct: "12.5"
+    debt_interest_tds: slab_equivalent
+  nre_interest_tax:
+    source_url: "https://www.incometax.gov.in/iec/foportal/help/all-topics/e-filing-services/non-resident"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: false
+    note_key: nre_interest_exempt_in_india
+  fcnr_interest_tax:
+    source_url: "https://www.rbi.org.in/commonman/Upload/English/FAQs/PDFs/Accountresidents16012025.pdf"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    note_key: fcnr_interest_exempt_in_india
+  nro_interest_tax:
+    source_url: "https://www.rbi.org.in/commonman/Upload/English/FAQs/PDFs/Accountresidents16012025.pdf"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: false
+    note_key: nro_interest_tds
+  rnor_foreign_income:
+    source_url: "https://www.incometax.gov.in/iec/foportal/help/all-topics/e-filing-services/non-resident"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    note_key: rnor_foreign_income_window
+    ordinary_residence_tests: ["non_resident_9_of_10_preceding_years", "729_or_fewer_days_in_7_preceding_years"]
+  spouse_clubbing:
+    source_url: "https://www.incometaxindia.gov.in/w/can-income-from-assets-transferred-to-spouse-without-adequate-consideration-be-clubbed-with-the-income-of-transferor-spouse-"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    note_key: clubbing_check
+    copy: "In India, income from money you give your spouse can be taxed as your income. Invest from their own income or savings, or keep records of a loan."
+resident_only_rules:
+  lrs_tcs:
+    source_url: "https://www.rbi.org.in/scripts/notificationuser.aspx?id=10192"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: false
+    note_key: resident_only_lrs_tcs
+    applies_to: RI
+    annual_limit_usd: "250000"
+    tcs_threshold_inr: "1000000"
+    tcs_rate_pct: "20"
+  schedule_fa:
+    source_url: "https://www.incometax.gov.in/iec/foportal//help/how-to-file-itr2-form"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: false
+    note_key: resident_only_schedule_fa
+    applies_to: RI
+us_person_rules:
+  pfic_avoid:
+    source_url: "https://www.irs.gov/forms-pubs/about-form-8621"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    note_key: pfic_avoid
+    excluded_instruments: [in_mf, in_etf]
+  fbar_fatca_reporting:
+    source_url: "https://www.fincen.gov/purpose-fbar"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    note_key: fbar_fatca_reporting
+  us_nre_fcnr_tax:
+    source_url: "https://www.irs.gov/individuals/international-taxpayers/us-citizens-and-resident-aliens-abroad"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    note_key: us_tax_applies
+  estate_tax_us_domiciled_assets:
+    source_url: "https://www.irs.gov/businesses/small-businesses-self-employed/estate-tax-for-nonresidents-not-citizens-of-the-united-states"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    note_key: estate_tax_us_domiciled_assets
+    warning: "US-situated assets may be included in a US estate-tax calculation; domicile, citizenship, asset type and treaties matter."
+    nonresident_not_citizen_filing_threshold_usd: "60000"
+  fatca_reporting:
+    source_url: "https://www.irs.gov/businesses/corporations/foreign-account-tax-compliance-act-fatca"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    note_key: fbar_fatca_reporting
+country_rules:
+  DK:
+    india_core_vehicle: in_equity_direct_core
+    local_currency: DKK
+    note_keys:
+      - dk_non_abis_capital_income
+      - dk_abis_list
+      - dk_abis_check
+      - dk_share_income
+      - dk_aktiesparekonto
+      - dk_pension_pal
+      - dk_worldwide_income
+      - dk_use_ask_first
+      - fcnr_currency_check
+      - local_deposit_tax_review
+    note_keys_with_indian_funds:
+      - dk_fund_tax_review
+denmark:
+  source_url: "https://skat.dk/borger/aktier-og-andre-vaerdipapirer/skat-af-aktier"
+  verified: false
+  last_checked: "2026-10-28"
+  needs_review: true
+  share_income:
+    tax_rates_pct: {lower: "27", upper: "42"}
+    threshold_dkk_2026: "79400"
+    source_url: "https://skat.dk/borger/aktier-og-andre-vaerdipapirer/skat-af-aktier"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: false
+    note_key: dk_share_income
+  abis_list:
+    source_url: "https://skat.dk/borger/aktier-og-andre-vaerdipapirer/skat-af-investeringsbeviser-udstedt-af-investeringsforeninger-og-investeringsselskaber"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: false
+    note_key: dk_abis_list
+  non_abis_funds:
+    source_url: "https://skat.dk/borger/udlandsforhold/du-bor-i-danmark-og-har-indkomst-fra-udlandet/giv-os-besked-om-dine-udenlandske-investeringer-senest-1-juli"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    note_key: dk_non_abis_capital_income
+    indian_funds_tax_class: capital_income
+  ask:
+    source_url: "https://skat.dk/borger/aktier-og-andre-vaerdipapirer/aktiesparekonto"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: false
+    tax_rate_pct_2026: "17"
+    deposit_cap_dkk_2026: "174200"
+    note_key: dk_aktiesparekonto
+  pal_pension:
+    source_url: "https://skat.dk/borger/pension-og-efterloen/skat-af-pensionsafkast"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: false
+    tax_rate_pct: "15.3"
+    note_key: dk_pension_pal
+  worldwide_income:
+    source_url: "https://skat.dk/en-us/individuals/cross-border-tax-matters/cross-border-commuters/general-rules-for-cross-border-workers"
+    treaty_source_url: "https://info.skat.dk/data.aspx?chk=220619&oId=2083262"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    note_key: dk_worldwide_income
+  priips:
+    source_url: "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32014R1286"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    eu_eea_countries: [DK]
+    route_vehicle: ucits_global_etf
+    excluded_vehicle: us_broad_market_etf
+    note_key: eu_priips_kid
+  local_deposit:
+    source_url: "https://www.finanstilsynet.dk/forbrugerinformation"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    currencies: [DKK, EUR]
+    yield_key: local_bank_deposit
+    note_key: local_deposit_tax_review
+  fcnr_currency_fallback:
+    source_url: "https://rbi.org.in/scripts/PublicationsView.aspx?id=13853"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    preferred_currency: EUR
+    alternative_currency: DKK
+    note_key: fcnr_currency_check
+notes:
+  dk_share_income: {source_url: "https://skat.dk/borger/aktier-og-andre-vaerdipapirer/skat-af-aktier", verified: false, last_checked: "2026-10-28", needs_review: false}
+  dk_abis_list: {source_url: "https://skat.dk/borger/aktier-og-andre-vaerdipapirer/skat-af-investeringsbeviser-udstedt-af-investeringsforeninger-og-investeringsselskaber", verified: false, last_checked: "2026-10-28", needs_review: false}
+  dk_non_abis_capital_income: {source_url: "https://skat.dk/borger/udlandsforhold/du-bor-i-danmark-og-har-indkomst-fra-udlandet/giv-os-besked-om-dine-udenlandske-investeringer-senest-1-juli", verified: false, last_checked: "2026-10-28", needs_review: true}
+  dk_aktiesparekonto: {source_url: "https://skat.dk/borger/aktier-og-andre-vaerdipapirer/aktiesparekonto", verified: false, last_checked: "2026-10-28", needs_review: false}
+  dk_pension_pal: {source_url: "https://skat.dk/borger/pension-og-efterloen/skat-af-pensionsafkast", verified: false, last_checked: "2026-10-28", needs_review: false}
+  dk_worldwide_income: {source_url: "https://skat.dk/en-us/individuals/cross-border-tax-matters/cross-border-commuters/general-rules-for-cross-border-workers", verified: false, last_checked: "2026-10-28", needs_review: true}
+  dk_abis_check: {source_url: "https://skat.dk/erhverv/selskaber-fonde-og-foreninger/selskaber-og-fonde/investeringsenheder/aktiebaserede-investeringsselskaber-abis", verified: false, last_checked: "2026-10-28", needs_review: false}
+  dk_fund_tax_review: {source_url: "https://skat.dk/borger/aktier-og-andre-vaerdipapirer/skat-af-investeringsbeviser-udstedt-af-investeringsforeninger-og-investeringsselskaber", verified: false, last_checked: "2026-10-28", needs_review: true}
+  dk_use_ask_first: {source_url: "https://skat.dk/borger/aktier-og-andre-vaerdipapirer/aktiesparekonto", verified: false, last_checked: "2026-10-28", needs_review: true}
+  eu_priips_kid: {source_url: "https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX:32014R1286", verified: false, last_checked: "2026-10-28", needs_review: true}
+  ppf_nri_eligibility: {source_url: "https://www.indiapost.gov.in/api/documents/file/U2FsdGVkX1-1PqMvBsuLMM0eiCWEbUcz0wgqxGoVqb_gv-g9e1NcXUMut0Ff8e_LwIuZ-ibUd8oKUXAdHZ1dwQ", verified: false, last_checked: "2026-10-28", needs_review: true}
+  small_savings_nri_eligibility: {source_url: "https://www.indiapost.gov.in/api/documents/file/U2FsdGVkX1-1PqMvBsuLMM0eiCWEbUcz0wgqxGoVqb_gv-g9e1NcXUMut0Ff8e_LwIuZ-ibUd8oKUXAdHZ1dwQ", verified: false, last_checked: "2026-10-28", needs_review: true}
+  epf_residency_review: {source_url: "https://www.epfindia.gov.in/site_docs/PDFs/Downloads_PDFs/EPFScheme.pdf", verified: false, last_checked: "2026-10-28", needs_review: true}
+  nps_nri_eligibility: {source_url: "https://pfrda.org.in/w/faqs/nps-all-citizen-model", verified: false, last_checked: "2026-10-28", needs_review: false}
+  bank_fd_residency_review: {source_url: "https://www.rbi.org.in/commonman/Upload/English/FAQs/PDFs/Accountresidents16012025.pdf", verified: false, last_checked: "2026-10-28", needs_review: true}
+  direct_equity_nri_pis: {source_url: "https://www.rbi.org.in/commonman/Upload/English/Notification/PDFs/06FIC010714FL.pdf", verified: false, last_checked: "2026-10-28", needs_review: false}
+  nri_mutual_fund_eligibility: {source_url: "https://www.rbi.org.in/commonman/Upload/English/Notification/PDFs/22MCFDI90701_F.pdf", verified: false, last_checked: "2026-10-28", needs_review: true}
+  sgb_residency_review: {source_url: "https://www.rbi.org.in/Commonman/English/scripts/Notification.aspx?Id=2858", verified: false, last_checked: "2026-10-28", needs_review: true}
+  gsec_nri_eligibility: {source_url: "https://systemhealth.rbi.org.in/Scripts/FAQDisplay.aspx_Id%3D145.html", verified: false, last_checked: "2026-10-28", needs_review: true}
+  nre_interest_exempt_in_india: {source_url: "https://www.incometax.gov.in/iec/foportal/help/all-topics/e-filing-services/non-resident", verified: false, last_checked: "2026-10-28", needs_review: false}
+  fcnr_interest_exempt_in_india: {source_url: "https://www.rbi.org.in/commonman/Upload/English/FAQs/PDFs/Accountresidents16012025.pdf", verified: false, last_checked: "2026-10-28", needs_review: true}
+  nro_interest_tds: {source_url: "https://www.rbi.org.in/commonman/Upload/English/FAQs/PDFs/Accountresidents16012025.pdf", verified: false, last_checked: "2026-10-28", needs_review: false}
+  nri_capital_gains_tds: {source_url: "https://www.incometax.gov.in/iec/foportal/sites/default/files/2026-04/Notification%20No.48_2026.pdf", verified: false, last_checked: "2026-10-28", needs_review: true}
+  rnor_foreign_income_window: {source_url: "https://www.incometax.gov.in/iec/foportal/help/all-topics/e-filing-services/non-resident", verified: false, last_checked: "2026-10-28", needs_review: true}
+  resident_only_lrs_tcs: {source_url: "https://www.rbi.org.in/scripts/notificationuser.aspx?id=10192", verified: false, last_checked: "2026-10-28", needs_review: false}
+  resident_only_schedule_fa: {source_url: "https://www.incometax.gov.in/iec/foportal//help/how-to-file-itr2-form", verified: false, last_checked: "2026-10-28", needs_review: false}
+  pfic_avoid: {source_url: "https://www.irs.gov/forms-pubs/about-form-8621", verified: false, last_checked: "2026-10-28", needs_review: true}
+  pfic_holding_review: {source_url: "https://www.irs.gov/forms-pubs/about-form-8621", verified: false, last_checked: "2026-10-28", needs_review: true}
+  fbar_fatca_reporting: {source_url: "https://www.fincen.gov/purpose-fbar", verified: false, last_checked: "2026-10-28", needs_review: true}
+  us_tax_applies: {source_url: "https://www.irs.gov/individuals/international-taxpayers/us-citizens-and-resident-aliens-abroad", verified: false, last_checked: "2026-10-28", needs_review: true}
+  fcnr_currency_check: {source_url: "https://rbi.org.in/scripts/PublicationsView.aspx?id=13853", verified: false, last_checked: "2026-10-28", needs_review: true}
+  local_deposit_tax_review: {source_url: "https://www.finanstilsynet.dk/forbrugerinformation", verified: false, last_checked: "2026-10-28", needs_review: true}
+  tax_residence_country_may_apply: {source_url: "https://skat.dk/en-us/individuals/cross-border-tax-matters/cross-border-commuters/general-rules-for-cross-border-workers", verified: false, last_checked: "2026-10-28", needs_review: true}

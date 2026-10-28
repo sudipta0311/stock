@@ -1,0 +1,122 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "asset_type": {
+      "const": "epf",
+      "title": "Asset Type",
+      "type": "string"
+    },
+    "balance": {
+      "format": "decimal",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+      "type": "string",
+      "x-unit": "INR"
+    },
+    "balance_as_of": {
+      "anyOf": [
+        {
+          "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "joint": {
+      "default": false,
+      "title": "Joint",
+      "type": "boolean"
+    },
+    "label": {
+      "anyOf": [
+        {
+          "maxLength": 80,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Label"
+    },
+    "member_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Member Id"
+    },
+    "monthly_employee": {
+      "anyOf": [
+        {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Monthly Employee"
+    },
+    "monthly_employer": {
+      "anyOf": [
+        {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Monthly Employer"
+    },
+    "notes": {
+      "anyOf": [
+        {
+          "maxLength": 500,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Notes"
+    },
+    "vpf_monthly": {
+      "anyOf": [
+        {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Vpf Monthly"
+    }
+  },
+  "required": [
+    "asset_type",
+    "balance"
+  ],
+  "title": "EPFAsset",
+  "type": "object"
+}

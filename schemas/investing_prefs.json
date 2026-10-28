@@ -1,0 +1,113 @@
+{
+  "$defs": {
+    "InvestingSip": {
+      "additionalProperties": false,
+      "description": "One existing monthly investment commitment.",
+      "properties": {
+        "instrument_category": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Instrument Category",
+          "type": "string"
+        },
+        "monthly_amount": {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        "sleeve": {
+          "enum": [
+            "equity_india",
+            "equity_global",
+            "debt",
+            "gold",
+            "cash"
+          ],
+          "title": "Sleeve",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sleeve",
+        "instrument_category",
+        "monthly_amount"
+      ],
+      "title": "InvestingSip",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "User-controlled investing constraints used by the deterministic policy engine.",
+  "properties": {
+    "ask_used_this_fy_dkk": {
+      "default": "0",
+      "format": "decimal",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+      "type": "string",
+      "x-unit": "INR"
+    },
+    "birth_year": {
+      "anyOf": [
+        {
+          "maximum": 9999,
+          "minimum": 1900,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Birth Year"
+    },
+    "existing_sips": {
+      "items": {
+        "$ref": "#/$defs/InvestingSip"
+      },
+      "title": "Existing Sips",
+      "type": "array"
+    },
+    "has_lrs_broker": {
+      "default": false,
+      "title": "Has Lrs Broker",
+      "type": "boolean"
+    },
+    "lrs_used_this_fy": {
+      "default": "0",
+      "format": "decimal",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+      "type": "string",
+      "x-unit": "INR"
+    },
+    "monthly_sip_capacity": {
+      "default": "0",
+      "format": "decimal",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+      "type": "string",
+      "x-unit": "INR"
+    },
+    "new_money_this_week": {
+      "default": "0",
+      "format": "decimal",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+      "type": "string",
+      "x-unit": "INR"
+    },
+    "prefers_no_paperwork": {
+      "default": false,
+      "title": "Prefers No Paperwork",
+      "type": "boolean"
+    },
+    "satellite_pct": {
+      "default": "20",
+      "format": "decimal",
+      "pattern": "^(0|[1-9]|1[0-9]|2[0-4])(\\.[0-9]{1,4})?$|^25(\\.0{1,4})?$",
+      "type": "string",
+      "x-maximum": "25",
+      "x-minimum": "0"
+    }
+  },
+  "title": "InvestingPrefs",
+  "type": "object"
+}

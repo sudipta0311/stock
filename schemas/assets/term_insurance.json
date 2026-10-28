@@ -1,0 +1,112 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "asset_type": {
+      "const": "term_insurance",
+      "title": "Asset Type",
+      "type": "string"
+    },
+    "cover": {
+      "format": "decimal",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+      "type": "string",
+      "x-unit": "INR"
+    },
+    "ends_year": {
+      "maximum": 9999,
+      "minimum": 1900,
+      "title": "Ends Year",
+      "type": "integer"
+    },
+    "insurer": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Insurer",
+      "type": "string"
+    },
+    "joint": {
+      "default": false,
+      "title": "Joint",
+      "type": "boolean"
+    },
+    "label": {
+      "anyOf": [
+        {
+          "maxLength": 80,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Label"
+    },
+    "member_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Member Id"
+    },
+    "notes": {
+      "anyOf": [
+        {
+          "maxLength": 500,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Notes"
+    },
+    "premium": {
+      "anyOf": [
+        {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Premium"
+    },
+    "premium_frequency": {
+      "anyOf": [
+        {
+          "enum": [
+            "monthly",
+            "quarterly",
+            "half_yearly",
+            "yearly"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Premium Frequency"
+    }
+  },
+  "required": [
+    "asset_type",
+    "insurer",
+    "cover",
+    "ends_year"
+  ],
+  "title": "TermInsuranceAsset",
+  "type": "object"
+}

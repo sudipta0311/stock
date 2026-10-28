@@ -1,0 +1,64 @@
+{{ email.brief_title.format(week=brief.week, date=date_label) }}
+{% if brief.household_header %}
+{{ brief.household_header }}
+{% endif %}
+
+{{ brief.sections.number.text }}
+{% if brief.sections.household %}
+{{ brief.sections.household.heading }}
+{% for member in brief.sections.household.members %}
+{{ member.text }}
+{% endfor %}
+{% for note in brief.sections.household.notes %}
+{{ note }}
+{% endfor %}
+{% endif %}
+
+{{ email.actions_heading }}
+{% if brief.actions %}
+{% for action in brief.actions %}
+{{ action.title }} — {{ action.why }}
+{{ email.text_open_link.format(url=action.deeplink) }}
+{% endfor %}
+{% else %}
+{{ email.no_actions }}
+{% endif %}
+
+{{ email.plan_heading }}
+{% for row in brief.sections.plan_at_a_glance %}
+{{ row.sleeve }}: {{ row.actual }} now · {{ row.target }} target
+{% endfor %}
+
+{{ email.coming_up_heading }}
+{% if brief.sections.coming_up %}
+{% for item in brief.sections.coming_up %}
+{{ item.label }}{% if item.amount_display %} · {{ item.amount_display }}{% endif %} · {{ item.date_label }}
+{% endfor %}
+{% else %}
+{{ email.no_calendar }}
+{% endif %}
+
+{{ email.exit_watch_heading }}
+{% if brief.sections.exit_watch %}
+{% for item in brief.sections.exit_watch %}
+{{ item.symbol }} · {{ item.action_label }}{% for trigger in item.triggers %} · {{ trigger.label }} ({{ trigger.status_label }}){% endfor %}
+{% endfor %}
+{% else %}
+{{ email.no_exit_watch }}
+{% endif %}
+{% if brief.sections.world_and_money %}
+{{ email.world_heading }}
+{{ brief.sections.world_and_money.headline }}
+{% endif %}
+{%- if brief.sections.for_nris %}
+{{ brief.sections.for_nris.heading }}
+{% for note in brief.sections.for_nris.notes %}
+{{ note }}
+{% endfor %}
+{%- endif %}
+
+{{ brief.disclaimer }}
+{{ brief.why_received }}
+{{ email.manage_alerts }}: {{ brief.manage_alerts_url }}
+{{ email.unsubscribe }}: {{ brief.unsubscribe_url }}
+{{ brief.postal_address }}

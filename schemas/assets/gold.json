@@ -1,0 +1,175 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "asset_type": {
+      "const": "gold",
+      "title": "Asset Type",
+      "type": "string"
+    },
+    "grams": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Grams"
+    },
+    "issue": {
+      "anyOf": [
+        {
+          "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "issue_price_per_gram": {
+      "anyOf": [
+        {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Issue Price Per Gram"
+    },
+    "joint": {
+      "default": false,
+      "title": "Joint",
+      "type": "boolean"
+    },
+    "kind": {
+      "enum": [
+        "sgb",
+        "etf",
+        "mf",
+        "physical",
+        "digital"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "label": {
+      "anyOf": [
+        {
+          "maxLength": 80,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Label"
+    },
+    "member_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Member Id"
+    },
+    "notes": {
+      "anyOf": [
+        {
+          "maxLength": 500,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Notes"
+    },
+    "purity": {
+      "anyOf": [
+        {
+          "enum": [
+            24,
+            22,
+            18
+          ],
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Purity"
+    },
+    "purpose": {
+      "anyOf": [
+        {
+          "enum": [
+            "jewellery",
+            "investment"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Purpose"
+    },
+    "series": {
+      "anyOf": [
+        {
+          "maxLength": 80,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Series"
+    },
+    "units": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Units"
+    }
+  },
+  "required": [
+    "asset_type",
+    "kind"
+  ],
+  "title": "GoldAsset",
+  "type": "object"
+}

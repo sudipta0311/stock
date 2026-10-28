@@ -1,0 +1,144 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "alternate_pct": {
+      "anyOf": [
+        {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]?)(\\.[0-9]{1,4})?$|^100(\\.0{1,4})?$",
+          "type": "string",
+          "x-maximum": "100",
+          "x-minimum": "0"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Alternate Pct"
+    },
+    "asset_type": {
+      "const": "nps",
+      "title": "Asset Type",
+      "type": "string"
+    },
+    "corporate_debt_pct": {
+      "anyOf": [
+        {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]?)(\\.[0-9]{1,4})?$|^100(\\.0{1,4})?$",
+          "type": "string",
+          "x-maximum": "100",
+          "x-minimum": "0"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Corporate Debt Pct"
+    },
+    "equity_pct": {
+      "anyOf": [
+        {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]?)(\\.[0-9]{1,4})?$|^100(\\.0{1,4})?$",
+          "type": "string",
+          "x-maximum": "100",
+          "x-minimum": "0"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Equity Pct"
+    },
+    "govt_debt_pct": {
+      "anyOf": [
+        {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]?)(\\.[0-9]{1,4})?$|^100(\\.0{1,4})?$",
+          "type": "string",
+          "x-maximum": "100",
+          "x-minimum": "0"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Govt Debt Pct"
+    },
+    "joint": {
+      "default": false,
+      "title": "Joint",
+      "type": "boolean"
+    },
+    "label": {
+      "anyOf": [
+        {
+          "maxLength": 80,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Label"
+    },
+    "member_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Member Id"
+    },
+    "notes": {
+      "anyOf": [
+        {
+          "maxLength": 500,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Notes"
+    },
+    "tier1_balance": {
+      "format": "decimal",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+      "type": "string",
+      "x-unit": "INR"
+    },
+    "tier2_balance": {
+      "anyOf": [
+        {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Tier2 Balance"
+    }
+  },
+  "required": [
+    "asset_type",
+    "tier1_balance"
+  ],
+  "title": "NPSAsset",
+  "type": "object"
+}

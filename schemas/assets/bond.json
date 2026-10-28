@@ -1,0 +1,142 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "asset_type": {
+      "const": "bond",
+      "title": "Asset Type",
+      "type": "string"
+    },
+    "coupon_frequency": {
+      "anyOf": [
+        {
+          "enum": [
+            1,
+            2
+          ],
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Coupon Frequency"
+    },
+    "coupon_pct": {
+      "anyOf": [
+        {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]?)(\\.[0-9]{1,4})?$",
+          "type": "string",
+          "x-maximum": "30",
+          "x-minimum": "0"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Coupon Pct"
+    },
+    "face_value": {
+      "format": "decimal",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+      "type": "string",
+      "x-unit": "INR"
+    },
+    "isin": {
+      "anyOf": [
+        {
+          "maxLength": 12,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Isin"
+    },
+    "issuer": {
+      "anyOf": [
+        {
+          "maxLength": 120,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Issuer"
+    },
+    "joint": {
+      "default": false,
+      "title": "Joint",
+      "type": "boolean"
+    },
+    "kind": {
+      "enum": [
+        "gsec",
+        "tbill",
+        "rbi_frsb",
+        "corporate",
+        "tax_free",
+        "bond_54ec"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "label": {
+      "anyOf": [
+        {
+          "maxLength": 80,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Label"
+    },
+    "maturity": {
+      "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+      "type": "string"
+    },
+    "member_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Member Id"
+    },
+    "notes": {
+      "anyOf": [
+        {
+          "maxLength": 500,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Notes"
+    }
+  },
+  "required": [
+    "asset_type",
+    "kind",
+    "face_value",
+    "maturity"
+  ],
+  "title": "BondAsset",
+  "type": "object"
+}

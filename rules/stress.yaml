@@ -1,0 +1,37 @@
+version: 1
+scenarios:
+  inr_minus_10:
+    assumption: true
+    equity_india: "0"
+    equity_global_usd: "0"
+    fx: "+0.10"
+    gold: "0"
+    debt: "0"
+  india_equity_minus_25:
+    assumption: true
+    equity_india: "-0.25"
+    equity_global_usd: "0"
+    fx: "0"
+    gold: "0"
+    debt: "0"
+  us_equity_minus_30:
+    assumption: true
+    equity_india: "0"
+    equity_global_usd: "-0.30"
+    fx: "0"
+    gold: "0"
+    debt: "0"
+  oil_shock:
+    assumption: true
+    equity_india: "-0.15"
+    equity_global_usd: "0"
+    fx: "+0.05"
+    gold: "+0.08"
+    debt: "-0.01"
+  global_risk_off:
+    assumption: true
+    equity_india: "-0.25"
+    equity_global_usd: "-0.25"
+    fx: "+0.08"
+    gold: "+0.15"
+    debt: "0"

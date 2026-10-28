@@ -1,0 +1,109 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "asset_type": {
+      "const": "health_insurance",
+      "title": "Asset Type",
+      "type": "string"
+    },
+    "cover": {
+      "format": "decimal",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+      "type": "string",
+      "x-unit": "INR"
+    },
+    "insurer": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Insurer",
+      "type": "string"
+    },
+    "joint": {
+      "default": false,
+      "title": "Joint",
+      "type": "boolean"
+    },
+    "label": {
+      "anyOf": [
+        {
+          "maxLength": 80,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Label"
+    },
+    "member_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Member Id"
+    },
+    "members_covered": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Members Covered"
+    },
+    "notes": {
+      "anyOf": [
+        {
+          "maxLength": 500,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Notes"
+    },
+    "renewal_month": {
+      "maximum": 12,
+      "minimum": 1,
+      "title": "Renewal Month",
+      "type": "integer"
+    },
+    "top_up_cover": {
+      "anyOf": [
+        {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Top Up Cover"
+    }
+  },
+  "required": [
+    "asset_type",
+    "insurer",
+    "cover",
+    "renewal_month"
+  ],
+  "title": "HealthInsuranceAsset",
+  "type": "object"
+}

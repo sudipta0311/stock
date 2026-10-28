@@ -1,0 +1,126 @@
+{
+  "$defs": {
+    "Residency": {
+      "additionalProperties": false,
+      "description": "Tax and country profile used by residency-aware policy decisions.",
+      "properties": {
+        "country": {
+          "default": "IN",
+          "enum": [
+            "IN",
+            "DK",
+            "OTHER"
+          ],
+          "title": "Country",
+          "type": "string"
+        },
+        "planned_return_year": {
+          "anyOf": [
+            {
+              "maximum": 9999,
+              "minimum": 1900,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Planned Return Year"
+        },
+        "settle_plan": {
+          "default": "undecided",
+          "enum": [
+            "india",
+            "abroad",
+            "undecided"
+          ],
+          "title": "Settle Plan",
+          "type": "string"
+        },
+        "status": {
+          "default": "RI",
+          "enum": [
+            "RI",
+            "NRI",
+            "RNOR"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "us_person": {
+          "default": false,
+          "title": "Us Person",
+          "type": "boolean"
+        }
+      },
+      "title": "Residency",
+      "type": "object"
+    },
+    "TaxRegime": {
+      "enum": [
+        "old",
+        "new"
+      ],
+      "title": "TaxRegime",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "city_tier": {
+      "anyOf": [
+        {
+          "enum": [
+            1,
+            2,
+            3
+          ],
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "City Tier"
+    },
+    "language": {
+      "default": "en",
+      "title": "Language",
+      "type": "string"
+    },
+    "residency": {
+      "$ref": "#/$defs/Residency"
+    },
+    "tax_regime": {
+      "$ref": "#/$defs/TaxRegime"
+    },
+    "tax_slab_pct": {
+      "anyOf": [
+        {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]?)(\\.[0-9]{1,4})?$",
+          "type": "string",
+          "x-maximum": "30",
+          "x-minimum": "0"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Tax Slab Pct"
+    },
+    "timezone": {
+      "default": "Asia/Kolkata",
+      "title": "Timezone",
+      "type": "string"
+    }
+  },
+  "required": [
+    "tax_regime"
+  ],
+  "title": "Profile",
+  "type": "object"
+}

@@ -1,0 +1,11 @@
+version: 1
+defaults:
+  route_a_max_monthly_inr: "25000"
+  route_c_min_annual_inr: "500000"
+  switch_to_ucits_above_usd: "60000"
+  etf_max_inav_premium_pct: "1.0"
+  lrs_tcs_threshold_inr: "1000000"
+fx_markup_note: "LRS remittances may include foreign exchange markup and transfer fees."
+checks:
+  pause_if_amc_subscription_suspended: true
+  require_schedule_fa_reminder_for_route_c: true

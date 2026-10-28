@@ -1,0 +1,690 @@
+{
+  "actions": [
+    {
+      "amount": "100000.00",
+      "clubbing_check": null,
+      "instrument_category": "liquid_fund",
+      "kind": "BUILD_EMERGENCY_FUND",
+      "lots_to_sell": null,
+      "member_id": "self",
+      "member_name": "You",
+      "member_relationship": "self",
+      "params": {
+        "after_tax_yield_pct": "5.00"
+      },
+      "quantity": null,
+      "rank": 1,
+      "reason_code": "emergency_fund_gap",
+      "route": null,
+      "security_id": null,
+      "sleeve": "debt",
+      "symbol": null,
+      "tax_estimate": null,
+      "tranche": null,
+      "urgency": null
+    },
+    {
+      "amount": "20000.00",
+      "clubbing_check": null,
+      "instrument_category": "monthly_sip",
+      "kind": "REBALANCE_SIPS",
+      "lots_to_sell": null,
+      "member_id": "self",
+      "member_name": "You",
+      "member_relationship": "self",
+      "params": {
+        "changes": [
+          {
+            "from": "15000.00",
+            "instrument_category": "in_core_index",
+            "sleeve": "equity_india",
+            "to": "27500.00"
+          },
+          {
+            "from": "5000.00",
+            "instrument_category": "us_etf",
+            "route": "C",
+            "sleeve": "equity_global",
+            "to": "9000.00"
+          },
+          {
+            "from": "0.00",
+            "instrument_category": "gold_etf",
+            "sleeve": "gold",
+            "to": "3000.00"
+          },
+          {
+            "from": "0.00",
+            "instrument_category": "ppf",
+            "sleeve": "cash",
+            "to": "500.00"
+          }
+        ]
+      },
+      "quantity": null,
+      "rank": 2,
+      "reason_code": "sip_capacity_redirected",
+      "route": null,
+      "security_id": null,
+      "sleeve": "multiple",
+      "symbol": null,
+      "tax_estimate": null,
+      "tranche": null,
+      "urgency": null
+    },
+    {
+      "amount": "6750.00",
+      "clubbing_check": null,
+      "instrument_category": "equity_holding",
+      "kind": "SELL_TRIM",
+      "lots_to_sell": [
+        {
+          "lot": {
+            "acquired_on": "2025-01-15",
+            "cost_per_unit": "350",
+            "fmv_2018_01_31": null,
+            "lot_id": "synthetic-lot-in-1",
+            "market_price": "450",
+            "maturity_date": null,
+            "quantity": "20",
+            "tax_class": "listed_equity"
+          },
+          "quantity": "15"
+        }
+      ],
+      "member_id": "self",
+      "member_name": "You",
+      "member_relationship": "self",
+      "params": {},
+      "quantity": "15",
+      "rank": 3,
+      "reason_code": "drift",
+      "route": null,
+      "security_id": "synthetic-india-equity",
+      "sleeve": "equity",
+      "symbol": "SYNTH",
+      "tax_estimate": {
+        "cess": "0.00",
+        "exemption_used": "1500.00",
+        "gross_proceeds": "6750.00",
+        "lines": [
+          {
+            "cost_basis_per_unit": "350",
+            "gain": "1500.00",
+            "gain_after_loss_setoff": "1500.00",
+            "holding_period": "LT",
+            "lot_id": "synthetic-lot-in-1",
+            "note": null,
+            "proceeds": "6750.00",
+            "quantity": "15",
+            "rate_pct": "12.5",
+            "tax_before_cess": "0.00",
+            "taxable_gain": "0.00"
+          }
+        ],
+        "net_proceeds": "6750.00",
+        "notes": [],
+        "tax_before_cess": "0.00",
+        "tds_estimate": null,
+        "total_tax": "0.00"
+      },
+      "tranche": null,
+      "urgency": "LOW"
+    }
+  ],
+  "allocation": {
+    "cash": {
+      "current": "150000.00",
+      "current_pct": "7.72",
+      "gap": "30000.00",
+      "target": "180000.00",
+      "target_pct": "9.27"
+    },
+    "debt": {
+      "current": "1750000.00",
+      "current_pct": "90.10",
+      "gap": "-1016160.00",
+      "target": "733840.00",
+      "target_pct": "37.78"
+    },
+    "equity_global": {
+      "current": "33400.00",
+      "current_pct": "1.72",
+      "gap": "205938.00",
+      "target": "239338.00",
+      "target_pct": "12.32"
+    },
+    "equity_india": {
+      "current": "9000.00",
+      "current_pct": "0.46",
+      "gap": "621982.00",
+      "target": "630982.00",
+      "target_pct": "32.48"
+    },
+    "gold": {
+      "current": "0.00",
+      "current_pct": "0.00",
+      "gap": "158240.00",
+      "target": "158240.00",
+      "target_pct": "8.15"
+    }
+  },
+  "as_of": "2026-10-28",
+  "band_breaches": [
+    {
+      "actual_pct": "0.46",
+      "direction": "under",
+      "excess_amount": "524836.48",
+      "sleeve": "equity_india",
+      "target_pct": "32.48"
+    },
+    {
+      "actual_pct": "1.72",
+      "direction": "under",
+      "excess_amount": "146068.48",
+      "sleeve": "equity_global",
+      "target_pct": "12.32"
+    },
+    {
+      "actual_pct": "90.10",
+      "direction": "over",
+      "excess_amount": "919143.68",
+      "sleeve": "debt",
+      "target_pct": "37.78"
+    },
+    {
+      "actual_pct": "0.00",
+      "direction": "under",
+      "excess_amount": "118729.20",
+      "sleeve": "gold",
+      "target_pct": "8.15"
+    }
+  ],
+  "carry_forward": "0.00",
+  "debt_answer": {
+    "current_debt": "1750000.00",
+    "gap": "-1016160.00",
+    "locked_debt": "1750000.00",
+    "message_key": "debt_target_met",
+    "new_money_order": [
+      "equity",
+      "gold",
+      "cash"
+    ],
+    "params": {
+      "current_pct": "90.1",
+      "target_pct": "37.8"
+    },
+    "status": "enough",
+    "target_debt": "733840.00"
+  },
+  "debt_picks": [
+    {
+      "after_tax_yield_pct": "5.60",
+      "instrument": "bank_fd",
+      "reason_codes": [
+        "after_tax_yield",
+        "suggested_tenure",
+        "split_across_banks"
+      ],
+      "reason_params": {
+        "split_across_banks": {
+          "bank_count": 2
+        },
+        "suggested_tenure": {
+          "years": "8"
+        }
+      },
+      "suggested_tenure": {
+        "years": "8"
+      }
+    }
+  ],
+  "deployment_mode": "personal",
+  "disclaimer": "Personal tool for family and friends. Information and education only, not investment advice.",
+  "exit_cards": [
+    {
+      "action": "TRIM_TO_TARGET",
+      "lots_to_sell": [
+        [
+          {
+            "acquired_on": "2025-01-15",
+            "cost_per_unit": "350",
+            "fmv_2018_01_31": null,
+            "lot_id": "synthetic-lot-in-1",
+            "market_price": "450",
+            "maturity_date": null,
+            "quantity": "20",
+            "tax_class": "listed_equity"
+          },
+          "15"
+        ]
+      ],
+      "member_id": "self",
+      "member_name": "You",
+      "member_relationship": "self",
+      "params": {},
+      "quantity": "15",
+      "reason_codes": [
+        "drift"
+      ],
+      "security_id": "synthetic-india-equity",
+      "symbol": "SYNTH",
+      "tax_estimate": {
+        "cess": "0.00",
+        "exemption_used": "1500.00",
+        "gross_proceeds": "6750.00",
+        "lines": [
+          {
+            "cost_basis_per_unit": "350",
+            "gain": "1500.00",
+            "gain_after_loss_setoff": "1500.00",
+            "holding_period": "LT",
+            "lot_id": "synthetic-lot-in-1",
+            "note": null,
+            "proceeds": "6750.00",
+            "quantity": "15",
+            "rate_pct": "12.5",
+            "tax_before_cess": "0.00",
+            "taxable_gain": "0.00"
+          }
+        ],
+        "net_proceeds": "6750.00",
+        "notes": [],
+        "tax_before_cess": "0.00",
+        "tds_estimate": null,
+        "total_tax": "0.00"
+      },
+      "triggers": {
+        "drift": {
+          "key": "drift",
+          "status": "triggered",
+          "threshold": "weight >5% of equity or >1.5x target",
+          "value": "21.22641509433962264150943396% of equity; 4.245283018867924528301886792x target"
+        },
+        "geopolitical_break": {
+          "key": "geopolitical_break",
+          "status": "unknown",
+          "threshold": "revenue hit >20% with at least 2 independent evidence ids",
+          "value": null
+        },
+        "goal_approach": {
+          "key": "goal_approach",
+          "status": "unknown",
+          "threshold": "goal within 3 years",
+          "value": null
+        },
+        "governance_break": {
+          "key": "governance_break",
+          "status": "unknown",
+          "threshold": "event in AUDITOR_RESIGNATION, RESTATEMENT, REGULATOR_ENFORCEMENT; pledge increase >=10 pp or pledge >25%",
+          "value": null
+        },
+        "risk_stop": {
+          "key": "risk_stop",
+          "status": "unknown",
+          "threshold": "drawdown <=-25% and below 200-DMA and thesis watch",
+          "value": "28.57142857142857142857142857% from cost; below 200-DMA=None; thesis=unknown"
+        },
+        "tax_wait": {
+          "key": "tax_wait",
+          "status": "ok",
+          "threshold": "within 30 days of long-term with positive tax savings",
+          "value": null
+        },
+        "thesis_break": {
+          "key": "thesis_break",
+          "status": "unknown",
+          "threshold": "2 recent revenue declines; ROCE <10% for 4 quarters; guidance cut >15%",
+          "value": null
+        },
+        "valuation_stretch": {
+          "key": "valuation_stretch",
+          "status": "unknown",
+          "threshold": "own PE percentile >90 and sector multiple >1.5x",
+          "value": null
+        }
+      },
+      "urgency": "LOW"
+    }
+  ],
+  "foundation": [
+    {
+      "gap": "0.00",
+      "have": "0.00",
+      "key": "high_interest_debt",
+      "required": "0.00",
+      "status": "ok"
+    },
+    {
+      "gap": "210000.00",
+      "have": "150000.00",
+      "key": "emergency_fund",
+      "required": "360000.00",
+      "status": "gap"
+    },
+    {
+      "gap": "17850000.00",
+      "have": "0.00",
+      "key": "term_cover",
+      "required": "17850000.00",
+      "status": "gap"
+    },
+    {
+      "gap": "1000000.00",
+      "have": "0.00",
+      "key": "health_cover",
+      "required": "1000000.00",
+      "status": "gap"
+    }
+  ],
+  "inputs_digest": "becae73f2ac33cd2e4aed85dc39e9ae7316ab9c10c8c80091fbc118c74421c1a",
+  "insurance_reviews": [],
+  "members": [
+    {
+      "eligibility": {
+        "arbitrage_fund": true,
+        "ask": false,
+        "bank_fd": true,
+        "epf": true,
+        "fcnr_b": false,
+        "gold_etf": true,
+        "in_equity_direct": true,
+        "in_etf": true,
+        "in_mf": true,
+        "kvp": true,
+        "liquid_fund": true,
+        "local_bank_deposit": false,
+        "lrs": true,
+        "nps": true,
+        "nre_fd": false,
+        "nro_fd": false,
+        "nsc": true,
+        "po_rd": true,
+        "po_td": true,
+        "pomis": true,
+        "ppf": true,
+        "rbi_frsb": true,
+        "rbi_retail_direct_gsec": true,
+        "scss": false,
+        "sgb": true,
+        "ssy": true,
+        "ucits_global_etf": false,
+        "vpf": true
+      },
+      "eligibility_conditions": {
+        "ucits_global_etf": "eu_priips_kid"
+      },
+      "eligibility_status": {
+        "arbitrage_fund": "allowed",
+        "ask": "not_allowed",
+        "bank_fd": "allowed",
+        "epf": "allowed",
+        "fcnr_b": "not_allowed",
+        "gold_etf": "allowed",
+        "in_equity_direct": "allowed",
+        "in_etf": "allowed",
+        "in_mf": "allowed",
+        "kvp": "allowed",
+        "liquid_fund": "allowed",
+        "local_bank_deposit": "not_allowed",
+        "lrs": "allowed",
+        "nps": "allowed",
+        "nre_fd": "not_allowed",
+        "nro_fd": "not_allowed",
+        "nsc": "allowed",
+        "po_rd": "allowed",
+        "po_td": "allowed",
+        "pomis": "allowed",
+        "ppf": "allowed",
+        "rbi_frsb": "allowed",
+        "rbi_retail_direct_gsec": "allowed",
+        "scss": "not_allowed",
+        "sgb": "allowed",
+        "ssy": "allowed",
+        "ucits_global_etf": "conditional",
+        "vpf": "allowed"
+      },
+      "foundation": {
+        "term_cover": {
+          "gap": "17850000.00",
+          "have": "0.00",
+          "required": "17850000.00",
+          "status": "gap"
+        }
+      },
+      "id": "self",
+      "limits_room": {
+        "ask_deposit_dkk": "0.00",
+        "lrs_annual_usd": "248802.40",
+        "lrs_tcs_pct": "20.00",
+        "lrs_tcs_threshold_inr": "1000000.00",
+        "nsc_inr": null,
+        "pomis_inr": "900000.00",
+        "ppf_annual_inr": "90000.00",
+        "scss_inr": "0.00",
+        "ssy_annual_inr": "150000.00"
+      },
+      "liquidity": {
+        "instant": "192400.00",
+        "locked": "1750000.00",
+        "within_1y": "0.00"
+      },
+      "locked": {
+        "cash": "0.00",
+        "debt": "1750000.00",
+        "equity_global": "0.00",
+        "equity_india": "0.00",
+        "gold": "0.00",
+        "protection": "0.00",
+        "real_estate": "0.00"
+      },
+      "ltcg_harvest": {
+        "available": false,
+        "exemption_inr": "125000",
+        "gains_booked": "0.00",
+        "lots": [],
+        "needs_review": false,
+        "tax_saved_before_cess": "0.00"
+      },
+      "name": "You",
+      "net_worth": "1942400.00",
+      "notes": [],
+      "relationship": "self",
+      "residency": {
+        "country": "IN",
+        "planned_return_year": null,
+        "settle_plan": "undecided",
+        "status": "RI",
+        "us_person": false
+      },
+      "sleeves": {
+        "cash": "150000.00",
+        "debt": "1750000.00",
+        "equity_global": "33400.00",
+        "equity_india": "9000.00",
+        "gold": "0.00",
+        "protection": "0.00",
+        "real_estate": "0.00"
+      }
+    }
+  ],
+  "notes": [
+    "debt_yields_unverified_as_of:2026-10-28",
+    "You: liquid_fund after-tax yield 5.00%"
+  ],
+  "placement_notes": [
+    "You: liquid_fund after-tax yield 5.00%"
+  ],
+  "plan_health": 38,
+  "residency": {
+    "country": "IN",
+    "planned_return_year": null,
+    "settle_plan": "undecided",
+    "status": "RI",
+    "us_person": false
+  },
+  "residency_notes": [],
+  "route": {
+    "alternatives": [
+      "C"
+    ],
+    "reasons": [
+      "below_route_a_max_monthly_inr"
+    ],
+    "route": "A",
+    "vehicle": "in_international_index_fund",
+    "warning_params": {},
+    "warnings": [
+      "estate_tax_us_domiciled_assets"
+    ]
+  },
+  "stress": {
+    "global_risk_off": {
+      "current": {
+        "by_sleeve": {
+          "cash": "0.00",
+          "debt": "0.00",
+          "equity_global": "-6346.00",
+          "equity_india": "-2250.00",
+          "gold": "0.00"
+        },
+        "total": "-8596.00"
+      },
+      "difference": {
+        "current_total": "-8596.00",
+        "difference": "-170887.72",
+        "target_total": "-179483.72"
+      },
+      "target": {
+        "by_sleeve": {
+          "cash": "0.00",
+          "debt": "0.00",
+          "equity_global": "-45474.22",
+          "equity_india": "-157745.50",
+          "gold": "23736.00"
+        },
+        "total": "-179483.72"
+      }
+    },
+    "india_equity_minus_25": {
+      "current": {
+        "by_sleeve": {
+          "cash": "0.00",
+          "debt": "0.00",
+          "equity_global": "0.00",
+          "equity_india": "-2250.00",
+          "gold": "0.00"
+        },
+        "total": "-2250.00"
+      },
+      "difference": {
+        "current_total": "-2250.00",
+        "difference": "-155495.50",
+        "target_total": "-157745.50"
+      },
+      "target": {
+        "by_sleeve": {
+          "cash": "0.00",
+          "debt": "0.00",
+          "equity_global": "0.00",
+          "equity_india": "-157745.50",
+          "gold": "0.00"
+        },
+        "total": "-157745.50"
+      }
+    },
+    "inr_minus_10": {
+      "current": {
+        "by_sleeve": {
+          "cash": "0.00",
+          "debt": "0.00",
+          "equity_global": "3340.00",
+          "equity_india": "0.00",
+          "gold": "0.00"
+        },
+        "total": "3340.00"
+      },
+      "difference": {
+        "current_total": "3340.00",
+        "difference": "20593.80",
+        "target_total": "23933.80"
+      },
+      "target": {
+        "by_sleeve": {
+          "cash": "0.00",
+          "debt": "0.00",
+          "equity_global": "23933.80",
+          "equity_india": "0.00",
+          "gold": "0.00"
+        },
+        "total": "23933.80"
+      }
+    },
+    "oil_shock": {
+      "current": {
+        "by_sleeve": {
+          "cash": "0.00",
+          "debt": "-17500.00",
+          "equity_global": "1670.00",
+          "equity_india": "-1350.00",
+          "gold": "0.00"
+        },
+        "total": "-17180.00"
+      },
+      "difference": {
+        "current_total": "-17180.00",
+        "difference": "-60179.60",
+        "target_total": "-77359.60"
+      },
+      "target": {
+        "by_sleeve": {
+          "cash": "0.00",
+          "debt": "-7338.40",
+          "equity_global": "11966.90",
+          "equity_india": "-94647.30",
+          "gold": "12659.20"
+        },
+        "total": "-77359.60"
+      }
+    },
+    "us_equity_minus_30": {
+      "current": {
+        "by_sleeve": {
+          "cash": "0.00",
+          "debt": "0.00",
+          "equity_global": "-10020.00",
+          "equity_india": "0.00",
+          "gold": "0.00"
+        },
+        "total": "-10020.00"
+      },
+      "difference": {
+        "current_total": "-10020.00",
+        "difference": "-61781.40",
+        "target_total": "-71801.40"
+      },
+      "target": {
+        "by_sleeve": {
+          "cash": "0.00",
+          "debt": "0.00",
+          "equity_global": "-71801.40",
+          "equity_india": "0.00",
+          "gold": "0.00"
+        },
+        "total": "-71801.40"
+      }
+    }
+  },
+  "unranked_options": [
+    {
+      "instrument": "gsec_rbi_retail_direct",
+      "reason": "yield_unavailable"
+    },
+    {
+      "instrument": "vpf",
+      "reason": "yield_unavailable"
+    }
+  ],
+  "week": "2026-W44"
+}

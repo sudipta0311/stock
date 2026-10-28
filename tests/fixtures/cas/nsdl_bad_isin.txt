@@ -1,0 +1,7 @@
+NSDL Consolidated Account Statement
+Statement for the period from 01-Jun-2026 to 30-Jun-2026
+Demat Account
+DP ID: IN300000 Client ID: 12345678
+Equity Shares
+INE000A01019 Synthetic Invalid Digit Limited 10.00 2 50.00 100.00
+Sub Total

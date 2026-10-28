@@ -1,0 +1,168 @@
+version: 1
+fd_split_limit_inr: "500000"
+instruments:
+  - key: liquid_fund
+    min_horizon_years: "0"
+    max_horizon_years: "1"
+    liquidity: within_1y
+    lock_in_years: "0"
+    tax: slab_deferred
+    eligibility: {min_age: null, max_amount: null, annual_limit: null}
+    yield_key: liquid_fund
+  - key: sweep_fd
+    min_horizon_years: "0"
+    max_horizon_years: "1"
+    liquidity: instant
+    lock_in_years: "0"
+    tax: slab
+    eligibility: {min_age: null, max_amount: null, annual_limit: null}
+    yield_key: sweep_fd
+  - key: bank_fd
+    min_horizon_years: "0"
+    max_horizon_years: null
+    liquidity: locked
+    tenure_flexible: true
+    min_tenure_days: 7
+    tax: slab
+    eligibility: {min_age: null, max_amount: null, annual_limit: null}
+    yield_key: bank_fd
+  - key: po_td_1y
+    min_horizon_years: "1"
+    max_horizon_years: "1"
+    liquidity: locked
+    lock_in_years: "1"
+    tax: slab
+    eligibility: {min_age: null, max_amount: null, annual_limit: null}
+    yield_key: po_td_1y
+  - key: po_td_2y
+    min_horizon_years: "2"
+    max_horizon_years: "2"
+    liquidity: locked
+    lock_in_years: "2"
+    tax: slab
+    eligibility: {min_age: null, max_amount: null, annual_limit: null}
+    yield_key: po_td_2y
+  - key: po_td_3y
+    min_horizon_years: "3"
+    max_horizon_years: "3"
+    liquidity: locked
+    lock_in_years: "3"
+    tax: slab
+    eligibility: {min_age: null, max_amount: null, annual_limit: null}
+    yield_key: po_td_3y
+  - key: po_td_5y
+    min_horizon_years: "5"
+    max_horizon_years: "5"
+    liquidity: locked
+    lock_in_years: "5"
+    tax: slab
+    eligibility: {min_age: null, max_amount: null, annual_limit: null}
+    yield_key: po_td_5y
+  - key: arbitrage_fund
+    min_horizon_years: "1"
+    max_horizon_years: "3"
+    liquidity: within_1y
+    lock_in_years: "1"
+    tax: equity
+    eligibility: {min_age: null, max_amount: null, annual_limit: null}
+    yield_key: arbitrage_fund
+  - key: target_maturity_fund
+    min_horizon_years: "3"
+    max_horizon_years: "7"
+    liquidity: within_1y
+    lock_in_years: "3"
+    tax: slab_deferred
+    eligibility: {min_age: null, max_amount: null, annual_limit: null}
+    yield_key: target_maturity_fund
+  - key: gsec_rbi_retail_direct
+    min_horizon_years: "3"
+    max_horizon_years: "30"
+    liquidity: within_1y
+    lock_in_years: "3"
+    tax: slab
+    eligibility: {min_age: null, max_amount: null, annual_limit: null}
+    yield_key: gsec_rbi_retail_direct
+  - key: nsc
+    min_horizon_years: "5"
+    max_horizon_years: "5"
+    liquidity: locked
+    lock_in_years: "5"
+    tax: slab
+    eligibility: {min_age: null, max_amount: null, annual_limit: null}
+    yield_key: nsc
+  - key: ppf
+    min_horizon_years: "15"
+    max_horizon_years: null
+    liquidity: locked
+    lock_in_years: "15"
+    tax: exempt
+    eligibility: {min_age: null, max_amount: null, annual_limit: "150000"}
+    yield_key: ppf
+  - key: vpf
+    min_horizon_years: "5"
+    max_horizon_years: null
+    liquidity: locked
+    lock_in_years: "15"
+    tax: slab
+    eligibility: {min_age: null, max_amount: null, annual_limit: null}
+    yield_key: vpf
+  - key: scss
+    min_horizon_years: "5"
+    max_horizon_years: "5"
+    liquidity: locked
+    lock_in_years: "5"
+    tax: slab
+    eligibility: {min_age: 60, max_amount: "3000000", annual_limit: null}
+    yield_key: scss
+  - key: pomis
+    min_horizon_years: "5"
+    max_horizon_years: "5"
+    liquidity: locked
+    lock_in_years: "5"
+    tax: slab
+    eligibility: {min_age: null, max_amount: "900000", annual_limit: null}
+    yield_key: pomis
+  - key: rbi_frsb
+    min_horizon_years: "7"
+    max_horizon_years: "7"
+    liquidity: locked
+    lock_in_years: "7"
+    tax: slab
+    eligibility: {min_age: null, max_amount: null, annual_limit: null}
+    yield_key: rbi_frsb
+  - key: local_bank_deposit
+    min_horizon_years: "0"
+    max_horizon_years: null
+    liquidity: instant
+    tenure_flexible: true
+    min_tenure_days: 0
+    tax: local_unmodeled
+    eligibility: {min_age: null, max_amount: null, annual_limit: null}
+    yield_key: local_bank_deposit
+    countries: [DK]
+    currencies: [DKK, EUR]
+  - key: nre_fd
+    min_horizon_years: "1"
+    max_horizon_years: null
+    liquidity: locked
+    lock_in_years: "1"
+    tax: exempt
+    eligibility: {min_age: null, max_amount: null, annual_limit: null}
+    yield_key: nre_fd
+  - key: fcnr_b
+    min_horizon_years: "1"
+    max_horizon_years: "5"
+    liquidity: locked
+    lock_in_years: "1"
+    tax: exempt
+    eligibility: {min_age: null, max_amount: null, annual_limit: null}
+    yield_key: fcnr_b
+  - key: nro_fd
+    min_horizon_years: "0"
+    max_horizon_years: null
+    liquidity: locked
+    tenure_flexible: true
+    min_tenure_days: 7
+    tax: slab
+    eligibility: {min_age: null, max_amount: null, annual_limit: null}
+    yield_key: nro_fd

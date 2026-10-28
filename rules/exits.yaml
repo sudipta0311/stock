@@ -1,0 +1,42 @@
+version: 1
+watch_fraction: "0.8"
+satellite:
+  thesis_break:
+    revenue_yoy_negative_quarters: 2
+    roce_floor_pct: "10"
+    roce_floor_quarters: 4
+    guidance_cut_pct: "15"
+    action: EXIT
+    urgency: HIGH
+  governance_break:
+    events: [AUDITOR_RESIGNATION, RESTATEMENT, REGULATOR_ENFORCEMENT]
+    pledge_jump_pp: "10"
+    pledge_abs_pct: "25"
+    action: EXIT
+    urgency: CRITICAL
+  geopolitical_break:
+    addressable_revenue_hit_pct: "20"
+    min_independent_sources: 2
+    action: REVIEW_THEN_EXIT
+  valuation_stretch:
+    own_band_percentile: "90"
+    sector_multiple: "1.5"
+    action: TRIM_TO_TARGET
+  drift:
+    max_weight_of_equity_pct: "5"
+    max_vs_target_ratio: "1.5"
+    action: TRIM_TO_TARGET
+  risk_stop:
+    drawdown_from_cost_pct: "25"
+    below_dma: 200
+    requires_thesis: WATCH
+    action: REVIEW_THEN_EXIT
+  tax_wait:
+    max_days_to_long_term: 30
+    applies_to: [valuation_stretch, drift, swap]
+  goal_approach:
+    within_years: 3
+    action: GLIDE_TO_DEBT
+core:
+  stop_loss: false
+  rebalance_bands: {absolute_pp: "5", relative_pct: "25"}

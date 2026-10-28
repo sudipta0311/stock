@@ -1,0 +1,865 @@
+import { useEffect, useMemo, useState } from "react";
+import type { FormEvent } from "react";
+import { ArrowRight, Building2, CalendarDays, CloudUpload } from "lucide-react";
+import { Link, useNavigate } from "react-router";
+import { ApiError } from "../api/client";
+import { sumInr } from "../lib/money";
+import { Badge, Button, Card, Progress, Stat } from "../ui";
+import { getNetworth, listAssets, quickAdd, updateChecklist } from "./api";
+import type { AssetResponse, NetworthResponse } from "./api";
+import {
+  addPathForCategory,
+  categoryLabel,
+  CHECKLIST_PENDING_KEY,
+  CHECKLIST_STORAGE_KEY,
+  checklistTiles,
+} from "./config";
+import type { ChecklistWorkflow } from "./config";
+import { listImports } from "../imports/api";
+import type { ImportJob } from "../imports/api";
+import { shouldShowCasNudge } from "../imports/domain";
+import { ImportHistorySheet } from "../imports/ImportHistorySheet";
+import { markValueMoment } from "../pwa/install";
+import englishCopy from "../copy/en.json";
+import { apiPathAvailable } from "../api/feature-support";
+import { useHousehold } from "../household/HouseholdContext";
+import { getPlan } from "../planning/api";
+import type { WeeklyPlan } from "../planning/api";
+import {
+  formatHouseholdAmount,
+  formatSecondaryAmount,
+} from "../household/currency";
+import type { DkkInrRate } from "../household/fx";
+
+const SLEEVE_ORDER = [
+  englishCopy.household_ui.indian_shares,
+  englishCopy.household_ui.safe_money,
+  englishCopy.household_ui.abroad,
+  englishCopy.household_ui.other_holdings,
+];
+
+function readChecklist(): string[] {
+  try {
+    const parsed: unknown = JSON.parse(
+      localStorage.getItem(CHECKLIST_STORAGE_KEY) ?? "[]",
+    );
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function toMinorUnits(value: string): bigint {
+  const negative = value.startsWith("-");
+  const [whole = "0", fraction = ""] = value.replace(/^-/, "").split(".");
+  const amount = BigInt(whole) * 100n + BigInt((fraction + "00").slice(0, 2));
+  return negative ? -amount : amount;
+}
+
+function sleeveForAsset(asset: AssetResponse): string {
+  switch (asset.asset_type) {
+    case "gold":
+    case "property":
+    case "term_insurance":
+    case "health_insurance":
+    case "loan":
+      return englishCopy.household_ui.other_holdings;
+    case "traditional_policy":
+    case "ulip":
+    case "fd":
+    case "rd":
+    case "ppf":
+    case "epf":
+    case "nps":
+    case "po_scheme":
+    case "bond":
+    case "savings":
+      return englishCopy.household_ui.safe_money;
+    default:
+      return englishCopy.household_ui.indian_shares;
+  }
+}
+
+function displaySleeveName(value: string): string {
+  const key = value.toLowerCase().replaceAll(" ", "_");
+  if (key.includes("equity_global")) return englishCopy.household_ui.abroad;
+  if (key.includes("equity_india"))
+    return englishCopy.household_ui.indian_shares;
+  if (key === "debt" || key === "cash")
+    return englishCopy.household_ui.safe_money;
+  if (["gold", "property", "protection", "liabilities"].includes(key)) {
+    return englishCopy.household_ui.other_holdings;
+  }
+  return value;
+}
+
+function assetLabel(asset: AssetResponse): string {
+  const label = asset.details.label;
+  if (typeof label === "string" && label.trim()) return label;
+  const bank =
+    asset.details.bank ?? asset.details.insurer ?? asset.details.institution;
+  const typeLabel = asset.asset_type
+    .replaceAll("_", " ")
+    .replace(/^./, (letter) => letter.toUpperCase());
+  return typeof bank === "string" && bank
+    ? `${typeLabel} · ${bank}`
+    : typeLabel;
+}
+
+function maturityStatus(asset: AssetResponse): string {
+  if (asset.valuation_status === "price_needed") return "Price needed";
+  if (asset.valuation_status === "rate_needed") return "Rate needed";
+  const maturity = asset.details.maturity;
+  if (typeof maturity === "string" && /^\d{4}-\d{2}$/.test(maturity)) {
+    const [yearText = "", monthText = ""] = maturity.split("-");
+    const year = Number(yearText);
+    const month = Number(monthText);
+    const date = new Date(year, month - 1, 1);
+    return `Matures ${new Intl.DateTimeFormat("en-IN", { month: "short", year: "numeric" }).format(date)}`;
+  }
+  return (
+    asset.valuation_note ||
+    (asset.value_cached ? "Estimate" : "Value not added yet")
+  );
+}
+
+function QuickAddBar({
+  onDraft,
+}: {
+  onDraft(result: Awaited<ReturnType<typeof quickAdd>>): void;
+}) {
+  const [text, setText] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!text.trim()) return;
+    setLoading(true);
+    setError("");
+    try {
+      onDraft(await quickAdd(text.trim()));
+    } catch (reason) {
+      if (reason instanceof ApiError && reason.code === "not_understood") {
+        setError(
+          "Try a short line such as “FD 5L SBI 7.1% till Mar 2027” or “PPF 6.5 lakh”.",
+        );
+      } else {
+        setError(
+          "We couldn't read that just now. You can add the asset from the tiles below.",
+        );
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+  return (
+    <Card>
+      <form className="grid gap-3" onSubmit={(event) => void submit(event)}>
+        <label htmlFor="quick-add" className="text-sm font-semibold">
+          Quick add
+        </label>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <input
+            id="quick-add"
+            value={text}
+            onChange={(event) => setText(event.currentTarget.value)}
+            placeholder="FD 5L SBI 7.1% till Mar 2027"
+            className="min-h-12 min-w-0 flex-1 rounded-xl border border-line bg-background px-3 text-base outline-none focus-visible:border-brand"
+            aria-describedby="quick-add-help quick-add-error"
+          />
+          <Button type="submit" loading={loading} disabled={!text.trim()}>
+            Add details
+          </Button>
+        </div>
+        <p
+          id="quick-add-help"
+          className="min-h-5 text-sm text-muted-foreground"
+        >
+          A quick note fills what it can. You can review every field.
+        </p>
+        <p
+          id="quick-add-error"
+          className="min-h-5 text-sm text-danger-foreground"
+          role="status"
+        >
+          {error}
+        </p>
+      </form>
+    </Card>
+  );
+}
+
+function AmountLabel({
+  amount,
+  primaryCurrency,
+  fxQuote,
+  showSecondary,
+}: {
+  amount: string;
+  primaryCurrency: "INR" | "DKK";
+  fxQuote: DkkInrRate | undefined;
+  showSecondary: boolean;
+}) {
+  const main = formatHouseholdAmount(amount, primaryCurrency, fxQuote);
+  const secondary = showSecondary
+    ? formatSecondaryAmount(amount, primaryCurrency, fxQuote)
+    : null;
+  return (
+    <span className="tabular-nums">
+      {main}
+      {secondary ? (
+        <span className="block text-xs font-normal text-muted-foreground">
+          {secondary}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function HouseholdInsights({
+  networth,
+  primaryCurrency,
+  fxQuote,
+  showSecondary,
+}: {
+  networth: NetworthResponse;
+  primaryCurrency: "INR" | "DKK";
+  fxQuote: DkkInrRate | undefined;
+  showSecondary: boolean;
+}) {
+  const liquidity = networth.liquidity_ladder;
+  const ladderTotal = sumInr([
+    liquidity.instant,
+    liquidity.within_1y,
+    liquidity.locked,
+  ]);
+  const toPercent = (value: string) => {
+    const total = toMinorUnits(ladderTotal);
+    if (total <= 0n) return 0;
+    const pctValue = (toMinorUnits(value) * 100n) / total;
+    return Number(pctValue > 100n ? 100n : pctValue);
+  };
+  const now = new Date();
+  const oneYear = new Date(now);
+  oneYear.setFullYear(oneYear.getFullYear() + 1);
+  const upcoming = networth.maturity_calendar.filter((event) => {
+    const date = new Date(`${event.date}T00:00:00`);
+    return date >= now && date <= oneYear;
+  });
+  const debtPercent = networth.debt_insight.debt_pct_including_locked;
+  return (
+    <div className="grid gap-4">
+      <Card className="grid gap-2">
+        <h2 className="text-base font-semibold">What your Money Map says</h2>
+        <p className="text-sm leading-6 text-muted-foreground">
+          Including EPF, PPF and fixed deposits,{" "}
+          <strong className="text-foreground">{debtPercent}%</strong>{" "}
+          {englishCopy.household_ui.safe_money_share}
+        </p>
+      </Card>
+      <Card className="grid gap-4">
+        <div>
+          <h2 className="text-base font-semibold">
+            {englishCopy.household_ui.accessible_money}
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {englishCopy.household_ui.accessible_money_help}
+          </p>
+        </div>
+        {[
+          ["Available today", liquidity.instant],
+          ["Within 1 year", liquidity.within_1y],
+          ["Locked beyond 1 year", liquidity.locked],
+        ].map(([label, amount]) => (
+          <div key={String(label)} className="grid gap-1.5">
+            <div className="flex justify-between gap-3 text-sm">
+              <span>{label}</span>
+              <span className="tabular-nums">
+                {formatHouseholdAmount(
+                  String(amount),
+                  primaryCurrency,
+                  fxQuote,
+                )}
+              </span>
+            </div>
+            <Progress
+              value={toPercent(String(amount))}
+              label={`${label}: ${formatHouseholdAmount(String(amount), primaryCurrency, fxQuote)}`}
+            />
+          </div>
+        ))}
+      </Card>
+      <Card className="grid gap-3">
+        <div className="flex items-center gap-2">
+          <CalendarDays aria-hidden="true" className="size-5 text-brand" />
+          <h2 className="text-base font-semibold">Coming up in 12 months</h2>
+        </div>
+        {upcoming.length ? (
+          upcoming.slice(0, 8).map((event) => (
+            <Link
+              key={`${event.asset_id}-${event.date}-${event.kind}`}
+              to={`/money/asset/${event.asset_id}`}
+              className="flex min-h-12 items-center justify-between gap-3 border-t border-line pt-2 text-sm"
+            >
+              <span>
+                <strong>{event.label}</strong>
+                <span className="block text-muted-foreground">
+                  {event.kind} ·{" "}
+                  {new Intl.DateTimeFormat("en-IN", {
+                    day: "numeric",
+                    month: "short",
+                    year: "numeric",
+                  }).format(new Date(`${event.date}T00:00:00`))}
+                </span>
+              </span>
+              {event.amount ? (
+                <AmountLabel
+                  amount={event.amount}
+                  primaryCurrency={primaryCurrency}
+                  fxQuote={fxQuote}
+                  showSecondary={showSecondary}
+                />
+              ) : null}
+            </Link>
+          ))
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            No maturities or renewals are due in the next 12 months.
+          </p>
+        )}
+      </Card>
+      {networth.unvalued_assets.length ? (
+        <Card className="grid gap-3 border-warning/50">
+          <div className="flex items-center gap-2">
+            <Building2 aria-hidden="true" className="size-5 text-warning" />
+            <h2 className="text-base font-semibold">Waiting for a value</h2>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            These items stay visible and are not counted as ₹0.
+          </p>
+          {networth.unvalued_assets.map((asset) => (
+            <Link
+              key={asset.id}
+              to={`/money/asset/${asset.id}`}
+              className="flex min-h-12 items-center justify-between border-t border-line pt-2 text-sm"
+            >
+              <span>
+                {asset.label}
+                <span className="block text-muted-foreground">
+                  {asset.reason === "price_needed"
+                    ? "We'll value this once today's price is in."
+                    : "Add the rate from your certificate."}
+                </span>
+              </span>
+              <ArrowRight aria-hidden="true" className="size-4" />
+            </Link>
+          ))}
+        </Card>
+      ) : null}
+    </div>
+  );
+}
+
+export function MoneyMapPage() {
+  const navigate = useNavigate();
+  const {
+    activeMemberId,
+    selectedMemberId,
+    selectedHouseholdId,
+    meMemberId,
+    members,
+    primaryCurrency,
+    isViewer,
+    fxRate,
+  } = useHousehold();
+  const [assets, setAssets] = useState<AssetResponse[]>([]);
+  const [importJobs, setImportJobs] = useState<ImportJob[]>([]);
+  const [importsLoaded, setImportsLoaded] = useState(false);
+  const [networth, setNetworth] = useState<NetworthResponse | null>(null);
+  const [plan, setPlan] = useState<WeeklyPlan | null>(null);
+  const [checklist, setChecklist] = useState<string[]>(readChecklist);
+  const [loading, setLoading] = useState(true);
+  const [pageError, setPageError] = useState("");
+  const [offlineSummaryOnly, setOfflineSummaryOnly] = useState(false);
+  const [checklistError, setChecklistError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setPageError("");
+    setOfflineSummaryOnly(false);
+    setAssets([]);
+    setNetworth(null);
+    setPlan(null);
+    setImportJobs([]);
+    setImportsLoaded(false);
+    const planRequest = apiPathAvailable("/v1/plan")
+      ? getPlan()
+      : Promise.resolve(null);
+    Promise.allSettled([
+      listAssets(activeMemberId),
+      getNetworth(activeMemberId),
+      planRequest,
+    ])
+      .then(([assetResult, networthResult, planResult]) => {
+        if (!active) return;
+        if (networthResult.status === "rejected") throw networthResult.reason;
+        const loadedNetworth = networthResult.value;
+        setNetworth(loadedNetworth);
+        if (planResult.status === "fulfilled") setPlan(planResult.value);
+        if (assetResult.status === "rejected") {
+          setAssets([]);
+          setOfflineSummaryOnly(true);
+          return;
+        }
+        const visibleAssets = assetResult.value;
+        setAssets(visibleAssets);
+        setOfflineSummaryOnly(false);
+        if (visibleAssets.length >= 3) markValueMoment();
+      })
+      .catch(() => {
+        if (active)
+          setPageError("We couldn't load your Money Map. Please try again.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [activeMemberId, selectedHouseholdId]);
+
+  useEffect(() => {
+    let active = true;
+    listImports()
+      .then((jobs) => {
+        if (active) setImportJobs(jobs);
+      })
+      .catch(() => {
+        if (active) setImportJobs([]);
+      })
+      .finally(() => {
+        if (active) setImportsLoaded(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [selectedHouseholdId]);
+
+  useEffect(() => {
+    function syncChecklist() {
+      try {
+        const pending = localStorage.getItem(CHECKLIST_PENDING_KEY);
+        if (!pending) return;
+        const categories: unknown = JSON.parse(pending);
+        if (!Array.isArray(categories)) return;
+        void updateChecklist(categories as string[])
+          .then(() => {
+            localStorage.removeItem(CHECKLIST_PENDING_KEY);
+            window.dispatchEvent(new Event("wealth:pending-changes"));
+          })
+          .catch(() => undefined);
+      } catch {
+        // Local storage is optional; the current screen remains usable without it.
+      }
+    }
+    window.addEventListener("online", syncChecklist);
+    return () => window.removeEventListener("online", syncChecklist);
+  }, []);
+
+  const orderedSelected = useMemo(
+    () =>
+      checklistTiles
+        .filter((tile) => checklist.includes(tile.category))
+        .map((tile) => tile.category),
+    [checklist],
+  );
+  const totals = networth
+    ? {
+        netWorth: networth.net_worth,
+        assets: networth.assets_total,
+        liabilities: networth.liabilities_total,
+      }
+    : null;
+  const hasDanishMember = members.some(
+    (member) => member.residency.country === "DK",
+  );
+  const fxQuote = fxRate;
+  const familyMembers = plan?.members ?? [];
+
+  function shownAmount(amount: string): string {
+    return formatHouseholdAmount(amount, primaryCurrency, fxQuote);
+  }
+
+  function secondaryAmount(amount: string): string | null {
+    return hasDanishMember
+      ? formatSecondaryAmount(amount, primaryCurrency, fxQuote)
+      : null;
+  }
+  const fxLine =
+    hasDanishMember && fxQuote
+      ? englishCopy.household.fx_line
+          .replace("{rate}", fxQuote.rate)
+          .replace("{date}", fxQuote.date)
+      : null;
+
+  const completenessPct = Math.max(
+    0,
+    Math.min(100, Number(networth?.completeness.pct ?? 0)),
+  );
+  const nextCategory = checklistTiles.find(
+    (tile) => !networth?.completeness.done.includes(tile.category),
+  )?.category;
+  const completenessText = `Money Map ${completenessPct}% complete${nextCategory ? ` · add ${categoryLabel(nextCategory)} to finish` : " · everything is up to date"}`;
+
+  async function toggleCategory(category: string) {
+    if (isViewer) return;
+    const updated = checklist.includes(category)
+      ? checklist.filter((item) => item !== category)
+      : [...checklist, category];
+    setChecklist(updated);
+    setChecklistError("");
+    try {
+      localStorage.setItem(CHECKLIST_STORAGE_KEY, JSON.stringify(updated));
+      if (!navigator.onLine) {
+        localStorage.setItem(CHECKLIST_PENDING_KEY, JSON.stringify(updated));
+        window.dispatchEvent(new Event("wealth:pending-changes"));
+        setChecklistError(
+          "Saved on this device. We'll sync when you're back online.",
+        );
+      } else {
+        await updateChecklist(updated);
+        localStorage.removeItem(CHECKLIST_PENDING_KEY);
+        window.dispatchEvent(new Event("wealth:pending-changes"));
+      }
+    } catch {
+      setChecklistError(
+        "Your selection is saved on this device. We'll sync it when you're back online.",
+      );
+      try {
+        localStorage.setItem(CHECKLIST_PENDING_KEY, JSON.stringify(updated));
+      } catch {
+        /* optional storage */
+      }
+      window.dispatchEvent(new Event("wealth:pending-changes"));
+    }
+  }
+
+  function startChecklist() {
+    if (!orderedSelected.length) return;
+    const workflow: ChecklistWorkflow = {
+      categories: orderedSelected,
+      index: 0,
+    };
+    navigate(addPathForCategory(orderedSelected[0] ?? ""), {
+      state: { workflow, memberId: activeMemberId ?? meMemberId },
+    });
+  }
+
+  function startQuickDraft(result: Awaited<ReturnType<typeof quickAdd>>) {
+    navigate(`/money/add/${result.asset_type}`, {
+      state: {
+        draft: result.draft,
+        missing: result.missing,
+        memberId: activeMemberId ?? meMemberId,
+      },
+    });
+  }
+
+  const visibleGroups = useMemo(() => {
+    const groups = new Map<string, AssetResponse[]>();
+    for (const asset of assets) {
+      const sleeve = sleeveForAsset(asset);
+      groups.set(sleeve, [...(groups.get(sleeve) ?? []), asset]);
+    }
+    return SLEEVE_ORDER.filter((sleeve) => groups.has(sleeve)).map(
+      (sleeve) => [sleeve, groups.get(sleeve) ?? []] as const,
+    );
+  }, [assets]);
+
+  return (
+    <div className="grid gap-4">
+      {pageError ? (
+        <Card role="alert" className="border-danger/50 text-sm">
+          {pageError}
+        </Card>
+      ) : null}
+      <Card className="grid gap-4">
+        {loading || !totals ? (
+          <div className="grid gap-3" aria-label="Loading your net worth">
+            <div className="h-5 w-32 animate-pulse rounded bg-muted" />
+            <div className="h-9 w-48 animate-pulse rounded bg-muted" />
+            <div className="h-4 w-full animate-pulse rounded bg-muted" />
+          </div>
+        ) : (
+          <>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <Stat
+                label="Net worth"
+                value={shownAmount(totals.netWorth)}
+                detail={`${secondaryAmount(totals.netWorth) ? `${secondaryAmount(totals.netWorth)} · ` : ""}Updated ${networth?.as_of ? new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric" }).format(new Date(`${networth.as_of}T00:00:00`)) : "recently"}`}
+              />
+              <div className="grid grid-cols-2 gap-4 text-right">
+                <Stat
+                  label={englishCopy.household_ui.money_you_own}
+                  value={shownAmount(totals.assets)}
+                  detail={secondaryAmount(totals.assets) ?? undefined}
+                />
+                <Stat
+                  label={englishCopy.household_ui.money_you_owe}
+                  value={shownAmount(totals.liabilities)}
+                  detail={secondaryAmount(totals.liabilities) ?? undefined}
+                />
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <div className="flex justify-between gap-3 text-sm">
+                <span>{completenessText}</span>
+                <span className="tabular-nums">{completenessPct}%</span>
+              </div>
+              <Progress value={completenessPct} label={completenessText} />
+            </div>
+            {selectedMemberId === "family" && familyMembers.length > 0 ? (
+              <div className="grid gap-2 border-t border-line pt-3">
+                <h2 className="text-sm font-semibold">
+                  {englishCopy.household.money.member_breakdown}
+                </h2>
+                {familyMembers.map((member) => (
+                  <div
+                    key={member.id}
+                    className="flex items-center justify-between gap-3 text-sm"
+                  >
+                    <span>
+                      {member.id === meMemberId
+                        ? englishCopy.household.you
+                        : member.name}
+                    </span>
+                    <AmountLabel
+                      amount={member.net_worth}
+                      primaryCurrency={primaryCurrency}
+                      fxQuote={fxQuote}
+                      showSecondary={hasDanishMember}
+                    />
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {hasDanishMember ? (
+              <p className="text-xs text-muted-foreground">
+                {fxLine ?? englishCopy.household.dkk_unavailable}
+              </p>
+            ) : null}
+          </>
+        )}
+      </Card>
+
+      {!offlineSummaryOnly && !isViewer ? (
+        <Link to="/import" className="block">
+          <Card className="flex min-h-20 items-center justify-between gap-4 hover:border-brand">
+            <span className="flex items-center gap-3">
+              <span className="grid size-11 place-items-center rounded-xl bg-brand/10 text-brand">
+                <CloudUpload aria-hidden="true" className="size-5" />
+              </span>
+              <span>
+                <strong className="block text-sm">Upload what you have</strong>
+                <span className="text-sm text-muted-foreground">
+                  CAS, broker or US holdings file
+                </span>
+              </span>
+            </span>
+            <ArrowRight
+              aria-hidden="true"
+              className="size-5 shrink-0 text-muted-foreground"
+            />
+          </Card>
+        </Link>
+      ) : null}
+
+      {!isViewer && importsLoaded && shouldShowCasNudge(importJobs) ? (
+        <Card className="flex flex-wrap items-center justify-between gap-3 border-brand/30 bg-brand/5">
+          <p className="text-sm leading-6">
+            Your new CAS usually arrives around the 10th, upload it.
+          </p>
+          <Link
+            to="/import"
+            className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 text-sm font-semibold text-white"
+          >
+            Upload CAS
+          </Link>
+        </Card>
+      ) : null}
+
+      <ImportHistorySheet jobs={importJobs} />
+
+      {!isViewer ? <QuickAddBar onDraft={startQuickDraft} /> : null}
+
+      <Card className="grid gap-4">
+        <div>
+          <h2 className="text-lg font-semibold">What else do you have?</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Tap everything that applies. Rough numbers are fine; you can edit
+            anytime.
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-2 [@media(min-width:360px)]:grid-cols-3">
+          {checklistTiles.map((tile) => {
+            const selected = checklist.includes(tile.category);
+            return (
+              <button
+                key={tile.category}
+                type="button"
+                aria-pressed={selected}
+                disabled={isViewer}
+                onClick={() => void toggleCategory(tile.category)}
+                className={`min-h-16 rounded-xl border px-2 py-3 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-brand ${selected ? "border-brand bg-brand/10 text-brand" : "border-line bg-background hover:bg-muted"}`}
+              >
+                {selected ? <span aria-hidden="true">✓ </span> : null}
+                {tile.shortLabel}
+              </button>
+            );
+          })}
+        </div>
+        <p className="min-h-5 text-sm text-danger-foreground" role="status">
+          {checklistError}
+        </p>
+        <Button
+          onClick={startChecklist}
+          disabled={isViewer || !orderedSelected.length}
+        >
+          Continue ({orderedSelected.length} selected)
+        </Button>
+      </Card>
+
+      <section className="grid gap-3" aria-labelledby="assets-heading">
+        <div className="flex items-center justify-between">
+          <h2 id="assets-heading" className="text-lg font-semibold">
+            Your money
+          </h2>
+          {!offlineSummaryOnly ? <Badge>{assets.length} items</Badge> : null}
+        </div>
+        {offlineSummaryOnly ? (
+          <Card>
+            <p className="text-sm text-muted-foreground">
+              {englishCopy.offline.money_map_summary}
+            </p>
+          </Card>
+        ) : null}
+        {visibleGroups.length ? (
+          visibleGroups.map(([sleeve, items]) => (
+            <Card key={sleeve} className="grid gap-1">
+              <h3 className="mb-1 text-sm font-semibold text-muted-foreground">
+                {sleeve}
+              </h3>
+              {items.map((asset) => (
+                <Link
+                  key={asset.id}
+                  to={`/money/asset/${asset.id}`}
+                  className="flex min-h-16 items-center justify-between gap-3 border-t border-line py-2 hover:text-brand"
+                >
+                  <span className="min-w-0">
+                    <strong className="block truncate text-sm">
+                      {assetLabel(asset)}
+                    </strong>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {maturityStatus(asset)}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-right text-sm font-semibold">
+                    {asset.valuation_status === "price_needed" ||
+                    !asset.value_cached ? (
+                      "—"
+                    ) : (
+                      <AmountLabel
+                        amount={asset.value_cached}
+                        primaryCurrency={primaryCurrency}
+                        fxQuote={fxQuote}
+                        showSecondary={hasDanishMember}
+                      />
+                    )}
+                  </span>
+                </Link>
+              ))}
+            </Card>
+          ))
+        ) : offlineSummaryOnly ? null : (
+          <Card className="py-7 text-center">
+            <p className="text-sm font-medium">
+              Your saved items will show here.
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Choose a tile above or add a quick note to get started.
+            </p>
+          </Card>
+        )}
+      </section>
+
+      {networth?.holdings.length ? (
+        <section className="grid gap-3" aria-labelledby="holdings-heading">
+          <div className="flex items-center justify-between gap-3">
+            <h2 id="holdings-heading" className="text-lg font-semibold">
+              Share holdings
+            </h2>
+            <Badge>{networth.holdings.length} holdings</Badge>
+          </div>
+          <Card className="grid gap-2">
+            {networth.holdings.map((holding) => (
+              <Link
+                key={holding.security_id}
+                to={`/money/holding/${holding.security_id}`}
+                className="flex min-h-16 items-center justify-between gap-3 border-t border-line py-2 first:border-0 first:pt-0 hover:text-brand"
+              >
+                <span className="min-w-0">
+                  <strong className="block truncate text-sm">
+                    {holding.name}
+                  </strong>
+                  <span className="block text-xs text-muted-foreground">
+                    {holding.symbol} · {holding.quantity} shares
+                  </span>
+                </span>
+                <span className="shrink-0 text-right text-sm font-semibold">
+                  {holding.value ? (
+                    <AmountLabel
+                      amount={holding.value}
+                      primaryCurrency={primaryCurrency}
+                      fxQuote={fxQuote}
+                      showSecondary={hasDanishMember}
+                    />
+                  ) : (
+                    "Not available"
+                  )}
+                </span>
+              </Link>
+            ))}
+          </Card>
+        </section>
+      ) : null}
+
+      {networth ? (
+        <HouseholdInsights
+          networth={networth}
+          primaryCurrency={primaryCurrency}
+          fxQuote={fxQuote}
+          showSecondary={hasDanishMember}
+        />
+      ) : null}
+      {networth?.by_sleeve.length ? (
+        <Card className="grid gap-3">
+          <h2 className="text-base font-semibold">Split by type</h2>
+          {networth.by_sleeve.map((sleeve) => (
+            <div
+              key={sleeve.sleeve}
+              className="flex min-h-10 items-center justify-between gap-3 border-t border-line pt-2 text-sm"
+            >
+              <span>{displaySleeveName(sleeve.sleeve)}</span>
+              <span className="tabular-nums">
+                {shownAmount(sleeve.amount)} · {sleeve.pct}%
+              </span>
+            </div>
+          ))}
+        </Card>
+      ) : null}
+    </div>
+  );
+}

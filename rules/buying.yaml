@@ -1,0 +1,20 @@
+version: 1
+round_to_inr: "500"
+min_action_inr: "1000"
+max_actions: 3
+satellite:
+  default_pct_of_india_equity: "20"
+  max_stock_pct_of_total_equity: "5"
+  max_sector_pct_of_satellite: "25"
+  tranches: 3
+  min_quant_decile: 10
+  max_valuation_percentile: "90"
+global_satellite:
+  requires_route: "C"
+  min_global_equity_inr: "500000"
+  max_pct_of_global_equity: "20"
+lumpsum:
+  stp_threshold_multiple_of_monthly_sip: "3"
+  stp_tranches_normal: 3
+  stp_tranches_expensive: 6
+  expensive_valuation_percentile: "80"

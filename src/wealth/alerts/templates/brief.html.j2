@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="color-scheme" content="light dark">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+  </head>
+  <body style="margin:0;background:#f3f5f7;color:#18212b;font-family:Arial,sans-serif">
+    <div style="display:none;max-height:0;overflow:hidden;opacity:0">{{ brief.preheader }}</div>
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f3f5f7">
+      <tr>
+        <td align="center" style="padding:20px 10px">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;background:#ffffff;border-radius:12px">
+            <tr>
+              <td style="padding:24px;color:#18212b">
+                <h1 style="font-size:22px;line-height:1.3;margin:0 0 18px">
+                  {{ email.brief_title.format(week=brief.week, date=date_label) }}
+                </h1>
+                {% if brief.household_header %}<p>{{ brief.household_header }}</p>{% endif %}
+                <section>
+                  <h2 style="font-size:17px">{{ email.number_heading }}</h2>
+                  <p>{{ brief.sections.number.text }}</p>
+                </section>
+                {%- if brief.sections.household %}
+                  <section>
+                    <h2 style="font-size:17px">{{ brief.sections.household.heading }}</h2>
+                    <ul>
+                      {%- for member in brief.sections.household.members -%}
+                        <li>{{ member.text }}</li>
+                      {%- endfor %}
+                    </ul>
+                    {%- if brief.sections.household.notes %}
+                      <ul>
+                        {% for note in brief.sections.household.notes %}<li>{{ note }}</li>{% endfor %}
+                      </ul>
+                    {%- endif %}
+                  </section>
+                {%- endif %}
+                <section>
+                  <h2 style="font-size:17px">{{ email.actions_heading }}</h2>
+                  {% if brief.actions %}
+                    <ul style="padding-left:20px">
+                      {% for action in brief.actions %}
+                        <li style="margin:0 0 14px">
+                          <strong>{{ action.title }}</strong><br>
+                          {{ action.why }}<br>
+                          <a href="{{ action.deeplink }}">{{ email.open_action }}</a>
+                        </li>
+                      {% endfor %}
+                    </ul>
+                  {% else %}
+                    <p>{{ email.no_actions }}</p>
+                  {% endif %}
+                </section>
+                <section>
+                  <h2 style="font-size:17px">{{ email.plan_heading }}</h2>
+                  <table role="presentation" width="100%" cellspacing="0" cellpadding="6" style="border-collapse:collapse">
+                    <thead>
+                      <tr>
+                        <th align="left">{{ email.allocation_header_sleeve }}</th>
+                        <th align="right">{{ email.allocation_header_target }}</th>
+                        <th align="right">{{ email.allocation_header_actual }}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for row in brief.sections.plan_at_a_glance %}
+                        <tr>
+                          <td style="border-top:1px solid #dce2e8">{{ row.sleeve }}</td>
+                          <td align="right" style="border-top:1px solid #dce2e8">{{ row.target }}</td>
+                          <td align="right" style="border-top:1px solid #dce2e8">{{ row.actual }}</td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </section>
+                <section>
+                  <h2 style="font-size:17px">{{ email.coming_up_heading }}</h2>
+                  {% if brief.sections.coming_up %}
+                    <ul>
+                      {% for item in brief.sections.coming_up %}
+                        <li>
+                          {{ item.label }}
+                          {% if item.amount_display %} · {{ item.amount_display }}{% endif %}
+                          · {{ item.date_label }}
+                        </li>
+                      {% endfor %}
+                    </ul>
+                  {% else %}
+                    <p>{{ email.no_calendar }}</p>
+                  {% endif %}
+                </section>
+                <section>
+                  <h2 style="font-size:17px">{{ email.exit_watch_heading }}</h2>
+                  {% if brief.sections.exit_watch %}
+                    <ul>
+                      {% for item in brief.sections.exit_watch %}
+                        <li>
+                          {{ item.symbol }} · {{ item.action_label }}
+                          {% for trigger in item.triggers %}
+                            · {{ trigger.label }} ({{ trigger.status_label }})
+                          {% endfor %}
+                        </li>
+                      {% endfor %}
+                    </ul>
+                  {% else %}
+                    <p>{{ email.no_exit_watch }}</p>
+                  {% endif %}
+                </section>
+                {% if brief.sections.world_and_money %}
+                  <section>
+                    <h2 style="font-size:17px">{{ email.world_heading }}</h2>
+                    <p>{{ brief.sections.world_and_money.headline }}</p>
+                    {% if brief.sections.world_and_money.tilt_notes %}
+                      <ul>
+                        {% for note in brief.sections.world_and_money.tilt_notes %}
+                          <li>{{ note }}</li>
+                        {% endfor %}
+                      </ul>
+                    {% endif %}
+                  </section>
+                {% endif %}
+                {%- if brief.sections.for_nris %}
+                  <section>
+                    <h2 style="font-size:17px">{{ brief.sections.for_nris.heading }}</h2>
+                    <ul>
+                      {% for note in brief.sections.for_nris.notes %}<li>{{ note }}</li>{% endfor %}
+                    </ul>
+                  </section>
+                {%- endif %}
+                <hr style="border:0;border-top:1px solid #dce2e8;margin:24px 0 14px">
+                <p style="font-size:12px;line-height:1.5;color:#4a5663">{{ brief.disclaimer }}</p>
+                <p style="font-size:12px;line-height:1.5;color:#4a5663">{{ brief.why_received }}</p>
+                <p style="font-size:12px">
+                  <a href="{{ brief.manage_alerts_url }}">{{ email.manage_alerts }}</a>
+                  · <a href="{{ brief.unsubscribe_url }}">{{ email.unsubscribe }}</a>
+                </p>
+                <p style="font-size:12px;color:#4a5663">{{ brief.postal_address }}</p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

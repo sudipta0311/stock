@@ -1,0 +1,98 @@
+{
+  "$defs": {
+    "TaxRegime": {
+      "enum": [
+        "old",
+        "new"
+      ],
+      "title": "TaxRegime",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Household details used by deterministic foundation and risk checks.",
+  "properties": {
+    "annual_income": {
+      "anyOf": [
+        {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Annual Income"
+    },
+    "city_tier": {
+      "anyOf": [
+        {
+          "enum": [
+            1,
+            2,
+            3
+          ],
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "City Tier"
+    },
+    "dependants": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Dependants",
+      "type": "integer"
+    },
+    "employment_type": {
+      "default": "salaried",
+      "enum": [
+        "salaried",
+        "self_employed",
+        "business",
+        "retired",
+        "other"
+      ],
+      "title": "Employment Type",
+      "type": "string"
+    },
+    "income_stability": {
+      "default": "medium",
+      "enum": [
+        "high",
+        "medium",
+        "low"
+      ],
+      "title": "Income Stability",
+      "type": "string"
+    },
+    "monthly_expenses": {
+      "format": "decimal",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+      "type": "string",
+      "x-unit": "INR"
+    },
+    "tax_regime": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TaxRegime"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "monthly_expenses"
+  ],
+  "title": "FinancialContext",
+  "type": "object"
+}

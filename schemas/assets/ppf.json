@@ -1,0 +1,112 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "asset_type": {
+      "const": "ppf",
+      "title": "Asset Type",
+      "type": "string"
+    },
+    "balance": {
+      "format": "decimal",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+      "type": "string",
+      "x-unit": "INR"
+    },
+    "balance_as_of": {
+      "anyOf": [
+        {
+          "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "held_at": {
+      "anyOf": [
+        {
+          "maxLength": 120,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Held At"
+    },
+    "joint": {
+      "default": false,
+      "title": "Joint",
+      "type": "boolean"
+    },
+    "label": {
+      "anyOf": [
+        {
+          "maxLength": 80,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Label"
+    },
+    "member_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Member Id"
+    },
+    "notes": {
+      "anyOf": [
+        {
+          "maxLength": 500,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Notes"
+    },
+    "opened_fy_start_year": {
+      "maximum": 9999,
+      "minimum": 1900,
+      "title": "Opened Fy Start Year",
+      "type": "integer"
+    },
+    "yearly_contribution": {
+      "anyOf": [
+        {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Yearly Contribution"
+    }
+  },
+  "required": [
+    "asset_type",
+    "balance",
+    "opened_fy_start_year"
+  ],
+  "title": "PPFAsset",
+  "type": "object"
+}

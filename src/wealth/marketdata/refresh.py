@@ -1,0 +1,285 @@
+"""CLI-only refresh job for official and fallback market-data sources."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, timedelta
+from typing import Any
+from zoneinfo import ZoneInfo
+
+from sqlalchemy.orm import Session
+
+from wealth.db.models import MarketdataRun
+from wealth.db.session import make_engine, system_session
+from wealth.marketdata import store
+from wealth.marketdata.sources import amfi, ecb, fred, ibja, manual, nse
+from wealth.marketdata.sources.amfi import AmfiNav
+from wealth.marketdata.sources.ecb import FxFetchResult
+from wealth.marketdata.sources.fred import FxObservation
+from wealth.marketdata.sources.ibja import GoldObservation
+from wealth.marketdata.sources.nse import NseClose, NseSecurity
+
+_SOURCES = ("nse", "amfi", "fx", "gold", "master")
+_RETENTION_DAYS = 400
+
+
+@dataclass(frozen=True)
+class NseMasterBatch:
+    securities: list[NseSecurity]
+    etf_count: int
+    etf_error: str | None = None
+
+
+def _fetch_fx(on: date) -> FxFetchResult:
+    observations: list[FxObservation] = []
+    errors: dict[str, str] = {}
+    try:
+        ecb_result = ecb.fetch_ecb_fx_rates(fetched_on=on)
+        observations.extend(ecb_result.observations)
+        errors.update(ecb_result.errors)
+    except Exception as error:
+        errors.update({currency: type(error).__name__ for currency in ecb.ECB_CROSS_CURRENCIES})
+
+    if not any(item.pair == "USD/INR" for item in observations):
+        try:
+            fallback = fred.fetch_dexinus(fetched_on=on)
+        except Exception as error:
+            errors.setdefault("USD", type(error).__name__)
+        else:
+            observations.extend(fallback)
+            if any(item.pair == "USD/INR" for item in fallback):
+                errors.pop("USD", None)
+
+    by_key = {(item.pair, item.as_of): item for item in observations}
+    ordered = tuple(sorted(by_key.values(), key=lambda item: (item.pair, item.as_of)))
+    return FxFetchResult(ordered, errors)
+
+
+def _fetch_nse_master() -> NseMasterBatch:
+    equities = nse.fetch_equity_list()
+    try:
+        etfs = nse.fetch_etf_list()
+    except Exception as error:
+        return NseMasterBatch(equities, 0, type(error).__name__)
+    if not etfs:
+        return NseMasterBatch(equities, 0, "EmptyETFList")
+    return NseMasterBatch(equities + etfs, len(etfs))
+
+
+def _default_fetchers(on: date) -> dict[str, Callable[[], Any]]:
+    return {
+        "nse": lambda: nse.fetch_bhavcopy(on),
+        "amfi": amfi.fetch_nav_all,
+        "fx": lambda: _fetch_fx(on),
+        "gold": lambda: ibja.fetch_gold_rate(on=on),
+        "master": _fetch_nse_master,
+    }
+
+
+def _store_source(
+    session: Session,
+    source: str,
+    records: Any,
+    *,
+    on: date,
+    fetched_at: datetime,
+) -> int | dict[str, int] | str:
+    if source == "master":
+        securities = records.securities if isinstance(records, NseMasterBatch) else records
+        if not isinstance(securities, list) or any(
+            not isinstance(item, NseSecurity) for item in securities
+        ):
+            raise TypeError("NSE master adapter returned invalid rows")
+        return store.upsert_nse_master(session, securities)
+    if source == "nse":
+        if not isinstance(records, list) or any(not isinstance(item, NseClose) for item in records):
+            raise TypeError("NSE price adapter returned invalid rows")
+        count = store.upsert_nse_closes(session, records, fetched_at=fetched_at)
+        return {"prices_eod": count}
+    if source == "amfi":
+        if not isinstance(records, list) or any(not isinstance(item, AmfiNav) for item in records):
+            raise TypeError("AMFI adapter returned invalid rows")
+        master_count = store.upsert_amfi_master(session, records)
+        cutoff = on - timedelta(days=_RETENTION_DAYS)
+        recent = [item for item in records if cutoff <= item.as_of <= on]
+        return {
+            "amfi_master": master_count,
+            "nav_daily": store.upsert_amfi_navs(session, recent, fetched_at=fetched_at),
+        }
+    if source == "fx":
+        if not isinstance(records, list) or any(
+            not isinstance(item, FxObservation) for item in records
+        ):
+            raise TypeError("FX adapter returned invalid rows")
+        cutoff = on - timedelta(days=_RETENTION_DAYS)
+        selected = [item for item in records if cutoff <= item.as_of <= on]
+        for item in selected:
+            store.upsert_fx_rate(session, item, source=item.source, fetched_at=fetched_at)
+        return {"fx_rates": len(selected)}
+    if source == "gold":
+        if not isinstance(records, GoldObservation):
+            raise TypeError("IBJA adapter returned no parseable gold rate")
+        selected_source = "manual" if records.source_url == "rules/manual_prices.yaml" else "IBJA"
+        store.upsert_gold_price(session, records, source=selected_source, fetched_at=fetched_at)
+        return {"gold_prices": 1, "gold_source": selected_source}
+    raise ValueError(f"Unknown market-data source {source}")
+
+
+def _run_gold_fetch(fetch: Callable[[], Any]) -> tuple[GoldObservation, str]:
+    try:
+        observation = fetch()
+    except Exception:
+        observation = None
+    if isinstance(observation, GoldObservation):
+        return observation, "IBJA"
+    fallback = manual.load_manual_gold_price()
+    if fallback is None:
+        raise ValueError("IBJA supplied no rate and manual_prices.yaml has no configured value")
+    return fallback, "manual"
+
+
+def run_refresh(
+    session: Session,
+    on: date,
+    only: tuple[str, ...] | list[str] | None = None,
+    *,
+    fetchers: Mapping[str, Callable[[], Any]] | None = None,
+    prune_old: bool = False,
+    fetched_at: datetime | None = None,
+) -> dict[str, Any]:
+    """Fetch selected sources, continue after failures, and record one run row."""
+    selected_sources = tuple(only or _SOURCES)
+    unknown = set(selected_sources) - set(_SOURCES)
+    if unknown:
+        raise ValueError(f"Unknown market-data sources: {', '.join(sorted(unknown))}")
+    effective_fetchers = dict(fetchers or _default_fetchers(on))
+    started_at = fetched_at or datetime.now(UTC)
+    run = MarketdataRun(
+        started_at=started_at,
+        status="failed",
+        counts={},
+        errors={},
+    )
+    session.add(run)
+    session.flush()
+    counts: dict[str, Any] = {}
+    errors: dict[str, str] = {}
+
+    for source in selected_sources:
+        fetcher = effective_fetchers.get(source)
+        if fetcher is None:
+            errors[source] = "MissingAdapter"
+            continue
+        try:
+            if source == "gold":
+                observation, source_name = _run_gold_fetch(fetcher)
+                with session.begin_nested():
+                    result = _store_source(
+                        session,
+                        source,
+                        observation,
+                        on=on,
+                        fetched_at=started_at,
+                    )
+                counts[source] = result
+                if source_name == "manual":
+                    counts["gold_fallback"] = "manual"
+            else:
+                records = fetcher()
+                if source == "fx" and isinstance(records, FxFetchResult):
+                    for currency, error_code in records.errors.items():
+                        errors[f"fx:{currency}"] = error_code
+                    records = list(records.observations)
+                with session.begin_nested():
+                    result = _store_source(
+                        session,
+                        source,
+                        records,
+                        on=on,
+                        fetched_at=started_at,
+                    )
+                counts[source] = result
+                if source == "master" and isinstance(records, NseMasterBatch):
+                    counts["master_etf"] = records.etf_count
+                    if records.etf_error is not None:
+                        errors["etf_master"] = records.etf_error
+        except Exception as error:
+            errors[source] = type(error).__name__
+
+    if prune_old:
+        try:
+            with session.begin_nested():
+                counts["pruned"] = store.prune(session, on, retention_days=_RETENTION_DAYS)
+        except Exception as error:
+            errors["prune"] = type(error).__name__
+
+    successful_sources = 0
+    for source in selected_sources:
+        source_errors = [key for key in errors if key == source or key.startswith(f"{source}:")]
+        if not source_errors or (
+            source == "fx"
+            and isinstance(counts.get("fx"), dict)
+            and counts["fx"].get("fx_rates", 0) > 0
+        ):
+            successful_sources += 1
+    run.status = "succeeded" if not errors else "partial" if successful_sources else "failed"
+    run.finished_at = datetime.now(UTC)
+    run.counts = counts
+    run.errors = errors
+    session.flush()
+    return {
+        "run_id": str(run.id),
+        "status": run.status,
+        "counts": counts,
+        "errors": errors,
+    }
+
+
+def _date_argument(value: str) -> date:
+    try:
+        return date.fromisoformat(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("date must use YYYY-MM-DD") from error
+
+
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Refresh dated market-data reference rows")
+    parser.add_argument("--date", type=_date_argument)
+    parser.add_argument("--only", default=",".join(_SOURCES))
+    parser.add_argument("--prune", action="store_true")
+    args = parser.parse_args(argv)
+    args.sources = tuple(part.strip().casefold() for part in args.only.split(",") if part.strip())
+    unknown = set(args.sources) - set(_SOURCES)
+    if not args.sources or unknown:
+        parser.error(f"--only must contain any of: {', '.join(_SOURCES)}")
+    return args
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
+    on = args.date or datetime.now(ZoneInfo("Asia/Kolkata")).date()
+    database_url = os.getenv("OWNER_DATABASE_URL") or os.getenv("TEST_DATABASE_URL")
+    if not database_url:
+        print(
+            "Set OWNER_DATABASE_URL or TEST_DATABASE_URL for a market-data refresh.",
+            file=sys.stderr,
+        )
+        return 2
+
+    engine = make_engine(database_url)
+    try:
+        with system_session(engine) as session:
+            result = run_refresh(session, on, args.sources, prune_old=args.prune)
+    finally:
+        engine.dispose()
+    print(json.dumps({"date": on.isoformat(), **result}, sort_keys=True))
+    return 2 if result["errors"] else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

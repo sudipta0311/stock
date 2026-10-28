@@ -1,0 +1,1899 @@
+{
+  "$defs": {
+    "BondAsset": {
+      "additionalProperties": false,
+      "properties": {
+        "asset_type": {
+          "const": "bond",
+          "title": "Asset Type",
+          "type": "string"
+        },
+        "coupon_frequency": {
+          "anyOf": [
+            {
+              "enum": [
+                1,
+                2
+              ],
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Coupon Frequency"
+        },
+        "coupon_pct": {
+          "anyOf": [
+            {
+              "format": "decimal",
+              "pattern": "^(0|[1-9][0-9]?)(\\.[0-9]{1,4})?$",
+              "type": "string",
+              "x-maximum": "30",
+              "x-minimum": "0"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Coupon Pct"
+        },
+        "face_value": {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        "isin": {
+          "anyOf": [
+            {
+              "maxLength": 12,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Isin"
+        },
+        "issuer": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Issuer"
+        },
+        "joint": {
+          "default": false,
+          "title": "Joint",
+          "type": "boolean"
+        },
+        "kind": {
+          "enum": [
+            "gsec",
+            "tbill",
+            "rbi_frsb",
+            "corporate",
+            "tax_free",
+            "bond_54ec"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "maturity": {
+          "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+          "type": "string"
+        },
+        "member_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Member Id"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        }
+      },
+      "required": [
+        "asset_type",
+        "kind",
+        "face_value",
+        "maturity"
+      ],
+      "title": "BondAsset",
+      "type": "object"
+    },
+    "Compounding": {
+      "enum": [
+        "simple",
+        "monthly",
+        "quarterly",
+        "half_yearly",
+        "yearly"
+      ],
+      "title": "Compounding",
+      "type": "string"
+    },
+    "EPFAsset": {
+      "additionalProperties": false,
+      "properties": {
+        "asset_type": {
+          "const": "epf",
+          "title": "Asset Type",
+          "type": "string"
+        },
+        "balance": {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        "balance_as_of": {
+          "anyOf": [
+            {
+              "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "joint": {
+          "default": false,
+          "title": "Joint",
+          "type": "boolean"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "member_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Member Id"
+        },
+        "monthly_employee": {
+          "anyOf": [
+            {
+              "format": "decimal",
+              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+              "type": "string",
+              "x-unit": "INR"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Monthly Employee"
+        },
+        "monthly_employer": {
+          "anyOf": [
+            {
+              "format": "decimal",
+              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+              "type": "string",
+              "x-unit": "INR"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Monthly Employer"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        },
+        "vpf_monthly": {
+          "anyOf": [
+            {
+              "format": "decimal",
+              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+              "type": "string",
+              "x-unit": "INR"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vpf Monthly"
+        }
+      },
+      "required": [
+        "asset_type",
+        "balance"
+      ],
+      "title": "EPFAsset",
+      "type": "object"
+    },
+    "FixedDepositAsset": {
+      "additionalProperties": false,
+      "properties": {
+        "asset_type": {
+          "const": "fd",
+          "title": "Asset Type",
+          "type": "string"
+        },
+        "bank": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Bank",
+          "type": "string"
+        },
+        "compounding": {
+          "$ref": "#/$defs/Compounding",
+          "default": "quarterly"
+        },
+        "joint": {
+          "default": false,
+          "title": "Joint",
+          "type": "boolean"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "maturity": {
+          "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+          "type": "string"
+        },
+        "member_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Member Id"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        },
+        "payout": {
+          "$ref": "#/$defs/PayoutType",
+          "default": "cumulative"
+        },
+        "principal": {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        "rate_pct": {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]?)(\\.[0-9]{1,4})?$",
+          "type": "string",
+          "x-maximum": "30",
+          "x-minimum": "0"
+        },
+        "start": {
+          "anyOf": [
+            {
+              "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "asset_type",
+        "bank",
+        "principal",
+        "rate_pct",
+        "maturity"
+      ],
+      "title": "FixedDepositAsset",
+      "type": "object"
+    },
+    "GoldAsset": {
+      "additionalProperties": false,
+      "properties": {
+        "asset_type": {
+          "const": "gold",
+          "title": "Asset Type",
+          "type": "string"
+        },
+        "grams": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Grams"
+        },
+        "issue": {
+          "anyOf": [
+            {
+              "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "issue_price_per_gram": {
+          "anyOf": [
+            {
+              "format": "decimal",
+              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+              "type": "string",
+              "x-unit": "INR"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Issue Price Per Gram"
+        },
+        "joint": {
+          "default": false,
+          "title": "Joint",
+          "type": "boolean"
+        },
+        "kind": {
+          "enum": [
+            "sgb",
+            "etf",
+            "mf",
+            "physical",
+            "digital"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "member_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Member Id"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        },
+        "purity": {
+          "anyOf": [
+            {
+              "enum": [
+                24,
+                22,
+                18
+              ],
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Purity"
+        },
+        "purpose": {
+          "anyOf": [
+            {
+              "enum": [
+                "jewellery",
+                "investment"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Purpose"
+        },
+        "series": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Series"
+        },
+        "units": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Units"
+        }
+      },
+      "required": [
+        "asset_type",
+        "kind"
+      ],
+      "title": "GoldAsset",
+      "type": "object"
+    },
+    "HealthInsuranceAsset": {
+      "additionalProperties": false,
+      "properties": {
+        "asset_type": {
+          "const": "health_insurance",
+          "title": "Asset Type",
+          "type": "string"
+        },
+        "cover": {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        "insurer": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Insurer",
+          "type": "string"
+        },
+        "joint": {
+          "default": false,
+          "title": "Joint",
+          "type": "boolean"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "member_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Member Id"
+        },
+        "members_covered": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Members Covered"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        },
+        "renewal_month": {
+          "maximum": 12,
+          "minimum": 1,
+          "title": "Renewal Month",
+          "type": "integer"
+        },
+        "top_up_cover": {
+          "anyOf": [
+            {
+              "format": "decimal",
+              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+              "type": "string",
+              "x-unit": "INR"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Top Up Cover"
+        }
+      },
+      "required": [
+        "asset_type",
+        "insurer",
+        "cover",
+        "renewal_month"
+      ],
+      "title": "HealthInsuranceAsset",
+      "type": "object"
+    },
+    "LoanAsset": {
+      "additionalProperties": false,
+      "properties": {
+        "asset_type": {
+          "const": "loan",
+          "title": "Asset Type",
+          "type": "string"
+        },
+        "emi": {
+          "anyOf": [
+            {
+              "format": "decimal",
+              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+              "type": "string",
+              "x-unit": "INR"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Emi"
+        },
+        "end": {
+          "anyOf": [
+            {
+              "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "joint": {
+          "default": false,
+          "title": "Joint",
+          "type": "boolean"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "loan_kind": {
+          "enum": [
+            "home",
+            "car",
+            "personal",
+            "education",
+            "credit_card",
+            "gold",
+            "other"
+          ],
+          "title": "Loan Kind",
+          "type": "string"
+        },
+        "member_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Member Id"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        },
+        "outstanding": {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        "rate_pct": {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]?)(\\.[0-9]{1,4})?$",
+          "type": "string",
+          "x-maximum": "60",
+          "x-minimum": "0"
+        }
+      },
+      "required": [
+        "asset_type",
+        "loan_kind",
+        "outstanding",
+        "rate_pct"
+      ],
+      "title": "LoanAsset",
+      "type": "object"
+    },
+    "NPSAsset": {
+      "additionalProperties": false,
+      "properties": {
+        "alternate_pct": {
+          "anyOf": [
+            {
+              "format": "decimal",
+              "pattern": "^(0|[1-9][0-9]?)(\\.[0-9]{1,4})?$|^100(\\.0{1,4})?$",
+              "type": "string",
+              "x-maximum": "100",
+              "x-minimum": "0"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Alternate Pct"
+        },
+        "asset_type": {
+          "const": "nps",
+          "title": "Asset Type",
+          "type": "string"
+        },
+        "corporate_debt_pct": {
+          "anyOf": [
+            {
+              "format": "decimal",
+              "pattern": "^(0|[1-9][0-9]?)(\\.[0-9]{1,4})?$|^100(\\.0{1,4})?$",
+              "type": "string",
+              "x-maximum": "100",
+              "x-minimum": "0"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Corporate Debt Pct"
+        },
+        "equity_pct": {
+          "anyOf": [
+            {
+              "format": "decimal",
+              "pattern": "^(0|[1-9][0-9]?)(\\.[0-9]{1,4})?$|^100(\\.0{1,4})?$",
+              "type": "string",
+              "x-maximum": "100",
+              "x-minimum": "0"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Equity Pct"
+        },
+        "govt_debt_pct": {
+          "anyOf": [
+            {
+              "format": "decimal",
+              "pattern": "^(0|[1-9][0-9]?)(\\.[0-9]{1,4})?$|^100(\\.0{1,4})?$",
+              "type": "string",
+              "x-maximum": "100",
+              "x-minimum": "0"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Govt Debt Pct"
+        },
+        "joint": {
+          "default": false,
+          "title": "Joint",
+          "type": "boolean"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "member_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Member Id"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        },
+        "tier1_balance": {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        "tier2_balance": {
+          "anyOf": [
+            {
+              "format": "decimal",
+              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+              "type": "string",
+              "x-unit": "INR"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tier2 Balance"
+        }
+      },
+      "required": [
+        "asset_type",
+        "tier1_balance"
+      ],
+      "title": "NPSAsset",
+      "type": "object"
+    },
+    "PPFAsset": {
+      "additionalProperties": false,
+      "properties": {
+        "asset_type": {
+          "const": "ppf",
+          "title": "Asset Type",
+          "type": "string"
+        },
+        "balance": {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        "balance_as_of": {
+          "anyOf": [
+            {
+              "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "held_at": {
+          "anyOf": [
+            {
+              "maxLength": 120,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Held At"
+        },
+        "joint": {
+          "default": false,
+          "title": "Joint",
+          "type": "boolean"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "member_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Member Id"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        },
+        "opened_fy_start_year": {
+          "maximum": 9999,
+          "minimum": 1900,
+          "title": "Opened Fy Start Year",
+          "type": "integer"
+        },
+        "yearly_contribution": {
+          "anyOf": [
+            {
+              "format": "decimal",
+              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+              "type": "string",
+              "x-unit": "INR"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Yearly Contribution"
+        }
+      },
+      "required": [
+        "asset_type",
+        "balance",
+        "opened_fy_start_year"
+      ],
+      "title": "PPFAsset",
+      "type": "object"
+    },
+    "PayoutType": {
+      "enum": [
+        "cumulative",
+        "monthly",
+        "quarterly",
+        "half_yearly",
+        "yearly"
+      ],
+      "title": "PayoutType",
+      "type": "string"
+    },
+    "PostOfficeAsset": {
+      "additionalProperties": false,
+      "properties": {
+        "amount": {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        "annual_contribution": {
+          "anyOf": [
+            {
+              "format": "decimal",
+              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+              "type": "string",
+              "x-unit": "INR"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Annual Contribution"
+        },
+        "asset_type": {
+          "const": "po_scheme",
+          "title": "Asset Type",
+          "type": "string"
+        },
+        "balance_as_of": {
+          "anyOf": [
+            {
+              "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "joint": {
+          "default": false,
+          "title": "Joint",
+          "type": "boolean"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "member_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Member Id"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        },
+        "purchase": {
+          "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+          "type": "string"
+        },
+        "rate_pct": {
+          "anyOf": [
+            {
+              "format": "decimal",
+              "pattern": "^(0|[1-9][0-9]?)(\\.[0-9]{1,4})?$",
+              "type": "string",
+              "x-maximum": "30",
+              "x-minimum": "0"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rate Pct"
+        },
+        "scheme": {
+          "enum": [
+            "nsc",
+            "kvp",
+            "scss",
+            "mis",
+            "td",
+            "rd",
+            "ssy"
+          ],
+          "title": "Scheme",
+          "type": "string"
+        },
+        "td_years": {
+          "anyOf": [
+            {
+              "enum": [
+                1,
+                2,
+                3,
+                5
+              ],
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Td Years"
+        }
+      },
+      "required": [
+        "asset_type",
+        "scheme",
+        "amount",
+        "purchase"
+      ],
+      "title": "PostOfficeAsset",
+      "type": "object"
+    },
+    "PropertyAsset": {
+      "additionalProperties": false,
+      "properties": {
+        "asset_type": {
+          "const": "property",
+          "title": "Asset Type",
+          "type": "string"
+        },
+        "estimated_value": {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        "joint": {
+          "default": false,
+          "title": "Joint",
+          "type": "boolean"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "linked_loan_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Linked Loan Id"
+        },
+        "member_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Member Id"
+        },
+        "monthly_rent": {
+          "anyOf": [
+            {
+              "format": "decimal",
+              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+              "type": "string",
+              "x-unit": "INR"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Monthly Rent"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        },
+        "property_kind": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Property Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "asset_type",
+        "property_kind",
+        "estimated_value"
+      ],
+      "title": "PropertyAsset",
+      "type": "object"
+    },
+    "RecurringDepositAsset": {
+      "additionalProperties": false,
+      "properties": {
+        "asset_type": {
+          "const": "rd",
+          "title": "Asset Type",
+          "type": "string"
+        },
+        "institution": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Institution",
+          "type": "string"
+        },
+        "joint": {
+          "default": false,
+          "title": "Joint",
+          "type": "boolean"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "maturity": {
+          "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+          "type": "string"
+        },
+        "member_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Member Id"
+        },
+        "monthly_amount": {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        },
+        "rate_pct": {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]?)(\\.[0-9]{1,4})?$",
+          "type": "string",
+          "x-maximum": "30",
+          "x-minimum": "0"
+        },
+        "start": {
+          "anyOf": [
+            {
+              "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "asset_type",
+        "institution",
+        "monthly_amount",
+        "rate_pct",
+        "maturity"
+      ],
+      "title": "RecurringDepositAsset",
+      "type": "object"
+    },
+    "SavingsAsset": {
+      "additionalProperties": false,
+      "properties": {
+        "asset_type": {
+          "const": "savings",
+          "title": "Asset Type",
+          "type": "string"
+        },
+        "balance": {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        "bank": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Bank",
+          "type": "string"
+        },
+        "joint": {
+          "default": false,
+          "title": "Joint",
+          "type": "boolean"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "member_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Member Id"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        }
+      },
+      "required": [
+        "asset_type",
+        "bank",
+        "balance"
+      ],
+      "title": "SavingsAsset",
+      "type": "object"
+    },
+    "TermInsuranceAsset": {
+      "additionalProperties": false,
+      "properties": {
+        "asset_type": {
+          "const": "term_insurance",
+          "title": "Asset Type",
+          "type": "string"
+        },
+        "cover": {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        "ends_year": {
+          "maximum": 9999,
+          "minimum": 1900,
+          "title": "Ends Year",
+          "type": "integer"
+        },
+        "insurer": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Insurer",
+          "type": "string"
+        },
+        "joint": {
+          "default": false,
+          "title": "Joint",
+          "type": "boolean"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "member_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Member Id"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        },
+        "premium": {
+          "anyOf": [
+            {
+              "format": "decimal",
+              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+              "type": "string",
+              "x-unit": "INR"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Premium"
+        },
+        "premium_frequency": {
+          "anyOf": [
+            {
+              "enum": [
+                "monthly",
+                "quarterly",
+                "half_yearly",
+                "yearly"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Premium Frequency"
+        }
+      },
+      "required": [
+        "asset_type",
+        "insurer",
+        "cover",
+        "ends_year"
+      ],
+      "title": "TermInsuranceAsset",
+      "type": "object"
+    },
+    "TraditionalPolicyAsset": {
+      "additionalProperties": false,
+      "properties": {
+        "annual_premium": {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        "asset_type": {
+          "const": "traditional_policy",
+          "title": "Asset Type",
+          "type": "string"
+        },
+        "bonus_accrued": {
+          "anyOf": [
+            {
+              "format": "decimal",
+              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+              "type": "string",
+              "x-unit": "INR"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bonus Accrued"
+        },
+        "insurer": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Insurer",
+          "type": "string"
+        },
+        "joint": {
+          "default": false,
+          "title": "Joint",
+          "type": "boolean"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "maturity_illustration": {
+          "anyOf": [
+            {
+              "format": "decimal",
+              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+              "type": "string",
+              "x-unit": "INR"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Maturity Illustration"
+        },
+        "member_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Member Id"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        },
+        "plan": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Plan",
+          "type": "string"
+        },
+        "policy_kind": {
+          "enum": [
+            "endowment",
+            "money_back",
+            "whole_life"
+          ],
+          "title": "Policy Kind",
+          "type": "string"
+        },
+        "premium_paying_term": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 100,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Premium Paying Term"
+        },
+        "start_year": {
+          "maximum": 9999,
+          "minimum": 1900,
+          "title": "Start Year",
+          "type": "integer"
+        },
+        "sum_assured": {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        "surrender_value": {
+          "anyOf": [
+            {
+              "format": "decimal",
+              "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+              "type": "string",
+              "x-unit": "INR"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Surrender Value"
+        },
+        "term_years": {
+          "exclusiveMinimum": 0,
+          "maximum": 100,
+          "title": "Term Years",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "asset_type",
+        "insurer",
+        "plan",
+        "policy_kind",
+        "sum_assured",
+        "annual_premium",
+        "start_year",
+        "term_years"
+      ],
+      "title": "TraditionalPolicyAsset",
+      "type": "object"
+    },
+    "ULIPAsset": {
+      "additionalProperties": false,
+      "properties": {
+        "annual_premium": {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        "asset_type": {
+          "const": "ulip",
+          "title": "Asset Type",
+          "type": "string"
+        },
+        "equity_pct": {
+          "anyOf": [
+            {
+              "format": "decimal",
+              "pattern": "^(0|[1-9][0-9]?)(\\.[0-9]{1,4})?$|^100(\\.0{1,4})?$",
+              "type": "string",
+              "x-maximum": "100",
+              "x-minimum": "0"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Equity Pct"
+        },
+        "fund_value": {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        "insurer": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Insurer",
+          "type": "string"
+        },
+        "joint": {
+          "default": false,
+          "title": "Joint",
+          "type": "boolean"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "member_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Member Id"
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "maxLength": 500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        },
+        "start_year": {
+          "anyOf": [
+            {
+              "maximum": 9999,
+              "minimum": 1900,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Year"
+        }
+      },
+      "required": [
+        "asset_type",
+        "insurer",
+        "fund_value",
+        "annual_premium"
+      ],
+      "title": "ULIPAsset",
+      "type": "object"
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/SavingsAsset"
+    },
+    {
+      "$ref": "#/$defs/FixedDepositAsset"
+    },
+    {
+      "$ref": "#/$defs/RecurringDepositAsset"
+    },
+    {
+      "$ref": "#/$defs/PPFAsset"
+    },
+    {
+      "$ref": "#/$defs/EPFAsset"
+    },
+    {
+      "$ref": "#/$defs/NPSAsset"
+    },
+    {
+      "$ref": "#/$defs/PostOfficeAsset"
+    },
+    {
+      "$ref": "#/$defs/BondAsset"
+    },
+    {
+      "$ref": "#/$defs/GoldAsset"
+    },
+    {
+      "$ref": "#/$defs/TermInsuranceAsset"
+    },
+    {
+      "$ref": "#/$defs/HealthInsuranceAsset"
+    },
+    {
+      "$ref": "#/$defs/TraditionalPolicyAsset"
+    },
+    {
+      "$ref": "#/$defs/ULIPAsset"
+    },
+    {
+      "$ref": "#/$defs/PropertyAsset"
+    },
+    {
+      "$ref": "#/$defs/LoanAsset"
+    }
+  ]
+}

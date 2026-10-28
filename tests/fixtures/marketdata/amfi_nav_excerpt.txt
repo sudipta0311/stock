@@ -1,0 +1,15 @@
+Scheme Code;ISIN Div Payout/ ISIN Growth;ISIN Div Reinvestment;Scheme Name;Plan;Option;Net Asset Value;Date
+Open Ended Schemes(Children’s Fund - Childrens' Fund)
+135762;INF846K01WO1;-;Axis Children's Fund;Direct Plan;Growth Option;28.9301;27-Oct-2026
+135765;INF846K01WP8;-;Axis Children's Fund;Direct Plan;IDCW Option;26.6498;27-Oct-2026
+135759;INF846K01WJ1;-;Axis Children's Fund;Regular Plan;Growth Option;25.1678;27-Oct-2026
+
+Open Ended Schemes(Debt Scheme - Banking and PSU Fund)
+129008;INF090I01KR8;-;Franklin India Banking & PSU Debt Fund;Direct Plan;Growth;25.2834;27-Oct-2026
+129006;INF090I01KO5;-;Franklin India Banking & PSU Debt Fund;Regular Plan;Growth;24.1078;27-Oct-2026
+129009;INF090I01KS6;INF090I01KT4;Franklin India Banking & PSU Debt Fund;Direct Plan;IDCW;11.4410;27-Oct-2026
+
+Open Ended Schemes(Debt Scheme - Corporate Bond Fund)
+119533;INF209K01S38;-;Aditya Birla Sun Life Corporate Bond Fund;Direct Plan;GROWTH;120.8356;27-Oct-2026
+103178;INF209K01785;-;Aditya Birla Sun Life Corporate Bond Fund;Regular Plan;GROWTH;118.5264;27-Oct-2026
+124832;INF209KA1KT0;-;Aditya Birla Sun Life Corporate Bond Fund;Direct Plan;IDCW Payout;9.9554;27-Oct-2026

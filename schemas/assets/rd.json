@@ -1,0 +1,97 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "asset_type": {
+      "const": "rd",
+      "title": "Asset Type",
+      "type": "string"
+    },
+    "institution": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Institution",
+      "type": "string"
+    },
+    "joint": {
+      "default": false,
+      "title": "Joint",
+      "type": "boolean"
+    },
+    "label": {
+      "anyOf": [
+        {
+          "maxLength": 80,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Label"
+    },
+    "maturity": {
+      "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+      "type": "string"
+    },
+    "member_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Member Id"
+    },
+    "monthly_amount": {
+      "format": "decimal",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+      "type": "string",
+      "x-unit": "INR"
+    },
+    "notes": {
+      "anyOf": [
+        {
+          "maxLength": 500,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Notes"
+    },
+    "rate_pct": {
+      "format": "decimal",
+      "pattern": "^(0|[1-9][0-9]?)(\\.[0-9]{1,4})?$",
+      "type": "string",
+      "x-maximum": "30",
+      "x-minimum": "0"
+    },
+    "start": {
+      "anyOf": [
+        {
+          "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "asset_type",
+    "institution",
+    "monthly_amount",
+    "rate_pct",
+    "maturity"
+  ],
+  "title": "RecurringDepositAsset",
+  "type": "object"
+}

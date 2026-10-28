@@ -1,0 +1,90 @@
+version: 1
+percent_scale: "100"
+profiles:
+  conservative: {equity: "35", debt: "55", gold: "10", cash: "0"}
+  moderate: {equity: "55", debt: "35", gold: "10", cash: "0"}
+  growth: {equity: "75", debt: "17.5", gold: "7.5", cash: "0"}
+  aggressive: {equity: "87.5", debt: "7.5", gold: "5", cash: "0"}
+horizon:
+  short_years: 3
+  medium_years: 7
+  short_mix: {equity: "0", debt: "80", gold: "0", cash: "20"}
+glide:
+  full_years: 2
+  start_years: 6
+  factor_bounds: {minimum: "0", maximum: "1"}
+allocation:
+  emergency_mix: {equity: "0", debt: "50", gold: "0", cash: "50"}
+  percent_display_places: 2
+foundation:
+  high_interest_debt_rate_pct: "12"
+  emergency_months: {salaried: 6, self_employed: 9, business: 12, retired: 12, other: 6}
+  term_cover_multiple_min: 10
+  term_cover_multiple_target: 12
+  default_city_tier: 1
+  health_cover_min:
+    tier1: "1000000"
+    tier2: "700000"
+    tier3: "500000"
+risk:
+  bands: {conservative: 0, moderate: 30, growth: 55, aggressive: 75}
+  question_count: 6
+  options_per_question: 4
+  allowed_option_scores: [0, 33, 67, 100]
+  capacity:
+    horizon_points: {short: 0, medium: 40, long: 70}
+    income_stability_points: {high: 20, medium: 10, low: 0}
+    dependants:
+      none_max: 0
+      one_to_two_max: 2
+      none_points: 10
+      one_to_two_points: 5
+      many_points: 0
+    emergency_fund_points: {ok: 0, missing: -20}
+    score_bounds: {minimum: 0, maximum: 100}
+  questions:
+    - id: market_fall
+      text: "Your ₹10 lakh investment falls to ₹7 lakh in three months. What would you do?"
+      options:
+        - {id: sell_all, text: "Sell it all to avoid a larger loss.", score: 0}
+        - {id: sell_some, text: "Sell some and keep the rest invested.", score: 33}
+        - {id: hold, text: "Hold the investment and wait for recovery.", score: 67}
+        - {id: invest_more, text: "Keep investing if my plan and finances allow.", score: 100}
+    - id: investing_experience
+      text: "How much experience do you have investing through market ups and downs?"
+      options:
+        - {id: none, text: "I have not invested through a market fall.", score: 0}
+        - {id: limited, text: "I have some experience, but little through a fall.", score: 33}
+        - {id: experienced, text: "I have invested through a few market cycles.", score: 67}
+        - {id: extensive, text: "I have stayed invested through several market cycles.", score: 100}
+    - id: equity_portion
+      text: "What portion of your savings would you feel comfortable investing in equity for the long term?"
+      options:
+        - {id: none, text: "None; I prefer to avoid market-linked investments.", score: 0}
+        - {id: small, text: "A small portion, up to about one quarter.", score: 33}
+        - {id: half, text: "About half, with the rest in steadier assets.", score: 67}
+        - {id: most, text: "Most of it, while keeping emergency money aside.", score: 100}
+    - id: outcome_preference
+      text: "Which outcome would you prefer for money you can invest for many years?"
+      options:
+        - {id: guaranteed, text: "A more certain return, even if it is lower.", score: 0}
+        - {id: mostly_certain, text: "Mostly predictable growth with limited ups and downs.", score: 33}
+        - {id: balanced_growth, text: "A balance of steady assets and higher growth potential.", score: 67}
+        - {id: growth, text: "Higher long-term growth, accepting large temporary falls.", score: 100}
+    - id: loss_tolerance
+      text: "How much temporary loss in your long-term investments could you accept without changing your plan?"
+      options:
+        - {id: five_percent, text: "About 5% or less.", score: 0}
+        - {id: fifteen_percent, text: "About 15%.", score: 33}
+        - {id: thirty_percent, text: "About 30%.", score: 67}
+        - {id: forty_percent, text: "More than 30%, if my goals remain on track.", score: 100}
+    - id: price_checking
+      text: "How often do you usually check investment prices?"
+      options:
+        - {id: several_times_daily, text: "Several times a day; price changes worry me.", score: 0}
+        - {id: daily, text: "About once a day.", score: 33}
+        - {id: weekly, text: "About once a week or month.", score: 67}
+        - {id: rarely, text: "Rarely; I review against my plan from time to time.", score: 100}
+debt_answer:
+  enough_ratio: "0.95"
+  percent_display_places: 1

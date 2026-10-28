@@ -1,0 +1,20 @@
+version: 1
+base_global_share_of_equity_pct:
+  conservative: "12.5"
+  moderate: "17.5"
+  growth: "25"
+  aggressive: "30"
+foreign_goal_bonus:
+  - {min_share_pct: "20", bonus_pp: "10"}
+  - {min_share_pct: "5", bonus_pp: "5"}
+tilt_bounds: {global_pp: "5", gold_pp: "3"}
+residency:
+  india_share_by_country: {DK: india_share_abroad_pct}
+  india_share_abroad_pct:
+    conservative: "30"
+    moderate: "25"
+    growth: "20"
+    aggressive: "15"
+  return_glide_years: 7
+  maximum_global_share_pct: "85"
+  nri_salaried_emergency_months: 9

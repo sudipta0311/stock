@@ -1,0 +1,97 @@
+# FIXTURE ONLY: not real rates.
+version: 1
+note: Synthetic fixture values for local tests only.
+schemes:
+  nsc:
+    compounding: yearly
+    tenure_months: 60
+    periods:
+      - from: "2025-01-01"
+        to: "2025-12-31"
+        rate_pct: "9.99"
+        source_url: "https://example.invalid/fake/nsc-2025"
+        verified: false
+      - from: "2026-01-01"
+        to: "2026-12-31"
+        rate_pct: "10.01"
+        source_url: "https://example.invalid/fake/nsc-2026"
+        verified: true
+  kvp:
+    compounding: yearly
+    periods:
+      - from: "2025-01-01"
+        to: "2026-12-31"
+        rate_pct: "8.88"
+        maturity_months: 115
+        source_url: "https://example.invalid/fake/kvp"
+        verified: false
+  td_1y:
+    compounding: quarterly
+    tenure_months: 12
+    periods: []
+  td_2y:
+    compounding: quarterly
+    tenure_months: 24
+    periods: []
+  td_3y:
+    compounding: quarterly
+    tenure_months: 36
+    periods: []
+  td_5y:
+    compounding: quarterly
+    tenure_months: 60
+    periods:
+      - from: "2025-01-01"
+        to: "2026-12-31"
+        rate_pct: "9.87"
+        source_url: "https://example.invalid/fake/td-5y"
+        verified: false
+  rd_5y:
+    compounding: quarterly
+    tenure_months: 60
+    periods:
+      - from: "2025-01-01"
+        to: "2026-12-31"
+        rate_pct: "8.76"
+        source_url: "https://example.invalid/fake/rd-5y"
+        verified: false
+  ppf:
+    compounding: yearly
+    periods:
+      - from: "2025-01-01"
+        to: "2026-12-31"
+        rate_pct: "7.1"
+        source_url: "https://example.invalid/fake/ppf"
+        verified: false
+  scss:
+    compounding: simple
+    tenure_months: 60
+    periods:
+      - from: "2025-01-01"
+        to: "2026-12-31"
+        rate_pct: "8.2"
+        source_url: "https://example.invalid/fake/scss"
+        verified: false
+  mis:
+    compounding: simple
+    tenure_months: 60
+    periods:
+      - from: "2025-01-01"
+        to: "2026-12-31"
+        rate_pct: "7.4"
+        source_url: "https://example.invalid/fake/mis"
+        verified: false
+  ssy:
+    compounding: yearly
+    periods:
+      - from: "2025-01-01"
+        to: "2026-12-31"
+        rate_pct: "8.2"
+        source_url: "https://example.invalid/fake/ssy"
+        verified: false
+epf:
+  periods:
+    - fy: "2024-25"
+      rate_pct: "8.89"
+      source_url: "https://example.invalid/fake/epf-2024-25"
+      verified: false

@@ -1,0 +1,91 @@
+version: 1
+supported_sales_from:
+  effective_from: "2024-07-23"
+  source_url: "https://www.indiabudget.gov.in/budget2024-25/doc/Finance_Bill.pdf"
+  verified: false
+cess:
+  rate_pct: "4"
+  effective_from: "2024-04-01"
+  source_url: "https://www.indiabudget.gov.in/budget2024-25/doc/memo.pdf"
+  verified: false
+equity_ltcg_exemption:
+  amount_inr: "125000"
+  shared_classes: [listed_equity, equity_mf]
+  effective_from: "2024-07-23"
+  source_url: "https://www.indiabudget.gov.in/budget2024-25/doc/Finance_Bill.pdf"
+  verified: false
+  needs_review: true
+grandfathering:
+  acquired_before: "2018-02-01"
+  effective_from: "2018-02-01"
+  source_url: "https://www.indiabudget.gov.in/budget2018-2019/ub2018-19/fb/bill.pdf"
+  verified: false
+tax_classes:
+  listed_equity:
+    effective_from: "2024-07-23"
+    source_url: "https://www.indiabudget.gov.in/budget2024-25/doc/Finance_Bill.pdf"
+    verified: false
+    long_term_months: 12
+    short_term_rate_pct: "20"
+    long_term_rate_pct: "12.5"
+    surcharge_cap_pct: "15"
+  equity_mf:
+    effective_from: "2024-07-23"
+    source_url: "https://www.indiabudget.gov.in/budget2024-25/doc/Finance_Bill.pdf"
+    verified: false
+    long_term_months: 12
+    short_term_rate_pct: "20"
+    long_term_rate_pct: "12.5"
+    surcharge_cap_pct: "15"
+  foreign_equity:
+    effective_from: "2024-07-23"
+    source_url: "https://www.indiabudget.gov.in/budget2024-25/doc/Finance_Bill.pdf"
+    verified: false
+    long_term_months: 24
+    short_term_rate_pct: slab
+    long_term_rate_pct: "12.5"
+    surcharge_cap_pct: "15"
+  intl_fof:
+    effective_from: "2024-07-23"
+    source_url: "https://www.indiabudget.gov.in/budget2024-25/doc/memo.pdf"
+    verified: false
+    needs_review: true
+    long_term_months: 24
+    short_term_rate_pct: slab
+    long_term_rate_pct: "12.5"
+    surcharge_cap_pct: "15"
+  intl_etf_listed_in:
+    effective_from: "2024-07-23"
+    source_url: "https://www.indiabudget.gov.in/budget2024-25/doc/memo.pdf"
+    verified: false
+    needs_review: true
+    long_term_months: 12
+    short_term_rate_pct: slab
+    long_term_rate_pct: "12.5"
+    surcharge_cap_pct: "15"
+  debt_mf_post_2023:
+    effective_from: "2023-04-01"
+    source_url: "https://www.indiabudget.gov.in/budget2023-24/doc/Finance_Bill.pdf"
+    verified: false
+    long_term_months: null
+    short_term_rate_pct: slab
+    long_term_rate_pct: slab
+  gold_etf:
+    effective_from: "2024-07-23"
+    source_url: "https://www.indiabudget.gov.in/budget2024-25/doc/memo.pdf"
+    verified: false
+    needs_review: true
+    long_term_months: 12
+    short_term_rate_pct: slab
+    long_term_rate_pct: "12.5"
+    surcharge_cap_pct: "15"
+  sgb:
+    effective_from: "2018-10-08"
+    source_url: "https://www.rbi.org.in/Commonman/English/scripts/Notification.aspx?Id=2858"
+    verified: false
+    needs_review: true
+    long_term_months: 12
+    short_term_rate_pct: slab
+    long_term_rate_pct: "12.5"
+    surcharge_cap_pct: "15"
+    redemption_exempt_at_maturity: true

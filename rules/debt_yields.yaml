@@ -1,0 +1,14 @@
+version: 1
+as_of: "2026-10-28"
+verified: false
+note: >-
+  Indicative yields for policy ranking only. Verify provider, institution, tenure,
+  and tax treatment before a user acts.
+yields_pct:
+  sweep_fd: "6.00"
+  bank_fd: "7.00"
+  liquid_fund: "6.25"
+  arbitrage_fund: "6.50"
+  target_maturity_fund: "7.00"
+  gsec_rbi_retail_direct: "7.10"
+  rbi_frsb: "8.05"

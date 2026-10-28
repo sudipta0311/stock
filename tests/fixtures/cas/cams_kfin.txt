@@ -1,0 +1,17 @@
+CAMS Consolidated Account Statement
+Statement for the period from 01-Apr-2026 to 30-Jun-2026
+AMC : Synthetic Asset Management Company
+Folio No : 123456/78
+Scheme Name : Synthetic Equity Fund - Direct Growth
+ISIN : INF000000002
+Opening Unit Balance : 0.000
+Date Transaction Amount (INR) Units Price (INR) Unit Balance
+01-Apr-2026 Purchase - SIP 10,000.00 100.000 100.00 100.000
+01-May-2026 Redemption 2,000.00 -20.000 100.00 80.000
+10-May-2026 Switch In 500.00 5.000 100.00 85.000
+15-May-2026 Switch Out 500.00 -5.000 100.00 80.000
+20-May-2026 Dividend Reinvestment 200.00 2.000 100.00 82.000
+30-May-2026 Adjustment 0.00 0.000 0.00 82.000
+Closing Unit Balance : 82.000
+NAV on 30-Jun-2026 : 110.00
+Market Value : 9,020.00

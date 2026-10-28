@@ -1,0 +1,114 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "asset_type": {
+      "const": "loan",
+      "title": "Asset Type",
+      "type": "string"
+    },
+    "emi": {
+      "anyOf": [
+        {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "INR"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Emi"
+    },
+    "end": {
+      "anyOf": [
+        {
+          "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "joint": {
+      "default": false,
+      "title": "Joint",
+      "type": "boolean"
+    },
+    "label": {
+      "anyOf": [
+        {
+          "maxLength": 80,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Label"
+    },
+    "loan_kind": {
+      "enum": [
+        "home",
+        "car",
+        "personal",
+        "education",
+        "credit_card",
+        "gold",
+        "other"
+      ],
+      "title": "Loan Kind",
+      "type": "string"
+    },
+    "member_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Member Id"
+    },
+    "notes": {
+      "anyOf": [
+        {
+          "maxLength": 500,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Notes"
+    },
+    "outstanding": {
+      "format": "decimal",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+      "type": "string",
+      "x-unit": "INR"
+    },
+    "rate_pct": {
+      "format": "decimal",
+      "pattern": "^(0|[1-9][0-9]?)(\\.[0-9]{1,4})?$",
+      "type": "string",
+      "x-maximum": "60",
+      "x-minimum": "0"
+    }
+  },
+  "required": [
+    "asset_type",
+    "loan_kind",
+    "outstanding",
+    "rate_pct"
+  ],
+  "title": "LoanAsset",
+  "type": "object"
+}

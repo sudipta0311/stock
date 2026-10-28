@@ -1,0 +1,6 @@
+Central Depository Services (India) Limited
+CDSL Consolidated Account Statement
+Statement for the period from 01-Jun-2026 to 30-Jun-2026
+BO ID : 1234567890123456
+INE000A01012 Synthetic CDSL Equity Limited 12 100.00 1200.00
+INF000000002 Synthetic CDSL Mutual Fund 5.500 200.00 1100.00

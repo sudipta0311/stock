@@ -1,0 +1,109 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "annual_premium": {
+      "format": "decimal",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+      "type": "string",
+      "x-unit": "INR"
+    },
+    "asset_type": {
+      "const": "ulip",
+      "title": "Asset Type",
+      "type": "string"
+    },
+    "equity_pct": {
+      "anyOf": [
+        {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]?)(\\.[0-9]{1,4})?$|^100(\\.0{1,4})?$",
+          "type": "string",
+          "x-maximum": "100",
+          "x-minimum": "0"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Equity Pct"
+    },
+    "fund_value": {
+      "format": "decimal",
+      "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+      "type": "string",
+      "x-unit": "INR"
+    },
+    "insurer": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Insurer",
+      "type": "string"
+    },
+    "joint": {
+      "default": false,
+      "title": "Joint",
+      "type": "boolean"
+    },
+    "label": {
+      "anyOf": [
+        {
+          "maxLength": 80,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Label"
+    },
+    "member_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Member Id"
+    },
+    "notes": {
+      "anyOf": [
+        {
+          "maxLength": 500,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Notes"
+    },
+    "start_year": {
+      "anyOf": [
+        {
+          "maximum": 9999,
+          "minimum": 1900,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Start Year"
+    }
+  },
+  "required": [
+    "asset_type",
+    "insurer",
+    "fund_value",
+    "annual_premium"
+  ],
+  "title": "ULIPAsset",
+  "type": "object"
+}
