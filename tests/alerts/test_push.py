@@ -9,6 +9,7 @@ import pytest
 from wealth.alerts.push import (
     PushDeliveryGone,
     PushSubscriptionInput,
+    generate_vapid_keypair,
     send_push,
     validate_push_endpoint,
 )
@@ -67,3 +68,12 @@ def test_push_service_410_is_signalled_for_subscription_cleanup() -> None:
             settings,
             webpush=expired,
         )
+
+
+def test_generated_vapid_values_use_browser_key_encoding() -> None:
+    public_key, private_key = generate_vapid_keypair()
+
+    assert len(public_key) == 87
+    assert len(private_key) == 43
+    assert "=" not in public_key
+    assert "=" not in private_key

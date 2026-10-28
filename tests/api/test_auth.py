@@ -42,6 +42,7 @@ def rsa_identity() -> tuple[Any, dict[str, str]]:
 @pytest.fixture
 def oidc_settings() -> Settings:
     return Settings(
+        env="test",
         auth_mode="oidc",
         auth_jwks_url="https://identity.example.test/keys",
         auth_issuer="https://identity.example.test/",
@@ -55,6 +56,7 @@ def _oidc_token(private_key: Any, kid: str = "synthetic-key", **overrides: Any) 
         "sub": "synthetic-subject",
         "email": "investor@example.test",
         "name": "Synthetic Investor",
+        "email_verified": True,
         "iss": "https://identity.example.test/",
         "aud": "wealth-api",
         "iat": now,
@@ -117,6 +119,53 @@ def test_oidc_rejects_invalid_standard_claims(
 
     with pytest.raises(AuthenticationError):
         verify_token(_oidc_token(private_key, **overrides), oidc_settings, JwksCache())
+
+
+@pytest.mark.parametrize("token_issuer", ["https://accounts.google.com", "accounts.google.com"])
+def test_google_tokens_verify_with_either_documented_issuer_spelling(
+    monkeypatch: pytest.MonkeyPatch,
+    rsa_identity: tuple[Any, dict[str, str]],
+    token_issuer: str,
+) -> None:
+    private_key, jwk = rsa_identity
+    monkeypatch.setattr(auth, "fetch_jwks", lambda _url: {"keys": [jwk]})
+    google_settings = Settings(
+        env="test",
+        auth_mode="oidc",
+        auth_jwks_url="https://www.googleapis.com/oauth2/v3/certs",
+        auth_issuer="https://accounts.google.com",
+        auth_audience="wealth-api",
+    )
+
+    claims = verify_token(_oidc_token(private_key, iss=token_issuer), google_settings, JwksCache())
+
+    assert claims.subject == "synthetic-subject"
+
+
+def test_google_issuer_spellings_are_not_accepted_for_other_providers(
+    monkeypatch: pytest.MonkeyPatch,
+    rsa_identity: tuple[Any, dict[str, str]],
+    oidc_settings: Settings,
+) -> None:
+    private_key, jwk = rsa_identity
+    monkeypatch.setattr(auth, "fetch_jwks", lambda _url: {"keys": [jwk]})
+
+    with pytest.raises(AuthenticationError):
+        verify_token(
+            _oidc_token(private_key, iss="accounts.google.com"), oidc_settings, JwksCache()
+        )
+
+
+def test_oidc_rejects_unverified_email(
+    monkeypatch: pytest.MonkeyPatch,
+    rsa_identity: tuple[Any, dict[str, str]],
+    oidc_settings: Settings,
+) -> None:
+    private_key, jwk = rsa_identity
+    monkeypatch.setattr(auth, "fetch_jwks", lambda _url: {"keys": [jwk]})
+
+    with pytest.raises(AuthenticationError, match="not verified"):
+        verify_token(_oidc_token(private_key, email_verified=False), oidc_settings, JwksCache())
 
 
 def test_oidc_refetches_once_when_key_id_is_unknown(
@@ -202,3 +251,28 @@ def test_dev_mode_accepts_only_hs256_with_configured_secret() -> None:
     )
 
     assert verify_token(token, settings, JwksCache()).subject == "synthetic-subject"
+
+
+def test_allow_list_blocks_other_valid_sign_ins_before_database_access() -> None:
+    secret = secrets.token_urlsafe(32)
+    settings = Settings(
+        env="test",
+        auth_mode="dev",
+        dev_auth_secret=secret,
+        allowed_emails="family@example.test",
+    )
+    token = jwt.encode(
+        {
+            "sub": "synthetic-subject",
+            "email": "other@example.test",
+            "exp": datetime.now(UTC) + timedelta(minutes=5),
+        },
+        secret,
+        algorithm="HS256",
+    )
+
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/v1/me", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "This is a private family app."

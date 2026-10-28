@@ -12,7 +12,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 from uuid import UUID
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import select, text
 from sqlalchemy.engine import Engine
@@ -29,7 +29,14 @@ from wealth.alerts.consent import consent_is_enabled
 from wealth.alerts.delivery import send_content, unsubscribe_url
 from wealth.alerts.email import rendered_body_hash
 from wealth.alerts.settings import AlertSettings
-from wealth.db.models import AlertLog, HouseholdAccess, HouseholdMember, NetworthSnapshot, User
+from wealth.db.models import (
+    AlertLog,
+    HouseholdAccess,
+    HouseholdMember,
+    NetworthSnapshot,
+    Profile,
+    User,
+)
 from wealth.db.models import WeeklyPlan as WeeklyPlanRow
 from wealth.db.session import make_engine, system_session, user_session
 
@@ -140,9 +147,12 @@ def run_weekly(
     settings: AlertSettings | None = None,
     dry_run: bool = False,
     now: datetime | None = None,
+    local_hour: int | None = None,
 ) -> WeeklyJobCounts:
     """List users as the owner and process each user's plan under user RLS."""
     validate_week(week)
+    if local_hour is not None and not 0 <= local_hour <= 23:
+        raise ValueError("local_hour must be between 0 and 23")
     configured = settings or AlertSettings.from_env()
     sent_at = now or datetime.now(UTC)
     with system_session(engine) as session:
@@ -175,6 +185,11 @@ def run_weekly(
             with user_session(engine, user_id, owner_id) as session:
                 user = session.get(User, user_id)
                 plan_row = session.get(WeeklyPlanRow, (owner_id, week))
+                if local_hour is not None:
+                    profile = session.get(Profile, user_id)
+                    if profile is None or not _is_local_hour(sent_at, profile.timezone, local_hour):
+                        skipped += 1
+                        continue
                 if (
                     user is None
                     or plan_row is None
@@ -250,6 +265,13 @@ def run_weekly(
     )
 
 
+def _is_local_hour(sent_at: datetime, timezone: str, local_hour: int) -> bool:
+    try:
+        return sent_at.astimezone(ZoneInfo(timezone)).hour == local_hour
+    except (ValueError, ZoneInfoNotFoundError):
+        return False
+
+
 def _sample_brief(status: str, week: str, settings: AlertSettings) -> tuple[Brief, str]:
     root = Path(__file__).resolve().parents[3]
     plan = json.loads((root / "tests" / "golden" / "weekly_plan_user1.json").read_text("utf-8"))
@@ -319,6 +341,7 @@ def _database_url() -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Send one week's approved email briefs")
     parser.add_argument("--week", required=True)
+    parser.add_argument("--local-hour", type=int, choices=range(24))
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--sample", choices=("actions", "none"))
     arguments = parser.parse_args(argv)
@@ -343,7 +366,11 @@ def main(argv: list[str] | None = None) -> int:
         engine = make_engine(_database_url())
         try:
             counts = run_weekly(
-                engine, arguments.week, settings=settings, dry_run=arguments.dry_run
+                engine,
+                arguments.week,
+                settings=settings,
+                dry_run=arguments.dry_run,
+                local_hour=arguments.local_hour,
             )
         finally:
             engine.dispose()

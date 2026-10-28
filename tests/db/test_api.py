@@ -7,10 +7,10 @@ from datetime import UTC, datetime, timedelta
 
 import jwt
 import pytest
-from conftest import MigratedDatabase
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
+from conftest import MigratedDatabase
 from wealth.api import main as api_main
 from wealth.api.settings import Settings
 from wealth.db import session as db_session

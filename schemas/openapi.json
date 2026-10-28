@@ -1607,6 +1607,24 @@
         "title": "GoldAsset",
         "type": "object"
       },
+      "GoogleExchangeResponse": {
+        "properties": {
+          "expires_in": {
+            "title": "Expires In",
+            "type": "integer"
+          },
+          "id_token": {
+            "title": "Id Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id_token",
+          "expires_in"
+        ],
+        "title": "GoogleExchangeResponse",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -6716,6 +6734,95 @@
           }
         ],
         "summary": "Patch Asset"
+      }
+    },
+    "/v1/auth/google/exchange": {
+      "post": {
+        "operationId": "exchange_google_code_v1_auth_google_exchange_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "code": {
+                    "maxLength": 4096,
+                    "minLength": 1,
+                    "title": "Code",
+                    "type": "string"
+                  },
+                  "code_verifier": {
+                    "maxLength": 128,
+                    "minLength": 43,
+                    "pattern": "^[A-Za-z0-9._~-]+$",
+                    "title": "Code Verifier",
+                    "type": "string"
+                  },
+                  "redirect_uri": {
+                    "maxLength": 2048,
+                    "minLength": 1,
+                    "title": "Redirect Uri",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code",
+                  "code_verifier",
+                  "redirect_uri"
+                ],
+                "title": "GoogleExchangeRequest",
+                "type": "object"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "code": {
+                    "maxLength": 4096,
+                    "minLength": 1,
+                    "title": "Code",
+                    "type": "string"
+                  },
+                  "code_verifier": {
+                    "maxLength": 128,
+                    "minLength": 43,
+                    "pattern": "^[A-Za-z0-9._~-]+$",
+                    "title": "Code Verifier",
+                    "type": "string"
+                  },
+                  "redirect_uri": {
+                    "maxLength": 2048,
+                    "minLength": 1,
+                    "title": "Redirect Uri",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code",
+                  "code_verifier",
+                  "redirect_uri"
+                ],
+                "title": "GoogleExchangeRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GoogleExchangeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Exchange Google Code"
       }
     },
     "/v1/brief/{week}": {

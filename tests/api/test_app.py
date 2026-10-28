@@ -20,6 +20,9 @@ def test_settings_default_to_production_oidc_and_fail_closed_for_dev_mode() -> N
         auth_jwks_url="https://identity.example.test/keys",
         auth_issuer="https://identity.example.test/",
         auth_audience="wealth-api",
+        google_client_id="wealth-api",
+        google_client_secret="synthetic-google-secret",
+        allowed_emails="family@example.test",
     )
     assert settings.env == "production"
     assert settings.auth_mode == "oidc"
@@ -40,6 +43,9 @@ def test_settings_reject_wildcard_origins_in_production() -> None:
             auth_jwks_url="https://identity.example.test/keys",
             auth_issuer="https://identity.example.test/",
             auth_audience="wealth-api",
+            google_client_id="wealth-api",
+            google_client_secret="synthetic-google-secret",
+            allowed_emails="family@example.test",
             allowed_origins="https://app.example.test, *",
         )
 
@@ -127,6 +133,25 @@ def test_authentication_errors_use_problem_json_and_security_headers() -> None:
         assert headers["x-content-type-options"] == "nosniff"
         assert headers["referrer-policy"] == "no-referrer"
         assert headers["x-frame-options"] == "DENY"
+
+
+def test_development_settings_leave_email_allow_list_optional() -> None:
+    settings = Settings(env="dev", auth_mode="dev", dev_auth_secret=token_urlsafe(32))
+
+    assert settings.allowed_email_list == []
+
+
+def test_production_settings_require_email_allow_list() -> None:
+    with pytest.raises(ValidationError, match="ALLOWED_EMAILS"):
+        Settings(
+            env="production",
+            auth_mode="oidc",
+            auth_jwks_url="https://identity.example.test/keys",
+            auth_issuer="https://identity.example.test/",
+            auth_audience="wealth-api",
+            google_client_id="wealth-api",
+            google_client_secret="synthetic-google-secret",
+        )
 
 
 def test_deep_health_reports_database_failure_as_problem_json() -> None:

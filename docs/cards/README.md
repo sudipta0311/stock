@@ -32,7 +32,7 @@ Status: ⬜ not started · 🟦 in progress · ✅ accepted · 🔁 rework · �
 | C16b | Research 3b: ETF/index-fund selector, Rates/Rulebook watchers + human approval queue, Scorekeeper (paper portfolio, track record, calibration), CIO agenda | 4.7, 5.2, 5.8 | ⬜ |
 | C17a | Alerts 1: investing prefs, Personaliser (weekly per-user plan → actions, pure code), weekly job, /v1/plan, /v1/actions, /v1/research/ideas | 4, 5.4 | ✅ |
 | C17b | Alerts 2: weekly brief (templated, no LLM numbers), HTML+text email via HTTP provider, web push, daily reminders, urgent alerts, consent/unsubscribe, Inbox API | 9 | ✅ |
-| C18 | Deploy: GitHub Actions workflows, `render.yaml`, env docs | App. D | 🟦 |
+| C18 | Deploy: GitHub Actions workflows, `render.yaml`, env docs | App. D | ✅ (owner creates the Render services) |
 | C19 | PWA 1: Vite + React + TS scaffold, design system, shell + bottom nav, service worker, typed API client, OIDC + dev token, Indian formatting | 8.1, 8.7 | ✅ |
 | C20 | PWA 2: onboarding + Money Map checklist + all mini-forms + Indian number input + autosave | 3.1, 8.3, 8.4 | ✅ |
 | C21 | PWA 3: import flow (upload, share target, progress, review & merge) | 3.3, 8.4 | ✅ |
@@ -52,6 +52,7 @@ Status: ⬜ not started · 🟦 in progress · ✅ accepted · 🔁 rework · �
 ## Follow-ups noted during review
 - (Deploy prep, reviewer) Migration 0002 was edited for managed Postgres. It no longer names SUPERUSER/REPLICATION in ALTER ROLE (it verifies them instead) and only REVOKEs an owner membership that exists. The end state is identical, so existing databases are unaffected. Neon `wealth` (owner's Frankfurt project) is migrated to 0011. → C18 adds a non-superuser CI owner so this class of bug is caught.
 - (C27c review) `DELETE /v1/households/leave` by the owner returns 404 instead of 409 (owner leave returns 404). The request is refused either way; the PWA (C27b) must not show Leave to owners. → C27b
+- (C18 review) The Google-exchange rate limiter keys on `request.client.host`, and uvicorn runs with `--forwarded-allow-ips '*'`, so a caller can vary `X-Forwarded-For` to dodge it. That is low risk (a code still needs a real Google sign-in), but key on the right-most hop Render adds, or trust only Render's proxy range. Also run `render blueprints validate` when the Render CLI is available. → C25
 - (C27c review) `wealth_app` has UPDATE/DELETE on `audit_log`. Make the household audit append-only: revoke UPDATE/DELETE from `wealth_app` and check that account deletion cascades still work (FK cascades run as the table owner). → C25
 - (C27c review) The audit trigger skips rows when the session setting `app.household_deleting_user` equals the tenant. Any session can set it, so it's an audit bypass if the API is ever compromised. Replace it with a check that needs no session setting (cascades run after the users row is gone, so the existing NOT EXISTS users check may be enough), with a test. → C25
 - C04: EPF accrual uses actual/365 days; EPFO credits interest on monthly running balances at rate/1200 (~0.02% difference). Align in C25.

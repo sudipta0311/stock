@@ -1,0 +1,50 @@
+name: Daily safety checks and reminders
+
+on:
+  schedule:
+    - cron: "30 0 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sentinel-daily
+  cancel-in-progress: false
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OWNER_DATABASE_URL: ${{ secrets.OWNER_DATABASE_URL }}
+      FOUNDRY_ENDPOINT: ${{ secrets.FOUNDRY_ENDPOINT }}
+      FOUNDRY_API_KEY: ${{ secrets.FOUNDRY_API_KEY }}
+      FOUNDRY_MODEL_WORKHORSE: ${{ secrets.FOUNDRY_MODEL_WORKHORSE }}
+      FOUNDRY_MODEL_REDTEAM: ${{ secrets.FOUNDRY_MODEL_REDTEAM }}
+      EMAIL_PROVIDER: ${{ secrets.EMAIL_PROVIDER }}
+      EMAIL_API_KEY: ${{ secrets.EMAIL_API_KEY }}
+      EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+      EMAIL_LINK_SECRET: ${{ secrets.EMAIL_LINK_SECRET }}
+      VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+      VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install --no-cache-dir ".[api,importer,research]"
+      - name: Run the optional safety review
+        run: |
+          if python -c "import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('wealth.research.sentinel') else 78)"; then
+            python -m wealth.research.sentinel --days 2
+          else
+            result=$?
+            if [ "$result" -ne 78 ]; then exit "$result"; fi
+            echo "::notice::The optional safety review is not available yet; skipping."
+          fi
+      - name: Send daily reminders
+        run: python -m wealth.alerts.daily

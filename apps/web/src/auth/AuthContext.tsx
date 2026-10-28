@@ -96,7 +96,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         try {
           const { getOidcUserManager } = await import("./oidc");
           const user = await (await getOidcUserManager()).getUser();
-          token = user?.access_token ?? token;
+          token = user?.id_token ?? user?.access_token ?? token;
           if (token) setAuthToken(token);
         } catch (error) {
           if (active)
@@ -155,7 +155,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const completeOidcLogin = useCallback(async () => {
     const { getOidcUserManager } = await import("./oidc");
     const user = await (await getOidcUserManager()).signinRedirectCallback();
-    acceptToken(user.access_token);
+    acceptToken(user.id_token ?? user.access_token);
   }, [acceptToken]);
 
   const completeSilentRenew = useCallback(async () => {

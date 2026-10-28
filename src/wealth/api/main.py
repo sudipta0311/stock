@@ -133,7 +133,7 @@ def _application_version() -> str:
 
 
 def _origin_list_from_environment() -> list[str]:
-    configured_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
+    configured_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173")
     return [origin.strip() for origin in configured_origins.split(",") if origin.strip()]
 
 
@@ -253,6 +253,9 @@ def create_app(settings: "Settings | None" = None) -> FastAPI:
     application.state.settings = configured
     application.state.jwks_cache = None
     application.state.db_engine = None
+    from wealth.api.google_auth import GoogleExchangeRateLimiter
+
+    application.state.google_exchange_limiter = GoogleExchangeRateLimiter()
     application.add_middleware(
         CORSMiddleware,
         allow_origins=(
@@ -399,6 +402,10 @@ def create_app(settings: "Settings | None" = None) -> FastAPI:
                 detail="The bearer token is invalid or expired.",
                 headers={"WWW-Authenticate": "Bearer"},
             ) from error
+
+        allowed_emails = request.app.state.settings.allowed_email_list
+        if allowed_emails and claims.email.casefold() not in allowed_emails:
+            raise HTTPException(status_code=403, detail="This is a private family app.")
 
         engine = request.app.state.db_engine
         if engine is None:
@@ -677,6 +684,9 @@ def create_app(settings: "Settings | None" = None) -> FastAPI:
     from wealth.api.alerts import build_router as build_alerts_router
 
     application.include_router(build_alerts_router(authenticated_user))
+    from wealth.api.google_auth import build_router as build_google_auth_router
+
+    application.include_router(build_google_auth_router())
 
     return application
 

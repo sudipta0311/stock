@@ -1,0 +1,45 @@
+name: Daily market data
+
+on:
+  schedule:
+    - cron: "30 13 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: marketdata-daily
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OWNER_DATABASE_URL: ${{ secrets.OWNER_DATABASE_URL }}
+      SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install --no-cache-dir ".[api,importer]"
+      - name: Refresh daily reference data
+        run: python -m wealth.marketdata.refresh --only master,nse,amfi,fx,gold --prune
+      - name: Refresh SEC data on Saturdays when configured
+        run: |
+          if [ "$(date -u +%u)" != "6" ] || [ -z "$SEC_USER_AGENT" ]; then
+            echo "::notice::Saturday SEC refresh is not scheduled for this run."
+            exit 0
+          fi
+          if python -c "import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('wealth.marketdata.edgar') else 78)"; then
+            python -m wealth.marketdata.edgar
+          else
+            result=$?
+            if [ "$result" -ne 78 ]; then exit "$result"; fi
+            echo "::notice::The optional SEC refresh is not available yet; skipping."
+          fi

@@ -8,6 +8,7 @@ export const API_PATHS = [
   "/v1/assets",
   "/v1/assets/quick-add",
   "/v1/assets/{asset_id}",
+  "/v1/auth/google/exchange",
   "/v1/brief/{week}",
   "/v1/email/unsubscribe",
   "/v1/goals",

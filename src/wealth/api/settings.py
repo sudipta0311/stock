@@ -27,11 +27,17 @@ class Settings(BaseSettings):
     auth_jwks_url: str | None = Field(default=None, validation_alias="AUTH_JWKS_URL")
     auth_issuer: str | None = Field(default=None, validation_alias="AUTH_ISSUER")
     auth_audience: str | None = Field(default=None, validation_alias="AUTH_AUDIENCE")
+    google_client_id: str | None = Field(default=None, validation_alias="GOOGLE_CLIENT_ID")
+    google_client_secret: SecretStr | None = Field(
+        default=None, validation_alias="GOOGLE_CLIENT_SECRET", repr=False
+    )
+    allowed_emails: str = Field(default="", validation_alias="ALLOWED_EMAILS")
     dev_auth_secret: SecretStr | None = Field(
         default=None, validation_alias="DEV_AUTH_SECRET", repr=False
     )
     allowed_origins: str = Field(
-        default="http://localhost:3000", validation_alias="ALLOWED_ORIGINS"
+        default="http://localhost:3000,http://localhost:5173",
+        validation_alias="ALLOWED_ORIGINS",
     )
     max_upload_mb: int = Field(default=10, gt=0, validation_alias="MAX_UPLOAD_MB")
     email_provider: Literal["brevo", "resend", "dry_run"] = Field(
@@ -81,16 +87,32 @@ class Settings(BaseSettings):
                 raise ValueError("DEV_AUTH_SECRET must be at least 32 characters in dev mode")
         if self.env == "production" and "*" in self.origin_list:
             raise ValueError("ALLOWED_ORIGINS must not contain '*' in production")
+        if self.env == "production" and not self.allowed_email_list:
+            raise ValueError("ALLOWED_EMAILS must be set in production")
         if self.auth_mode == "oidc" and not all(
             (self.auth_jwks_url, self.auth_issuer, self.auth_audience)
         ):
             raise ValueError("OIDC mode requires AUTH_JWKS_URL, AUTH_ISSUER, and AUTH_AUDIENCE")
+        if self.env == "production" and self.auth_mode == "oidc":
+            if not self.google_client_id or not self.google_client_secret_value:
+                raise ValueError(
+                    "Google sign-in requires GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET"
+                )
+            if self.google_client_id != self.auth_audience:
+                raise ValueError("AUTH_AUDIENCE must match GOOGLE_CLIENT_ID")
         return self
 
     @property
     def origin_list(self) -> list[str]:
         """Return the comma-separated origin setting as trimmed origins."""
         return [origin.strip() for origin in self.allowed_origins.split(",") if origin.strip()]
+
+    @property
+    def allowed_email_list(self) -> list[str]:
+        """Return configured sign-in addresses in case-insensitive comparison form."""
+        return [
+            email.strip().casefold() for email in self.allowed_emails.split(",") if email.strip()
+        ]
 
     @property
     def database_url_value(self) -> str | None:
@@ -101,6 +123,15 @@ class Settings(BaseSettings):
     def dev_auth_secret_value(self) -> str | None:
         """Return the configured development signing secret."""
         return self.dev_auth_secret.get_secret_value() if self.dev_auth_secret is not None else None
+
+    @property
+    def google_client_secret_value(self) -> str | None:
+        """Return the Google OAuth secret without exposing it in settings reprs."""
+        return (
+            self.google_client_secret.get_secret_value()
+            if self.google_client_secret is not None
+            else None
+        )
 
     @property
     def email_api_key_value(self) -> str | None:

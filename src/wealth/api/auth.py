@@ -15,6 +15,8 @@ from jwt import PyJWK
 from wealth.api.settings import Settings
 
 _ALLOWED_OIDC_ALGORITHMS = {"RS256", "ES256"}
+# Google documents both spellings for the `iss` claim of its ID tokens.
+_GOOGLE_ISSUERS = ("https://accounts.google.com", "accounts.google.com")
 _JWKS_TTL_SECONDS = 60 * 60
 _CLOCK_LEEWAY_SECONDS = 60
 
@@ -110,15 +112,20 @@ def verify_token(token: str, settings: Settings, jwks_cache: JwksCache) -> AuthC
             if not settings.auth_jwks_url or not settings.auth_issuer or not settings.auth_audience:
                 raise AuthenticationError("OIDC is not configured")
             key = jwks_cache.signing_key(settings.auth_jwks_url, kid, algorithm)
+            issuer: str | tuple[str, ...] = (
+                _GOOGLE_ISSUERS if settings.auth_issuer in _GOOGLE_ISSUERS else settings.auth_issuer
+            )
             claims = jwt.decode(
                 token,
                 key.key,
                 algorithms=[algorithm],
                 audience=settings.auth_audience,
-                issuer=settings.auth_issuer,
+                issuer=issuer,
                 leeway=_CLOCK_LEEWAY_SECONDS,
                 options={"require": ["sub", "email", "exp"]},
             )
+            if claims.get("email_verified") is not True:
+                raise AuthenticationError("The identity provider has not verified this email")
     except AuthenticationError:
         raise
     except (jwt.PyJWTError, OSError, TypeError, ValueError, KeyError) as error:

@@ -13,6 +13,12 @@ export async function getOidcUserManager(): Promise<UserManager> {
     );
   }
   const audience = import.meta.env.VITE_OIDC_AUDIENCE;
+  if (audience && audience !== clientId) {
+    throw new Error(
+      "VITE_OIDC_AUDIENCE must match VITE_OIDC_CLIENT_ID for Google sign-in.",
+    );
+  }
+  const apiUrl = import.meta.env.VITE_API_URL || window.location.origin;
   userManager = new UserManager({
     authority,
     client_id: clientId,
@@ -23,7 +29,9 @@ export async function getOidcUserManager(): Promise<UserManager> {
     scope: import.meta.env.VITE_OIDC_SCOPE || "openid email profile",
     automaticSilentRenew: true,
     userStore: new WebStorageStateStore({ store: window.sessionStorage }),
-    ...(audience ? { extraQueryParams: { audience } } : {}),
+    metadataSeed: {
+      token_endpoint: new URL("/v1/auth/google/exchange", apiUrl).toString(),
+    },
   });
   return userManager;
 }

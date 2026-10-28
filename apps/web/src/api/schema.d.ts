@@ -1,4 +1,4 @@
-// OpenAPI SHA256: 7da2c6841dc4a7b781e19d5df61b665116034e236fedf0656a77a8e5149137d2
+// OpenAPI SHA256: 6e5c09c890ef0c94e28a5111465bd4a915f89d42c676e6b1c74bfa43d579e624
 export interface paths {
     "/healthz": {
         parameters: {
@@ -139,6 +139,23 @@ export interface paths {
         head?: never;
         /** Patch Asset */
         patch: operations["patch_asset_v1_assets__asset_id__patch"];
+        trace?: never;
+    };
+    "/v1/auth/google/exchange": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Exchange Google Code */
+        post: operations["exchange_google_code_v1_auth_google_exchange_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/brief/{week}": {
@@ -1257,6 +1274,13 @@ export interface components {
             series?: string | null;
             /** Units */
             units?: number | string | null;
+        };
+        /** GoogleExchangeResponse */
+        GoogleExchangeResponse: {
+            /** Expires In */
+            expires_in: number;
+            /** Id Token */
+            id_token: string;
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -3274,6 +3298,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    exchange_google_code_v1_auth_google_exchange_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Code */
+                    code: string;
+                    /** Code Verifier */
+                    code_verifier: string;
+                    /** Redirect Uri */
+                    redirect_uri: string;
+                };
+                "application/x-www-form-urlencoded": {
+                    /** Code */
+                    code: string;
+                    /** Code Verifier */
+                    code_verifier: string;
+                    /** Redirect Uri */
+                    redirect_uri: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GoogleExchangeResponse"];
                 };
             };
         };

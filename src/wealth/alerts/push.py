@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import argparse
+import base64
 import json
 from collections.abc import Callable, Mapping
 from typing import Any
@@ -112,3 +114,38 @@ def send_push(
             raise PushDeliveryGone from error
         raise
     return str(getattr(result, "status_code", "push-accepted"))
+
+
+def generate_vapid_keypair() -> tuple[str, str]:
+    """Create browser-compatible VAPID public and private key values."""
+    from cryptography.hazmat.primitives import serialization
+    from py_vapid import Vapid
+
+    vapid = Vapid()
+    vapid.generate_keys()
+    private_bytes = vapid.private_key.private_numbers().private_value.to_bytes(32, "big")
+    public_bytes = vapid.public_key.public_bytes(
+        encoding=serialization.Encoding.X962,
+        format=serialization.PublicFormat.UncompressedPoint,
+    )
+
+    def encode(value: bytes) -> str:
+        return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
+
+    return encode(public_bytes), encode(private_bytes)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Generate browser push credentials")
+    parser.add_argument("--generate-vapid", action="store_true")
+    arguments = parser.parse_args(argv)
+    if not arguments.generate_vapid:
+        parser.error("use --generate-vapid to print a new key pair")
+    public_key, private_key = generate_vapid_keypair()
+    print(f"VAPID_PUBLIC_KEY={public_key}")
+    print(f"VAPID_PRIVATE_KEY={private_key}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
