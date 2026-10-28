@@ -64,12 +64,6 @@ jobs:
   pwa:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      VITE_API_URL: https://wealth-api.onrender.com
-      VITE_AUTH_MODE: oidc
-      VITE_OIDC_AUTHORITY: https://accounts.google.com
-      VITE_OIDC_CLIENT_ID: ci-client-id
-      VITE_OIDC_AUDIENCE: ci-client-id
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -89,8 +83,16 @@ jobs:
         working-directory: apps/web
       - run: npm run format:check
         working-directory: apps/web
+      # Only the build sees deploy-like values: tests mock same-origin API calls, so a
+      # job-wide VITE_API_URL would send them to another host and break the mocks.
       - run: npm run build
         working-directory: apps/web
+        env:
+          VITE_API_URL: https://wealth-api.onrender.com
+          VITE_AUTH_MODE: oidc
+          VITE_OIDC_AUTHORITY: https://accounts.google.com
+          VITE_OIDC_CLIENT_ID: ci-client-id
+          VITE_OIDC_AUDIENCE: ci-client-id
       - run: npm test
         working-directory: apps/web
       - run: npm run budget
