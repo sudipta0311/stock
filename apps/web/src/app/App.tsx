@@ -45,6 +45,11 @@ const LoanDetailPage = lazy(() =>
     default: module.LoanDetailPage,
   })),
 );
+const OnboardingFrame = lazy(() =>
+  import("../onboarding/OnboardingFrame").then((module) => ({
+    default: module.OnboardingFrame,
+  })),
+);
 const OnboardingPage = lazy(() =>
   import("../onboarding/OnboardingPage").then((module) => ({
     default: module.OnboardingPage,
@@ -155,7 +160,7 @@ function ProtectedApp() {
 function ProfileProtectedApp() {
   return (
     <RouteGuard requiresProfile={false}>
-      <Outlet />
+      <OnboardingFrame />
     </RouteGuard>
   );
 }
