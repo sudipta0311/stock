@@ -10,9 +10,22 @@ import type { ReactNode } from "react";
 import type { components } from "../api/schema";
 import { apiFetch } from "../api/client";
 import { queryClient } from "../api/query-client";
-import { clearAuthToken, getAuthToken, setAuthToken } from "./token";
+import {
+  clearAuthToken,
+  getAuthToken,
+  getRefreshToken,
+  setAuthSession,
+  setAuthToken,
+} from "./token";
 import { goToLogin } from "./navigation";
 import { clearAllDeviceData } from "../pwa/offline-cache";
+import {
+  beginAuthBootstrap,
+  cancelProactiveRefresh,
+  completeAuthBootstrap,
+  refreshAuthSession,
+  scheduleProactiveRefresh,
+} from "./session";
 
 type AuthMode = "oidc" | "dev";
 type AuthState = "loading" | "anonymous" | "authenticated";
@@ -27,11 +40,11 @@ interface AuthContextValue {
   loginWithDevToken(token: string): void;
   loginWithOidc(): Promise<void>;
   completeOidcLogin(): Promise<void>;
-  completeSilentRenew(): Promise<void>;
   logout(options?: {
     disablePush?: boolean;
     notice?: boolean;
     preserveTourHistory?: boolean;
+    serverRevoked?: boolean;
   }): Promise<void>;
 }
 
@@ -45,6 +58,7 @@ function configuredAuthMode(): AuthMode {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  beginAuthBootstrap();
   const mode = configuredAuthMode();
   const [state, setState] = useState<AuthState>("loading");
   const [hasProfile, setHasProfile] = useState<boolean | null>(null);
@@ -64,6 +78,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     } catch (error) {
       if (error instanceof Error && "status" in error && error.status === 401) {
+        cancelProactiveRefresh();
         clearAuthToken();
         setHasProfile(null);
         setState("anonymous");
@@ -89,36 +104,52 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         "Development token sign-in is disabled in production builds.",
       );
       setState("anonymous");
+      completeAuthBootstrap();
       return;
     }
 
     let active = true;
     void (async () => {
-      let token = getAuthToken();
-      if (
-        mode === "oidc" &&
-        import.meta.env.VITE_OIDC_AUTHORITY &&
-        import.meta.env.VITE_OIDC_CLIENT_ID
-      ) {
-        try {
-          const { getOidcUserManager } = await import("./oidc");
-          const user = await (await getOidcUserManager()).getUser();
-          token = user?.id_token ?? user?.access_token ?? token;
-          if (token) setAuthToken(token);
-        } catch (error) {
-          if (active)
-            setConfigurationError(
-              error instanceof Error
-                ? error.message
-                : "Unable to configure sign-in.",
-            );
+      let token = mode === "dev" ? getAuthToken() : null;
+      if (mode === "oidc") {
+        if (getRefreshToken()) {
+          try {
+            token = (await refreshAuthSession())?.access_token ?? null;
+          } catch {
+            // Keep the refresh token for the next attempt when the API is unavailable.
+          }
+        }
+        if (
+          import.meta.env.VITE_OIDC_AUTHORITY &&
+          import.meta.env.VITE_OIDC_CLIENT_ID
+        ) {
+          try {
+            const { getOidcUserManager } = await import("./oidc");
+            const manager = await getOidcUserManager();
+            const user = await manager.getUser();
+            if (!token) {
+              token = user?.id_token ?? user?.access_token ?? null;
+              if (token) setAuthToken(token);
+            }
+            if (user) await manager.removeUser();
+          } catch (error) {
+            if (active)
+              setConfigurationError(
+                error instanceof Error
+                  ? error.message
+                  : "Unable to configure sign-in.",
+              );
+          }
         }
       }
       if (!active) return;
+      completeAuthBootstrap();
       if (!token) {
         setState("anonymous");
         return;
       }
+      setAuthToken(token);
+      scheduleProactiveRefresh();
       setState("authenticated");
       try {
         const cachedProfile = window.sessionStorage.getItem(PROFILE_STATUS_KEY);
@@ -127,7 +158,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setHasProfile(null);
       }
       await verifyProfile();
-    })();
+    })().finally(() => completeAuthBootstrap());
     return () => {
       active = false;
     };
@@ -135,8 +166,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     function expireSession() {
-      if (!getAuthToken()) return;
       queryClient.clear();
+      cancelProactiveRefresh();
       clearAuthToken();
       setHasProfile(null);
       setState("anonymous");
@@ -184,14 +215,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const completeOidcLogin = useCallback(async () => {
     const { getOidcUserManager } = await import("./oidc");
-    const user = await (await getOidcUserManager()).signinRedirectCallback();
-    acceptToken(user.id_token ?? user.access_token);
-  }, [acceptToken]);
-
-  const completeSilentRenew = useCallback(async () => {
-    const { getOidcUserManager } = await import("./oidc");
-    await (await getOidcUserManager()).signinSilentCallback();
-  }, []);
+    const manager = await getOidcUserManager();
+    const user = await manager.signinRedirectCallback();
+    const token = user.access_token || user.id_token;
+    if (!token) throw new Error("Google sign-in returned no app token.");
+    if (user.refresh_token) {
+      setAuthSession({
+        access_token: token,
+        refresh_token: user.refresh_token,
+        expires_in:
+          user.expires_in ??
+          (user.expires_at
+            ? Math.max(1, user.expires_at - Math.floor(Date.now() / 1_000))
+            : 30 * 60),
+      });
+      scheduleProactiveRefresh();
+    } else {
+      setAuthToken(token);
+    }
+    await manager.removeUser();
+    setState("authenticated");
+    setHasProfile(null);
+    await verifyProfile();
+  }, [verifyProfile]);
 
   const logout = useCallback(
     async (
@@ -199,6 +245,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         disablePush?: boolean;
         notice?: boolean;
         preserveTourHistory?: boolean;
+        serverRevoked?: boolean;
       } = {},
     ) => {
       if (options.disablePush) {
@@ -207,6 +254,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           await disablePush();
         } catch {
           // Signing out still works if this phone cannot reach the push service.
+        }
+      }
+      const currentToken = getAuthToken();
+      if (!options.serverRevoked && currentToken) {
+        try {
+          const apiBase =
+            import.meta.env.VITE_API_URL || window.location.origin;
+          await fetch(new URL("/v1/auth/logout", apiBase), {
+            method: "POST",
+            headers: { Authorization: `Bearer ${currentToken}` },
+            cache: "no-store",
+          });
+        } catch {
+          // Local sign-out still completes when the phone cannot reach the API.
         }
       }
       if (mode === "oidc") {
@@ -218,6 +279,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }
       queryClient.clear();
+      cancelProactiveRefresh();
       clearAuthToken();
       setState("anonymous");
       setHasProfile(null);
@@ -252,7 +314,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loginWithDevToken,
       loginWithOidc,
       completeOidcLogin,
-      completeSilentRenew,
       logout,
     }),
     [
@@ -264,7 +325,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loginWithDevToken,
       loginWithOidc,
       completeOidcLogin,
-      completeSilentRenew,
       logout,
     ],
   );

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from threading import Lock
 from typing import Any
 from urllib.request import urlopen
+from uuid import UUID
 
 import jwt
 from jwt import PyJWK
@@ -30,6 +31,7 @@ class AuthClaims:
     subject: str
     email: str
     name: str | None
+    session_id: UUID | None = None
 
 
 def fetch_jwks(url: str) -> dict[str, Any]:
@@ -88,7 +90,8 @@ class JwksCache:
 
 
 def verify_token(token: str, settings: Settings, jwks_cache: JwksCache) -> AuthClaims:
-    """Verify signature, time bounds, issuer, audience, and identity claims."""
+    """Verify a legacy identity token, an app session, or a local development token."""
+    session_id: UUID | None = None
     try:
         header = jwt.get_unverified_header(token)
         algorithm = header.get("alg")
@@ -103,6 +106,28 @@ def verify_token(token: str, settings: Settings, jwks_cache: JwksCache) -> AuthC
                 leeway=_CLOCK_LEEWAY_SECONDS,
                 options={"require": ["sub", "email", "exp"]},
             )
+        elif algorithm == "HS256":
+            secret = settings.app_session_secret_value
+            if secret is None or len(secret.encode("utf-8")) < 32:
+                raise AuthenticationError("App sessions are not configured")
+            claims = jwt.decode(
+                token,
+                secret,
+                algorithms=["HS256"],
+                audience="wealth-pwa",
+                issuer="wealth-api",
+                leeway=_CLOCK_LEEWAY_SECONDS,
+                options={"require": ["sub", "email", "exp", "iat", "sid", "typ"]},
+            )
+            if claims.get("typ") != "access":
+                raise AuthenticationError("Invalid app session token type")
+            raw_session_id = claims.get("sid")
+            try:
+                session_id = UUID(raw_session_id) if isinstance(raw_session_id, str) else None
+            except ValueError as error:
+                raise AuthenticationError("Invalid app session id") from error
+            if session_id is None:
+                raise AuthenticationError("Invalid app session id")
         else:
             if algorithm not in _ALLOWED_OIDC_ALGORITHMS:
                 raise AuthenticationError("Unsupported token algorithm")
@@ -145,4 +170,4 @@ def verify_token(token: str, settings: Settings, jwks_cache: JwksCache) -> AuthC
         or (isinstance(name, str) and len(name) > 120)
     ):
         raise AuthenticationError("Invalid identity claims")
-    return AuthClaims(subject=subject, email=email, name=name)
+    return AuthClaims(subject=subject, email=email, name=name, session_id=session_id)

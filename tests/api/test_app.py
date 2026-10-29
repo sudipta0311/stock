@@ -23,6 +23,7 @@ def test_settings_default_to_production_oidc_and_fail_closed_for_dev_mode() -> N
         auth_audience="wealth-api",
         google_client_id="wealth-api",
         google_client_secret="synthetic-google-secret",
+        app_session_secret=token_urlsafe(32),
         allowed_emails="family@example.test",
     )
     assert settings.env == "production"
@@ -49,6 +50,25 @@ def test_settings_reject_wildcard_origins_in_production() -> None:
             allowed_emails="family@example.test",
             allowed_origins="https://app.example.test, *",
         )
+
+
+def test_app_session_secret_requires_32_bytes_and_is_hidden_in_repr() -> None:
+    with pytest.raises(ValidationError, match="APP_SESSION_SECRET must be at least 32 bytes"):
+        Settings(
+            env="test",
+            auth_mode="dev",
+            dev_auth_secret=token_urlsafe(32),
+            app_session_secret="short",
+        )
+
+    secret = token_urlsafe(32)
+    settings = Settings(
+        env="test",
+        auth_mode="dev",
+        dev_auth_secret=token_urlsafe(32),
+        app_session_secret=secret,
+    )
+    assert secret not in repr(settings)
 
 
 def test_settings_validation_error_hides_database_url_inputs(

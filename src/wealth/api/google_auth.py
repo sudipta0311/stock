@@ -2,24 +2,22 @@
 
 from __future__ import annotations
 
-import math
-import time
-from collections import defaultdict, deque
-from threading import Lock
 from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from wealth.api.auth import AuthenticationError, JwksCache, verify_token
+from wealth.api.auth_rate_limit import AuthRateLimiter, client_address
+from wealth.api.auth_sessions import AuthSessionPair, SessionConfigurationError, create_app_session
 from wealth.api.settings import Settings
 
 _GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
-_RATE_LIMIT_REQUESTS = 10
-_RATE_LIMIT_WINDOW_SECONDS = 60
+
+GoogleExchangeRateLimiter = AuthRateLimiter
 
 
 class GoogleExchangeRequest(BaseModel):
@@ -34,9 +32,8 @@ class GoogleExchangeRequest(BaseModel):
     redirect_uri: str = Field(min_length=1, max_length=2048)
 
 
-class GoogleExchangeResponse(BaseModel):
+class GoogleExchangeResponse(AuthSessionPair):
     id_token: str
-    expires_in: int
 
 
 class GoogleExchangeFailure(Exception):
@@ -45,37 +42,6 @@ class GoogleExchangeFailure(Exception):
 
 class InvalidGoogleCode(Exception):
     """Google rejected an expired, invalid, or already used code."""
-
-
-class GoogleExchangeRateLimiter:
-    """Small per-process sliding-window limiter keyed by client address."""
-
-    def __init__(
-        self,
-        limit: int = _RATE_LIMIT_REQUESTS,
-        window_seconds: int = _RATE_LIMIT_WINDOW_SECONDS,
-    ) -> None:
-        self._limit = limit
-        self._window_seconds = window_seconds
-        self._attempts: dict[str, deque[float]] = defaultdict(deque)
-        self._lock = Lock()
-
-    def retry_after(self, key: str, *, now: float | None = None) -> int | None:
-        current = time.monotonic() if now is None else now
-        cutoff = current - self._window_seconds
-        with self._lock:
-            for address in tuple(self._attempts):
-                attempts = self._attempts[address]
-                while attempts and attempts[0] <= cutoff:
-                    attempts.popleft()
-                if not attempts:
-                    del self._attempts[address]
-
-            attempts = self._attempts[key]
-            if len(attempts) >= self._limit:
-                return max(1, math.ceil(attempts[0] + self._window_seconds - current))
-            attempts.append(current)
-            return None
 
 
 async def _fetch_google_token(
@@ -191,10 +157,14 @@ def build_router() -> APIRouter:
             }
         },
     )
-    async def exchange_google_code(request: Request) -> GoogleExchangeResponse | JSONResponse:
+    async def exchange_google_code(
+        request: Request, response: Response
+    ) -> GoogleExchangeResponse | JSONResponse:
         settings: Settings = request.app.state.settings
-        remote_address = request.client.host if request.client is not None else "unknown"
-        retry_after = request.app.state.google_exchange_limiter.retry_after(remote_address)
+        limiter = getattr(request.app.state, "auth_rate_limiter", None) or getattr(
+            request.app.state, "google_exchange_limiter", None
+        )
+        retry_after = limiter.retry_after(client_address(request)) if limiter is not None else None
         if retry_after is not None:
             raise HTTPException(
                 status_code=429,
@@ -235,7 +205,7 @@ def build_router() -> APIRouter:
             )
 
         try:
-            id_token, expires_in = await _fetch_google_token(
+            id_token, _google_expires_in = await _fetch_google_token(
                 code=payload.code,
                 code_verifier=payload.code_verifier,
                 redirect_uri=payload.redirect_uri,
@@ -256,7 +226,19 @@ def build_router() -> APIRouter:
         allowed_emails = settings.allowed_email_list
         if allowed_emails and claims.email.casefold() not in allowed_emails:
             return _oauth_error(403, "access_denied", "This is a private family app.")
-
-        return GoogleExchangeResponse(id_token=id_token, expires_in=expires_in)
+        engine = request.app.state.db_engine
+        if engine is None:
+            raise HTTPException(status_code=503, detail="The data service is unavailable.")
+        try:
+            pair = create_app_session(
+                engine=engine,
+                settings=settings,
+                claims=claims,
+                user_agent=request.headers.get("user-agent"),
+            )
+        except SessionConfigurationError as error:
+            raise HTTPException(status_code=503, detail="Sign-in is not configured.") from error
+        response.headers["Cache-Control"] = "no-store"
+        return GoogleExchangeResponse(id_token=id_token, **pair.model_dump())
 
     return router

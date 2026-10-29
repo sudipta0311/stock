@@ -200,31 +200,3 @@ export function AuthCallbackPage() {
     </main>
   );
 }
-
-export function SilentCallbackPage() {
-  const { completeSilentRenew } = useAuth();
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    void completeSilentRenew().catch((reason: unknown) =>
-      setError(
-        reason instanceof Error ? reason.message : "Silent sign-in failed.",
-      ),
-    );
-  }, [completeSilentRenew]);
-  return (
-    <main className="grid min-h-screen place-items-center p-5">
-      <p
-        role={error ? "alert" : "status"}
-        className={error ? "text-danger-foreground" : ""}
-      >
-        {error ? (
-          <AlertCircle
-            aria-hidden="true"
-            className="mr-1.5 inline size-4 align-text-bottom"
-          />
-        ) : null}
-        {error ?? "Refreshing secure sign-in…"}
-      </p>
-    </main>
-  );
-}

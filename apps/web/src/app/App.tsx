@@ -1,7 +1,7 @@
 import { Component, lazy, Suspense } from "react";
 import type { ErrorInfo, ReactNode } from "react";
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router";
-import { AuthCallbackPage, LoginPage, SilentCallbackPage } from "./AuthPages";
+import { AuthCallbackPage, LoginPage } from "./AuthPages";
 import { PwaLifecycle } from "./PwaLifecycle";
 import { RouteGuard } from "./RouteGuard";
 import { WakeIndicator } from "./WakeIndicator";
@@ -191,10 +191,6 @@ export function App() {
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/auth/callback" element={<AuthCallbackPage />} />
-            <Route
-              path="/auth/callback/silent"
-              element={<SilentCallbackPage />}
-            />
             <Route element={<ProfileProtectedApp />}>
               <Route path="/onboarding/*" element={<OnboardingPage />} />
               <Route path="/join" element={<HouseholdJoinPage />} />

@@ -33,11 +33,13 @@ describe("Google sign-in setup", () => {
       authority: "https://accounts.google.com",
       client_id: "synthetic-client-id",
       response_type: "code",
-      automaticSilentRenew: true,
       metadataSeed: {
         token_endpoint: "https://api.example.test/v1/auth/google/exchange",
       },
     });
+    expect(captured.settings[0]?.automaticSilentRenew).not.toBe(true);
+    expect(captured.settings[0]?.silent_redirect_uri).toBeUndefined();
+    expect(captured.settings[0]?.userStore).toBeDefined();
     expect(captured.settings[0]?.disablePKCE).not.toBe(true);
   });
 });

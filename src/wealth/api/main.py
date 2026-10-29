@@ -3,7 +3,7 @@
 import os
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING, Annotated, Any, Literal
@@ -119,6 +119,7 @@ class AuthenticatedUser:
     household_owner_id: UUID | None = None
     role: Literal["owner", "partner", "viewer"] = "owner"
     deployment_mode: Literal["personal", "public"] = "personal"
+    session_id: UUID | None = None
 
     def __post_init__(self) -> None:
         if self.household_owner_id is None:
@@ -253,9 +254,11 @@ def create_app(settings: "Settings | None" = None) -> FastAPI:
     application.state.settings = configured
     application.state.jwks_cache = None
     application.state.db_engine = None
-    from wealth.api.google_auth import GoogleExchangeRateLimiter
+    from wealth.api.auth_rate_limit import AuthRateLimiter
 
-    application.state.google_exchange_limiter = GoogleExchangeRateLimiter()
+    auth_limiter = AuthRateLimiter()
+    application.state.auth_rate_limiter = auth_limiter
+    application.state.google_exchange_limiter = auth_limiter
     application.add_middleware(
         CORSMiddleware,
         allow_origins=(
@@ -410,9 +413,10 @@ def create_app(settings: "Settings | None" = None) -> FastAPI:
         engine = request.app.state.db_engine
         if engine is None:
             raise HTTPException(status_code=503, detail="The data service is unavailable.")
-        from sqlalchemy import text
+        from sqlalchemy import select, text
         from sqlalchemy.exc import SQLAlchemyError
 
+        from wealth.db.models import AuthSession
         from wealth.db.session import resolve_user, user_session
 
         try:
@@ -427,6 +431,27 @@ def create_app(settings: "Settings | None" = None) -> FastAPI:
                         status_code=404, detail="The household was not found."
                     ) from error
             with user_session(engine, user_id, household_owner_id) as session:
+                if claims.session_id is not None:
+                    auth_session = session.scalar(
+                        select(AuthSession).where(
+                            AuthSession.id == claims.session_id,
+                            AuthSession.user_id == user_id,
+                        )
+                    )
+                    now = datetime.now(UTC)
+                    if (
+                        auth_session is None
+                        or auth_session.revoked_at is not None
+                        or auth_session.expires_at <= now
+                        or auth_session.absolute_expires_at <= now
+                    ):
+                        raise HTTPException(
+                            status_code=401,
+                            detail="The sign-in session has expired.",
+                            headers={"WWW-Authenticate": "Bearer"},
+                        )
+                    if auth_session.last_used_at < now - timedelta(minutes=5):
+                        auth_session.last_used_at = now
                 role = session.scalar(
                     text("SELECT app_household_role(:owner_id)"),
                     {"owner_id": household_owner_id},
@@ -450,6 +475,7 @@ def create_app(settings: "Settings | None" = None) -> FastAPI:
                     household_owner_id=household_owner_id,
                     role=role,
                     deployment_mode=request.app.state.settings.deployment_mode,
+                    session_id=claims.session_id,
                 )
         except SQLAlchemyError as error:
             raise HTTPException(
@@ -664,6 +690,10 @@ def create_app(settings: "Settings | None" = None) -> FastAPI:
         from sqlalchemy import text
 
         user.session.execute(
+            text("DELETE FROM auth_sessions WHERE user_id = :me"),
+            {"me": user.user_id},
+        )
+        user.session.execute(
             text(
                 "DELETE FROM highlight_dismissals "
                 "WHERE login_user_id = :me AND household_owner_id = :owner"
@@ -700,6 +730,9 @@ def create_app(settings: "Settings | None" = None) -> FastAPI:
     from wealth.api.google_auth import build_router as build_google_auth_router
 
     application.include_router(build_google_auth_router())
+    from wealth.api.auth_sessions import build_router as build_auth_sessions_router
+
+    application.include_router(build_auth_sessions_router(authenticated_user))
 
     return application
 

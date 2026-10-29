@@ -72,6 +72,22 @@ def _oidc_token(private_key: Any, kid: str = "synthetic-key", **overrides: Any) 
     )
 
 
+def _app_access_token(secret: str, **overrides: Any) -> str:
+    now = datetime.now(UTC)
+    claims: dict[str, Any] = {
+        "sub": "synthetic-subject",
+        "email": "investor@example.test",
+        "sid": "12345678-1234-5678-1234-567812345678",
+        "typ": "access",
+        "iss": "wealth-api",
+        "aud": "wealth-pwa",
+        "iat": now,
+        "exp": now + timedelta(minutes=30),
+    }
+    claims.update(overrides)
+    return jwt.encode(claims, secret, algorithm="HS256")
+
+
 def test_oidc_verifies_identity_claims_with_cached_jwks(
     monkeypatch: pytest.MonkeyPatch,
     rsa_identity: tuple[Any, dict[str, str]],
@@ -140,6 +156,34 @@ def test_google_tokens_verify_with_either_documented_issuer_spelling(
     claims = verify_token(_oidc_token(private_key, iss=token_issuer), google_settings, JwksCache())
 
     assert claims.subject == "synthetic-subject"
+    assert claims.session_id is None
+
+
+def test_app_access_token_requires_the_app_issuer_audience_type_and_signature() -> None:
+    secret = secrets.token_urlsafe(32)
+    settings = Settings(
+        env="test",
+        auth_mode="oidc",
+        auth_jwks_url="https://identity.example.test/keys",
+        auth_issuer="https://identity.example.test/",
+        auth_audience="wealth-api",
+        app_session_secret=secret,
+    )
+
+    claims = verify_token(_app_access_token(secret), settings, JwksCache())
+    assert claims.subject == "synthetic-subject"
+    assert claims.email == "investor@example.test"
+    assert str(claims.session_id) == "12345678-1234-5678-1234-567812345678"
+
+    for token in (
+        _app_access_token(secret, aud="wrong-audience"),
+        _app_access_token(secret, iss="wrong-issuer"),
+        _app_access_token(secret, typ="refresh"),
+        _app_access_token(secret, exp=datetime.now(UTC) - timedelta(minutes=5)),
+        _app_access_token(secret + "wrong"),
+    ):
+        with pytest.raises(AuthenticationError):
+            verify_token(token, settings, JwksCache())
 
 
 def test_google_issuer_spellings_are_not_accepted_for_other_providers(

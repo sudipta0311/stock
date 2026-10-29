@@ -384,14 +384,15 @@
           "title": "Keep your account safe",
           "summary": "Your saved details are private to the family plan and its invited members.",
           "steps": [
-            "Your profile, saved money, family settings, and reminders live on EU servers.",
-            "A family member can see details allowed by their can view or can edit role.",
+            "You stay signed in on this phone for 30 days.",
+            "Choose Sign out on all devices in Settings to end every session.",
+            "If you lose a phone, sign out on all devices to remove its access.",
+            "Invited family members can see details based on their access.",
             "Open Settings to export or delete your account and saved data.",
-            "Sign out from the account menu on a shared phone.",
-            "This signs you out of the app, not of Google.",
+            "Sign out on a shared phone from the account menu. This signs you out of the app, not Google.",
             "We never ask for your bank passwords or PINs."
           ],
-          "example": "Example: Signing out removes this app's session from the phone.",
+          "example": "Example: Use Sign out on all devices after losing a phone.",
           "related": [
             "family-plans",
             "uploading-statements",

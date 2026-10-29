@@ -21,12 +21,28 @@ export type RiskAnswers = components["schemas"]["RiskAnswersRequest"];
 export type MemberWrite = components["schemas"]["MemberWrite"];
 export type MemberPatch = components["schemas"]["MemberPatch"];
 
+export interface SignedInDevice {
+  id: string;
+  device_label: string;
+  created_at: string;
+  last_used_at: string;
+  current: boolean;
+}
+
 export function settingsPathAvailable(path: string): boolean {
   return apiPathAvailable(path);
 }
 
 export function getSettingsMe(): Promise<SettingsMe> {
   return apiFetch("/v1/me");
+}
+
+export function listSignedInDevices(): Promise<SignedInDevice[]> {
+  return apiFetch("/v1/auth/sessions");
+}
+
+export function signOutEverywhere(): Promise<void> {
+  return apiFetch("/v1/auth/logout-all", { method: "POST" });
 }
 
 export function listSettingsMembers(): Promise<SettingsMember[]> {

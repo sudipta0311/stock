@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   disablePush: vi.fn().mockResolvedValue(undefined),
   removeUser: vi.fn().mockResolvedValue(undefined),
   signoutRedirect: vi.fn(),
+  serverLogout: vi.fn(),
 }));
 
 vi.mock("../../src/auth/navigation", () => ({
@@ -51,6 +52,10 @@ beforeEach(() => {
   mocks.disablePush.mockClear();
   mocks.removeUser.mockClear();
   mocks.signoutRedirect.mockClear();
+  mocks.serverLogout
+    .mockReset()
+    .mockResolvedValue(new Response(null, { status: 204 }));
+  vi.stubGlobal("fetch", mocks.serverLogout);
   queryClient.clear();
   vi.stubEnv("VITE_AUTH_MODE", "dev");
 });
@@ -76,6 +81,10 @@ it("clears the session while keeping this phone's push registration by default",
   );
   expect(queryClient.getQueryData(["private"])).toBeUndefined();
   expect(mocks.disablePush).not.toHaveBeenCalled();
+  expect(mocks.serverLogout).toHaveBeenCalledWith(
+    expect.any(URL),
+    expect.objectContaining({ method: "POST" }),
+  );
   expect(mocks.clearAllDeviceData).toHaveBeenCalledWith({
     preservePushSubscription: true,
     preserveTourHistory: true,
@@ -98,5 +107,6 @@ it("clears the app's OIDC session without logging out of Google", async () => {
   await signOut(false);
   await waitFor(() => expect(mocks.goToLogin).toHaveBeenCalledOnce());
   expect(mocks.removeUser).toHaveBeenCalledOnce();
+  expect(mocks.serverLogout).toHaveBeenCalledOnce();
   expect(mocks.signoutRedirect).not.toHaveBeenCalled();
 });

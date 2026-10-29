@@ -1,4 +1,5 @@
 import { getAuthToken } from "../auth/token";
+import { refreshAuthSession, waitForAuthBootstrap } from "../auth/session";
 import {
   readOfflineSnapshot,
   storeOfflineSnapshot,
@@ -153,10 +154,9 @@ export async function apiFetch<T>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
+  await waitForAuthBootstrap();
   const url = requestUrl(path);
   const headers = new Headers(init.headers);
-  const token = getAuthToken();
-  if (token) headers.set("Authorization", `Bearer ${token}`);
 
   const startedAt = Date.now();
   const snapshotRequest =
@@ -167,11 +167,14 @@ export async function apiFetch<T>(
   let lastNetworkError: unknown;
   let lastRetryableResponse: Response | undefined;
   let householdFallback = false;
+  let authRefreshAttempted = false;
   let snapshotUrl = url.href;
 
   while (Date.now() - startedAt < MAX_RETRY_MS) {
     try {
       const requestHeaders = new Headers(headers);
+      const token = getAuthToken();
+      if (token) requestHeaders.set("Authorization", `Bearer ${token}`);
       const selectedHousehold = householdFallback
         ? null
         : getSelectedHouseholdId();
@@ -187,7 +190,26 @@ export async function apiFetch<T>(
       } else {
         requestHeaders.delete("X-Household");
       }
-      const response = await fetch(url, { ...init, headers: requestHeaders });
+      let response = await fetch(url, { ...init, headers: requestHeaders });
+      if (response.status === 401 && token && !authRefreshAttempted) {
+        authRefreshAttempted = true;
+        let refreshed;
+        try {
+          refreshed = await refreshAuthSession();
+        } catch {
+          throw await asApiError(response);
+        }
+        if (refreshed) {
+          const retryHeaders = new Headers(requestHeaders);
+          retryHeaders.set("Authorization", `Bearer ${refreshed.access_token}`);
+          response = await fetch(url, { ...init, headers: retryHeaders });
+          if (response.status === 401) {
+            window.dispatchEvent(new Event("wealth:auth-expired"));
+          }
+        } else {
+          window.dispatchEvent(new Event("wealth:auth-expired"));
+        }
+      }
       if (response.status === 404 && selectedHousehold && !householdFallback) {
         householdFallback = true;
         persistSelectedHouseholdId(null);
@@ -205,13 +227,6 @@ export async function apiFetch<T>(
       } else {
         if (waking) emitWaking(false);
         if (!response.ok) {
-          if (
-            response.status === 401 &&
-            getAuthToken() &&
-            typeof window !== "undefined"
-          ) {
-            window.dispatchEvent(new Event("wealth:auth-expired"));
-          }
           throw await asApiError(response);
         }
         if (response.status === 204) return undefined as T;

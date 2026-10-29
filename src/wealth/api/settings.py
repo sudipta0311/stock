@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     dev_auth_secret: SecretStr | None = Field(
         default=None, validation_alias="DEV_AUTH_SECRET", repr=False
     )
+    app_session_secret: SecretStr | None = Field(
+        default=None, validation_alias="APP_SESSION_SECRET", repr=False
+    )
     allowed_origins: str = Field(
         default="http://localhost:3000,http://localhost:5173",
         validation_alias="ALLOWED_ORIGINS",
@@ -100,6 +103,11 @@ class Settings(BaseSettings):
                 )
             if self.google_client_id != self.auth_audience:
                 raise ValueError("AUTH_AUDIENCE must match GOOGLE_CLIENT_ID")
+        session_secret = self.app_session_secret_value
+        if session_secret is not None and len(session_secret.encode("utf-8")) < 32:
+            raise ValueError("APP_SESSION_SECRET must be at least 32 bytes")
+        if self.env == "production" and session_secret is None:
+            raise ValueError("APP_SESSION_SECRET must be set in production")
         return self
 
     @property
@@ -123,6 +131,15 @@ class Settings(BaseSettings):
     def dev_auth_secret_value(self) -> str | None:
         """Return the configured development signing secret."""
         return self.dev_auth_secret.get_secret_value() if self.dev_auth_secret is not None else None
+
+    @property
+    def app_session_secret_value(self) -> str | None:
+        """Return the app-session signing key without exposing it in settings reprs."""
+        return (
+            self.app_session_secret.get_secret_value()
+            if self.app_session_secret is not None
+            else None
+        )
 
     @property
     def google_client_secret_value(self) -> str | None:

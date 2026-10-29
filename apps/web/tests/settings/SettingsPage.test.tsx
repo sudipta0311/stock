@@ -127,6 +127,21 @@ const investingPrefs = {
 function settingsHandlers() {
   return [
     http.get("*/v1/me", () => HttpResponse.json(settingsMe)),
+    http.get("*/v1/auth/sessions", () =>
+      HttpResponse.json([
+        {
+          id: "00000000-0000-4000-8000-000000000010",
+          device_label: "iPhone",
+          created_at: "2026-10-01T00:00:00Z",
+          last_used_at: "2026-10-29T00:00:00Z",
+          current: true,
+        },
+      ]),
+    ),
+    http.post(
+      "*/v1/auth/logout-all",
+      () => new HttpResponse(null, { status: 204 }),
+    ),
     http.get("*/v1/members", () => HttpResponse.json(settingsMembers)),
     http.get("*/v1/households", () =>
       HttpResponse.json([
@@ -241,6 +256,28 @@ afterEach(() => {
 });
 
 describe("Settings", () => {
+  it("lists signed-in devices and confirms sign-out everywhere", async () => {
+    const user = userEvent.setup();
+    renderSettings();
+
+    expect(await screen.findByText("iPhone · This phone")).toBeInTheDocument();
+    expect(
+      screen.getByText("You stay signed in on this phone for 30 days."),
+    ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Sign out on all devices" }),
+    );
+    expect(
+      screen.getByRole("heading", { name: "Sign out on all devices?" }),
+    ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Sign out everywhere" }),
+    );
+    await waitFor(() =>
+      expect(logoutMock).toHaveBeenCalledWith({ serverRevoked: true }),
+    );
+  });
+
   it("shows four simple groups, keeps plan details closed, and passes the accessibility scan", async () => {
     renderSettings();
     expect(

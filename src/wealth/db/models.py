@@ -1134,6 +1134,36 @@ class PushSubscription(UserOwned, Base):
     )
 
 
+class AuthSession(UserOwned, Base):
+    """One login's rotating refresh-token session on a device."""
+
+    __tablename__ = "auth_sessions"
+    __table_args__ = (
+        UniqueConstraint("user_id", "id", name="uq_auth_sessions_user_id_id"),
+        UniqueConstraint("token_hash", name="uq_auth_sessions_token_hash"),
+        CheckConstraint("token_hash ~ '^[0-9a-f]{64}$'", name="ck_auth_sessions_token_hash"),
+        CheckConstraint(
+            "previous_hash IS NULL OR previous_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_auth_sessions_previous_hash",
+        ),
+        Index("ix_auth_sessions_user_expiry", "user_id", "expires_at"),
+        Index("ix_auth_sessions_previous_hash", "previous_hash"),
+    )
+
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    previous_hash: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    last_used_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    absolute_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    device_label: Mapped[str] = mapped_column(String(60), nullable=False)
+
+
 class HighlightDismissal(Base):
     """A login's dismissal state for one highlight in one shared household."""
 

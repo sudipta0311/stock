@@ -230,6 +230,8 @@ def _render_issues(root: Path) -> list[str]:
         issues.append(f"{relative}: VITE_AUTH_MODE must be oidc")
     if "GOOGLE_CLIENT_SECRET" in static_env:
         issues.append(f"{relative}: the Google secret must not reach the PWA")
+    if "APP_SESSION_SECRET" in static_env:
+        issues.append(f"{relative}: the app-session signing key must not reach the PWA")
 
     if (
         api.get("type") != "web"
@@ -254,6 +256,7 @@ def _render_issues(root: Path) -> list[str]:
         "AUTH_AUDIENCE",
         "GOOGLE_CLIENT_ID",
         "GOOGLE_CLIENT_SECRET",
+        "APP_SESSION_SECRET",
         "ALLOWED_EMAILS",
         "ALLOWED_ORIGINS",
         "EMAIL_LINK_SECRET",

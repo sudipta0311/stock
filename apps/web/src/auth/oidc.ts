@@ -23,11 +23,9 @@ export async function getOidcUserManager(): Promise<UserManager> {
     authority,
     client_id: clientId,
     redirect_uri: `${window.location.origin}/auth/callback`,
-    silent_redirect_uri: `${window.location.origin}/auth/callback/silent`,
     post_logout_redirect_uri: `${window.location.origin}/login`,
     response_type: "code",
     scope: import.meta.env.VITE_OIDC_SCOPE || "openid email profile",
-    automaticSilentRenew: true,
     userStore: new WebStorageStateStore({ store: window.sessionStorage }),
     metadataSeed: {
       token_endpoint: new URL("/v1/auth/google/exchange", apiUrl).toString(),

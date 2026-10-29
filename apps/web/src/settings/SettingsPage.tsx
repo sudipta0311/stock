@@ -55,6 +55,7 @@ import { MemberDetailsEditor } from "./MemberDetailsEditor";
 import { FundSipFineTune } from "./FundSipFineTune";
 import { useHousehold } from "../household/HouseholdContext";
 import { SignOutConfirmation } from "../account/SignOutConfirmation";
+import { SignedInDevicesPanel } from "./SignedInDevicesPanel";
 
 const LOCAL_CONSENTS_KEY = "wealth.settings.consents";
 const DAILY_CHANGES_KEY = "wealth.settings.show-daily-changes";
@@ -1282,6 +1283,7 @@ export function SettingsPage() {
               </p>
             ) : null}
           </div>
+          <SignedInDevicesPanel />
           <div className="grid gap-2 border-t border-line pt-3">
             {meSupported ? (
               <Button
