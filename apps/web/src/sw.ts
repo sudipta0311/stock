@@ -82,6 +82,9 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
   }
   if (message?.type === "CLEAR_SNAPSHOTS")
     event.waitUntil(caches.delete(SNAPSHOT_CACHE));
+  // "Tap to refresh" (vite-plugin-pwa) asks the waiting version to take over; without
+  // this the old version keeps running until every tab of the app is closed.
+  if (message?.type === "SKIP_WAITING") event.waitUntil(self.skipWaiting());
 });
 
 const snapshotStrategy = new NetworkFirst({

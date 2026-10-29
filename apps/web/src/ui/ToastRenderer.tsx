@@ -14,6 +14,7 @@ export function ToastRenderer({
       {items.map((item) => (
         <ToastPrimitive.Root
           key={item.id}
+          duration={item.duration}
           className="rounded-xl border border-line bg-surface p-4 text-foreground shadow-lg"
           onOpenChange={(open) => {
             if (!open) onDismiss(item.id);

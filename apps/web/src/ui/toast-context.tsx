@@ -13,6 +13,8 @@ export interface ToastItem {
   id: number;
   title: string;
   description?: string;
+  /** Milliseconds before it closes by itself; `Infinity` keeps it until dismissed. */
+  duration?: number;
   action?: { label: string; altText: string; onClick(): void };
 }
 
