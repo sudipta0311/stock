@@ -229,6 +229,10 @@ export function GmailStatementsSettingsPage() {
           <li>
             Approve access so the script can find and send statement PDFs.
           </li>
+          <li>
+            It checks your Gmail right away, then every morning. New statements
+            appear in Inbox.
+          </li>
         </ol>
         <p className="text-sm text-muted-foreground">
           Google may show an unverified app notice. It is your own script, so

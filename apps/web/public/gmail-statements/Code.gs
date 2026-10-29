@@ -28,6 +28,8 @@ function setup() {
     }
   });
   ScriptApp.newTrigger("run").timeBased().everyDays(1).atHour(7).create();
+  // Check once now, so statements already in Gmail don't wait for tomorrow morning.
+  return run();
 }
 
 function _searchQuery() {

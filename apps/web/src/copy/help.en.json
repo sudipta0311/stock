@@ -209,7 +209,7 @@
           "steps": [
             "Ask CAMS or KFintech to email a combined statement. NSDL and CDSL usually email statements each month.",
             "In Settings, choose Get statements from Gmail. Create a key and copy the script.",
-            "Paste the script at script.google.com, run setup, and approve access.",
+            "Paste the script at script.google.com, run setup, and approve access. It checks Gmail now, then every morning.",
             "Google may show an unverified app warning. It's your own script, so Google asks you to confirm.",
             "Each adult can use their own Gmail. You can also forward statements to one Gmail account.",
             "It checks matching PDFs and sends them to Inbox. It cannot read or change your saved holdings.",

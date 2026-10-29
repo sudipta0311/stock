@@ -13,7 +13,7 @@ const source = readFileSync(
   )
   .replace(
     /const UPLOAD_KEY = "[^"]*";/,
-    'const UPLOAD_KEY = "synthetic-test-upload-key";',
+    'const UPLOAD_KEY = "wsk_synthetic-setup-key";',
   );
 
 interface FakeResponse {
@@ -118,7 +118,7 @@ function makeHarness(fetchImpl: () => FakeResponse) {
     context,
   );
   const exported = context.module.exports as {
-    setup: () => void;
+    setup: () => { sent: number; labelled: number };
     run: () => { sent: number; labelled: number };
     searchQuery: () => string;
   };
@@ -136,16 +136,16 @@ function makeHarness(fetchImpl: () => FakeResponse) {
 }
 
 describe("Gmail statement helper", () => {
-  it("sets up a label and a daily morning trigger", () => {
+  it("sets up a label and a daily morning trigger, then checks Gmail once now", () => {
     const harness = makeHarness(() => response(202));
 
-    harness.exported.setup();
+    expect(harness.exported.setup()).toEqual({ sent: 1, labelled: 1 });
 
     expect(harness.properties.get("API_URL")).toBe(
       "https://api.example.test/v1/statement-inbox/uploads",
     );
     expect(harness.properties.get("UPLOAD_KEY")).toBe(
-      "synthetic-test-upload-key",
+      "wsk_synthetic-setup-key",
     );
     expect(harness.triggers).toEqual([{ handler: "run", days: 1, hour: 7 }]);
   });
