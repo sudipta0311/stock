@@ -368,11 +368,11 @@ describe("family plan screens", () => {
       </HouseholdProvider>,
     );
     expect(
-      await screen.findByText("Possible with the account's terms"),
+      await screen.findByText("Possible with the account's terms."),
     ).toBeInTheDocument();
     expect(screen.getByText("What can fit for you")).toBeInTheDocument();
     expect(
-      screen.queryByText(/Not available for new deposits/),
+      screen.queryByText(englishCopy.household_ui.eligibility_not_allowed),
     ).not.toBeInTheDocument();
     expect((await axe(container)).violations).toEqual([]);
   });

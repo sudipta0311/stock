@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { Link, useNavigate } from "react-router";
 import { ApiError } from "../api/client";
-import { sumInr } from "../lib/money";
+import { formatInr, sumInr } from "../lib/money";
 import { Badge, Button, Card, EmptyState, Progress, Stat, Term } from "../ui";
 import {
   getNetworth,
@@ -35,6 +35,8 @@ import { markValueMoment } from "../pwa/install";
 import englishCopy from "../copy/en.json";
 import { apiPathAvailable } from "../api/feature-support";
 import { useHousehold } from "../household/HouseholdContext";
+import { quantityLabel } from "./quantity";
+import { assetTitles } from "./titles";
 import { dismissHighlight, getPlan } from "../planning/api";
 import type { WeeklyPlan } from "../planning/api";
 import { Highlights } from "../features/Highlights";
@@ -42,7 +44,7 @@ import {
   formatHouseholdAmount,
   formatSecondaryAmount,
 } from "../household/currency";
-import type { DkkInrRate } from "../household/fx";
+import { formatDkk, type DkkInrRate } from "../household/fx";
 
 const FundCheckCard = lazy(() =>
   import("./FundCheckCard").then((module) => ({
@@ -78,6 +80,32 @@ function toMinorUnits(value: string): bigint {
   return negative ? -amount : amount;
 }
 
+function fromMinorUnits(minor: bigint): string {
+  const sign = minor < 0n ? "-" : "";
+  const magnitude = minor < 0n ? -minor : minor;
+  return `${sign}${magnitude / 100n}.${(magnitude % 100n).toString().padStart(2, "0")}`;
+}
+
+/** Several kinds share one plain name ("Other holdings"), so they show as one row. */
+function sleeveRows(
+  sleeves: readonly { sleeve: string; amount: string; pct: string }[],
+): { label: string; amount: string; pct: number }[] {
+  const rows = new Map<string, { minor: bigint; pct: number }>();
+  for (const sleeve of sleeves) {
+    const label = displaySleeveName(sleeve.sleeve);
+    const row = rows.get(label) ?? { minor: 0n, pct: 0 };
+    rows.set(label, {
+      minor: row.minor + toMinorUnits(sleeve.amount),
+      pct: row.pct + Number(sleeve.pct),
+    });
+  }
+  return [...rows].map(([label, row]) => ({
+    label,
+    amount: fromMinorUnits(row.minor),
+    pct: row.pct,
+  }));
+}
+
 function sleeveForAsset(asset: AssetResponse): string {
   switch (asset.asset_type) {
     case "gold":
@@ -110,12 +138,19 @@ function displaySleeveName(value: string): string {
   if (key.includes("equity_india"))
     return englishCopy.household_ui.indian_shares;
   if (key === "gold") return "Gold";
-  if (key === "debt" || key === "cash")
-    return englishCopy.household_ui.safe_money;
-  if (["gold", "property", "protection", "liabilities"].includes(key)) {
+  if (key === "debt") return englishCopy.household_ui.safe_money;
+  if (key === "cash") return englishCopy.household_ui.cash;
+  if (["property", "real_estate", "protection", "liabilities"].includes(key)) {
     return englishCopy.household_ui.other_holdings;
   }
   return value;
+}
+
+/** Whole percentages read better than "46.88%"; tiny shares show as "under 1%". */
+function plainPercent(value: string | number | null | undefined): string {
+  const number = Number(value ?? 0);
+  if (number > 0 && number < 1) return "under 1%";
+  return `${Math.round(number)}%`;
 }
 
 function assetLabel(asset: AssetResponse): string {
@@ -123,9 +158,7 @@ function assetLabel(asset: AssetResponse): string {
   if (typeof label === "string" && label.trim()) return label;
   const bank =
     asset.details.bank ?? asset.details.insurer ?? asset.details.institution;
-  const typeLabel = asset.asset_type
-    .replaceAll("_", " ")
-    .replace(/^./, (letter) => letter.toUpperCase());
+  const typeLabel = assetTitles[asset.asset_type] ?? asset.asset_type;
   return typeof bank === "string" && bank
     ? `${typeLabel} · ${bank}`
     : typeLabel;
@@ -149,11 +182,11 @@ function maturityStatus(asset: AssetResponse): string {
 }
 
 function formatNativeLoanAmount(amount: string, currency: string): string {
-  return new Intl.NumberFormat(currency === "INR" ? "en-IN" : "en-DK", {
-    style: "currency",
-    currency,
+  if (currency === "INR") return formatInr(amount, "compact", 0);
+  if (currency === "DKK") return formatDkk(amount);
+  return `${currency} ${new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0,
-  }).format(Number(amount));
+  }).format(Number(amount))}`;
 }
 
 function LoansGroup({
@@ -370,7 +403,9 @@ function HouseholdInsights({
         <h2 className="text-base font-semibold">What your Money Map says</h2>
         <p className="text-base text-muted-foreground">
           Including EPF, PPF and fixed deposits,{" "}
-          <strong className="text-foreground">{debtPercent}%</strong>{" "}
+          <strong className="text-foreground">
+            {plainPercent(debtPercent)}
+          </strong>{" "}
           {englishCopy.household_ui.safe_money_share}
         </p>
       </Card>
@@ -421,7 +456,6 @@ function HouseholdInsights({
               <span>
                 <strong>{event.label}</strong>
                 <span className="block text-muted-foreground">
-                  {event.kind} ·{" "}
                   {new Intl.DateTimeFormat("en-IN", {
                     day: "numeric",
                     month: "short",
@@ -967,7 +1001,7 @@ export function MoneyMapPage() {
         <section className="grid gap-3" aria-labelledby="holdings-heading">
           <div className="flex items-center justify-between gap-3">
             <h2 id="holdings-heading" className="text-lg font-semibold">
-              Share holdings
+              Shares and funds
             </h2>
             <Badge>{networth.holdings.length} holdings</Badge>
           </div>
@@ -988,7 +1022,7 @@ export function MoneyMapPage() {
                     </strong>
                     <span className="block truncate text-xs text-muted-foreground">
                       <span data-security>{holding.symbol}</span> ·{" "}
-                      {holding.quantity} shares
+                      {quantityLabel(holding.quantity, holding.security_type)}
                     </span>
                   </span>
                 </span>
@@ -1027,14 +1061,14 @@ export function MoneyMapPage() {
       {networth?.by_sleeve.length ? (
         <Card className="grid gap-3">
           <h2 className="text-base font-semibold">Split by type</h2>
-          {networth.by_sleeve.map((sleeve) => (
+          {sleeveRows(networth.by_sleeve).map((row) => (
             <div
-              key={sleeve.sleeve}
+              key={row.label}
               className="flex min-h-10 items-center justify-between gap-3 border-t border-line pt-2 text-sm"
             >
-              <span>{displaySleeveName(sleeve.sleeve)}</span>
+              <span>{row.label}</span>
               <span className="tabular-nums">
-                {shownAmount(sleeve.amount)} · {sleeve.pct}%
+                {shownAmount(row.amount)} · {plainPercent(row.pct)}
               </span>
             </div>
           ))}

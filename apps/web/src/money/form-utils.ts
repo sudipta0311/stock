@@ -23,6 +23,21 @@ export function initialAssetValues(
   return values;
 }
 
+/**
+ * Amounts in any currency. Rupees accept the shorthand used everywhere else
+ * ("38L", "1,25,000"); kroner and euro accept "120,000", but "120.000" stays an
+ * error rather than being read as 120.
+ */
+export function normalizeAmount(value: string, currency: unknown): string {
+  const text = value.trim();
+  if ((currency ?? "INR") === "INR") return parseInr(text);
+  const plain = /^\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?$/.test(text)
+    ? text.replaceAll(",", "")
+    : text;
+  if (!/^\d+(?:\.\d{1,2})?$/.test(plain)) throw new Error("Invalid amount");
+  return plain;
+}
+
 export function validateAssetValues(
   fields: readonly GeneratedAssetField[],
   values: AssetFormValues,
@@ -45,11 +60,15 @@ export function validateAssetValues(
       } catch {
         errors[field.name] = "Enter a rupee amount such as 5 lakh or 50k.";
       }
-    } else if (
-      field.kind === "amount" &&
-      !/^\d+(?:\.\d{1,2})?$/.test(String(value))
-    ) {
-      errors[field.name] = "Enter an amount with up to two decimal places.";
+    } else if (field.kind === "amount") {
+      try {
+        normalizeAmount(String(value), values.currency);
+      } catch {
+        errors[field.name] =
+          (values.currency ?? "INR") === "INR"
+            ? "Enter a rupee amount such as 5 lakh or 50k."
+            : "Enter an amount with up to two decimal places.";
+      }
     } else if (
       field.kind === "rate_pct" &&
       !/^\d+(?:\.\d{1,4})?$/.test(String(value))
@@ -90,8 +109,13 @@ export function serializeAssetValues(
     if (field.kind === "rupees") {
       body[field.name] = parseInr(String(raw));
     } else if (field.kind === "amount") {
-      body[field.name] = String(raw).trim();
-    } else if (field.kind === "number") {
+      body[field.name] = normalizeAmount(String(raw), values.currency);
+    } else if (
+      field.kind === "number" ||
+      (field.kind === "enum" &&
+        field.options?.some((option) => typeof option === "number"))
+    ) {
+      // Selects hand back text; numeric choices (gold purity, deposit years) must stay numbers.
       body[field.name] = Number(raw);
     } else if (field.kind === "list" && typeof raw === "string") {
       body[field.name] = raw

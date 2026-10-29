@@ -1028,7 +1028,7 @@ export function ImportReviewPage() {
           {wasAlreadyConfirmed
             ? "This import is already confirmed"
             : added > 0
-              ? `Added ${added} holdings · Net worth updated`
+              ? `Added ${added} ${added === 1 ? "holding" : "holdings"} · Net worth updated`
               : cashFlowsSaved
                 ? englishCopy.imports.cash_flow_saved_title
                 : englishCopy.imports.confirmed_zero_title}
@@ -1099,7 +1099,8 @@ export function ImportReviewPage() {
           ))}
         </div>
         <p className="text-sm text-muted-foreground">
-          Your file and password were not stored.
+          Your file isn’t kept. A password is kept only if you chose to remember
+          it.
         </p>
         {detail.cash_flow_count > 0 ? (
           <p className="text-sm text-muted-foreground">
@@ -1421,12 +1422,14 @@ export function ImportReviewPage() {
             loading={saving}
             onClick={() => void confirm()}
           >
-            {selectedCount > 0
-              ? englishCopy.imports.confirm_import_selected.replace(
-                  "{count}",
-                  String(selectedCount),
-                )
-              : englishCopy.imports.cash_flow_confirm_only}
+            {selectedCount === 1
+              ? englishCopy.imports.confirm_import_one
+              : selectedCount > 0
+                ? englishCopy.imports.confirm_import_selected.replace(
+                    "{count}",
+                    String(selectedCount),
+                  )
+                : englishCopy.imports.cash_flow_confirm_only}
           </Button>
         </div>
       </div>

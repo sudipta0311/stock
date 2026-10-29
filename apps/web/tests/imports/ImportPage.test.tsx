@@ -312,7 +312,7 @@ describe("statement import review", () => {
     renderReview();
 
     await user.click(
-      await screen.findByRole("button", { name: "Confirm import (1 items)" }),
+      await screen.findByRole("button", { name: "Confirm import (1 item)" }),
     );
     expect(
       await screen.findByText("This import is already confirmed"),

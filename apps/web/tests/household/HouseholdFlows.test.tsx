@@ -411,9 +411,7 @@ describe("household screens", () => {
     server.use(...householdHandlers({ plan }));
     renderHouseholdApp("/money/add/ppf");
     expect(
-      await screen.findByText(
-        "Not available for new deposits: the account's terms.",
-      ),
+      await screen.findByText(englishCopy.household_ui.eligibility_not_allowed),
     ).toBeInTheDocument();
     await user.selectOptions(
       screen.getByLabelText(englishCopy.household_ui.whose_is_this),
@@ -422,6 +420,25 @@ describe("household screens", () => {
     expect(
       await screen.findByText(englishCopy.household_ui.eligibility_allowed),
     ).toBeInTheDocument();
+  });
+
+  it("says a full sentence when a condition has no wording yet", async () => {
+    const plan = planData({
+      members: [
+        {
+          ...planData().members![0]!,
+          eligibility_status: { ppf: "conditional" },
+          eligibility_conditions: { ppf: "a_reason_without_copy" },
+        },
+        planData().members![1]!,
+      ],
+    });
+    server.use(...householdHandlers({ plan }));
+    renderHouseholdApp("/money/add/ppf");
+    expect(
+      await screen.findByText(englishCopy.household_ui.eligibility_unknown),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Possible with/)).not.toBeInTheDocument();
   });
 
   it("asks before changing tax residence and invalidates household plan data", async () => {

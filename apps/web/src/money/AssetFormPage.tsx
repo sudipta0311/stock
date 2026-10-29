@@ -25,6 +25,8 @@ import {
   serializeAssetValues,
   validateAssetValues,
 } from "./form-utils";
+import { applyFieldRules, withoutHiddenValues } from "./field-rules";
+import { assetTitles } from "./titles";
 import { fieldCopy } from "./labels.en";
 import { queueAssetWrite } from "./offline-queue";
 import { useHousehold } from "../household/HouseholdContext";
@@ -42,24 +44,6 @@ const INSURANCE_TYPES = [
   "ulip",
 ] as const;
 const EMPTY_DETAILS: Record<string, unknown> = {};
-
-const assetTitles: Record<string, string> = {
-  bond: "Bond",
-  epf: "EPF / VPF",
-  fd: "Fixed deposit",
-  gold: "Gold",
-  health_insurance: "Health insurance",
-  loan: "Loan",
-  nps: "NPS",
-  po_scheme: "Post Office investment",
-  ppf: "PPF",
-  property: "Property",
-  rd: "Recurring deposit",
-  savings: "Savings account",
-  term_insurance: "Term insurance",
-  traditional_policy: "LIC / Insurance policy",
-  ulip: "ULIP",
-};
 
 function optionLabel(value: string | number): string {
   const labels: Record<string, string> = {
@@ -85,7 +69,12 @@ function optionLabel(value: string | number): string {
     personal: "Personal loan",
     education: "Education loan",
     credit_card: "Credit card",
+    gold: "Gold loan",
     other: "Other",
+    in_home_self_occupied: "India: home you live in",
+    in_home_let_out: "India: rented-out home",
+    in_education: "India: education loan",
+    dk_interest_deduction: "Denmark: interest deduction",
     nsc: "National Savings Certificate (NSC)",
     kvp: "Kisan Vikas Patra (KVP)",
     scss: "Senior Citizens Savings Scheme (SCSS)",
@@ -157,7 +146,9 @@ function eligibilityInstrument(
   if (assetType === "nps") return "nps";
   if (assetType === "epf") return "epf";
   if (assetType === "gold") {
-    return values.kind === "sgb" ? "sgb" : "gold_etf";
+    if (values.kind === "sgb") return "sgb";
+    // Physical and digital gold have no residence rule.
+    return values.kind === "etf" || values.kind === "mf" ? "gold_etf" : null;
   }
   if (assetType === "po_scheme") {
     const scheme = String(values.scheme ?? "");
@@ -168,11 +159,11 @@ function eligibilityInstrument(
   return null;
 }
 
-function eligibilityCondition(condition: string): string {
+function eligibilityCondition(condition: string | undefined): string | null {
   const conditions: Record<string, string> = {
     ...englishCopy.household_ui.conditions,
   };
-  return conditions[condition] ?? englishCopy.household_ui.eligibility_unknown;
+  return condition ? (conditions[condition] ?? null) : null;
 }
 
 function eligibilityNote(
@@ -182,21 +173,20 @@ function eligibilityNote(
   if (!member || !instrument) return null;
   const status = member.eligibility_status?.[instrument];
   if (status === "allowed") return englishCopy.household_ui.eligibility_allowed;
-  const condition = member.eligibility_conditions?.[instrument];
-  const conditionText = condition
-    ? eligibilityCondition(condition)
-    : englishCopy.household_ui.eligibility_unknown;
-  if (status === "not_allowed") {
-    return englishCopy.household_ui.eligibility_not_allowed.replace(
-      "{condition}",
-      conditionText,
-    );
-  }
+  // The rules give a reason only for "conditional", and only some reasons have
+  // copy, so each status also needs a sentence that stands on its own.
+  if (status === "not_allowed")
+    return englishCopy.household_ui.eligibility_not_allowed;
   if (status === "conditional") {
-    return englishCopy.household_ui.eligibility_conditional.replace(
-      "{condition}",
-      conditionText,
+    const conditionText = eligibilityCondition(
+      member.eligibility_conditions?.[instrument],
     );
+    return conditionText
+      ? englishCopy.household_ui.eligibility_conditional.replace(
+          "{condition}",
+          conditionText,
+        )
+      : englishCopy.household_ui.eligibility_unknown;
   }
   return null;
 }
@@ -275,16 +265,25 @@ function AssetForm({
   });
   const formDefinition: GeneratedAssetForm = assetForms[assetType];
   const fields = formDefinition.fields;
-  const formFields = useMemo(
-    () =>
-      fields.map((field) => ({
-        ...field,
-        required:
-          field.required ||
-          (assetType === "loan" && !initialAsset && field.name === "emi"),
-      })),
-    [assetType, fields, initialAsset],
-  );
+  const baseFormFields = useMemo(() => {
+    const shaped = fields.map((field) => ({
+      ...field,
+      required:
+        field.required ||
+        (assetType === "loan" && !initialAsset && field.name === "emi") ||
+        // Loans can be in kroner, and the amounts below follow this choice.
+        (assetType === "loan" && field.name === "currency"),
+    }));
+    if (assetType !== "loan") return shaped;
+    const currency = shaped.filter((field) => field.name === "currency");
+    const rest = shaped.filter((field) => field.name !== "currency");
+    const kindIndex = rest.findIndex((field) => field.name === "loan_kind");
+    return [
+      ...rest.slice(0, kindIndex + 1),
+      ...currency,
+      ...rest.slice(kindIndex + 1),
+    ];
+  }, [assetType, fields, initialAsset]);
   const baseDetails = initialAsset?.details ?? EMPTY_DETAILS;
   const defaults = useMemo(
     () =>
@@ -308,6 +307,10 @@ function AssetForm({
     mode: "onChange",
   });
   const watched = useWatch({ control: form.control }) as AssetFormValues;
+  const formFields = useMemo(
+    () => applyFieldRules(assetType, baseFormFields, watched),
+    [assetType, baseFormFields, watched],
+  );
   const [assetId, setAssetId] = useState(initialAsset?.id ?? null);
   const assetIdRef = useRef<string | null>(initialAsset?.id ?? null);
   const [savedAsset, setSavedAsset] = useState<AssetResponse | null>(
@@ -322,6 +325,7 @@ function AssetForm({
   const [saveError, setSaveError] = useState("");
   const [revision, setRevision] = useState(0);
   const changed = useRef(false);
+  const moreDetailsRef = useRef<HTMLDetailsElement>(null);
   const saving = useRef(false);
   const pendingBody = useRef<Record<string, unknown> | null>(null);
   const lastSignature = useRef("");
@@ -331,7 +335,12 @@ function AssetForm({
     if (!initialAsset) return;
     form.reset(defaults);
     lastSignature.current = JSON.stringify(
-      serializeAssetValues(assetType, fields, defaults, baseDetails),
+      serializeAssetValues(
+        assetType,
+        fields,
+        withoutHiddenValues(assetType, defaults),
+        baseDetails,
+      ),
     );
   }, [assetType, baseDetails, defaults, fields, form, initialAsset]);
 
@@ -435,7 +444,12 @@ function AssetForm({
     if (Object.keys(errors).length) return;
     let body: Record<string, unknown>;
     try {
-      body = serializeAssetValues(assetType, fields, values, baseDetails);
+      body = serializeAssetValues(
+        assetType,
+        fields,
+        withoutHiddenValues(assetType, values),
+        baseDetails,
+      );
     } catch {
       return;
     }
@@ -465,10 +479,24 @@ function AssetForm({
     const values = form.getValues();
     const errors = validateAssetValues(formFields, values);
     setClientErrors(errors);
-    if (Object.keys(errors).length) return;
+    if (Object.keys(errors).length) {
+      if (
+        moreDetailsRef.current &&
+        optionalFields.some((field) => errors[field.name])
+      )
+        moreDetailsRef.current.open = true;
+      setSaveError("Please check the highlighted details.");
+      setSaveState("error");
+      return;
+    }
     try {
       void saveBody(
-        serializeAssetValues(assetType, fields, values, baseDetails),
+        serializeAssetValues(
+          assetType,
+          fields,
+          withoutHiddenValues(assetType, values),
+          baseDetails,
+        ),
       );
     } catch {
       setSaveError("Enter a valid amount before saving.");
@@ -550,9 +578,9 @@ function AssetForm({
               type="text"
               inputMode="decimal"
               value={String(watched[field.name] ?? "")}
-              placeholder="0.00"
+              placeholder={currency === "INR" ? "5L or 1,25,000" : "0.00"}
               aria-invalid={Boolean(error) || undefined}
-              className={`${baseInput} ${highlightClass}`}
+              className={`${baseInput.replace("px-3", "pr-3")} ${prefix.length > 1 ? "pl-14" : "pl-9"} ${highlightClass}`}
               onChange={(event) => {
                 form.setValue(name, event.currentTarget.value, {
                   shouldDirty: true,
@@ -748,6 +776,16 @@ function AssetForm({
   const optionalFields = formFields.filter(
     (field) => !field.required && field.kind !== "hidden",
   );
+  const optionalFieldHasError = optionalFields.some(
+    (field) =>
+      clientErrors[field.name] ??
+      fieldErrors.some((error) => error.field === field.name),
+  );
+  useEffect(() => {
+    // An error inside the collapsed section would otherwise be invisible.
+    if (optionalFieldHasError && moreDetailsRef.current)
+      moreDetailsRef.current.open = true;
+  }, [optionalFieldHasError]);
   const valuation = savedAsset?.valuation as Record<string, unknown> | null;
   const valueToday =
     typeof valuation?.value_today === "string"
@@ -847,7 +885,10 @@ function AssetForm({
               </section>
             ) : null}
             {optionalFields.length ? (
-              <details className="rounded-xl border border-line px-3">
+              <details
+                ref={moreDetailsRef}
+                className="rounded-xl border border-line px-3"
+              >
                 <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-2 text-sm font-medium">
                   <span>More details (for a closer estimate)</span>
                   <ChevronDown aria-hidden="true" className="size-4" />
@@ -858,14 +899,7 @@ function AssetForm({
               </details>
             ) : null}
             <div className="grid gap-2 sm:grid-cols-2">
-              <Button
-                type="button"
-                onClick={saveNow}
-                disabled={
-                  Object.keys(validateAssetValues(formFields, watched)).length >
-                  0
-                }
-              >
+              <Button type="button" onClick={saveNow}>
                 {saveState === "saved" ? (
                   <>
                     <Check aria-hidden="true" className="size-4" /> Save now

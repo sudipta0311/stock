@@ -232,3 +232,33 @@ def test_loan_events_and_loan_rows_merge_into_the_target_household(
     merged = client.get("/v1/loans", headers=owner_headers)
     assert merged.status_code == 200, merged.text
     assert any(row["id"] == str(loan_id) for row in merged.json()["loans"])
+
+
+def test_upcoming_loan_payment_shows_the_monthly_payment_not_the_balance(
+    api_client: tuple[TestClient, str, MigratedDatabase],
+) -> None:
+    client, secret, database = api_client
+    headers, _email, _owner_id, _ = _login(client, secret, "calendar")
+    rupee_loan = _create_loan(client, headers, "INR")
+    krone_loan = _create_loan(client, headers, "DKK")
+    with system_session(database.owner_engine) as session:
+        session.add(
+            FxRate(
+                pair="DKK/INR",
+                # Earlier tests may already hold today's synthetic rate.
+                as_of=_TODAY - timedelta(days=1),
+                rate=Decimal("12.5"),
+                source="synthetic-test",
+                source_url="https://example.test/fx",
+            )
+        )
+
+    networth = client.get("/v1/networth", headers=headers)
+    assert networth.status_code == 200, networth.text
+    payments = {
+        event["asset_id"]: event["amount"]
+        for event in networth.json()["maturity_calendar"]
+        if event["kind"] == "loan_payment"
+    }
+    assert payments[str(rupee_loan)] == "10000.00"
+    assert payments[str(krone_loan)] == "2500.00"

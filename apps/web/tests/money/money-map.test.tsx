@@ -278,6 +278,39 @@ describe("Money Map", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows plain names and whole percentages instead of codes", async () => {
+    server.use(
+      ...baseHandlers(
+        networth({
+          by_sleeve: [
+            { sleeve: "debt", amount: "600000.00", pct: "46.88" },
+            { sleeve: "cash", amount: "100000.00", pct: "9.87" },
+            { sleeve: "real_estate", amount: "0.00", pct: "0.00" },
+            { sleeve: "other", amount: "0.00", pct: "0.00" },
+          ],
+          maturity_calendar: [
+            {
+              date: "2026-11-05",
+              asset_id: "asset-test-1",
+              kind: "loan_payment",
+              amount: "34500.00",
+              label: "Loan monthly payment",
+            },
+          ],
+        }),
+      ),
+    );
+    renderMap();
+
+    expect(await screen.findByText("Loan monthly payment")).toBeInTheDocument();
+    expect(screen.queryByText(/loan_payment/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/real_estate/)).not.toBeInTheDocument();
+    expect(screen.getByText("Cash")).toBeInTheDocument();
+    expect(screen.getAllByText("Other holdings")).toHaveLength(1);
+    expect(screen.getByText(/· 47%/)).toBeInTheDocument();
+    expect(screen.queryByText(/46\.88/)).not.toBeInTheDocument();
+  });
+
   it("puts one upload action first and closes the completed checklist", async () => {
     server.use(
       ...baseHandlers(

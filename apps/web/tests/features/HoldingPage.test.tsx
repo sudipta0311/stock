@@ -87,7 +87,7 @@ describe("holding Exit Card", () => {
       await screen.findByRole("heading", { name: "Demo Company" }),
     ).toBeInTheDocument();
     expect(screen.getByText(/DEMO/).parentElement).toHaveTextContent(
-      "10.000 shares",
+      "10 shares",
     );
     expect(screen.getByText("Exit Card")).toBeInTheDocument();
     const thesisLabel = englishCopy.labels.trigger_keys.thesis_break;

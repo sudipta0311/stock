@@ -333,6 +333,27 @@ def _money(value: Decimal | None) -> str | None:
     return None if value is None else format(value, ".2f")
 
 
+_HOLDING_STATUS_ORDER = ("priced", "statement_value_used", "fx_unavailable", "price_unavailable")
+
+
+def _merge_lots(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One row per security: statements list each purchase as its own lot."""
+    merged: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        current = merged.get(row["security_id"])
+        if current is None:
+            merged[row["security_id"]] = dict(row)
+            continue
+        current["quantity"] = format(Decimal(current["quantity"]) + Decimal(row["quantity"]), ".6f")
+        # Sum what is known, as net worth does; the worst status still flags a missing price.
+        for key in ("value", "value_usd"):
+            known = [Decimal(item) for item in (current[key], row[key]) if item is not None]
+            current[key] = format(sum(known, Decimal(0)), ".2f") if known else None
+        current["fx_missing"] = current["fx_missing"] or row["fx_missing"]
+        current["status"] = max(current["status"], row["status"], key=_HOLDING_STATUS_ORDER.index)
+    return list(merged.values())
+
+
 def _valuation_json(valuation: Valuation) -> dict[str, Any]:
     return {
         "value_today": _money(valuation.value_today),
@@ -837,12 +858,26 @@ def refresh_networth_snapshot(
             continue
         position, fx_rate = calculated
         loan = _validate_asset(dict(record.details))
-        for event_date, kind, label in (
-            (position.next_emi_date, "loan_payment", "Loan monthly payment"),
+        next_payment = next(
+            (
+                payment.amount
+                for payment in position.scheduled_payments
+                if payment.on_date == position.next_emi_date
+            ),
+            loan.emi if isinstance(loan, LoanAsset) else None,
+        )
+        for event_date, kind, label, amount in (
+            (
+                position.next_emi_date,
+                "loan_payment",
+                "Loan monthly payment",
+                next_payment,
+            ),
             (
                 position.payoff_month.first_day() if position.payoff_month else None,
                 "loan_payoff",
                 "Loan payoff",
+                position.outstanding,
             ),
         ):
             if event_date is not None and _in_window(event_date, today):
@@ -851,7 +886,7 @@ def refresh_networth_snapshot(
                         "date": event_date.isoformat(),
                         "asset_id": str(record.id),
                         "kind": kind,
-                        "amount": _money(position.outstanding * fx_rate),
+                        "amount": _money(amount * fx_rate) if amount is not None else None,
                         "label": label,
                     }
                 )
@@ -893,7 +928,7 @@ def refresh_networth_snapshot(
             if prices.market_data_as_of(today) is not None
             else None
         ),
-        "holdings": holding_values,
+        "holdings": _merge_lots(holding_values),
     }
     insert = pg_insert(NetworthSnapshot).values(
         id=uuid4(), user_id=user_id, on_date=today, totals=totals

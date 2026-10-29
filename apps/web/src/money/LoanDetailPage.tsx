@@ -12,6 +12,7 @@ import {
 import type { LoanEventWrite, PrepayPreviewResponse } from "./api";
 import { Button, Card, Field, Progress, Select, Sheet, Term } from "../ui";
 import { formatInr } from "../lib/money";
+import { formatDkk } from "../household/fx";
 
 type EventKind = LoanEventWrite["kind"];
 
@@ -24,12 +25,13 @@ function money(
   if (currency === "INR") {
     return formatInr(value, compact ? "compact" : "full", compact ? 0 : 2);
   }
-  return new Intl.NumberFormat(currency === "INR" ? "en-IN" : "en-DK", {
-    style: "currency",
-    currency,
-    maximumFractionDigits: compact ? 0 : 2,
-    minimumFractionDigits: compact ? 0 : 2,
-  }).format(Number(value));
+  // "DKK 120,000", not the Danish "120.000 kr." that reads as 120 to Indian eyes.
+  if (currency === "DKK") return formatDkk(value);
+  const digits = compact ? 0 : 2;
+  return `${currency} ${new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: digits,
+    minimumFractionDigits: digits,
+  }).format(Number(value))}`;
 }
 
 function monthLabel(

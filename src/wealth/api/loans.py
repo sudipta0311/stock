@@ -113,6 +113,14 @@ class PrepayPreviewResponse(ApiModel):
 
 
 _RESIDENCY_PATH = Path(__file__).resolve().parents[3] / "rules" / "residency.yaml"
+_LOAN_KIND_NAMES = {
+    "home": "Home loan",
+    "car": "Car loan",
+    "personal": "Personal loan",
+    "education": "Education loan",
+    "credit_card": "Credit card",
+    "gold": "Gold loan",
+}
 
 
 def _read_loan(record: ManualAsset) -> LoanAsset:
@@ -315,9 +323,8 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             result.append(
                 {
                     "id": record.id,
-                    "name": asset.label
-                    or asset.lender
-                    or f"{asset.loan_kind.replace('_', ' ').title()} loan",
+                    # The list shows "name · lender", so the name must not fall back to the lender.
+                    "name": asset.label or _LOAN_KIND_NAMES.get(asset.loan_kind, "Loan"),
                     "lender": asset.lender,
                     "currency": asset.currency,
                     "outstanding": position.outstanding,

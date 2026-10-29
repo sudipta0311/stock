@@ -16,6 +16,7 @@ import type { NetworthResponse } from "./api";
 import { getPlan } from "../planning/api";
 import type { WeeklyPlan } from "../planning/api";
 import { Badge, Card } from "../ui";
+import { quantityLabel } from "./quantity";
 
 function statusIcon(status: string) {
   if (status === "ok")
@@ -204,7 +205,8 @@ export function HoldingPage() {
           {holding.name || holding.symbol}
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          {holding.symbol} · {holding.quantity} shares
+          {holding.symbol} ·{" "}
+          {quantityLabel(holding.quantity, holding.security_type)}
         </p>
       </header>
       <Card className="grid grid-cols-2 gap-4">
