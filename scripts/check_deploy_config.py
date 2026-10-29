@@ -94,6 +94,13 @@ def _module_exists(root: Path, module: str) -> bool:
     )
 
 
+def _non_editable_project_install(command: str) -> bool:
+    """Rules and copy are read from the checkout (rules/, copy/), not from site-packages."""
+    return bool(re.search(r"pip install\b.*\.\[", command)) and not re.search(
+        r"pip install\b.*\s-e\s", command
+    )
+
+
 def _workflow_issues(root: Path, workflow: Path, document: Any) -> list[str]:
     relative = workflow.relative_to(root).as_posix()
     issues: list[str] = []
@@ -138,6 +145,9 @@ def _workflow_issues(root: Path, workflow: Path, document: Any) -> list[str]:
         if re.search(r"\b(?:echo|printf)\b.*\$\{\{\s*secrets\.", line, re.IGNORECASE):
             issues.append(f"{relative}: a command appears to print a GitHub secret")
             break
+
+    if any(_non_editable_project_install(line) for line in raw.splitlines()):
+        issues.append(f"{relative}: install the project with pip install -e")
 
     guarded = set(_MODULE_GUARD.findall(raw))
     modules = set(_MODULE_REFERENCE.findall(raw))
@@ -246,6 +256,8 @@ def _render_issues(root: Path) -> list[str]:
     api_build_command = str(api.get("buildCommand", ""))
     if re.search(r"\bresearch\b", api_build_command, re.IGNORECASE):
         issues.append(f"{relative}: wealth-api must not install the research extra")
+    if _non_editable_project_install(api_build_command):
+        issues.append(f"{relative}: wealth-api must install the project with pip install -e")
     required_api = {
         "PYTHON_VERSION",
         "ENV",

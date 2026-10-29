@@ -4,6 +4,7 @@ from pathlib import Path
 
 import yaml
 from scripts.check_deploy_config import (
+    _non_editable_project_install,
     _secret_like_yaml,
     _valid_cron,
     _workflow_issues,
@@ -59,3 +60,10 @@ def test_yaml_secret_scan_rejects_secret_shaped_values_without_echoing_them() ->
     assert _secret_like_yaml({"database": "postgresql://user:password@host/db"})
     assert _secret_like_yaml({"value": "A" * 40})
     assert not _secret_like_yaml({"value": "3.12.7", "mode": "oidc"})
+
+
+def test_project_installs_must_be_editable_so_rule_files_resolve() -> None:
+    # A plain install copies the code into site-packages, where rules/*.yaml can't be found.
+    assert _non_editable_project_install('pip install --no-cache-dir ".[api,importer]"')
+    assert not _non_editable_project_install('pip install --no-cache-dir -e ".[api,importer]"')
+    assert not _non_editable_project_install("python -m pip install --upgrade pip")

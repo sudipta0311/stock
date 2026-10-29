@@ -36,7 +36,7 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install --no-cache-dir ".[api,importer,research]"
+      - run: python -m pip install --no-cache-dir -e ".[api,importer,research]"
       - name: Run the optional safety review
         run: |
           if python -c "import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('wealth.research.sentinel') else 78)"; then
