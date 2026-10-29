@@ -60,6 +60,7 @@ Status: ⬜ not started · 🟦 in progress · ✅ accepted · 🔁 rework · �
 - C04: EPF accrual uses actual/365 days; EPFO credits interest on monthly running balances at rate/1200 (~0.02% difference). Align in C25.
 - (C14 review) Flex model calls can queue for minutes; the router uses one 120 s read timeout for every tier. Give Flex calls a longer read timeout (for example 15 minutes) before the weekly run depends on them. → C15c
 - (C15a review) US price factors have no bulk source: Alpha Vantage's free tier allows 25 calls a day, far short of the S&P 500. Find a free daily-close source whose terms allow this use, or score US names on fundamentals only and say so. → C15b
+- (Deploy) `research-weekly.yml` is gated by the repository variable `RESEARCH_ENABLED` (off). C15c must align the workflow with the C14 CLI (`start --week … --mode weekly`, `continue --run-id …`), then set the variable. → C15c
 - C03: post-office TD rates per tenure are empty (India Post page shows only a range); historical small-savings periods not yet loaded. Rates watcher (C16) + human approval.
 - C05: residual risk accepted: SQL that can call set_config(app.user_id) with another user's UUID would read that tenant. Mitigated by parameterised SQLAlchemy only; owner-role escalation is closed (API logs in as wealth_api).
 - C07: manual assets needing a market price (gold physical/ETF/SGB) store valuation=null and silently drop out of /v1/networth. Add per-asset `valuation_status` and networth `unvalued_assets` (do in C08b); wire PriceProvider from market data in C10.

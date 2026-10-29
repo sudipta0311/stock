@@ -15,6 +15,9 @@ concurrency:
 
 jobs:
   research:
+    # Off until the real agents land (C15c): the C14 runner is plumbing only. Turn on by
+    # setting the repository variable RESEARCH_ENABLED to "true".
+    if: vars.RESEARCH_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
