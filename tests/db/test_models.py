@@ -17,6 +17,8 @@ _SHARED_MARKET_TABLES = {
     "marketdata_runs",
     "research_packs",
     "sentinel_events",
+    "fundamentals_pit",
+    "universe_members",
 }
 _POST_INITIAL_TABLES = {
     "fund_lagging_checks",

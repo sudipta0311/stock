@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -12,10 +13,10 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from wealth.db.models import HoldingLot, MarketdataRun, Security
+from wealth.db.models import HoldingLot, MarketdataRun, Security, UniverseMember
 from wealth.db.session import make_engine, system_session
 from wealth.marketdata import store
 from wealth.marketdata.sources import (
@@ -23,20 +24,39 @@ from wealth.marketdata.sources import (
     amfi,
     amfi_history,
     ecb,
+    edgar,
     fred,
     ibja,
     manual,
     nse,
+    nse_fundamentals,
+    universes,
 )
 from wealth.marketdata.sources.alpha_vantage import DailyClose
 from wealth.marketdata.sources.amfi import AmfiNav
 from wealth.marketdata.sources.amfi_history import AmfiHistoricalNav
 from wealth.marketdata.sources.ecb import FxFetchResult
+from wealth.marketdata.sources.edgar import EdgarCompany
 from wealth.marketdata.sources.fred import FxObservation
+from wealth.marketdata.sources.fundamentals import FundamentalObservation
 from wealth.marketdata.sources.ibja import GoldObservation
 from wealth.marketdata.sources.nse import NseClose, NseSecurity
+from wealth.marketdata.sources.nse_fundamentals import NseIntegratedClient
+from wealth.marketdata.sources.universes import Sp500Holdings
 
-_SOURCES = ("nse", "amfi", "fx", "gold", "master", "amfi_history", "eu_etfs", "us_stocks")
+_SOURCES = (
+    "nse",
+    "amfi",
+    "fx",
+    "gold",
+    "master",
+    "amfi_history",
+    "eu_etfs",
+    "us_stocks",
+    "universes",
+    "edgar",
+    "nse_fundamentals",
+)
 _RETENTION_DAYS = 400
 _MAX_ABROAD_QUOTES_PER_DAY = 24
 
@@ -54,6 +74,26 @@ class NseMasterBatch:
     securities: list[NseSecurity]
     etf_count: int
     etf_error: str | None = None
+
+
+@dataclass(frozen=True)
+class FundamentalsBatch:
+    observations: dict[str, list[FundamentalObservation]]
+    errors: dict[str, str]
+    companies: dict[str, EdgarCompany] | None = None
+
+
+@dataclass(frozen=True)
+class UniverseBatch:
+    sp500: Sp500Holdings | None
+    nifty500: list[NseSecurity] | None
+    errors: dict[str, str]
+
+
+@dataclass(frozen=True)
+class SourceBatchResult:
+    counts: dict[str, Any]
+    errors: dict[str, str]
 
 
 def _fetch_fx(on: date) -> FxFetchResult:
@@ -195,7 +235,125 @@ def _remaining_abroad_quote_slots(curated_count: int) -> int:
     return _MAX_ABROAD_QUOTES_PER_DAY - reserved
 
 
-def _default_fetchers(on: date, session: Session | None = None) -> dict[str, Callable[[], Any]]:
+def _universe_symbols(
+    session: Session,
+    market: str,
+    universe: str,
+    symbols: tuple[str, ...] | None,
+) -> list[str]:
+    if symbols:
+        return list(dict.fromkeys(symbols))
+    return list(
+        session.scalars(
+            select(Security.symbol)
+            .join(UniverseMember, UniverseMember.security_id == Security.id)
+            .where(
+                UniverseMember.universe == universe,
+                UniverseMember.removed_on.is_(None),
+                Security.market == market,
+                Security.symbol.is_not(None),
+            )
+            .order_by(Security.symbol)
+        )
+    )
+
+
+def _fetch_edgar(
+    session: Session | None, on: date, symbols: tuple[str, ...] | None
+) -> FundamentalsBatch:
+    if session is None:
+        raise ValueError("EDGAR refresh requires a database session")
+    client = edgar.SecEdgarClient()
+    companies = edgar.fetch_company_tickers(client)
+    target_symbols = _universe_symbols(session, "US", "sp500", symbols)
+    if not target_symbols:
+        return FundamentalsBatch({}, {"universe": "NoSymbols"}, {})
+    observations: dict[str, list[FundamentalObservation]] = {}
+    errors: dict[str, str] = {}
+    selected_companies: dict[str, EdgarCompany] = {}
+    for ticker in target_symbols:
+        company = edgar.ticker_lookup(companies, ticker)
+        if company is None:
+            errors[ticker] = "TickerNotFound"
+            continue
+        selected_companies[ticker] = company
+        try:
+            payload = edgar.fetch_companyfacts(company.cik, client)
+            observations[ticker] = edgar.parse_company_facts(payload, as_of=on)
+        except Exception as error:
+            errors[ticker] = type(error).__name__
+    return FundamentalsBatch(observations, errors, selected_companies)
+
+
+def _securities_for_symbols(
+    session: Session, market: str, symbols: list[str]
+) -> dict[str, Security]:
+    if not symbols:
+        return {}
+    field = Security.nse_symbol if market == "IN" else Security.symbol
+    matches = session.scalars(
+        select(Security).where(
+            Security.market == market,
+            or_(field.in_(symbols), Security.symbol.in_(symbols)),
+        )
+    )
+    return {
+        (security.nse_symbol or security.symbol or "").upper(): security
+        for security in matches
+        if (security.nse_symbol or security.symbol)
+    }
+
+
+def _fetch_nse_fundamentals(
+    session: Session | None, on: date, symbols: tuple[str, ...] | None
+) -> FundamentalsBatch:
+    if session is None:
+        raise ValueError("NSE fundamentals refresh requires a database session")
+    target_symbols = _universe_symbols(session, "IN", "nifty500", symbols)
+    if not target_symbols:
+        return FundamentalsBatch({}, {"universe": "NoSymbols"})
+    securities = _securities_for_symbols(session, "IN", target_symbols)
+    observations: dict[str, list[FundamentalObservation]] = {}
+    errors: dict[str, str] = {}
+    with NseIntegratedClient() as client:  # type: ignore[attr-defined]
+        for symbol in target_symbols:
+            security = securities.get(symbol.upper())
+            if security is None:
+                errors[symbol] = "SecurityNotFound"
+                continue
+            try:
+                after = store.latest_fundamental_filed_at(session, security.id, "NSE_XBRL")
+                observations[symbol] = nse_fundamentals.fetch_symbol_fundamentals(
+                    client,
+                    symbol,
+                    as_of=on,
+                    after=after,
+                )
+            except Exception as error:
+                errors[symbol] = type(error).__name__
+    return FundamentalsBatch(observations, errors)
+
+
+def _fetch_universes() -> UniverseBatch:
+    sp500: Sp500Holdings | None = None
+    nifty500: list[NseSecurity] | None = None
+    errors: dict[str, str] = {}
+    try:
+        sp500 = universes.fetch_sp500()
+    except Exception as error:
+        errors["sp500"] = type(error).__name__
+    try:
+        nifty500 = universes.fetch_nifty500()
+    except Exception as error:
+        errors["nifty500"] = type(error).__name__
+    return UniverseBatch(sp500, nifty500, errors)
+
+
+def _default_fetchers(
+    on: date,
+    session: Session | None = None,
+    symbols: tuple[str, ...] | None = None,
+) -> dict[str, Callable[[], Any]]:
     return {
         "nse": lambda: nse.fetch_bhavcopy(on),
         "amfi": amfi.fetch_nav_all,
@@ -207,6 +365,9 @@ def _default_fetchers(on: date, session: Session | None = None) -> dict[str, Cal
         ),
         "eu_etfs": lambda: _fetch_abroad_etfs(session, on) if session is not None else [],
         "us_stocks": lambda: _fetch_abroad_us_stocks(session, on) if session is not None else [],
+        "universes": _fetch_universes,
+        "edgar": lambda: _fetch_edgar(session, on, symbols),
+        "nse_fundamentals": lambda: _fetch_nse_fundamentals(session, on, symbols),
     }
 
 
@@ -217,7 +378,97 @@ def _store_source(
     *,
     on: date,
     fetched_at: datetime,
-) -> int | dict[str, int] | str:
+) -> int | dict[str, int] | str | SourceBatchResult:
+    if source in {"edgar", "nse_fundamentals"}:
+        if not isinstance(records, FundamentalsBatch):
+            raise TypeError(f"{source} adapter returned invalid rows")
+        errors = dict(records.errors)
+        inserted = 0
+        stored_symbols = 0
+        for ticker, observations in records.observations.items():
+            try:
+                with session.begin_nested():
+                    if source == "edgar":
+                        company = (records.companies or {}).get(ticker)
+                        if company is None:
+                            raise ValueError("TickerNotFound")
+                        security_id = store.upsert_us_equity_security(session, ticker, company.name)
+                    else:
+                        security = _securities_for_symbols(session, "IN", [ticker]).get(
+                            ticker.upper()
+                        )
+                        if security is None:
+                            raise ValueError("SecurityNotFound")
+                        security_id = security.id
+                    inserted += store.upsert_fundamentals(
+                        session,
+                        security_id,
+                        observations,
+                        as_of=on,
+                        fetched_at=fetched_at,
+                    )
+                stored_symbols += 1
+            except Exception as error:
+                errors[ticker] = type(error).__name__
+        return SourceBatchResult({"fundamentals_pit": inserted, "symbols": stored_symbols}, errors)
+    if source == "universes":
+        if not isinstance(records, UniverseBatch):
+            raise TypeError("universe adapter returned invalid rows")
+        errors = dict(records.errors)
+        counts: dict[str, Any] = {"universes_loaded": 0}
+        if records.sp500 is not None:
+            try:
+                with session.begin_nested():
+                    security_ids = {
+                        store.upsert_us_equity_security(session, row.symbol, row.name)
+                        for row in records.sp500.securities
+                    }
+                    membership = store.upsert_universe_members(
+                        session,
+                        "sp500",
+                        security_ids,
+                        loaded_on=on,
+                        source=universes.SP500_SOURCE,
+                        source_url=universes.SP500_HOLDINGS_URL,
+                        survivorship_label=universes.SURVIVORSHIP_LABEL,
+                    )
+                counts["sp500"] = {
+                    **membership,
+                    "as_of": records.sp500.as_of.isoformat(),
+                }
+                counts["universes_loaded"] += 1
+            except Exception as error:
+                errors["sp500_store"] = type(error).__name__
+        if records.nifty500 is not None:
+            try:
+                with session.begin_nested():
+                    store.upsert_nse_master(session, records.nifty500)
+                    symbols = {row.symbol for row in records.nifty500}
+                    security_ids = set(
+                        session.scalars(
+                            select(Security.id).where(
+                                Security.market == "IN",
+                                or_(
+                                    Security.nse_symbol.in_(symbols),
+                                    Security.symbol.in_(symbols),
+                                ),
+                            )
+                        )
+                    )
+                    membership = store.upsert_universe_members(
+                        session,
+                        "nifty500",
+                        security_ids,
+                        loaded_on=on,
+                        source=universes.NIFTY500_SOURCE,
+                        source_url=universes.NIFTY500_ARCHIVE_URL,
+                        survivorship_label=universes.SURVIVORSHIP_LABEL,
+                    )
+                counts["nifty500"] = membership
+                counts["universes_loaded"] += 1
+            except Exception as error:
+                errors["nifty500_store"] = type(error).__name__
+        return SourceBatchResult(counts, errors)
     if source == "master":
         securities = records.securities if isinstance(records, NseMasterBatch) else records
         if not isinstance(securities, list) or any(
@@ -305,13 +556,23 @@ def run_refresh(
     fetchers: Mapping[str, Callable[[], Any]] | None = None,
     prune_old: bool = False,
     fetched_at: datetime | None = None,
+    symbols: tuple[str, ...] | list[str] | None = None,
 ) -> dict[str, Any]:
     """Fetch selected sources, continue after failures, and record one run row."""
     selected_sources = tuple(only or _SOURCES)
     unknown = set(selected_sources) - set(_SOURCES)
     if unknown:
         raise ValueError(f"Unknown market-data sources: {', '.join(sorted(unknown))}")
-    effective_fetchers = dict(fetchers or _default_fetchers(on, session))
+    if "universes" in selected_sources:
+        selected_sources = ("universes",) + tuple(
+            source for source in selected_sources if source != "universes"
+        )
+    normalized_symbols = (
+        tuple(dict.fromkeys(symbol.strip().upper() for symbol in symbols if symbol.strip()))
+        if symbols
+        else None
+    )
+    effective_fetchers = dict(fetchers or _default_fetchers(on, session, normalized_symbols))
     started_at = fetched_at or datetime.now(UTC)
     run = MarketdataRun(
         started_at=started_at,
@@ -323,6 +584,13 @@ def run_refresh(
     session.flush()
     counts: dict[str, Any] = {}
     errors: dict[str, str] = {}
+    try:
+        with session.begin_nested():
+            fundamentals_pruned = store.prune_fundamentals(session, on)
+        if fundamentals_pruned:
+            counts["fundamentals_pit_pruned"] = fundamentals_pruned
+    except Exception as error:
+        errors["fundamentals_pit_retention"] = type(error).__name__
 
     for source in selected_sources:
         fetcher = effective_fetchers.get(source)
@@ -357,7 +625,13 @@ def run_refresh(
                         on=on,
                         fetched_at=started_at,
                     )
-                counts[source] = result
+                if isinstance(result, SourceBatchResult):
+                    counts[source] = result.counts
+                    errors.update(
+                        {f"{source}:{key}": value for key, value in result.errors.items()}
+                    )
+                else:
+                    counts[source] = result
                 if source == "master" and isinstance(records, NseMasterBatch):
                     counts["master_etf"] = records.etf_count
                     if records.etf_error is not None:
@@ -375,10 +649,23 @@ def run_refresh(
     successful_sources = 0
     for source in selected_sources:
         source_errors = [key for key in errors if key == source or key.startswith(f"{source}:")]
-        if not source_errors or (
-            source == "fx"
-            and isinstance(counts.get("fx"), dict)
-            and counts["fx"].get("fx_rates", 0) > 0
+        if (
+            not source_errors
+            or (
+                source == "fx"
+                and isinstance(counts.get("fx"), dict)
+                and counts["fx"].get("fx_rates", 0) > 0
+            )
+            or (
+                source in {"edgar", "nse_fundamentals"}
+                and isinstance(counts.get(source), dict)
+                and counts[source].get("symbols", 0) > 0
+            )
+            or (
+                source == "universes"
+                and isinstance(counts.get(source), dict)
+                and counts[source].get("universes_loaded", 0) > 0
+            )
         ):
             successful_sources += 1
     run.status = "succeeded" if not errors else "partial" if successful_sources else "failed"
@@ -405,9 +692,15 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Refresh dated market-data reference rows")
     parser.add_argument("--date", type=_date_argument)
     parser.add_argument("--only", default=",".join(_SOURCES))
+    parser.add_argument("--symbols", default="")
     parser.add_argument("--prune", action="store_true")
     args = parser.parse_args(argv)
     args.sources = tuple(part.strip().casefold() for part in args.only.split(",") if part.strip())
+    args.symbols = tuple(
+        dict.fromkeys(part.strip().upper() for part in args.symbols.split(",") if part.strip())
+    )
+    if any(not re.fullmatch(r"[A-Z0-9.-]{1,15}", symbol) for symbol in args.symbols):
+        parser.error("--symbols must contain comma-separated ticker symbols")
     unknown = set(args.sources) - set(_SOURCES)
     if not args.sources or unknown:
         parser.error(f"--only must contain any of: {', '.join(_SOURCES)}")
@@ -428,7 +721,13 @@ def main(argv: list[str] | None = None) -> int:
     engine = make_engine(database_url)
     try:
         with system_session(engine) as session:
-            result = run_refresh(session, on, args.sources, prune_old=args.prune)
+            result = run_refresh(
+                session,
+                on,
+                args.sources,
+                prune_old=args.prune,
+                symbols=args.symbols,
+            )
     finally:
         engine.dispose()
     print(json.dumps({"date": on.isoformat(), **result}, sort_keys=True))

@@ -531,6 +531,66 @@ class MarketdataRun(Base):
     )
 
 
+class FundamentalPIT(Base):
+    __tablename__ = "fundamentals_pit"
+    __table_args__ = (
+        CheckConstraint("period_type IN ('Q', 'FY')", name="ck_fundamentals_pit_period_type"),
+        CheckConstraint(
+            "value > '-Infinity'::numeric AND value < 'Infinity'::numeric",
+            name="ck_fundamentals_pit_value_finite",
+        ),
+        Index("ix_fundamentals_pit_asof", "security_id", "metric", "known_at"),
+        Index("ix_fundamentals_pit_period", "security_id", "metric", "period_end", "period_type"),
+    )
+
+    security_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("securities.id", ondelete="CASCADE"), primary_key=True
+    )
+    metric: Mapped[str] = mapped_column(String(48), primary_key=True)
+    period_end: Mapped[date] = mapped_column(Date, primary_key=True)
+    period_type: Mapped[str] = mapped_column(String(2), primary_key=True)
+    source: Mapped[str] = mapped_column(String(24), primary_key=True)
+    known_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    value: Mapped[Decimal] = mapped_column(Numeric(30, 8), nullable=False)
+    unit: Mapped[str] = mapped_column(String(24), nullable=False)
+    filed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    source_url: Mapped[str] = mapped_column(Text, nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    is_latest_for_period: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
+
+
+class UniverseMember(Base):
+    __tablename__ = "universe_members"
+    __table_args__ = (
+        CheckConstraint(
+            "removed_on IS NULL OR removed_on >= added_on",
+            name="ck_universe_members_dates",
+        ),
+        Index(
+            "uq_universe_members_active",
+            "universe",
+            "security_id",
+            unique=True,
+            postgresql_where=text("removed_on IS NULL"),
+        ),
+        Index("ix_universe_members_added_on", "universe", "added_on"),
+    )
+
+    universe: Mapped[str] = mapped_column(String(24), primary_key=True)
+    security_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("securities.id", ondelete="CASCADE"), primary_key=True
+    )
+    added_on: Mapped[date] = mapped_column(Date, primary_key=True)
+    removed_on: Mapped[date | None] = mapped_column(Date)
+    source: Mapped[str] = mapped_column(String(40), nullable=False)
+    source_url: Mapped[str] = mapped_column(Text, nullable=False)
+    survivorship_label: Mapped[str] = mapped_column(String(80), nullable=False)
+
+
 class HoldingLot(UserOwned, Base):
     __tablename__ = "holdings_lots"
     __table_args__ = (

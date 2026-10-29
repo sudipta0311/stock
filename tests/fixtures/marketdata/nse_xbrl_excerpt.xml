@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xbrli:xbrl xmlns:xbrli="http://www.xbrl.org/2003/instance" xmlns:xbrldi="http://xbrl.org/2006/xbrldi" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:in-capmkt="https://example.invalid/in-capmkt" xmlns:iso4217="http://www.xbrl.org/2003/iso4217">
+  <xbrli:context id="Quarter">
+    <xbrli:entity><xbrli:identifier scheme="https://example.invalid/security">10001</xbrli:identifier></xbrli:entity>
+    <xbrli:period><xbrli:startDate>2025-10-01</xbrli:startDate><xbrli:endDate>2025-12-31</xbrli:endDate></xbrli:period>
+  </xbrli:context>
+  <xbrli:context id="Instant">
+    <xbrli:entity><xbrli:identifier scheme="https://example.invalid/security">10001</xbrli:identifier></xbrli:entity>
+    <xbrli:period><xbrli:instant>2025-12-31</xbrli:instant></xbrli:period>
+  </xbrli:context>
+  <xbrli:context id="Segment">
+    <xbrli:entity><xbrli:identifier scheme="https://example.invalid/security">10001</xbrli:identifier></xbrli:entity>
+    <xbrli:period><xbrli:startDate>2025-10-01</xbrli:startDate><xbrli:endDate>2025-12-31</xbrli:endDate></xbrli:period>
+    <xbrli:scenario><xbrldi:explicitMember dimension="in-capmkt:SegmentAxis">in-capmkt:SegmentOne</xbrldi:explicitMember></xbrli:scenario>
+  </xbrli:context>
+  <xbrli:unit id="INR"><xbrli:measure>iso4217:INR</xbrli:measure></xbrli:unit>
+  <xbrli:unit id="INRPerShare"><xbrli:measure>iso4217:INR</xbrli:measure><xbrli:measure>xbrli:shares</xbrli:measure></xbrli:unit>
+  <in-capmkt:RevenueFromOperations contextRef="Quarter" unitRef="INR" decimals="0">1000</in-capmkt:RevenueFromOperations>
+  <in-capmkt:ProfitLossForPeriod contextRef="Quarter" unitRef="INR" decimals="0">80</in-capmkt:ProfitLossForPeriod>
+  <in-capmkt:ProfitBeforeExceptionalItemsAndTax contextRef="Quarter" unitRef="INR" decimals="0">120</in-capmkt:ProfitBeforeExceptionalItemsAndTax>
+  <in-capmkt:FinanceCosts contextRef="Quarter" unitRef="INR" decimals="0">20</in-capmkt:FinanceCosts>
+  <in-capmkt:OtherIncome contextRef="Quarter" unitRef="INR" decimals="0">5</in-capmkt:OtherIncome>
+  <in-capmkt:DilutedEarningsLossPerShareFromContinuingAndDiscontinuedOperations contextRef="Quarter" unitRef="INRPerShare" decimals="2">2.50</in-capmkt:DilutedEarningsLossPerShareFromContinuingAndDiscontinuedOperations>
+  <in-capmkt:Assets contextRef="Instant" unitRef="INR" decimals="0">5000</in-capmkt:Assets>
+  <in-capmkt:Equity contextRef="Instant" unitRef="INR" decimals="0">2800</in-capmkt:Equity>
+  <in-capmkt:Borrowings contextRef="Instant" unitRef="INR" decimals="0">400</in-capmkt:Borrowings>
+  <in-capmkt:CurrentLiabilities contextRef="Instant" unitRef="INR" decimals="0">1000</in-capmkt:CurrentLiabilities>
+  <in-capmkt:RevenueFromOperations contextRef="Segment" unitRef="INR" decimals="0">9999</in-capmkt:RevenueFromOperations>
+</xbrli:xbrl>

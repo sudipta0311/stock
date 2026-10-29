@@ -1,0 +1,31 @@
+{
+  "cik": 123456,
+  "facts": {
+    "us-gaap": {
+      "Revenues": {
+        "units": {
+          "USD": [
+            {"start": "2025-01-01", "end": "2025-03-31", "val": 100, "accn": "0000000001-25-000001", "form": "10-Q", "filed": "2025-05-01"},
+            {"start": "2025-01-01", "end": "2025-03-31", "val": 100, "accn": "0000000001-25-000002", "form": "10-Q/A", "filed": "2025-05-05"},
+            {"start": "2025-01-01", "end": "2025-03-31", "val": 110, "accn": "0000000001-26-000003", "form": "10-Q/A", "filed": "2026-02-10"}
+          ]
+        }
+      },
+      "ProfitLoss": {"units": {"USD": [{"start": "2025-01-01", "end": "2025-03-31", "val": 20, "form": "10-Q", "filed": "2025-05-01"}]}},
+      "OperatingIncomeLoss": {"units": {"USD": [{"start": "2025-01-01", "end": "2025-03-31", "val": 30, "form": "10-Q", "filed": "2025-05-01"}]}},
+      "Assets": {"units": {"USD": [{"end": "2025-03-31", "val": 500, "form": "10-Q", "filed": "2025-05-01"}]}},
+      "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest": {"units": {"USD": [{"end": "2025-03-31", "val": 250, "form": "10-Q", "filed": "2025-05-01"}]}},
+      "ShortTermBorrowings": {"units": {"USD": [{"end": "2025-03-31", "val": 10, "form": "10-Q", "filed": "2025-05-01"}]}},
+      "LongTermDebtCurrent": {"units": {"USD": [{"end": "2025-03-31", "val": 15, "form": "10-Q", "filed": "2025-05-01"}]}},
+      "LongTermDebtNoncurrent": {"units": {"USD": [{"end": "2025-03-31", "val": 75, "form": "10-Q", "filed": "2025-05-01"}]}},
+      "CashAndCashEquivalentsAtCarryingValue": {"units": {"USD": [{"end": "2025-03-31", "val": 45, "form": "10-Q", "filed": "2025-05-01"}]}},
+      "LiabilitiesCurrent": {"units": {"USD": [{"end": "2025-03-31", "val": 120, "form": "10-Q", "filed": "2025-05-01"}]}},
+      "EarningsPerShareBasicAndDiluted": {"units": {"USD/shares": [{"start": "2025-01-01", "end": "2025-03-31", "val": 2, "form": "10-Q", "filed": "2025-05-01"}]}},
+      "NetCashProvidedByUsedInOperatingActivities": {"units": {"USD": [{"start": "2025-01-01", "end": "2025-03-31", "val": 40, "form": "10-Q", "filed": "2025-05-01"}]}},
+      "PaymentsToAcquireProductiveAssets": {"units": {"USD": [{"start": "2025-01-01", "end": "2025-03-31", "val": 8, "form": "10-Q", "filed": "2025-05-01"}]}}
+    },
+    "dei": {
+      "EntityCommonStockSharesOutstanding": {"units": {"shares": [{"end": "2025-03-31", "val": 1000, "form": "10-Q", "filed": "2025-05-01"}]}}
+    }
+  }
+}

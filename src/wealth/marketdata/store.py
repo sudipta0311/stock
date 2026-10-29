@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from wealth.db.models import (
+    FundamentalPIT,
     FxRate,
     GoldPrice,
     HoldingLot,
@@ -19,12 +20,15 @@ from wealth.db.models import (
     NavMonthly,
     PriceEod,
     Security,
+    UniverseMember,
 )
+from wealth.marketdata.sources.fundamentals import retention_cutoff
 
 if TYPE_CHECKING:
     from wealth.marketdata.sources.amfi import AmfiNav
     from wealth.marketdata.sources.amfi_history import AmfiHistoricalNav
     from wealth.marketdata.sources.fred import FxObservation
+    from wealth.marketdata.sources.fundamentals import FundamentalObservation
     from wealth.marketdata.sources.ibja import GoldObservation
     from wealth.marketdata.sources.nse import NseClose, NseSecurity
 
@@ -152,6 +156,205 @@ def upsert_nse_master(session: Session, records: list[NseSecurity]) -> int:
         )
         count += 1
     return count
+
+
+def upsert_us_equity_security(session: Session, symbol: str, name: str) -> UUID:
+    """Insert/update a US listing through the shared security upsert function."""
+    normalized_symbol = symbol.strip().upper()
+    security_id = session.scalar(
+        select(
+            func.app_upsert_security_by_symbol(
+                "US",
+                normalized_symbol,
+                "US",
+                name.strip()[:160],
+                "equity",
+                "USD",
+                None,
+                "equity_global",
+                "equity:us",
+            )
+        )
+    )
+    if security_id is None:
+        raise RuntimeError("US security upsert returned no identifier")
+    return security_id if isinstance(security_id, UUID) else UUID(str(security_id))
+
+
+def upsert_universe_members(
+    session: Session,
+    universe: str,
+    security_ids: set[UUID],
+    *,
+    loaded_on: date,
+    source: str,
+    source_url: str,
+    survivorship_label: str,
+) -> dict[str, int]:
+    """Reconcile a current constituent snapshot without duplicate active rows."""
+    rows = list(session.scalars(select(UniverseMember).where(UniverseMember.universe == universe)))
+    active_by_security = {row.security_id: row for row in rows if row.removed_on is None}
+    added = 0
+    removed = 0
+    for security_id, row in active_by_security.items():
+        if security_id not in security_ids:
+            row.removed_on = max(loaded_on, row.added_on)
+            removed += 1
+    for security_id in security_ids:
+        row = active_by_security.get(security_id)
+        if row is not None:
+            row.source = source
+            row.source_url = source_url
+            row.survivorship_label = survivorship_label
+            continue
+        same_day = next(
+            (
+                previous
+                for previous in rows
+                if previous.security_id == security_id
+                and previous.added_on == loaded_on
+                and previous.removed_on is not None
+            ),
+            None,
+        )
+        if same_day is not None:
+            same_day.removed_on = None
+            same_day.source = source
+            same_day.source_url = source_url
+            same_day.survivorship_label = survivorship_label
+            active_by_security[security_id] = same_day
+            continue
+        session.add(
+            UniverseMember(
+                universe=universe,
+                security_id=security_id,
+                added_on=loaded_on,
+                removed_on=None,
+                source=source,
+                source_url=source_url,
+                survivorship_label=survivorship_label,
+            )
+        )
+        added += 1
+    return {"added": added, "removed": removed, "active": len(security_ids)}
+
+
+def _fundamentals_cutoff(as_of: date) -> date:
+    return retention_cutoff(as_of)
+
+
+def prune_fundamentals(session: Session, as_of: date) -> int:
+    """Prune facts older than the rolling fundamentals storage window."""
+    cutoff = _fundamentals_cutoff(as_of)
+    result = session.execute(delete(FundamentalPIT).where(FundamentalPIT.period_end < cutoff))
+    return int(result.rowcount or 0)
+
+
+def upsert_fundamentals(
+    session: Session,
+    security_id: UUID,
+    observations: list[FundamentalObservation],
+    *,
+    as_of: date,
+    fetched_at: datetime | None = None,
+) -> int:
+    """Store changed values only, preserving each value's first reporting filing."""
+    cutoff = _fundamentals_cutoff(as_of)
+    selected = [
+        item
+        for item in observations
+        if cutoff <= item.period_end <= as_of
+        and item.period_type in {"Q", "FY"}
+        and item.value.is_finite()
+    ]
+    if not selected:
+        return 0
+    retrieved_at = fetched_at or datetime.now(UTC)
+    session.execute(
+        select(
+            func.pg_advisory_xact_lock(func.hashtextextended(f"fundamentals-pit:{security_id}", 0))
+        )
+    )
+    groups: dict[tuple[str, date, str, str], list[FundamentalObservation]] = {}
+    for observation in selected:
+        key = (
+            observation.metric,
+            observation.period_end,
+            observation.period_type,
+            observation.source,
+        )
+        groups.setdefault(key, []).append(observation)
+    existing_rows = list(
+        session.scalars(
+            select(FundamentalPIT).where(
+                FundamentalPIT.security_id == security_id,
+                FundamentalPIT.period_end >= cutoff,
+                FundamentalPIT.source.in_({key[3] for key in groups}),
+            )
+        )
+    )
+    existing_groups: dict[tuple[str, date, str, str], list[FundamentalPIT]] = {}
+    for row in existing_rows:
+        key = (row.metric, row.period_end, row.period_type, row.source)
+        existing_groups.setdefault(key, []).append(row)
+
+    inserted = 0
+    for key, incoming in groups.items():
+        rows = existing_groups.get(key, [])
+        by_known_at = {row.known_at: row for row in rows}
+        for observation in sorted(incoming, key=lambda item: (item.known_at, item.filed_at)):
+            existing = by_known_at.get(observation.known_at)
+            if existing is not None:
+                if observation.filed_at >= existing.filed_at:
+                    existing.value = observation.value
+                    existing.unit = observation.unit
+                    existing.filed_at = observation.filed_at
+                    existing.source_url = observation.source_url
+                    existing.fetched_at = retrieved_at
+                continue
+            earlier_rows = [
+                row for row in by_known_at.values() if row.known_at < observation.known_at
+            ]
+            previous = max(earlier_rows, key=lambda row: row.known_at) if earlier_rows else None
+            if previous is not None and previous.value == observation.value:
+                continue
+            later_rows = [
+                row for row in by_known_at.values() if row.known_at > observation.known_at
+            ]
+            current = FundamentalPIT(
+                security_id=security_id,
+                metric=observation.metric,
+                period_end=observation.period_end,
+                period_type=observation.period_type,
+                source=observation.source,
+                known_at=observation.known_at,
+                value=observation.value,
+                unit=observation.unit,
+                filed_at=observation.filed_at,
+                source_url=observation.source_url,
+                fetched_at=retrieved_at,
+                is_latest_for_period=not later_rows,
+            )
+            session.add(current)
+            by_known_at[observation.known_at] = current
+            inserted += 1
+        if by_known_at:
+            latest_known_at = max(by_known_at)
+            for row in by_known_at.values():
+                row.is_latest_for_period = row.known_at == latest_known_at
+    return inserted
+
+
+def latest_fundamental_filed_at(
+    session: Session, security_id: UUID, source: str
+) -> datetime | None:
+    """Return the latest filing timestamp already observed for one security/source."""
+    return session.scalar(
+        select(func.max(FundamentalPIT.filed_at)).where(
+            FundamentalPIT.security_id == security_id,
+            FundamentalPIT.source == source,
+        )
+    )
 
 
 def upsert_amfi_master(session: Session, records: list[AmfiNav]) -> int:
@@ -597,7 +800,14 @@ def prune(session: Session, on: date, *, retention_days: int = 400) -> dict[str,
             )
         )
     )
-    keep_ids = held_ids | proxy_ids
+    # Current index members keep their price history so the research factors (momentum,
+    # volatility, 200-day distance) have the year of closes they need.
+    universe_ids = set(
+        session.scalars(
+            select(UniverseMember.security_id).where(UniverseMember.removed_on.is_(None)).distinct()
+        )
+    )
+    keep_ids = held_ids | proxy_ids | universe_ids
     price_delete = delete(PriceEod).where(PriceEod.as_of < cutoff)
     nav_delete = delete(NavDaily).where(NavDaily.as_of < cutoff)
     if keep_ids:

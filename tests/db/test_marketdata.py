@@ -27,6 +27,7 @@ from wealth.db.models import (
     NavDaily,
     PriceEod,
     Security,
+    UniverseMember,
     User,
 )
 from wealth.marketdata import store
@@ -187,12 +188,13 @@ def test_master_refresh_reports_etf_endpoint_failure_and_keeps_equities(
     assert equities[0].symbol in stored_symbols
 
 
-def test_prune_keeps_recent_held_and_proxy_prices_only(
+def test_prune_keeps_recent_held_proxy_and_index_member_prices_only(
     migrated_database: MigratedDatabase,
 ) -> None:
     on = date(2026, 10, 28)
     held = _security("SYNTHETIC-HELD")
     unheld = _security("SYNTHETIC-UNHELD")
+    member = _security("SYNTHETIC-INDEX")
     proxy = _security("NIFTYBEES", security_type="etf", category="etf:equity_india")
     user = User(email=f"marketdata-{uuid4()}@example.test", auth_subject=str(uuid4()))
     cutoff = on - timedelta(days=400)
@@ -205,8 +207,18 @@ def test_prune_keeps_recent_held_and_proxy_prices_only(
             session.add(proxy)
         else:
             proxy = existing_proxy
-        session.add_all([held, unheld, user])
+        session.add_all([held, unheld, member, user])
         session.flush()
+        session.add(
+            UniverseMember(
+                universe="nifty500",
+                security_id=member.id,
+                added_on=on,
+                source="NSE_ARCHIVE",
+                source_url="https://archives.nseindia.com/example.csv",
+                survivorship_label="current constituents only (survivorship bias)",
+            )
+        )
         session.execute(delete(PriceEod).where(PriceEod.security_id == proxy.id))
         session.execute(delete(NavDaily).where(NavDaily.security_id == proxy.id))
         session.add(
@@ -217,7 +229,7 @@ def test_prune_keeps_recent_held_and_proxy_prices_only(
                 source="manual",
             )
         )
-        for security in (held, unheld, proxy):
+        for security in (held, unheld, member, proxy):
             store.upsert_eod_price(session, security.id, recent, Decimal("10.00"))
             store.upsert_nav(session, security.id, recent, Decimal("10.00"))
         store.upsert_eod_price(session, held.id, old, Decimal("9.00"))
@@ -236,6 +248,9 @@ def test_prune_keeps_recent_held_and_proxy_prices_only(
         proxy_price_count = session.scalar(
             select(func.count()).select_from(PriceEod).where(PriceEod.security_id == proxy.id)
         )
+        member_price_count = session.scalar(
+            select(func.count()).select_from(PriceEod).where(PriceEod.security_id == member.id)
+        )
 
     assert counts["prices_eod"] >= 2
     assert counts["nav_daily"] >= 1
@@ -243,6 +258,7 @@ def test_prune_keeps_recent_held_and_proxy_prices_only(
     assert old_price_count == 0
     assert unheld_price_count == 0
     assert proxy_price_count == 1
+    assert member_price_count == 1
 
 
 def test_db_price_provider_returns_source_and_rejects_prices_over_ten_days_old(
