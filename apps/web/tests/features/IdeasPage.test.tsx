@@ -1,4 +1,5 @@
 import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
@@ -9,7 +10,7 @@ import { action, networth, weeklyPlan } from "./fixtures";
 import { renderWithQueries } from "./render";
 import { server } from "../msw";
 
-function ideaHandlers() {
+function ideaHandlers(plan = weeklyPlan()) {
   return [
     http.get(/\/v1\/research\/ideas$/, () =>
       HttpResponse.json({
@@ -45,7 +46,7 @@ function ideaHandlers() {
         }),
       ]),
     ),
-    http.get(/\/v1\/plan$/, () => HttpResponse.json(weeklyPlan())),
+    http.get(/\/v1\/plan$/, () => HttpResponse.json(plan)),
     http.get(/\/v1\/networth$/, () => HttpResponse.json(networth())),
   ];
 }
@@ -66,6 +67,157 @@ describe("Ideas page", () => {
       screen.getByText("Research, not personal advice"),
     ).toBeInTheDocument();
     expect((await axe(container)).violations).toEqual([]);
+  });
+
+  it("shows a sourced Denmark buy line with details closed by default", async () => {
+    server.use(
+      ...ideaHandlers(
+        weeklyPlan({
+          residency: {
+            status: "NRI",
+            country: "DK",
+            settle_plan: "undecided",
+            us_person: false,
+          },
+          abroad_buy_list: [
+            {
+              member_id: "member-test-1",
+              account: "ask",
+              broker: "nordnet",
+              instrument: {
+                name: "European world fund",
+                ticker: "WLDX",
+                exchange: "Xetra",
+                isin: "IE00ABC00001",
+                currency: "EUR",
+              },
+              amount_dkk: "10000",
+              amount_inr: "125000.00",
+              reason_codes: ["ask_first"],
+              how_to_key: "how_to.nordnet",
+              details: {
+                tax_verified: false,
+                sources: [
+                  { label: "factsheet", url: "https://example.test/factsheet" },
+                  { label: "tax_list", url: "https://example.test/tax-list" },
+                ],
+              },
+            },
+          ],
+        }),
+      ),
+    );
+    const { container } = renderWithQueries(
+      <MemoryRouter>
+        <IdeasPage />
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Buy from Denmark" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("European world fund")).toBeInTheDocument();
+    expect(screen.getByText("DKK 10,000")).toBeInTheDocument();
+    expect(screen.getByText(/Share savings account/)).toBeInTheDocument();
+    expect(screen.getByText("IE00ABC00001")).toBeInTheDocument();
+    expect(screen.getByText("How?")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Choose your Aktiesparekonto (share savings account) or your ordinary account.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Why?")).toBeInTheDocument();
+    expect(
+      screen.getByText("Tax details still need a check."),
+    ).not.toBeVisible();
+    expect((await axe(container)).violations).toEqual([]);
+  });
+
+  it("shows a Danish member's buy line and broker check in a shared household", async () => {
+    const user = userEvent.setup();
+    server.use(
+      ...ideaHandlers(
+        weeklyPlan({
+          residency: {
+            status: "RI",
+            country: "IN",
+            settle_plan: "india",
+            us_person: false,
+          },
+          members: [
+            {
+              id: "member-test-1",
+              name: "Account owner",
+              relationship: "self",
+              net_worth: "0.00",
+              residency: {
+                status: "RI",
+                country: "IN",
+                settle_plan: "india",
+                us_person: false,
+              },
+              notes: [],
+            },
+            {
+              id: "member-dk",
+              name: "Denmark resident",
+              relationship: "spouse",
+              net_worth: "0.00",
+              residency: {
+                status: "NRI",
+                country: "DK",
+                settle_plan: "undecided",
+                us_person: false,
+              },
+              notes: [],
+            },
+          ],
+          abroad_buy_list: [
+            {
+              member_id: "member-dk",
+              account: "ordinary",
+              broker: "other",
+              instrument: {
+                name: "European world fund",
+                ticker: "WLDX",
+                exchange: "Xetra",
+                isin: "IE00ABC00001",
+                currency: "EUR",
+              },
+              amount_dkk: "10000",
+              amount_inr: "125000.00",
+              reason_codes: ["broker_availability_unchecked"],
+              how_to_key: "how_to.other",
+              details: {
+                tax_verified: false,
+                us_comparison: {
+                  annual_difference_pct: "0.15",
+                  annual_difference_direction: "less",
+                },
+                sources: [],
+              },
+            },
+          ],
+        }),
+      ),
+    );
+    renderWithQueries(
+      <MemoryRouter>
+        <IdeasPage />
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Buy from Denmark" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("For Denmark resident")).toBeInTheDocument();
+    await user.click(screen.getByText("Why?"));
+    expect(
+      screen.getByText("Check that your broker offers this fund."),
+    ).toBeVisible();
+    expect(
+      screen.getByText("Costs about 0.15% a year less than the US version."),
+    ).toBeVisible();
   });
 
   it("formats stress impacts for current holdings and the target plan", async () => {

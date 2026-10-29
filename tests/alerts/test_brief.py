@@ -249,6 +249,9 @@ def test_household_brief_attributes_actions_and_net_worth_to_members() -> None:
         "Self: net worth ₹10 L",
         "Spouse: net worth ₹5 L",
     ]
+    assert (
+        brief.subject == f"{len(brief.actions)} actions this week · Plan health {brief.plan_health}"
+    )
 
 
 class _VisibleText(HTMLParser):
@@ -321,6 +324,55 @@ def test_brief_omits_track_record_until_scorekeeper_exists() -> None:
     brief = _brief(True)
     assert "track_record" not in brief.sections
     assert brief.status == "ACTIONS"
-    assert (
-        brief.subject == f"{len(brief.actions)} actions this week · Plan health {brief.plan_health}"
-    )
+
+
+def test_danish_abroad_buy_list_renders_dkk_account_and_broker_steps() -> None:
+    plan = json.loads(_GOLDEN_PLAN.read_text(encoding="utf-8"))
+    plan["residency"] = {"status": "NRI", "country": "DK", "us_person": False}
+    plan["abroad_buy_list"] = [
+        {
+            "member_id": _SYNTHETIC_USER_ID,
+            "account": "ask",
+            "broker": "nordnet",
+            "instrument": {
+                "name": "European world fund",
+                "ticker": "WLDX",
+                "exchange": "Xetra",
+                "isin": "IE00ABC00001",
+                "currency": "EUR",
+            },
+            "amount_dkk": "10000",
+            "amount_inr": "125000.00",
+            "reason_codes": ["ask_first"],
+            "how_to_key": "how_to.nordnet",
+            "details": {"tax_verified": False},
+        }
+    ]
+    plan["actions"] = [
+        {
+            "rank": 1,
+            "kind": "BUY_ABROAD",
+            "sleeve": "equity_global",
+            "instrument_category": "abroad_etf",
+            "amount": "125000.00",
+            "reason_code": "buy_abroad",
+            "params": {
+                "broker": "nordnet",
+                "account_type": "ASK",
+                "abroad_buy_list": plan["abroad_buy_list"],
+            },
+            "member_id": _SYNTHETIC_USER_ID,
+            "member_name": "You",
+            "member_relationship": "self",
+        }
+    ]
+
+    brief = _brief_from_plan(plan)
+    html = render_html(brief)
+    text = render_text(brief)
+
+    assert "DKK 10,000" in html
+    assert "Share savings account" in html
+    assert "Nordnet" in html
+    assert "Search the fund code." in html
+    assert "IE00ABC00001" in text

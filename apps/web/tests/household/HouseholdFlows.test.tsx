@@ -63,6 +63,11 @@ function member(
       existing_sips: [],
       has_lrs_broker: false,
       lrs_used_this_fy: id === partnerId ? "25000.00" : "0.00",
+      broker: "nordnet",
+      has_indian_nri_share_account: false,
+      has_danish_pension_account: false,
+      us_stock_picks_opt_in: false,
+      us_stock_picks_pct: "10.00",
       monthly_sip_capacity: "0.00",
       new_money_this_week: "0.00",
       prefers_no_paperwork: false,
@@ -318,7 +323,7 @@ describe("household screens", () => {
     });
     expect(askDialog).toHaveTextContent("For Demo Owner");
     expect(askDialog).toHaveTextContent("Nordnet");
-    expect(askDialog).toHaveTextContent("Aktiesparekonto");
+    expect(askDialog).toHaveTextContent("share savings account");
     await user.click(within(askDialog).getByRole("button", { name: "Close" }));
 
     await user.click(screen.getAllByRole("button", { name: "How to" })[1]!);

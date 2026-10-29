@@ -16,7 +16,294 @@ import {
 } from "../features/api";
 import { getActions, getPlan, getResearchIdeas } from "../planning/api";
 import type { ActionResponse, WeeklyPlan } from "../planning/api";
-import { Badge, Card } from "../ui";
+import { Badge, Card, Term } from "../ui";
+import englishCopy from "../copy/en.json";
+
+function dkkAmount(raw: unknown): string {
+  const amount = String(raw ?? "").trim();
+  if (!/^-?\d+$/.test(amount)) return "";
+  return `DKK ${new Intl.NumberFormat("en-US").format(BigInt(amount))}`;
+}
+
+function usdAmount(raw: unknown): string {
+  const match = /^(-?)(\d+)(?:\.(\d+))?$/.exec(String(raw ?? "").trim());
+  if (!match) return "";
+  let amount = BigInt(match[2] ?? "0");
+  if ((match[3]?.[0] ?? "0") >= "5") amount += 1n;
+  if (match[1]) amount = -amount;
+  return `USD ${new Intl.NumberFormat("en-US").format(amount)}`;
+}
+
+function DenmarkBuyCard({ plan }: { plan?: WeeklyPlan }) {
+  const copy = englishCopy.denmark;
+  const residency = asRecord(plan?.residency);
+  const members = asArray(plan?.members).map(asRecord);
+  const lines = asArray(plan?.abroad_buy_list).slice(0, 3).map(asRecord);
+  const hasDkResident = members.some(
+    (member) => asRecord(member.residency).country === "DK",
+  );
+  if (residency.country !== "DK" && !hasDkResident && !lines.length)
+    return null;
+  return (
+    <Card className="grid gap-3">
+      <div>
+        <h2 className="text-base font-semibold">{copy.buy_title}</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{copy.buy_intro}</p>
+      </div>
+      {lines.length ? (
+        <ul className="grid gap-3">
+          {lines.map((line, index) => {
+            const instrument = asRecord(line.instrument);
+            const details = asRecord(line.details);
+            const member = members.find((item) => item.id === line.member_id);
+            const broker = textValue(line.broker, "other");
+            const howTo = asArray(asRecord(copy.how_to)[broker]);
+            const heldNotes = asArray(details.held_us_etf_notes).map(asRecord);
+            const alternatives = asArray(details.alternatives_considered).map(
+              asRecord,
+            );
+            const comparison = asRecord(details.us_comparison);
+            const reasonCodes = asArray(line.reason_codes).map(String);
+            const usStockTax = asRecord(details.us_stock_tax);
+            const usTaxSources = asArray(usStockTax.sources).map(asRecord);
+            const sources = asArray(details.sources).map(asRecord);
+            return (
+              <li
+                key={`${textValue(instrument.isin)}-${index}`}
+                className="grid gap-2 rounded-xl bg-muted p-3"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <h3 className="font-semibold">
+                    {textValue(instrument.name, copy.fund_fallback)}
+                  </h3>
+                  <span className="shrink-0 text-sm font-semibold tabular-nums">
+                    {dkkAmount(line.amount_dkk)}
+                  </span>
+                </div>
+                {members.length > 1 && textValue(member?.name) ? (
+                  <p className="text-xs text-muted-foreground">
+                    {copy.buy_for_member.replace(
+                      "{name}",
+                      textValue(member?.name),
+                    )}
+                  </p>
+                ) : null}
+                <div className="text-xs">
+                  {copy.fund_code_label}:{" "}
+                  <Term
+                    explanation={copy.fund_code_help}
+                    prompt={copy.term_prompt}
+                  >
+                    {textValue(instrument.isin)}
+                  </Term>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {textValue(line.account) === "ask"
+                    ? copy.account_ask
+                    : textValue(line.account) === "pension"
+                      ? copy.account_pension
+                      : copy.account_ordinary}
+                  {" · "}
+                  {copy.broker}:{" "}
+                  {textValue(asRecord(copy.brokers)[broker], broker)}
+                  {" · "}
+                  {textValue(instrument.currency)}
+                </p>
+                <details>
+                  <summary className="cursor-pointer text-sm font-semibold text-brand">
+                    {copy.how}
+                  </summary>
+                  <ol className="mt-2 grid gap-1 pl-5 text-sm leading-6 list-decimal">
+                    {howTo.map((step, stepIndex) => (
+                      <li key={`${broker}-${stepIndex}`}>{String(step)}</li>
+                    ))}
+                  </ol>
+                </details>
+                <details>
+                  <summary className="cursor-pointer text-sm text-muted-foreground">
+                    {copy.why}
+                  </summary>
+                  <div className="mt-2 grid gap-2 text-sm leading-6">
+                    <p>{copy.why_ranked}</p>
+                    {reasonCodes.includes("broker_availability_unchecked") ? (
+                      <p>{copy.broker_availability_unchecked}</p>
+                    ) : null}
+                    {alternatives.length ? (
+                      <div>
+                        <p>{copy.alternative_reason}</p>
+                        <ul className="list-disc pl-5">
+                          {alternatives.map((alternative, alternativeIndex) => (
+                            <li
+                              key={`${textValue(alternative.name)}-${alternativeIndex}`}
+                            >
+                              {textValue(alternative.name)}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {comparison.annual_difference_pct ? (
+                      <div className="grid gap-1">
+                        <p>
+                          {(textValue(
+                            comparison.annual_difference_direction,
+                          ) === "less"
+                            ? copy.comparison_summary_less
+                            : copy.comparison_summary_more
+                          ).replace(
+                            "{difference}",
+                            textValue(comparison.annual_difference_pct),
+                          )}
+                        </p>
+                        <p>{copy.us_comparison_advantage_one}</p>
+                        <p>{copy.us_comparison_advantage_two}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {copy.sources}
+                        </p>
+                        <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                          <li>
+                            <a
+                              className="underline underline-offset-2"
+                              href={textValue(comparison.us_ter_source_url)}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              {copy.fee_source}
+                            </a>
+                          </li>
+                          <li>
+                            <a
+                              className="underline underline-offset-2"
+                              href={textValue(
+                                comparison.dividend_yield_source_url,
+                              )}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              {copy.dividend_source}
+                            </a>
+                          </li>
+                        </ul>
+                      </div>
+                    ) : null}
+                    {heldNotes.slice(0, 1).map((note, noteIndex) => (
+                      <p key={`${textValue(note.symbol)}-${noteIndex}`}>
+                        {copy.held_us_etf
+                          .replace("{symbol}", textValue(note.symbol))
+                          .replace("{name}", textValue(note.eu_twin))}
+                      </p>
+                    ))}
+                    {Object.keys(usStockTax).length ? (
+                      <div className="grid gap-1">
+                        <p>
+                          {copy.us_stock_dividend_before}
+                          <Term
+                            explanation={copy.us_stock_form_help}
+                            prompt={copy.term_prompt}
+                          >
+                            {copy.us_stock_form}
+                          </Term>
+                          {copy.us_stock_dividend_after.replace(
+                            "{rate}",
+                            textValue(usStockTax.dividend_withholding_pct),
+                          )}
+                        </p>
+                        {usStockTax.projected_us_situs_usd ? (
+                          <p>
+                            {copy.us_stock_situs_total
+                              .replace(
+                                "{current}",
+                                usdAmount(usStockTax.current_us_situs_usd),
+                              )
+                              .replace(
+                                "{projected}",
+                                usdAmount(usStockTax.projected_us_situs_usd),
+                              )
+                              .replace(
+                                "{threshold}",
+                                usdAmount(
+                                  usStockTax.estate_filing_threshold_usd,
+                                ),
+                              )}
+                          </p>
+                        ) : (
+                          <p>
+                            {copy.us_stock_situs_unavailable.replace(
+                              "{threshold}",
+                              usdAmount(usStockTax.estate_filing_threshold_usd),
+                            )}
+                          </p>
+                        )}
+                        <p>{copy.us_stock_estate_treaty}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {copy.sources}
+                        </p>
+                        <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                          {usTaxSources.map((source, sourceIndex) => {
+                            const label = textValue(source.label);
+                            const labelText =
+                              label === "w8ben"
+                                ? copy.us_stock_form
+                                : label === "dividend_treaty"
+                                  ? copy.us_stock_dividend_source
+                                  : label === "danish_credit"
+                                    ? copy.us_stock_credit_source
+                                    : label === "us_estate"
+                                      ? copy.us_stock_estate_source
+                                      : copy.us_stock_treaty_source;
+                            return (
+                              <li key={`${label}-${sourceIndex}`}>
+                                <a
+                                  className="underline underline-offset-2"
+                                  href={textValue(source.url)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  {labelText}
+                                </a>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {details.pension_note ? <p>{copy.pension_note}</p> : null}
+                    <p>{copy.unverified}</p>
+                    <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                      {sources.map((source, sourceIndex) => {
+                        const label = textValue(source.label);
+                        const labelText =
+                          label === "factsheet"
+                            ? copy.factsheet
+                            : label === "tax_list"
+                              ? copy.tax_list
+                              : copy.share_savings_rules;
+                        return (
+                          <li key={`${label}-${sourceIndex}`}>
+                            <a
+                              className="underline underline-offset-2"
+                              href={textValue(source.url)}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              {labelText}
+                            </a>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                </details>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="text-sm text-muted-foreground">{copy.no_buy}</p>
+      )}
+    </Card>
+  );
+}
 
 function actionPayload(action: ActionResponse): Record<string, unknown> {
   const payload = asRecord(action.payload);
@@ -204,6 +491,7 @@ export function IdeasPage() {
         actions={actions.data}
         plan={plan.data as WeeklyPlan | undefined}
       />
+      <DenmarkBuyCard plan={plan.data as WeeklyPlan | undefined} />
       <ResearchCard
         ideas={asArray(research.data?.ideas)}
         actions={actions.data}

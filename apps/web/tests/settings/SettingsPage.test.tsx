@@ -388,6 +388,61 @@ describe("Settings", () => {
     );
   });
 
+  it("shows the optional year-start account value for a Denmark resident", async () => {
+    const user = userEvent.setup();
+    const selfMember = settingsMembers[0]!;
+    let submitted: Record<string, unknown> | null = null;
+    server.use(
+      http.get("*/v1/members", () =>
+        HttpResponse.json([
+          {
+            ...selfMember,
+            residency: {
+              country: "DK",
+              status: "NRI",
+              settle_plan: "undecided",
+              us_person: false,
+              planned_return_year: null,
+            },
+            investing: {
+              ...selfMember.investing,
+              ask_value_start_of_year_dkk: null,
+            },
+          },
+          settingsMembers[1],
+        ]),
+      ),
+      http.patch("*/v1/members/member-self-test", async ({ request }) => {
+        submitted = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(selfMember);
+      }),
+    );
+    renderSettings();
+    await screen.findByText("Test Child");
+    await user.click(
+      screen.getAllByText(englishCopy.household.settings.edit_member)[0]!,
+    );
+    expect(
+      screen.getByLabelText(englishCopy.denmark.ask_start_value_label),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(englishCopy.denmark.ask_start_value_hint),
+    ).toBeInTheDocument();
+    await user.type(
+      screen.getByLabelText(englishCopy.denmark.ask_start_value_label),
+      "105000",
+    );
+    await user.click(
+      screen.getByRole("button", {
+        name: englishCopy.household.settings.save_member,
+      }),
+    );
+    await screen.findByText(englishCopy.household.settings.details_saved);
+    expect(submitted).toMatchObject({
+      investing: { ask_value_start_of_year_dkk: "105000" },
+    });
+  });
+
   it("asks for push setup only after the push toggle is tapped", async () => {
     const user = userEvent.setup();
     const savedConsents: unknown[] = [];

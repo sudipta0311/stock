@@ -20,7 +20,7 @@ from pydantic import (
     model_validator,
 )
 
-from wealth.schemas.common import RatePct, Rupees
+from wealth.schemas.common import DanishKroner, RatePct, Rupees
 
 _SATELLITE_PCT_SCHEMA = {
     "type": "string",
@@ -85,7 +85,13 @@ class InvestingPrefs(BaseModel):
     satellite_pct: SatellitePct = Decimal("20")
     birth_year: int | None = Field(default=None, ge=1900, le=9999)
     lrs_used_this_fy: Rupees = Decimal("0")
-    ask_used_this_fy_dkk: Rupees = Decimal("0")
+    ask_used_this_fy_dkk: DanishKroner = Decimal("0")
+    ask_value_start_of_year_dkk: DanishKroner | None = None
+    broker: Literal["nordnet", "saxo", "danske_bank", "other"] = "nordnet"
+    has_indian_nri_share_account: bool = False
+    has_danish_pension_account: bool = False
+    us_stock_picks_opt_in: bool = False
+    us_stock_picks_pct: SatellitePct = Decimal("10")
 
 
 class TaxRegime(StrEnum):

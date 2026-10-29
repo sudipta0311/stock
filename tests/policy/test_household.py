@@ -126,6 +126,9 @@ def test_member_contexts_keep_tax_and_annual_room_separate() -> None:
     assert self_context.eligibility_conditions["in_equity_direct"] == "direct_equity_nri_pis"
     assert self_context.eligibility_status["ucits_global_etf"] == "allowed"
     assert self_context.eligibility["ucits_global_etf"]
+    assert self_context.eligibility_status["gold_etf"] == "not_allowed"
+    assert self_context.eligibility_conditions["gold_etf"] == "dk_fund_tax_review"
+    assert spouse_context.eligibility_conditions["ucits_global_etf"] == "ucits_via_lrs_broker"
     assert self_context.limits_room["lrs_annual_usd"] == Decimal("0.00")
     assert self_context.limits_room["ppf_annual_inr"] == Decimal("0.00")
     assert self_context.limits_room["ssy_annual_inr"] == Decimal("0.00")
@@ -136,6 +139,34 @@ def test_member_contexts_keep_tax_and_annual_room_separate() -> None:
     assert spouse_context.limits_room["lrs_tcs_pct"] == Decimal("20.00")
     assert spouse_context.limits_room["ppf_annual_inr"] == Decimal("100000.00")
     assert self_context.limits_room["ask_deposit_dkk"] == Decimal("124200.00")
+
+
+def test_preexisting_share_savings_account_requires_start_value() -> None:
+    member = MemberProfile(
+        id="member-dk",
+        name="Member",
+        relationship="self",
+        is_self=True,
+        residency=Residency(status="NRI", country="DK"),
+        has_prior_ask_activity=True,
+    )
+    household = build_household_snapshot((), (), (), (member,), self_member_id=member.id)
+    missing_value = build_member_contexts((member,), household, (), as_of_year=2026, fx_rates={})[0]
+    assert missing_value.limits_room["ask_deposit_dkk"] == Decimal("0.00")
+    assert "ask_start_value_missing" in missing_value.notes
+
+    known_value_member = replace(
+        member,
+        investing=InvestingPrefs(ask_value_start_of_year_dkk=Decimal("105000")),
+    )
+    known_value_household = build_household_snapshot(
+        (), (), (), (known_value_member,), self_member_id=known_value_member.id
+    )
+    known_value = build_member_contexts(
+        (known_value_member,), known_value_household, (), as_of_year=2026, fx_rates={}
+    )[0]
+    assert known_value.limits_room["ask_deposit_dkk"] == Decimal("69200.00")
+    assert "ask_start_value_missing" not in known_value.notes
 
 
 def test_india_equity_prefers_eligible_spouse_and_adds_clubbing_copy() -> None:
@@ -537,6 +568,62 @@ def test_new_instrument_buy_placements_match_member_eligibility_status() -> None
         next(item for item in result.actions if item.sleeve == "equity_india").member_id
         == members[1].id
     )
+
+
+def test_danish_gold_sip_moves_to_india_resident_spouse_with_clubbing_note() -> None:
+    members, _assets, _snapshot, contexts = _household()
+    action = Action(
+        rank=1,
+        kind="REBALANCE_SIPS",
+        sleeve="multiple",
+        instrument_category="monthly_sip",
+        amount=Decimal("5000"),
+        reason_code="sip_capacity_redirected",
+        member_id=members[0].id,
+        member_name=members[0].name,
+        member_relationship=members[0].relationship,
+        params={"changes": [{"sleeve": "gold", "from": "0.00", "to": "5000.00"}]},
+    )
+
+    result = place_actions(
+        [action],
+        contexts,
+        debt_yields={},
+        fx_rates={"DKK/INR": Decimal("12")},
+        as_of_year=2026,
+    )
+
+    assert len(result.actions) == 1
+    placed = result.actions[0]
+    assert placed.member_id == members[1].id
+    assert placed.clubbing_check is not None
+    assert placed.params["changes"][0]["instrument_category"] == "gold_etf"
+
+
+def test_danish_gold_is_carried_forward_without_an_india_resident_member() -> None:
+    members, assets, _snapshot, _contexts = _household()
+    danish_member = members[0]
+    household = build_household_snapshot(
+        assets, (), (), (danish_member,), self_member_id=danish_member.id
+    )
+    contexts = build_member_contexts(
+        (danish_member,), household, assets, as_of_year=2026, fx_rates={}
+    )
+    action = Action(
+        rank=1,
+        kind="BUY_LUMPSUM",
+        sleeve="gold",
+        instrument_category="gold_etf",
+        amount=Decimal("25000"),
+        reason_code="target_gap",
+        member_id=danish_member.id,
+    )
+
+    result = place_actions([action], contexts, debt_yields={}, fx_rates={}, as_of_year=2026)
+
+    assert result.actions == ()
+    assert result.carry_forward == Decimal("25000.00")
+    assert result.notes == ("dk_fund_tax_review", "dk_gold_carried_forward")
 
 
 def test_two_danish_members_keep_individual_limits_and_review_existing_funds() -> None:

@@ -23,6 +23,15 @@
 {% else %}
 {{ email.no_actions }}
 {% endif %}
+{% if brief.sections.abroad_buy_list %}
+{{ denmark.buy_title }}
+{% for line in brief.sections.abroad_buy_list %}
+{{ line.name }} · {{ line.amount }} · {{ line.account }} · {{ line.broker }}
+{{ line.fund_code_label }}: {{ line.fund_code }}
+{% for step in line.how_to %}{{ loop.index }}. {{ step }}
+{% endfor %}
+{% endfor %}
+{% endif %}
 
 {{ email.plan_heading }}
 {% for row in brief.sections.plan_at_a_glance %}

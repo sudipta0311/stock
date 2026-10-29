@@ -52,6 +52,25 @@
                     <p>{{ email.no_actions }}</p>
                   {% endif %}
                 </section>
+                {% if brief.sections.abroad_buy_list %}
+                  <section>
+                    <h2 style="font-size:17px">{{ denmark.buy_title }}</h2>
+                    <ul style="padding-left:20px">
+                      {% for line in brief.sections.abroad_buy_list %}
+                        <li style="margin:0 0 14px">
+                          <strong>{{ line.name }}</strong><br>
+                          {{ line.amount }} · {{ line.account }} · {{ line.broker }}<br>
+                          {{ line.fund_code_label }}: {{ line.fund_code }}
+                          {% if line.how_to %}
+                            <ol>
+                              {% for step in line.how_to %}<li>{{ step }}</li>{% endfor %}
+                            </ol>
+                          {% endif %}
+                        </li>
+                      {% endfor %}
+                    </ul>
+                  </section>
+                {% endif %}
                 <section>
                   <h2 style="font-size:17px">{{ email.plan_heading }}</h2>
                   <table role="presentation" width="100%" cellspacing="0" cellpadding="6" style="border-collapse:collapse">

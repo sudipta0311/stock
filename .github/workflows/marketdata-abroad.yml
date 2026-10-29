@@ -30,6 +30,10 @@ jobs:
       - run: python -m pip install --no-cache-dir ".[api,importer]"
       - name: Refresh overseas prices when the source is available
         run: |
+          if [ -z "${PRICE_API_KEY:-}" ]; then
+            echo "::notice::Overseas price API key is not configured; skipping."
+            exit 0
+          fi
           if python -c "import sys; from wealth.marketdata import refresh; sys.exit(0 if {'eu_etfs', 'us_stocks'} <= set(refresh._SOURCES) else 78)"; then
             python -m wealth.marketdata.refresh --only eu_etfs,us_stocks
           else

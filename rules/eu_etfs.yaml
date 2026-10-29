@@ -1,0 +1,399 @@
+version: 1
+source_checked: "2026-10-29"
+abis_source_url: "https://skat.dk/media/fo5m24x5/september-2026-abis-liste-2021-2026.xlsx"
+ask_source_url: "https://skat.dk/borger/aktier-og-andre-vaerdipapirer/aktiesparekonto"
+broker_sources:
+  nordnet: "https://www.nordnet.dk/etf/liste"
+  saxo: "https://campaigns.home.saxo/it-it/rates-and-conditions/autoinvest-etf-list"
+selection:
+  global_core_exposure: global_all_world
+  global_exposures:
+    - global_all_world
+    - global_sp500
+    - global_nasdaq100
+    - global_developed
+    - global_em_ex_india
+  ask_first: true
+  stock_picks:
+    default_pct: "10"
+    maximum_pct: "25"
+    per_stock_max_pct_of_investable_wealth: "5"
+    minimum_buy_dkk: "2000"
+  us_stock_tax:
+    dividend_withholding_pct: "15"
+    estate_filing_threshold_usd: "60000"
+    verified: false
+    sources:
+      w8ben: "https://www.irs.gov/instructions/iw8ben"
+      dividend_treaty: "https://www.irs.gov/pub/irs-trty/denmarkprot06.pdf"
+      danish_credit: "https://info.skat.dk/data.aspx?oid=2309428"
+      us_estate: "https://www.irs.gov/businesses/small-businesses-self-employed/estate-tax-for-nonresidents-not-citizens-of-the-united-states"
+      estate_treaty: "https://www.irs.gov/businesses/small-businesses-self-employed/estate-gift-tax-treaties-international"
+  listing_currency_preference: [DKK, EUR, USD, GBP]
+  fund_size_bands_usd:
+    large: "10000000000"
+    medium: "1000000000"
+    small: "0"
+  comparison:
+    dividend_withholding_pct: "15"
+    dividend_yields_pct:
+      global_all_world:
+        value: "1.62"
+        as_of: "2026-04-30"
+        source_url: "https://www.msci.com/documents/10199/1ee87397-6313-4f46-87ae-6761f666558e"
+      global_developed:
+        value: "1.56"
+        as_of: "2026-04-30"
+        source_url: "https://www.msci.com/documents/10199/1ee87397-6313-4f46-87ae-6761f666558e"
+      global_sp500:
+        value: "1.12"
+        as_of: "2026-04-30"
+        source_url: "https://www.spglobal.com/spdji/en/education/article/talkingpoints-why-dividend-and-capital-return-strategies-have-stood-out-in-2026/"
+      global_nasdaq100:
+        value: "0.70"
+        as_of: "2026-03-31"
+        source_url: "https://www.nasdaq.com/docs/global-markets-dashboard-march-2026"
+    us_equivalent_ter_pct:
+      ACWI: {value: "0.32", source_url: "https://www.ishares.com/us/products/ars/product/239600/ishares-msci-acwi-etf"}
+      URTH: {value: "0.24", source_url: "https://www.ishares.com/us/products/239696/ishares-msci-world-etf"}
+      IVV: {value: "0.03", source_url: "https://www.ishares.com/us/products/239726/ishares-core-sp-500-etf"}
+      QQQM: {value: "0.15", source_url: "https://www.invesco.com/us/en/financial-products/etfs/invesco-nasdaq-100-etf.html"}
+    explanation_verified: false
+  indian_vehicle:
+    default: ucits_india_etf
+    direct_if_nri_account: in_equity_direct_core
+    explanation: "Simplest from Denmark: one Indian fund in your share savings account."
+  no_source_notes:
+    global_em_ex_india: "No source-confirmed, listed fund was found on the 2026 ABIS list."
+    gold: "No source-confirmed physical-gold product was found on the 2026 ABIS list."
+    india_equity: "Only one source-confirmed broad India fund passed the 2026 ABIS and broker checks."
+instruments:
+  - id: spdr_acwi_acc
+    name: "SPDR MSCI All Country World UCITS ETF (Acc)"
+    isin: IE00B44Z5B48
+    tickers:
+      Xetra: {symbol: SPYY, currency: EUR}
+      Euronext: {symbol: ACWE, currency: EUR}
+      LSE_GBP: {symbol: ACWI, currency: GBP}
+      LSE_USD: {symbol: ACWD, currency: USD}
+    domicile: IE
+    index: "MSCI ACWI"
+    exposure: global_all_world
+    ter_pct: "0.12"
+    distribution: accumulating
+    fund_size_band: large
+    fund_size_as_of: "2026-10-27"
+    fund_size_source_url: "https://www.ssga.com/at/en_gb/intermediary/etfs/state-street-spdr-msci-all-country-world-ucits-etf-acc-spyy-gy"
+    abis_listed: true
+    abis_list_year: 2026
+    abis_source_url: "https://skat.dk/media/fo5m24x5/september-2026-abis-liste-2021-2026.xlsx"
+    ask_eligible: true
+    ask_source_url: "https://skat.dk/borger/aktier-og-andre-vaerdipapirer/aktiesparekonto"
+    available_at: [nordnet, saxo]
+    availability_source_urls:
+      nordnet: "https://www.nordnet.dk/etf/liste"
+      saxo: "https://campaigns.home.saxo/it-it/rates-and-conditions/autoinvest-etf-list"
+    us_equivalent: ACWI
+    factsheet_url: "https://www.ssga.com/library-content/products/factsheets/etfs/emea/factsheet-emea-en_gb-spyy-gy.pdf"
+    source_url: "https://www.ssga.com/at/en_gb/intermediary/etfs/state-street-spdr-msci-all-country-world-ucits-etf-acc-spyy-gy"
+    last_checked: "2026-10-29"
+    verified: false
+    tax_verified: false
+  - id: spdr_acwi_imi_acc
+    name: "SPDR MSCI All Country World Investable Market UCITS ETF (Acc)"
+    isin: IE00B3YLTY66
+    tickers:
+      Xetra: {symbol: SPYI, currency: EUR}
+      Euronext: {symbol: IMIE, currency: EUR}
+      LSE_USD: {symbol: IMID, currency: USD}
+    domicile: IE
+    index: "MSCI ACWI IMI"
+    exposure: global_all_world
+    ter_pct: "0.17"
+    distribution: accumulating
+    fund_size_band: medium
+    fund_size_as_of: "2026-04-30"
+    fund_size_source_url: "https://www.ssga.com/library-content/products/factsheets/etfs/emea/factsheet-emea-en_gb-spyi-gy.pdf"
+    abis_listed: true
+    abis_list_year: 2026
+    abis_source_url: "https://skat.dk/media/fo5m24x5/september-2026-abis-liste-2021-2026.xlsx"
+    ask_eligible: true
+    ask_source_url: "https://skat.dk/borger/aktier-og-andre-vaerdipapirer/aktiesparekonto"
+    available_at: [nordnet, saxo]
+    availability_source_urls:
+      nordnet: "https://www.nordnet.dk/etf/liste"
+      saxo: "https://campaigns.home.saxo/it-it/rates-and-conditions/autoinvest-etf-list"
+    us_equivalent: ACWI
+    factsheet_url: "https://www.ssga.com/library-content/products/factsheets/etfs/emea/factsheet-emea-en_gb-spyi-gy.pdf"
+    source_url: "https://www.ssga.com/library-content/products/factsheets/etfs/emea/factsheet-emea-en_gb-spyi-gy.pdf"
+    last_checked: "2026-10-29"
+    verified: false
+    tax_verified: false
+  - id: ishares_acwi_acc
+    name: "iShares MSCI ACWI UCITS ETF USD (Acc)"
+    isin: IE00B6R52259
+    tickers:
+      Xetra: {symbol: IUSQ, currency: EUR}
+      Euronext: {symbol: SSAC, currency: EUR}
+      LSE_USD: {symbol: ISAC, currency: USD}
+    domicile: IE
+    index: "MSCI ACWI"
+    exposure: global_all_world
+    ter_pct: "0.20"
+    distribution: accumulating
+    fund_size_band: large
+    fund_size_as_of: "2026-10-27"
+    fund_size_source_url: "https://www.ishares.com/uk/individual/en/products/251850/ishares-msci-acwi-ucits-etf?siteEntryPassthrough=true"
+    abis_listed: true
+    abis_list_year: 2026
+    abis_source_url: "https://skat.dk/media/fo5m24x5/september-2026-abis-liste-2021-2026.xlsx"
+    ask_eligible: true
+    ask_source_url: "https://skat.dk/borger/aktier-og-andre-vaerdipapirer/aktiesparekonto"
+    available_at: [nordnet, saxo]
+    availability_source_urls:
+      nordnet: "https://www.nordnet.dk/aktier/inspiration/lister/etf-favoritter"
+      saxo: "https://campaigns.home.saxo/it-it/rates-and-conditions/autoinvest-etf-list"
+    us_equivalent: ACWI
+    factsheet_url: "https://www.blackrock.com/ch/individual/en/literature/fact-sheet/ssac-ishares-msci-acwi-ucits-etf-fund-fact-sheet-en-ch.pdf"
+    source_url: "https://www.ishares.com/uk/individual/en/products/251850/ishares-msci-acwi-ucits-etf?siteEntryPassthrough=true"
+    last_checked: "2026-10-29"
+    verified: false
+    tax_verified: false
+  - id: ishares_core_sp500_acc
+    name: "iShares Core S&P 500 UCITS ETF USD (Acc)"
+    isin: IE00B5BMR087
+    tickers:
+      Xetra: {symbol: SXR8, currency: EUR}
+      LSE_USD: {symbol: CSPX, currency: USD}
+    domicile: IE
+    index: "S&P 500"
+    exposure: global_sp500
+    ter_pct: "0.07"
+    distribution: accumulating
+    fund_size_band: large
+    fund_size_as_of: "2026-10-27"
+    fund_size_source_url: "https://www.ishares.com/uk/individual/en/products/253743/CSSPX"
+    abis_listed: true
+    abis_list_year: 2026
+    abis_source_url: "https://skat.dk/media/fo5m24x5/september-2026-abis-liste-2021-2026.xlsx"
+    ask_eligible: true
+    ask_source_url: "https://skat.dk/borger/aktier-og-andre-vaerdipapirer/aktiesparekonto"
+    available_at: [nordnet, saxo]
+    availability_source_urls:
+      nordnet: "https://www.nordnet.dk/etf/liste/i-shares-core-sp-500-sxr8-xeta"
+      saxo: "https://campaigns.home.saxo/it-it/rates-and-conditions/autoinvest-etf-list"
+    us_equivalent: IVV
+    factsheet_url: "https://www.blackrock.com/gls-download/literature/fact-sheet/cspx-ishares-core-s-p-500-ucits-etf-fund-fact-sheet-en-dk.pdf"
+    source_url: "https://www.ishares.com/uk/individual/en/products/253743/CSSPX"
+    last_checked: "2026-10-28"
+    verified: false
+    tax_verified: false
+  - id: xtrackers_sp500_acc
+    name: "Xtrackers S&P 500 UCITS ETF 4C"
+    isin: IE000Z9SJA06
+    tickers:
+      Xetra: {symbol: XDPU, currency: EUR}
+      Borsa_Italiana: {symbol: XDPU, currency: EUR}
+      LSE_USD: {symbol: XDPU, currency: USD}
+      LSE_GBP: {symbol: XDPP, currency: GBP}
+    domicile: IE
+    index: "S&P 500"
+    exposure: global_sp500
+    ter_pct: "0.03"
+    distribution: accumulating
+    fund_size_band: medium
+    fund_size_as_of: "2026-09-30"
+    fund_size_source_url: "https://etf.dws.com/download/asset/8c8f9cdc-9c64-4314-a25b-8222c6344e90"
+    abis_listed: true
+    abis_list_year: 2026
+    abis_source_url: "https://skat.dk/media/fo5m24x5/september-2026-abis-liste-2021-2026.xlsx"
+    ask_eligible: true
+    ask_source_url: "https://skat.dk/borger/aktier-og-andre-vaerdipapirer/aktiesparekonto"
+    available_at: [saxo]
+    availability_source_urls:
+      saxo: "https://www.home.saxo/pl-pl/rates-and-conditions/etf/etfs-available"
+    us_equivalent: IVV
+    factsheet_url: "https://etf.dws.com/download/asset/8c8f9cdc-9c64-4314-a25b-8222c6344e90"
+    source_url: "https://etf.dws.com/en-gb/IE000Z9SJA06-s-p-500-ucits-etf-4c/"
+    last_checked: "2026-10-29"
+    verified: false
+    tax_verified: false
+  - id: ishares_nasdaq100_acc
+    name: "iShares NASDAQ 100 UCITS ETF USD (Acc)"
+    isin: IE00B53SZB19
+    tickers:
+      Xetra: {symbol: SXRV, currency: EUR}
+      Euronext: {symbol: CNDX, currency: EUR}
+      LSE_USD: {symbol: CNDX, currency: USD}
+    domicile: IE
+    index: "NASDAQ 100"
+    exposure: global_nasdaq100
+    ter_pct: "0.30"
+    distribution: accumulating
+    fund_size_band: large
+    fund_size_as_of: "2026-10-27"
+    fund_size_source_url: "https://www.ishares.com/uk/individual/en/products/253741/ishares-nasdaq-100-ucits-etf?siteEntryPassthrough=true"
+    abis_listed: true
+    abis_list_year: 2026
+    abis_source_url: "https://skat.dk/media/fo5m24x5/september-2026-abis-liste-2021-2026.xlsx"
+    ask_eligible: true
+    ask_source_url: "https://skat.dk/borger/aktier-og-andre-vaerdipapirer/aktiesparekonto"
+    available_at: [nordnet, saxo]
+    availability_source_urls:
+      nordnet: "https://www.nordnet.dk/aktier/inspiration/lister/nasdaq-100-etf"
+      saxo: "https://campaigns.home.saxo/it-it/rates-and-conditions/autoinvest-etf-list"
+    us_equivalent: QQQM
+    factsheet_url: "https://www.blackrock.com/gls-download/literature/fact-sheet/csndx-ishares-nasdaq-100-ucits-etf-fund-fact-sheet-en-dk.pdf"
+    source_url: "https://www.ishares.com/uk/individual/en/products/253741/ishares-nasdaq-100-ucits-etf?siteEntryPassthrough=true"
+    last_checked: "2026-10-28"
+    verified: false
+    tax_verified: false
+  - id: xtrackers_nasdaq100_acc
+    name: "Xtrackers NASDAQ 100 UCITS ETF 1C"
+    isin: IE00BMFKG444
+    tickers:
+      Xetra: {symbol: XNAS, currency: EUR}
+      Borsa_Italiana: {symbol: XNAS, currency: EUR}
+      LSE_USD: {symbol: XNAS, currency: USD}
+      LSE_GBP: {symbol: XNAQ, currency: GBP}
+    domicile: IE
+    index: "NASDAQ 100"
+    exposure: global_nasdaq100
+    ter_pct: "0.20"
+    distribution: accumulating
+    fund_size_band: medium
+    fund_size_as_of: "2026-09-30"
+    fund_size_source_url: "https://etf.dws.com/download/asset/2e79f466-e566-4fc6-a4a6-3448c30bd5c0"
+    abis_listed: true
+    abis_list_year: 2026
+    abis_source_url: "https://skat.dk/media/fo5m24x5/september-2026-abis-liste-2021-2026.xlsx"
+    ask_eligible: true
+    ask_source_url: "https://skat.dk/borger/aktier-og-andre-vaerdipapirer/aktiesparekonto"
+    available_at: [saxo]
+    availability_source_urls:
+      saxo: "https://www.home.saxo/pl-pl/rates-and-conditions/etf/etfs-available"
+    us_equivalent: QQQM
+    factsheet_url: "https://etf.dws.com/download/asset/2e79f466-e566-4fc6-a4a6-3448c30bd5c0"
+    source_url: "https://etf.dws.com/en-gb/IE00BMFKG444-nasdaq-100-ucits-etf-1c/"
+    last_checked: "2026-10-29"
+    verified: false
+    tax_verified: false
+  - id: ishares_core_world_acc
+    name: "iShares Core MSCI World UCITS ETF USD (Acc)"
+    isin: IE00B4L5Y983
+    tickers:
+      Xetra: {symbol: EUNL, currency: EUR}
+      LSE_GBP: {symbol: SWDA, currency: GBP}
+    domicile: IE
+    index: "MSCI World"
+    exposure: global_developed
+    ter_pct: "0.20"
+    distribution: accumulating
+    fund_size_band: large
+    fund_size_as_of: "2026-10-27"
+    fund_size_source_url: "https://www.ishares.com/uk/individual/en/products/251882/ishares-msci-world-ucits-etf-acc-fund?locale=en_GB&siteEntryPassthrough=true"
+    abis_listed: true
+    abis_list_year: 2026
+    abis_source_url: "https://skat.dk/media/fo5m24x5/september-2026-abis-liste-2021-2026.xlsx"
+    ask_eligible: true
+    ask_source_url: "https://skat.dk/borger/aktier-og-andre-vaerdipapirer/aktiesparekonto"
+    available_at: [nordnet, saxo]
+    availability_source_urls:
+      nordnet: "https://www.nordnet.dk/etf/liste/i-shares-core-msci-world-eunl-xeta"
+      saxo: "https://campaigns.home.saxo/it-it/rates-and-conditions/autoinvest-etf-list"
+    us_equivalent: URTH
+    factsheet_url: "https://www.blackrock.com/gls-download/literature/fact-sheet/swda-ishares-core-msci-world-ucits-etf-fund-fact-sheet-en-dk.pdf"
+    source_url: "https://www.ishares.com/uk/individual/en/products/251882/ishares-msci-world-ucits-etf-acc-fund?locale=en_GB&siteEntryPassthrough=true"
+    last_checked: "2026-10-28"
+    verified: false
+    tax_verified: false
+  - id: spdr_world_acc
+    name: "SPDR MSCI World UCITS ETF (Acc)"
+    isin: IE00BFY0GT14
+    tickers:
+      Xetra: {symbol: SPPW, currency: EUR}
+      Euronext: {symbol: SWRD, currency: EUR}
+      LSE_GBP: {symbol: SWLD, currency: GBP}
+    domicile: IE
+    index: "MSCI World"
+    exposure: global_developed
+    ter_pct: "0.12"
+    distribution: accumulating
+    fund_size_band: large
+    fund_size_as_of: "2026-10-26"
+    fund_size_source_url: "https://www.ssga.com/it/it/intermediary/etfs/state-street-spdr-msci-world-ucits-etf-acc-sppw-gy"
+    abis_listed: true
+    abis_list_year: 2026
+    abis_source_url: "https://skat.dk/media/fo5m24x5/september-2026-abis-liste-2021-2026.xlsx"
+    ask_eligible: true
+    ask_source_url: "https://skat.dk/borger/aktier-og-andre-vaerdipapirer/aktiesparekonto"
+    available_at: [nordnet, saxo]
+    availability_source_urls:
+      nordnet: "https://www.nordnet.dk/etf/liste"
+      saxo: "https://campaigns.home.saxo/it-it/rates-and-conditions/autoinvest-etf-list"
+    us_equivalent: URTH
+    factsheet_url: "https://www.ssga.com/library-content/products/factsheets/etfs/emea/factsheet-emea-en_gb-sppw-gy.pdf"
+    source_url: "https://www.ssga.com/library-content/products/factsheets/etfs/emea/factsheet-emea-en_gb-sppw-gy.pdf"
+    last_checked: "2026-10-28"
+    verified: false
+    tax_verified: false
+  - id: ishares_india_acc
+    name: "iShares MSCI India UCITS ETF USD (Acc)"
+    isin: IE00BZCQB185
+    tickers:
+      Euronext: {symbol: NDIA, currency: EUR}
+      LSE_USD: {symbol: NDIA, currency: USD}
+      LSE_GBP: {symbol: IIND, currency: GBP}
+    domicile: IE
+    index: "MSCI India"
+    exposure: india_equity
+    ter_pct: "0.65"
+    distribution: accumulating
+    fund_size_band: medium
+    fund_size_as_of: "2026-10-23"
+    fund_size_source_url: "https://www.ishares.com/uk/individual/en/products/297617/ishares-msci-india-ucits-etf-fund"
+    abis_listed: true
+    abis_list_year: 2026
+    abis_source_url: "https://skat.dk/media/fo5m24x5/september-2026-abis-liste-2021-2026.xlsx"
+    ask_eligible: true
+    ask_source_url: "https://skat.dk/borger/aktier-og-andre-vaerdipapirer/aktiesparekonto"
+    available_at: [nordnet, saxo]
+    availability_source_urls:
+      nordnet: "https://www.nordnet.dk/etf/liste"
+      saxo: "https://campaigns.home.saxo/it-it/rates-and-conditions/autoinvest-etf-list"
+    us_equivalent: INDA
+    factsheet_url: "https://www.blackrock.com/dk/individual/literature/fact-sheet/ndia-ishares-msci-india-ucits-etf-fund-fact-sheet-en-dk.pdf"
+    source_url: "https://www.ishares.com/uk/individual/en/products/297617/ishares-msci-india-ucits-etf-fund"
+    last_checked: "2026-10-28"
+    verified: false
+    tax_verified: false
+  - id: amundi_india_ii_acc
+    name: "Amundi MSCI India II UCITS ETF EUR Acc"
+    isin: FR0010361683
+    tickers:
+      Xetra: {symbol: LYXINR, currency: EUR}
+      Euronext: {symbol: INR, currency: EUR}
+      Borsa_Italiana: {symbol: INDI, currency: EUR}
+    domicile: FR
+    index: "MSCI India"
+    exposure: india_equity
+    ter_pct: "0.85"
+    distribution: accumulating
+    fund_size_band: medium
+    fund_size_as_of: "2025-08-29"
+    fund_size_source_url: "https://www.amundietf.co.uk/pdfDocuments/monthly-factsheet/FR0010361683/ENG/GBR/INSTITUTIONNEL/ETF/20250831"
+    abis_listed: true
+    abis_list_year: 2026
+    abis_source_url: "https://skat.dk/media/fo5m24x5/september-2026-abis-liste-2021-2026.xlsx"
+    ask_eligible: true
+    ask_source_url: "https://skat.dk/borger/aktier-og-andre-vaerdipapirer/aktiesparekonto"
+    available_at: [nordnet, saxo]
+    availability_source_urls:
+      nordnet: "https://www.nordnet.dk/etf/liste?fundType=EQUITY&page=2&sortField=name&sortOrder=asc"
+      saxo: "https://www.home.saxo/it-it/rates-and-conditions/autoinvest-etf-list"
+    us_equivalent: INDA
+    factsheet_url: "https://www.amundietf.co.uk/pdfDocuments/monthly-factsheet/FR0010361683/ENG/GBR/INSTITUTIONNEL/ETF/20250831"
+    source_url: "https://www.amundietf.co.uk/pdfDocuments/monthly-factsheet/FR0010361683/ENG/GBR/INSTITUTIONNEL/ETF/20250831"
+    last_checked: "2026-10-29"
+    verified: false
+    tax_verified: false

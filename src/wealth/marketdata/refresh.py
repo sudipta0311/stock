@@ -12,12 +12,23 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from wealth.db.models import MarketdataRun
+from wealth.db.models import HoldingLot, MarketdataRun, Security
 from wealth.db.session import make_engine, system_session
 from wealth.marketdata import store
-from wealth.marketdata.sources import amfi, amfi_history, ecb, fred, ibja, manual, nse
+from wealth.marketdata.sources import (
+    alpha_vantage,
+    amfi,
+    amfi_history,
+    ecb,
+    fred,
+    ibja,
+    manual,
+    nse,
+)
+from wealth.marketdata.sources.alpha_vantage import DailyClose
 from wealth.marketdata.sources.amfi import AmfiNav
 from wealth.marketdata.sources.amfi_history import AmfiHistoricalNav
 from wealth.marketdata.sources.ecb import FxFetchResult
@@ -25,8 +36,17 @@ from wealth.marketdata.sources.fred import FxObservation
 from wealth.marketdata.sources.ibja import GoldObservation
 from wealth.marketdata.sources.nse import NseClose, NseSecurity
 
-_SOURCES = ("nse", "amfi", "fx", "gold", "master", "amfi_history")
+_SOURCES = ("nse", "amfi", "fx", "gold", "master", "amfi_history", "eu_etfs", "us_stocks")
 _RETENTION_DAYS = 400
+_MAX_ABROAD_QUOTES_PER_DAY = 24
+
+
+@dataclass(frozen=True)
+class AbroadPrice:
+    """A provider close already matched to the shared securities key."""
+
+    security_id: Any
+    close: DailyClose
 
 
 @dataclass(frozen=True)
@@ -79,6 +99,102 @@ def _fetch_missing_amfi_history(session: Session, on: date) -> list[AmfiHistoric
     return records
 
 
+def _upsert_curated_security(session: Session, instrument: Mapping[str, Any]) -> tuple[Any, str]:
+    tickers = instrument.get("tickers", {})
+    if not isinstance(tickers, Mapping):
+        raise ValueError("curated ETF has no sourced listing")
+    choices: list[tuple[int, str, str, str]] = []
+    currency_rank = {"EUR": 0, "GBP": 1, "USD": 2, "DKK": 3}
+    for exchange, listing in tickers.items():
+        if not isinstance(exchange, str) or not isinstance(listing, Mapping):
+            continue
+        symbol = listing.get("symbol")
+        currency = listing.get("currency")
+        if isinstance(symbol, str) and currency in currency_rank:
+            choices.append((currency_rank[currency], exchange, symbol, currency))
+    if not choices:
+        raise ValueError("curated ETF has no supported listing")
+    london = [choice for choice in choices if choice[1].startswith("LSE_")]
+    london_usd = [choice for choice in london if choice[1] == "LSE_USD" and choice[3] == "USD"]
+    if london and not london_usd:
+        raise ValueError("curated ETF has no USD-quoted London listing")
+    _rank, exchange, symbol, currency = min(london_usd or choices)
+    market = "GB" if exchange.startswith("LSE_") else "EU"
+    security_id = session.scalar(
+        select(
+            func.app_upsert_security_by_symbol(
+                market,
+                symbol,
+                exchange,
+                str(instrument["name"]),
+                "etf",
+                currency,
+                str(instrument["isin"]),
+                "equity_india" if instrument.get("exposure") == "india_equity" else "equity_global",
+                f"ucits:{instrument.get('exposure', 'global_all_world')}",
+            )
+        )
+    )
+    return security_id, f"{symbol}.LON" if exchange.startswith("LSE_") else symbol
+
+
+def _fetch_abroad_etfs(session: Session, on: date) -> list[AbroadPrice]:
+    api_key = os.getenv("PRICE_API_KEY", "")
+    if not api_key:
+        return []
+    from wealth.policy.denmark_picks import load_eu_etfs
+
+    records: list[AbroadPrice] = []
+    instruments = load_eu_etfs()["instruments"][:_MAX_ABROAD_QUOTES_PER_DAY]
+    for instrument in instruments:
+        try:
+            security_id, provider_symbol = _upsert_curated_security(session, instrument)
+            if security_id is None:
+                continue
+            close = alpha_vantage.fetch_daily(provider_symbol, api_key)
+            if close.as_of <= on:
+                records.append(AbroadPrice(security_id, close))
+        except Exception:
+            continue
+    return records
+
+
+def _fetch_abroad_us_stocks(session: Session, on: date) -> list[AbroadPrice]:
+    api_key = os.getenv("PRICE_API_KEY", "")
+    if not api_key:
+        return []
+    from wealth.policy.denmark_picks import load_eu_etfs
+
+    curated_count = min(
+        _MAX_ABROAD_QUOTES_PER_DAY,
+        len(load_eu_etfs()["instruments"]),
+    )
+    securities = session.scalars(
+        select(Security)
+        .join(HoldingLot, HoldingLot.security_id == Security.id)
+        .where(Security.market == "US", Security.security_type == "equity")
+        .distinct()
+        .order_by(Security.symbol, Security.id)
+    )
+    records: list[AbroadPrice] = []
+    for security in list(securities)[: _remaining_abroad_quote_slots(curated_count)]:
+        if not security.symbol:
+            continue
+        try:
+            close = alpha_vantage.fetch_daily(security.symbol, api_key)
+        except Exception:
+            continue
+        if close.as_of <= on:
+            records.append(AbroadPrice(security.id, close))
+    return records
+
+
+def _remaining_abroad_quote_slots(curated_count: int) -> int:
+    """Reserve one free-tier call for each curated fund, capped at 24 calls daily."""
+    reserved = min(_MAX_ABROAD_QUOTES_PER_DAY, max(0, curated_count))
+    return _MAX_ABROAD_QUOTES_PER_DAY - reserved
+
+
 def _default_fetchers(on: date, session: Session | None = None) -> dict[str, Callable[[], Any]]:
     return {
         "nse": lambda: nse.fetch_bhavcopy(on),
@@ -89,6 +205,8 @@ def _default_fetchers(on: date, session: Session | None = None) -> dict[str, Cal
         "amfi_history": (
             lambda: _fetch_missing_amfi_history(session, on) if session is not None else []
         ),
+        "eu_etfs": lambda: _fetch_abroad_etfs(session, on) if session is not None else [],
+        "us_stocks": lambda: _fetch_abroad_us_stocks(session, on) if session is not None else [],
     }
 
 
@@ -147,6 +265,22 @@ def _store_source(
         selected_source = "manual" if records.source_url == "rules/manual_prices.yaml" else "IBJA"
         store.upsert_gold_price(session, records, source=selected_source, fetched_at=fetched_at)
         return {"gold_prices": 1, "gold_source": selected_source}
+    if source in {"eu_etfs", "us_stocks"}:
+        if not isinstance(records, list) or any(
+            not isinstance(item, AbroadPrice) for item in records
+        ):
+            raise TypeError("Alpha Vantage adapter returned invalid rows")
+        for item in records:
+            store.upsert_eod_price(
+                session,
+                item.security_id,
+                item.close.as_of,
+                item.close.close,
+                source="AlphaVantage",
+                source_url=alpha_vantage.SOURCE_URL,
+                fetched_at=fetched_at,
+            )
+        return {"prices_eod": len(records)}
     raise ValueError(f"Unknown market-data source {source}")
 
 

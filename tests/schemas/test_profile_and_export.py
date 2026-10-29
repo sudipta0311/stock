@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
@@ -108,9 +109,16 @@ def test_schema_files_match_fresh_deterministic_export() -> None:
     actual_files = {
         path.relative_to(schema_root): path.read_bytes()
         for path in schema_root.rglob("*.json")
-        if path.name != "openapi.json"
+        if path.name not in {"openapi.json", "eu_etfs.schema.json"}
     }
     assert actual_files == expected
+
+
+def test_eu_etf_rules_pass_their_checked_in_schema() -> None:
+    repository_root = Path(__file__).resolve().parents[2]
+    rules = yaml.safe_load((repository_root / "rules" / "eu_etfs.yaml").read_text("utf-8"))
+    schema = json.loads((repository_root / "schemas" / "eu_etfs.schema.json").read_text("utf-8"))
+    Draft202012Validator(schema).validate(rules)
 
 
 def test_every_exported_schema_passes_draft_2020_12_meta_schema() -> None:

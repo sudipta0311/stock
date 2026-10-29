@@ -1,4 +1,4 @@
-// OpenAPI SHA256: 8a15026680d3b9edde3edac48939fd9a68b75342f4309ee8d2d80e1aba1fb400
+// OpenAPI SHA256: aae8847c7d927772391f6fde0c226e61d6b328404d141f2d0382d8c1af9e64be
 export interface paths {
     "/healthz": {
         parameters: {
@@ -1785,10 +1785,28 @@ export interface components {
              * @default 0
              */
             ask_used_this_fy_dkk: string;
+            /** Ask Value Start Of Year Dkk */
+            ask_value_start_of_year_dkk?: string | null;
             /** Birth Year */
             birth_year?: number | null;
+            /**
+             * Broker
+             * @default nordnet
+             * @enum {string}
+             */
+            broker: "nordnet" | "saxo" | "danske_bank" | "other";
             /** Existing Sips */
             existing_sips?: components["schemas"]["InvestingSip"][];
+            /**
+             * Has Danish Pension Account
+             * @default false
+             */
+            has_danish_pension_account: boolean;
+            /**
+             * Has Indian Nri Share Account
+             * @default false
+             */
+            has_indian_nri_share_account: boolean;
             /**
              * Has Lrs Broker
              * @default false
@@ -1823,6 +1841,17 @@ export interface components {
              * @default 20
              */
             satellite_pct: string;
+            /**
+             * Us Stock Picks Opt In
+             * @default false
+             */
+            us_stock_picks_opt_in: boolean;
+            /**
+             * Us Stock Picks Pct
+             * Format: decimal
+             * @default 10
+             */
+            us_stock_picks_pct: string;
         };
         /**
          * InvestingPrefs
@@ -1835,10 +1864,28 @@ export interface components {
              * @default 0.00
              */
             ask_used_this_fy_dkk: string;
+            /** Ask Value Start Of Year Dkk */
+            ask_value_start_of_year_dkk?: string | null;
             /** Birth Year */
             birth_year?: number | null;
+            /**
+             * Broker
+             * @default nordnet
+             * @enum {string}
+             */
+            broker: "nordnet" | "saxo" | "danske_bank" | "other";
             /** Existing Sips */
             existing_sips?: components["schemas"]["InvestingSip"][];
+            /**
+             * Has Danish Pension Account
+             * @default false
+             */
+            has_danish_pension_account: boolean;
+            /**
+             * Has Indian Nri Share Account
+             * @default false
+             */
+            has_indian_nri_share_account: boolean;
             /**
              * Has Lrs Broker
              * @default false
@@ -1873,6 +1920,17 @@ export interface components {
              * @default 20
              */
             satellite_pct: string;
+            /**
+             * Us Stock Picks Opt In
+             * @default false
+             */
+            us_stock_picks_opt_in: boolean;
+            /**
+             * Us Stock Picks Pct
+             * Format: decimal
+             * @default 10
+             */
+            us_stock_picks_pct: string;
         };
         /**
          * InvestingSip
@@ -2937,6 +2995,10 @@ export interface components {
         };
         /** WeeklyPlanResponse */
         WeeklyPlanResponse: {
+            /** Abroad Buy List */
+            abroad_buy_list?: {
+                [key: string]: unknown;
+            }[];
             /** Actions */
             actions: {
                 [key: string]: unknown;

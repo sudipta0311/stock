@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import date, timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Any, Literal
 
@@ -68,6 +68,14 @@ def _decimal(value: Any) -> Decimal | None:
 def _compact_amount(value: Any) -> str | None:
     amount = _decimal(value)
     return None if amount is None else format_inr(amount, style="compact")
+
+
+def _dkk_amount(value: Any) -> str | None:
+    amount = _decimal(value)
+    if amount is None:
+        return None
+    whole = amount.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    return f"DKK {whole:,.0f}"
 
 
 def _date_label(value: Any) -> str:
@@ -136,7 +144,14 @@ def _action_records(
         kind = str(action.get("kind", "ACTION"))
         title = str(action_labels.get(kind, "Review this part of your plan"))
         category = action.get("instrument_category")
-        if kind in {"SELL_EXIT", "SELL_TRIM", "REVIEW_EXIT", "SWAP"}:
+        params = action.get("params") if isinstance(action.get("params"), Mapping) else {}
+        if kind == "BUY_ABROAD":
+            lines = params.get("abroad_buy_list", [])
+            first_line = lines[0] if isinstance(lines, list) and lines else {}
+            title = (
+                f"{title} · {_dkk_amount(first_line.get('amount_dkk')) or 'DKK amount unavailable'}"
+            )
+        elif kind in {"SELL_EXIT", "SELL_TRIM", "REVIEW_EXIT", "SWAP"}:
             symbol = action.get("symbol")
             if symbol:
                 title = f"{title} · {symbol}"
@@ -145,7 +160,7 @@ def _action_records(
                 title = f"{title} · {format(quantity.normalize(), 'f')} shares"
         elif category:
             title = f"{title} · {instrument_labels.get(category, 'Investment option')}"
-        amount = _compact_amount(action.get("amount"))
+        amount = None if kind == "BUY_ABROAD" else _compact_amount(action.get("amount"))
         if amount:
             title = f"{title} · {amount}"
         code = str(action.get("reason_code", ""))
@@ -329,6 +344,29 @@ def build_brief(
         "exit_watch": exit_watch,
         "world_and_money": stress,
     }
+    denmark_copy = copy["denmark"]
+    abroad_lines = data.get("abroad_buy_list", [])
+    if isinstance(abroad_lines, list) and abroad_lines:
+        broker_copy = denmark_copy.get("brokers", {})
+        how_to_copy = denmark_copy.get("how_to", {})
+        account_copy = {
+            "ask": denmark_copy["account_ask"],
+            "ordinary": denmark_copy["account_ordinary"],
+            "pension": denmark_copy["account_pension"],
+        }
+        sections["abroad_buy_list"] = [
+            {
+                "name": line.get("instrument", {}).get("name", "European fund"),
+                "fund_code_label": denmark_copy["fund_code_label"],
+                "fund_code": line.get("instrument", {}).get("isin", ""),
+                "amount": _dkk_amount(line.get("amount_dkk")) or "",
+                "account": account_copy.get(line.get("account"), ""),
+                "broker": broker_copy.get(line.get("broker"), ""),
+                "how_to": how_to_copy.get(line.get("broker"), []),
+            }
+            for line in abroad_lines[:3]
+            if isinstance(line, Mapping) and isinstance(line.get("instrument"), Mapping)
+        ]
     members = data.get("members", [])
     if members:
         joint_note = copy.get("household_notes", {}).get("joint_asset_tax_owner")
@@ -402,6 +440,7 @@ def render_html(brief: Brief) -> str:
     return _HTML_ENV.get_template("brief.html.j2").render(
         brief=brief,
         email=copy["email"],
+        denmark=copy["denmark"],
         date_label=f"{brief.as_of.day} {brief.as_of.strftime('%b %Y')}",
     )
 
@@ -414,6 +453,7 @@ def render_text(brief: Brief) -> str:
         .render(
             brief=brief,
             email=copy["email"],
+            denmark=copy["denmark"],
             date_label=f"{brief.as_of.day} {brief.as_of.strftime('%b %Y')}",
         )
         .strip()

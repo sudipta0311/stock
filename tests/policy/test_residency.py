@@ -257,8 +257,8 @@ def test_nri_small_savings_and_equal_yield_nre_rules() -> None:
     ).after_tax_yield_pct == Decimal("3.50")
 
 
-def test_danish_policy_uses_ucits_direct_india_core_and_eu_copy() -> None:
-    """A Denmark NRI uses UCITS and direct Indian core, with Danish notes and PRIIPs copy."""
+def test_danish_policy_uses_ucits_india_fund_and_eu_copy() -> None:
+    """A Denmark NRI gets a sourced India fund by default with Danish notes."""
     residency = Residency(status="NRI", country="DK")
     public_user = replace(_policy_user(residency), deployment_mode="public")
     plan = personalise(public_user, _market(), None, "2026-W44", _AS_OF)
@@ -268,7 +268,8 @@ def test_danish_policy_uses_ucits_direct_india_core_and_eu_copy() -> None:
     assert "estate_tax_us_domiciled_assets" not in plan.route["warnings"]
     assert "estate_tax_us_domiciled_assets" not in plan.residency_notes
     assert india_core_vehicle(residency) == "in_equity_direct_core"
-    assert "in_equity_direct_core" in categories
+    assert "in_equity_direct_core" not in categories
+    assert any("india_fund_from_denmark" in line["reason_codes"] for line in plan.abroad_buy_list)
     assert not categories.intersection({"in_mf", "in_etf"})
     assert "dk_non_abis_capital_income" in plan.residency_notes
     assert "dk_abis_check" in plan.residency_notes

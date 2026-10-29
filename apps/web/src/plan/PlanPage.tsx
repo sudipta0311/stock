@@ -97,6 +97,9 @@ function limitsForMember(
 }
 
 function placementNoteText(note: string): string {
+  if (note === "ask_start_value_missing") {
+    return englishCopy.denmark.ask_start_value_missing;
+  }
   if (/clubbing(?:_check)?/i.test(note)) {
     return englishCopy.household_ui.clubbing_check;
   }
@@ -118,7 +121,19 @@ function placementNotes(plan: WeeklyPlan): string[] {
     ...(plan.residency_notes ?? []),
     ...(plan.members ?? []).flatMap((member) => member.notes ?? []),
   ];
-  const friendly = notes.map(placementNoteText);
+  const denmarkCodes = notes.filter((note) =>
+    /^(?:dk_|ask_|denmark_)/i.test(note),
+  );
+  const preferredDenmarkCode =
+    denmarkCodes.find((note) => note === "ask_start_value_missing") ??
+    denmarkCodes[0];
+  const otherNotes = notes.filter(
+    (note) => !/^(?:dk_|ask_|denmark_)/i.test(note),
+  );
+  const friendly = [
+    ...(preferredDenmarkCode ? [preferredDenmarkCode] : []),
+    ...otherNotes,
+  ].map(placementNoteText);
   const hasClubbingAction = asArray(plan.actions).some((action) => {
     const record = asRecord(action);
     const payload = asRecord(record.payload);

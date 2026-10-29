@@ -24,6 +24,7 @@ Open: https://app.example/plan
 
 
 
+
 Your plan at a glance
 
 Cash: 7.72% now · 9.27% target

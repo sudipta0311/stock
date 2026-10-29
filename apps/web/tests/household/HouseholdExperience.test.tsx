@@ -67,6 +67,11 @@ function member(
       birth_year: null,
       ask_used_this_fy_dkk: "0.00",
       lrs_used_this_fy: id === partnerId ? "250000.00" : "0.00",
+      broker: "nordnet",
+      has_indian_nri_share_account: false,
+      has_danish_pension_account: false,
+      us_stock_picks_opt_in: false,
+      us_stock_picks_pct: "10.00",
     },
   };
 }
@@ -331,7 +336,7 @@ describe("family plan screens", () => {
       0,
     );
     expect(
-      screen.getAllByText("Room left in your Aktiesparekonto").length,
+      screen.getAllByText(englishCopy.household_ui.ask_room).length,
     ).toBeGreaterThan(0);
     await user.click(
       screen.getByText(englishCopy.household_ui.placement_details),

@@ -45,7 +45,22 @@
       "format": "decimal",
       "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
       "type": "string",
-      "x-unit": "INR"
+      "x-unit": "DKK"
+    },
+    "ask_value_start_of_year_dkk": {
+      "anyOf": [
+        {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string",
+          "x-unit": "DKK"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Ask Value Start Of Year Dkk"
     },
     "birth_year": {
       "anyOf": [
@@ -61,12 +76,33 @@
       "default": null,
       "title": "Birth Year"
     },
+    "broker": {
+      "default": "nordnet",
+      "enum": [
+        "nordnet",
+        "saxo",
+        "danske_bank",
+        "other"
+      ],
+      "title": "Broker",
+      "type": "string"
+    },
     "existing_sips": {
       "items": {
         "$ref": "#/$defs/InvestingSip"
       },
       "title": "Existing Sips",
       "type": "array"
+    },
+    "has_danish_pension_account": {
+      "default": false,
+      "title": "Has Danish Pension Account",
+      "type": "boolean"
+    },
+    "has_indian_nri_share_account": {
+      "default": false,
+      "title": "Has Indian Nri Share Account",
+      "type": "boolean"
     },
     "has_lrs_broker": {
       "default": false,
@@ -101,6 +137,19 @@
     },
     "satellite_pct": {
       "default": "20",
+      "format": "decimal",
+      "pattern": "^(0|[1-9]|1[0-9]|2[0-4])(\\.[0-9]{1,4})?$|^25(\\.0{1,4})?$",
+      "type": "string",
+      "x-maximum": "25",
+      "x-minimum": "0"
+    },
+    "us_stock_picks_opt_in": {
+      "default": false,
+      "title": "Us Stock Picks Opt In",
+      "type": "boolean"
+    },
+    "us_stock_picks_pct": {
+      "default": "10",
       "format": "decimal",
       "pattern": "^(0|[1-9]|1[0-9]|2[0-4])(\\.[0-9]{1,4})?$|^25(\\.0{1,4})?$",
       "type": "string",

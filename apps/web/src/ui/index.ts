@@ -7,6 +7,7 @@ export {
   Sheet,
   Skeleton,
   Stat,
+  Term,
   ToastProvider,
   useToast,
 } from "./primitives";

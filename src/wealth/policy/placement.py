@@ -108,14 +108,26 @@ def place_actions(
                 as_of_year=selected_year,
             )
         else:
+            source = next(
+                (member for member in members if member.member_id == action.member_id), None
+            )
+            dk_gold = (
+                action.instrument_category == "gold_etf"
+                and source is not None
+                and source.residency.country == "DK"
+            )
             eligible_members = [
                 member
                 for member in members
-                if _instrument_eligibility(member, action.instrument_category)
+                if (not dk_gold or member.residency.status == "RI")
+                and _instrument_eligibility(member, action.instrument_category)
                 in {"allowed", "conditional"}
             ]
             if not eligible_members:
-                notes.append(f"no_eligible_member:{action.instrument_category}")
+                if dk_gold:
+                    notes.extend(("dk_fund_tax_review", "dk_gold_carried_forward"))
+                else:
+                    notes.append(f"no_eligible_member:{action.instrument_category}")
                 carry_forward = round_paise(carry_forward + action.amount)
                 continue
             member = _preferred(eligible_members, available)[0]
@@ -433,6 +445,7 @@ def _place_global_equity(
                         amount=ask_amount,
                         params={
                             "account_type": "ASK",
+                            "broker": member.member.investing.broker,
                             "ask_tax_rate_pct": str(
                                 load_residency_rules()["denmark"]["ask"]["tax_rate_pct_2026"]
                             ),
@@ -451,7 +464,10 @@ def _place_global_equity(
                         instrument="ucits_global_etf",
                         route="LOCAL",
                         amount=remaining,
-                        params={"account_type": "ORDINARY"},
+                        params={
+                            "account_type": "ORDINARY",
+                            "broker": member.member.investing.broker,
+                        },
                         clubbing_check=clubbing,
                     )
                 )
@@ -583,7 +599,22 @@ def _place_sip_redirection(
             )
             notes.extend(placement_notes)
         elif sleeve == "gold":
-            if _instrument_eligibility(source, "gold_etf") in {"allowed", "conditional"}:
+            if source.residency.country == "DK":
+                ri_members = [
+                    member
+                    for member in members
+                    if member.residency.status == "RI"
+                    and _instrument_eligibility(member, "gold_etf") in {"allowed", "conditional"}
+                ]
+                if ri_members:
+                    recipient = _preferred(ri_members, {})[0]
+                    placements.append((recipient, increase, {"instrument_category": "gold_etf"}))
+                else:
+                    notes.extend(("dk_fund_tax_review", "dk_gold_carried_forward"))
+            elif _instrument_eligibility(source, "gold_etf") in {
+                "allowed",
+                "conditional",
+            }:
                 placements.append((source, increase, {"instrument_category": "gold_etf"}))
         elif sleeve in {"debt", "cash"}:
             debt_action = action.model_copy(
@@ -617,7 +648,8 @@ def _place_sip_redirection(
             unchanged = dict(change)
             unchanged["to"] = format(before, ".2f")
             add_change(source, unchanged, Decimal(0))
-            notes.append(f"sip_increase_unplaced:{sleeve or 'unknown'}")
+            if sleeve != "gold" or source.residency.country != "DK":
+                notes.append(f"sip_increase_unplaced:{sleeve or 'unknown'}")
             continue
 
         transfers_to_other_member = any(
@@ -725,6 +757,7 @@ def _sip_global_assignments(
                             "instrument_category": "ucits_global_etf",
                             "route": "LOCAL",
                             "account_type": "ASK",
+                            "broker": member.member.investing.broker,
                         },
                     )
                 )
@@ -742,6 +775,7 @@ def _sip_global_assignments(
                             "instrument_category": "ucits_global_etf",
                             "route": "LOCAL",
                             "account_type": "ASK",
+                            "broker": member.member.investing.broker,
                         },
                     )
                 )
@@ -755,6 +789,7 @@ def _sip_global_assignments(
                             "instrument_category": "ucits_global_etf",
                             "route": "LOCAL",
                             "account_type": "ORDINARY",
+                            "broker": member.member.investing.broker,
                         },
                     )
                 )

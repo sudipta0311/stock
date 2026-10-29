@@ -25,6 +25,7 @@ ActionKind = Literal[
     "BUILD_EMERGENCY_FUND",
     "BUY_LUMPSUM",
     "BUY_STP",
+    "BUY_ABROAD",
     "BUY_STOCK_TRANCHE",
     "REBALANCE_SIPS",
     "SELL_EXIT",
@@ -108,6 +109,11 @@ class SatelliteIdea(BaseModel):
     dossier_status: DossierStatus
     valuation_percentile: _PERCENTILE
     confidence: Confidence
+    # These fields are joined from securities by the data loader, never from a research pack.
+    name: str | None = None
+    exchange: str | None = None
+    isin: str | None = None
+    currency: str | None = None
 
 
 class WeekInput(BaseModel):

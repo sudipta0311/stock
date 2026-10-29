@@ -4,17 +4,19 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 from uuid import UUID
 
-from sqlalchemy import func, select
+import yaml
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from wealth.core.dates import fy_start
 from wealth.db.models import (
-    Goal as GoalRow,
-)
-from wealth.db.models import (
+    Account,
+    BrokerCashFlowRecord,
     HoldingLot,
     HouseholdMember,
     ManualAsset,
@@ -22,6 +24,9 @@ from wealth.db.models import (
     RealisedTrade,
     ResearchPackRecord,
     Security,
+)
+from wealth.db.models import (
+    Goal as GoalRow,
 )
 from wealth.marketdata import store
 from wealth.marketdata.provider import DbPriceProvider
@@ -50,6 +55,8 @@ from wealth.schemas.profile import (
     residency_from_stored,
 )
 from wealth.valuation import PriceUnavailable, Valuation, value_asset
+
+_MANUAL_PRICES_PATH = Path(__file__).resolve().parents[3] / "rules" / "manual_prices.yaml"
 
 
 def _financial_context(profile: Profile | None) -> FinancialContext:
@@ -142,6 +149,8 @@ def _holdings(
                 "price_as_of": None,
                 "price_source": None,
                 "statement_value": Decimal(0),
+                "statement_quantity": Decimal(0),
+                "statement_as_of": None,
                 "joint": lot.joint,
             },
         )
@@ -150,6 +159,13 @@ def _holdings(
             record["statement_value"] = (
                 record["statement_value"] + lot.statement_value  # type: ignore[operator]
             )
+            record["statement_quantity"] = (
+                record["statement_quantity"] + lot.quantity  # type: ignore[operator]
+            )
+            if lot.statement_date is not None and (
+                record["statement_as_of"] is None or lot.statement_date > record["statement_as_of"]
+            ):
+                record["statement_as_of"] = lot.statement_date
         record["lots"].append(  # type: ignore[union-attr]
             HoldingLotInput(
                 lot_id=str(lot.id),
@@ -182,6 +198,26 @@ def _holdings(
     for (security_id, member_id), record in grouped.items():
         security = record["security"]
         assert isinstance(security, Security)
+        if record["price"] is None:
+            quantity = record["quantity"]
+            statement_value = record["statement_value"]
+            statement_quantity = record["statement_quantity"]
+            if (
+                isinstance(quantity, Decimal)
+                and quantity > 0
+                and isinstance(statement_quantity, Decimal)
+                and statement_quantity == quantity
+                and isinstance(statement_value, Decimal)
+                and statement_value > 0
+                and isinstance(record["statement_as_of"], date)
+            ):
+                record["price"] = statement_value / quantity
+                record["price_as_of"] = record["statement_as_of"]
+                record["price_source"] = "broker_statement"
+            else:
+                manual = _manual_abroad_price(security, as_of)
+                if manual is not None:
+                    record["price"], record["price_as_of"], record["price_source"] = manual
         holdings.append(
             HoldingInput(
                 security_id=str(security_id),
@@ -206,12 +242,60 @@ def _holdings(
     return tuple(holdings)
 
 
+@lru_cache(maxsize=1)
+def _manual_prices_document() -> dict[str, object]:
+    document = yaml.safe_load(_MANUAL_PRICES_PATH.read_text(encoding="utf-8"))
+    return document if isinstance(document, dict) else {}
+
+
+def _manual_abroad_price(security: Security, as_of: date) -> tuple[Decimal, date, str] | None:
+    rows = _manual_prices_document().get("abroad_securities", {})
+    if not isinstance(rows, dict):
+        return None
+    keys = [security.isin, f"{security.market}:{security.symbol}", security.symbol]
+    for key in keys:
+        row = rows.get(key) if isinstance(key, str) else None
+        if not isinstance(row, dict) or row.get("source") != "manual":
+            continue
+        try:
+            value = Decimal(str(row["value"]))
+            price_date = date.fromisoformat(str(row["as_of"]))
+        except (KeyError, ValueError):
+            continue
+        if value > 0 and price_date <= as_of and (as_of - price_date).days <= 60:
+            return value, price_date, "manual"
+    return None
+
+
 def _research_pack(session: Session, week: str) -> ResearchPack | None:
     row = session.get(ResearchPackRecord, week)
     if row is None:
         return None
     document = row.pack
-    ideas = tuple(SatelliteIdea.model_validate(item) for item in document.get("ideas", []))
+    ideas_list: list[SatelliteIdea] = []
+    for item in document.get("ideas", []):
+        idea = SatelliteIdea.model_validate(item)
+        if idea.market == "US":
+            try:
+                security = session.get(Security, UUID(idea.security_id))
+            except ValueError:
+                security = None
+            if (
+                security is not None
+                and security.market == "US"
+                and security.security_type == "equity"
+            ):
+                idea = idea.model_copy(
+                    update={
+                        "symbol": security.symbol or idea.symbol,
+                        "name": security.name,
+                        "exchange": security.exchange,
+                        "isin": security.isin,
+                        "currency": security.currency,
+                    }
+                )
+        ideas_list.append(idea)
+    ideas = tuple(ideas_list)
     raw_tilts = document.get("geo_tilts")
     tilts = GeoTilts.model_validate(raw_tilts) if raw_tilts is not None else None
     return ResearchPack(week=week, ideas=ideas, geo_tilts=tilts)
@@ -253,6 +337,8 @@ def _member_profiles(
                 "fy_realised_equity_stcg": max(tax.fy_realised_equity_stcg, realised_stcg),
             }
         )
+        ask_used_dkk, ask_fx_missing = _ask_deposits_dkk(session, user_id, row.id, as_of)
+        has_prior_ask_activity = _has_prior_ask_activity(session, user_id, row.id, as_of)
         members.append(
             MemberProfile(
                 id=str(row.id),
@@ -264,9 +350,111 @@ def _member_profiles(
                 investing=InvestingPrefs.model_validate(stored_investing),
                 realised_equity_ltcg=tax.fy_realised_equity_ltcg,
                 realised_equity_stcg=tax.fy_realised_equity_stcg,
+                ask_used_dkk=ask_used_dkk,
+                ask_deposit_fx_missing=ask_fx_missing,
+                has_prior_ask_activity=has_prior_ask_activity,
             )
         )
     return tuple(members)
+
+
+def _ask_deposits_dkk(
+    session: Session, user_id: UUID, member_id: UUID, as_of: date
+) -> tuple[Decimal | None, bool]:
+    """Return this calendar year's net ASK deposits, converted on each transaction date."""
+    flows = session.execute(
+        select(
+            BrokerCashFlowRecord.amount,
+            BrokerCashFlowRecord.currency,
+            BrokerCashFlowRecord.transaction_date,
+            BrokerCashFlowRecord.kind,
+        )
+        .join(
+            Account,
+            and_(
+                Account.id == BrokerCashFlowRecord.account_id,
+                Account.user_id == BrokerCashFlowRecord.user_id,
+                Account.member_id == BrokerCashFlowRecord.member_id,
+                Account.tax_wrapper == "ask",
+            ),
+        )
+        .where(
+            BrokerCashFlowRecord.user_id == user_id,
+            BrokerCashFlowRecord.member_id == member_id,
+            BrokerCashFlowRecord.transaction_date >= date(as_of.year, 1, 1),
+            BrokerCashFlowRecord.transaction_date <= as_of,
+        )
+        .order_by(BrokerCashFlowRecord.transaction_date, BrokerCashFlowRecord.id)
+    ).all()
+    if not flows:
+        return None, False
+    deposits = Decimal(0)
+    withdrawals = Decimal(0)
+    for amount, currency, transaction_date, kind in flows:
+        if currency == "DKK":
+            converted = amount
+        else:
+            currency_rate = store.latest_fx_rate(session, f"{currency}/INR", transaction_date)
+            dkk_rate = store.latest_fx_rate(session, "DKK/INR", transaction_date)
+            if (
+                currency_rate is None
+                or dkk_rate is None
+                or currency_rate[0] <= 0
+                or dkk_rate[0] <= 0
+                or (transaction_date - currency_rate[1]).days > 10
+                or (transaction_date - dkk_rate[1]).days > 10
+            ):
+                return None, True
+            converted = amount * currency_rate[0] / dkk_rate[0]
+        if kind == "deposit":
+            deposits += converted
+        else:
+            withdrawals += converted
+    return deposits - withdrawals, False
+
+
+def _has_prior_ask_activity(session: Session, user_id: UUID, member_id: UUID, as_of: date) -> bool:
+    """Detect ASK holdings or imported ASK activity dated before this calendar year."""
+    year_start = date(as_of.year, 1, 1)
+    historical_lots = session.scalar(
+        select(func.count(HoldingLot.id))
+        .select_from(HoldingLot)
+        .join(
+            Account,
+            and_(
+                Account.id == HoldingLot.account_id,
+                Account.user_id == HoldingLot.user_id,
+                Account.member_id == HoldingLot.member_id,
+                Account.tax_wrapper == "ask",
+            ),
+        )
+        .where(
+            HoldingLot.user_id == user_id,
+            HoldingLot.member_id == member_id,
+            or_(HoldingLot.acquired_on.is_(None), HoldingLot.acquired_on < year_start),
+        )
+    )
+    if historical_lots:
+        return True
+    historical_flows = session.scalar(
+        select(func.count(BrokerCashFlowRecord.id))
+        .select_from(BrokerCashFlowRecord)
+        .join(
+            Account,
+            and_(
+                Account.id == BrokerCashFlowRecord.account_id,
+                Account.user_id == BrokerCashFlowRecord.user_id,
+                Account.member_id == BrokerCashFlowRecord.member_id,
+                Account.tax_wrapper == "ask",
+            ),
+        )
+        .where(
+            BrokerCashFlowRecord.user_id == user_id,
+            BrokerCashFlowRecord.member_id == member_id,
+            BrokerCashFlowRecord.transaction_date < year_start,
+        )
+    )
+    return bool(historical_flows)
 
 
 def _realised_equity_gains(

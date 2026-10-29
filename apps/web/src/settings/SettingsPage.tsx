@@ -432,6 +432,13 @@ export function SettingsPage() {
           birth_year: birthYear ? Number(birthYear) : null,
           ask_used_this_fy_dkk: current?.ask_used_this_fy_dkk ?? "0",
           lrs_used_this_fy: current?.lrs_used_this_fy ?? "0",
+          broker: current?.broker ?? "nordnet",
+          has_indian_nri_share_account:
+            current?.has_indian_nri_share_account ?? false,
+          has_danish_pension_account:
+            current?.has_danish_pension_account ?? false,
+          us_stock_picks_opt_in: current?.us_stock_picks_opt_in ?? false,
+          us_stock_picks_pct: current?.us_stock_picks_pct ?? "10",
         };
         await saveInvestingPrefs(preferences);
       }

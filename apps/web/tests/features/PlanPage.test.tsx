@@ -1,4 +1,5 @@
 import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
@@ -106,6 +107,38 @@ describe("Plan page", () => {
       screen.getByText(/report accounts and investments held outside India/i),
     ).toBeInTheDocument();
     expect(screen.queryByText(/may be subject to estate tax/i)).toBeNull();
+  });
+
+  it("shows the missing year-start account value as one Denmark note", async () => {
+    const user = userEvent.setup();
+    server.use(
+      ...planHandlers({
+        residency_notes: ["dk_aktiesparekonto"],
+        members: [
+          {
+            id: "member-test-1",
+            name: "Member",
+            relationship: "self",
+            net_worth: "0.00",
+            residency: {
+              status: "NRI",
+              country: "DK",
+              settle_plan: "undecided",
+              us_person: false,
+            },
+            notes: ["ask_start_value_missing", "dk_share_income"],
+          },
+        ],
+      }),
+    );
+    renderPlan();
+    await user.click(await screen.findByText("Why this?"));
+    expect(
+      screen.getByText(
+        "Add your share savings account's value on 1 January so we can use it.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText(/share savings account/).length).toBe(1);
   });
 
   it("shows eligible debt options when their yields are unavailable", async () => {

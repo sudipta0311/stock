@@ -18,6 +18,12 @@ _RUPEES_JSON_SCHEMA = {
     "format": "decimal",
     "x-unit": "INR",
 }
+_DANISH_KRONER_JSON_SCHEMA = {
+    "type": "string",
+    "pattern": r"^(0|[1-9][0-9]*)(\.[0-9]{1,2})?$",
+    "format": "decimal",
+    "x-unit": "DKK",
+}
 _RATE_PCT_JSON_SCHEMA = {
     "type": "string",
     "pattern": r"^(0|[1-9][0-9]?)(\.[0-9]{1,4})?$",
@@ -174,6 +180,15 @@ Rupees = Annotated[
     PlainSerializer(_format_rupees, return_type=str, when_used="json"),
     WithJsonSchema(_RUPEES_JSON_SCHEMA, mode="validation"),
     WithJsonSchema(_RUPEES_JSON_SCHEMA, mode="serialization"),
+]
+DanishKroner = Annotated[
+    Decimal,
+    BeforeValidator(_strict_decimal),
+    AfterValidator(_at_most_two_places),
+    Field(ge=Decimal("0")),
+    PlainSerializer(_format_rupees, return_type=str, when_used="json"),
+    WithJsonSchema(_DANISH_KRONER_JSON_SCHEMA, mode="validation"),
+    WithJsonSchema(_DANISH_KRONER_JSON_SCHEMA, mode="serialization"),
 ]
 RatePct = Annotated[
     Decimal,

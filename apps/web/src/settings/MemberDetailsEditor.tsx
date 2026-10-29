@@ -1,5 +1,4 @@
-import { useState } from "react";
-import type { FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "../api/client";
 import type { MemberPatch, SettingsMember } from "./api";
@@ -76,6 +75,22 @@ export function MemberDetailsEditor({
   const [newMoney, setNewMoney] = useState(
     member.investing.new_money_this_week || "0",
   );
+  const [broker, setBroker] = useState(member.investing.broker ?? "nordnet");
+  const [askStartValue, setAskStartValue] = useState(
+    member.investing.ask_value_start_of_year_dkk ?? "",
+  );
+  const [hasNriShareAccount, setHasNriShareAccount] = useState(
+    member.investing.has_indian_nri_share_account ?? false,
+  );
+  const [hasDanishPension, setHasDanishPension] = useState(
+    member.investing.has_danish_pension_account ?? false,
+  );
+  const [usStockPicksOptIn, setUsStockPicksOptIn] = useState(
+    member.investing.us_stock_picks_opt_in ?? false,
+  );
+  const [usStockPicksPct, setUsStockPicksPct] = useState(
+    member.investing.us_stock_picks_pct ?? "10",
+  );
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -108,7 +123,13 @@ export function MemberDetailsEditor({
         prefers_no_paperwork: member.investing.prefers_no_paperwork,
         satellite_pct: member.investing.satellite_pct,
         ask_used_this_fy_dkk: member.investing.ask_used_this_fy_dkk,
+        ask_value_start_of_year_dkk: askStartValue.trim() || null,
         lrs_used_this_fy: member.investing.lrs_used_this_fy,
+        broker,
+        has_indian_nri_share_account: hasNriShareAccount,
+        has_danish_pension_account: hasDanishPension,
+        us_stock_picks_opt_in: usStockPicksOptIn,
+        us_stock_picks_pct: usStockPicksPct,
         birth_year: birthYear.trim()
           ? Number(birthYear)
           : (member.investing.birth_year ?? null),
@@ -184,6 +205,20 @@ export function MemberDetailsEditor({
             );
             setMonthlySip(member.investing.monthly_sip_capacity || "0");
             setNewMoney(member.investing.new_money_this_week || "0");
+            setBroker(member.investing.broker ?? "nordnet");
+            setAskStartValue(
+              member.investing.ask_value_start_of_year_dkk ?? "",
+            );
+            setHasNriShareAccount(
+              member.investing.has_indian_nri_share_account ?? false,
+            );
+            setHasDanishPension(
+              member.investing.has_danish_pension_account ?? false,
+            );
+            setUsStockPicksOptIn(
+              member.investing.us_stock_picks_opt_in ?? false,
+            );
+            setUsStockPicksPct(member.investing.us_stock_picks_pct ?? "10");
             setOpen((current) => !current);
             setMessage("");
           }}
@@ -249,6 +284,103 @@ export function MemberDetailsEditor({
               {englishCopy.household.add_details}
             </summary>
             <div className="mt-3 grid gap-3">
+              {status === "NRI" ? (
+                <>
+                  <Select
+                    id={`member-broker-${member.id}`}
+                    label={englishCopy.denmark.broker}
+                    value={broker}
+                    onChange={(event) =>
+                      setBroker(
+                        event.currentTarget.value as
+                          "nordnet" | "saxo" | "danske_bank" | "other",
+                      )
+                    }
+                  >
+                    <option value="nordnet">
+                      {englishCopy.denmark.brokers.nordnet}
+                    </option>
+                    <option value="saxo">
+                      {englishCopy.denmark.brokers.saxo}
+                    </option>
+                    <option value="danske_bank">
+                      {englishCopy.denmark.brokers.danske_bank}
+                    </option>
+                    <option value="other">
+                      {englishCopy.denmark.other_broker}
+                    </option>
+                  </Select>
+                  <Field
+                    id={`member-ask-start-value-${member.id}`}
+                    label={englishCopy.denmark.ask_start_value_label}
+                    help={englishCopy.denmark.ask_start_value_hint}
+                  >
+                    <input
+                      id={`member-ask-start-value-${member.id}`}
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={askStartValue}
+                      onChange={(event) =>
+                        setAskStartValue(event.currentTarget.value)
+                      }
+                      className="min-h-12 w-full rounded-xl border border-line bg-background px-3"
+                    />
+                  </Field>
+                  <label className="flex min-h-10 items-center gap-3 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={hasNriShareAccount}
+                      onChange={(event) =>
+                        setHasNriShareAccount(event.currentTarget.checked)
+                      }
+                      className="size-5 accent-brand"
+                    />
+                    {englishCopy.denmark.nri_account}
+                  </label>
+                  <label className="flex min-h-10 items-center gap-3 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={hasDanishPension}
+                      onChange={(event) =>
+                        setHasDanishPension(event.currentTarget.checked)
+                      }
+                      className="size-5 accent-brand"
+                    />
+                    {englishCopy.denmark.pension_account}
+                  </label>
+                  <label className="flex min-h-10 items-center gap-3 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={usStockPicksOptIn}
+                      onChange={(event) =>
+                        setUsStockPicksOptIn(event.currentTarget.checked)
+                      }
+                      className="size-5 accent-brand"
+                    />
+                    {englishCopy.denmark.stock_picks_opt_in}
+                  </label>
+                  {usStockPicksOptIn ? (
+                    <Field
+                      id={`member-us-stock-picks-pct-${member.id}`}
+                      label={englishCopy.denmark.stock_picks_pct}
+                    >
+                      <input
+                        id={`member-us-stock-picks-pct-${member.id}`}
+                        type="number"
+                        min="0"
+                        max="25"
+                        step="0.1"
+                        value={usStockPicksPct}
+                        onChange={(event) =>
+                          setUsStockPicksPct(event.currentTarget.value)
+                        }
+                        className="min-h-12 w-full rounded-xl border border-line bg-background px-3"
+                      />
+                    </Field>
+                  ) : null}
+                </>
+              ) : null}
               {status === "NRI" ? (
                 <Field
                   id={`member-return-year-${member.id}`}

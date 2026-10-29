@@ -10,6 +10,7 @@ from typing import Literal
 
 from wealth.core.money import round_paise
 from wealth.policy.debt_picker import load_debt_rules
+from wealth.policy.denmark import ask_deposit_room_dkk
 from wealth.policy.residency import (
     eligibility_rule,
     load_residency_rules,
@@ -45,7 +46,9 @@ class MemberProfile:
     investing: InvestingPrefs = field(default_factory=InvestingPrefs)
     realised_equity_ltcg: Decimal = Decimal(0)
     realised_equity_stcg: Decimal = Decimal(0)
-    ask_used_dkk: Decimal = Decimal(0)
+    ask_used_dkk: Decimal | None = None
+    ask_deposit_fx_missing: bool = False
+    has_prior_ask_activity: bool = False
 
 
 @dataclass(frozen=True)
@@ -225,9 +228,12 @@ def build_member_contexts(
         for instrument in instrument_rules:
             status, condition = _eligibility_for_member(instrument, member.residency)
             eligibility_status[instrument] = status
-            if status == "conditional" and condition is not None:
+            if condition is not None:
                 eligibility_conditions[instrument] = condition
-        eligibility_status["gold_etf"] = "allowed"
+        gold_status, gold_condition = _eligibility_for_member("gold_etf", member.residency)
+        eligibility_status["gold_etf"] = gold_status
+        if gold_condition is not None:
+            eligibility_conditions["gold_etf"] = gold_condition
         eligibility_status["lrs"] = "allowed" if member.residency.status == "RI" else "not_allowed"
         eligibility_status["ask"] = "allowed" if member.residency.country == "DK" else "not_allowed"
         if age is None or age < 60:
@@ -301,6 +307,26 @@ def build_member_contexts(
             else Decimal(0)
         )
         nsc_room: Decimal | None = None if eligibility_status["nsc"] == "allowed" else Decimal(0)
+        ask_start_value = member.investing.ask_value_start_of_year_dkk
+        ask_start_value_missing = (
+            member.residency.country == "DK"
+            and member.has_prior_ask_activity
+            and ask_start_value is None
+        )
+        ask_net_deposits = (
+            member.ask_used_dkk
+            if member.ask_used_dkk is not None
+            else member.investing.ask_used_this_fy_dkk
+        )
+        ask_room = (
+            Decimal(0)
+            if member.ask_deposit_fx_missing or ask_start_value_missing
+            else ask_deposit_room_dkk(
+                ask_cap,
+                ask_start_value or Decimal(0),
+                ask_net_deposits,
+            )
+        )
         limits_room: dict[str, Decimal | None] = {
             "ppf_annual_inr": ppf_room,
             "lrs_annual_usd": max(Decimal(0), lrs_cap - lrs_used_usd)
@@ -308,7 +334,7 @@ def build_member_contexts(
             else Decimal(0),
             "lrs_tcs_threshold_inr": Decimal(str(rules["limits"]["lrs_tcs_threshold_inr"])),
             "lrs_tcs_pct": Decimal(str(rules["limits"]["lrs_tcs_pct"])),
-            "ask_deposit_dkk": max(Decimal(0), ask_cap - member.investing.ask_used_this_fy_dkk)
+            "ask_deposit_dkk": ask_room
             if eligibility_status.get("ask") == "allowed"
             else Decimal(0),
             "scss_inr": scss_room,
@@ -343,6 +369,10 @@ def build_member_contexts(
             member.residency,
             has_indian_funds=funding_notes.get(member.id, False),
         )
+        if member.ask_deposit_fx_missing:
+            notes = (*notes, "ask_deposit_fx_missing")
+        if ask_start_value_missing:
+            notes = (*notes, "ask_start_value_missing")
         contexts.append(
             MemberContext(
                 member=member,
@@ -380,6 +410,8 @@ def _eligibility_for_member(
 ) -> tuple[EligibilityStatus, str | None]:
     """Return rulebook status while honoring the US-person pooled-fund exclusion."""
     if instrument == "gold_etf":
+        if residency.country == "DK":
+            return "not_allowed", "dk_fund_tax_review"
         return "allowed", None
     rule = eligibility_rule(instrument, residency)
     if rule is None:
@@ -392,6 +424,8 @@ def _eligibility_for_member(
         return "not_allowed", None
     rule_document = load_residency_rules()["instruments"].get(key, {})
     condition = rule_document.get("note_key") if status == "conditional" else None
+    if instrument == "ucits_global_etf" and residency.status == "RI":
+        condition = "ucits_via_lrs_broker"
     return status, condition
 
 

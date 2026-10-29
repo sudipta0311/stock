@@ -134,6 +134,28 @@ export function Badge({
   );
 }
 
+export function Term({
+  children,
+  explanation,
+  prompt,
+}: {
+  children: ReactNode;
+  explanation: string;
+  prompt: string;
+}) {
+  return (
+    <span className="inline-flex flex-wrap items-center gap-2">
+      <span className="font-mono text-xs">{children}</span>
+      <details className="inline-block text-xs text-muted-foreground">
+        <summary className="cursor-pointer underline decoration-dotted underline-offset-2">
+          {prompt}
+        </summary>
+        <span className="ml-2">{explanation}</span>
+      </details>
+    </span>
+  );
+}
+
 export function Progress({
   value,
   max = 100,

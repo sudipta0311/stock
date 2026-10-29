@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wealth-copilot.invalid/schemas/eu_etfs.schema.json",
+  "title": "European listed ETF research rules",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "source_checked", "abis_source_url", "ask_source_url", "broker_sources", "selection", "instruments"],
+  "properties": {
+    "version": {"const": 1},
+    "source_checked": {"type": "string", "format": "date"},
+    "abis_source_url": {"type": "string", "format": "uri", "pattern": "^https://"},
+    "ask_source_url": {"type": "string", "format": "uri", "pattern": "^https://"},
+    "broker_sources": {
+      "type": "object",
+      "additionalProperties": {"type": "string", "format": "uri", "pattern": "^https://"}
+    },
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["global_core_exposure", "global_exposures", "ask_first", "stock_picks", "us_stock_tax", "listing_currency_preference", "fund_size_bands_usd", "comparison", "indian_vehicle", "no_source_notes"],
+      "properties": {
+        "global_core_exposure": {"type": "string", "minLength": 1},
+        "global_exposures": {"type": "array", "uniqueItems": true, "items": {"enum": ["global_all_world", "global_sp500", "global_nasdaq100", "global_developed", "global_em_ex_india"]}},
+        "ask_first": {"type": "boolean"},
+        "stock_picks": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["default_pct", "maximum_pct", "per_stock_max_pct_of_investable_wealth", "minimum_buy_dkk"],
+          "properties": {
+            "default_pct": {"$ref": "#/$defs/decimalString"},
+            "maximum_pct": {"$ref": "#/$defs/decimalString"},
+            "per_stock_max_pct_of_investable_wealth": {"$ref": "#/$defs/decimalString"},
+            "minimum_buy_dkk": {"$ref": "#/$defs/decimalString"}
+          }
+        },
+        "us_stock_tax": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["dividend_withholding_pct", "estate_filing_threshold_usd", "verified", "sources"],
+          "properties": {
+            "dividend_withholding_pct": {"$ref": "#/$defs/decimalString"},
+            "estate_filing_threshold_usd": {"$ref": "#/$defs/decimalString"},
+            "verified": {"const": false},
+            "sources": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["w8ben", "dividend_treaty", "danish_credit", "us_estate", "estate_treaty"],
+              "properties": {
+                "w8ben": {"$ref": "#/$defs/httpsUri"},
+                "dividend_treaty": {"$ref": "#/$defs/httpsUri"},
+                "danish_credit": {"$ref": "#/$defs/httpsUri"},
+                "us_estate": {"$ref": "#/$defs/httpsUri"},
+                "estate_treaty": {"$ref": "#/$defs/httpsUri"}
+              }
+            }
+          }
+        },
+        "listing_currency_preference": {"type": "array", "uniqueItems": true, "items": {"enum": ["DKK", "EUR", "USD", "GBP"]}},
+        "fund_size_bands_usd": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["large", "medium", "small"],
+          "properties": {
+            "large": {"$ref": "#/$defs/decimalString"},
+            "medium": {"$ref": "#/$defs/decimalString"},
+            "small": {"$ref": "#/$defs/decimalString"}
+          }
+        },
+        "comparison": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["dividend_withholding_pct", "dividend_yields_pct", "us_equivalent_ter_pct", "explanation_verified"],
+          "properties": {
+            "dividend_withholding_pct": {"$ref": "#/$defs/decimalString"},
+            "dividend_yields_pct": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["value", "as_of", "source_url"],
+                "properties": {
+                  "value": {"$ref": "#/$defs/decimalString"},
+                  "as_of": {"type": "string", "format": "date"},
+                  "source_url": {"$ref": "#/$defs/httpsUri"}
+                }
+              }
+            },
+            "us_equivalent_ter_pct": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["value", "source_url"],
+                "properties": {
+                  "value": {"$ref": "#/$defs/decimalString"},
+                  "source_url": {"$ref": "#/$defs/httpsUri"}
+                }
+              }
+            },
+            "explanation_verified": {"const": false}
+          }
+        },
+        "indian_vehicle": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["default", "direct_if_nri_account", "explanation"],
+          "properties": {
+            "default": {"type": "string", "minLength": 1},
+            "direct_if_nri_account": {"type": "string", "minLength": 1},
+            "explanation": {"type": "string", "minLength": 1}
+          }
+        },
+        "no_source_notes": {"type": "object", "additionalProperties": {"type": "string"}}
+      }
+    },
+    "instruments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "name", "isin", "tickers", "domicile", "index", "exposure", "ter_pct", "distribution", "fund_size_band", "fund_size_as_of", "fund_size_source_url", "abis_listed", "abis_list_year", "abis_source_url", "ask_eligible", "ask_source_url", "available_at", "availability_source_urls", "us_equivalent", "factsheet_url", "source_url", "last_checked", "verified", "tax_verified"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+          "name": {"type": "string", "minLength": 1},
+          "isin": {"type": "string", "pattern": "^[A-Z]{2}[A-Z0-9]{9}[0-9]$"},
+          "tickers": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["symbol", "currency"],
+              "properties": {
+                "symbol": {"type": "string", "pattern": "^[A-Z0-9.-]+$"},
+                "currency": {"enum": ["DKK", "EUR", "USD", "GBP"]}
+              }
+            }
+          },
+          "domicile": {"enum": ["IE", "LU", "FR"]},
+          "index": {"type": "string", "minLength": 1},
+          "exposure": {"enum": ["global_all_world", "global_sp500", "global_nasdaq100", "global_developed", "global_em_ex_india", "india_equity", "gold"]},
+          "ter_pct": {"$ref": "#/$defs/decimalString"},
+          "distribution": {"enum": ["accumulating", "distributing"]},
+          "fund_size_band": {"enum": ["small", "medium", "large"]},
+          "fund_size_as_of": {"type": "string", "format": "date"},
+          "fund_size_source_url": {"$ref": "#/$defs/httpsUri"},
+          "abis_listed": {"type": "boolean"},
+          "abis_list_year": {"type": "integer", "minimum": 2020},
+          "abis_source_url": {"$ref": "#/$defs/httpsUri"},
+          "ask_eligible": {"type": "boolean"},
+          "ask_source_url": {"$ref": "#/$defs/httpsUri"},
+          "available_at": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["nordnet", "saxo", "danske_bank"]}},
+          "availability_source_urls": {"type": "object", "minProperties": 1, "additionalProperties": {"$ref": "#/$defs/httpsUri"}},
+          "us_equivalent": {"type": "string", "minLength": 1},
+          "factsheet_url": {"$ref": "#/$defs/httpsUri"},
+          "source_url": {"$ref": "#/$defs/httpsUri"},
+          "last_checked": {"type": "string", "format": "date"},
+          "verified": {"const": false},
+          "tax_verified": {"const": false}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "decimalString": {"type": "string", "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,6})?$"},
+    "httpsUri": {"type": "string", "format": "uri", "pattern": "^https://"}
+  }
+}

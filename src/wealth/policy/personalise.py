@@ -33,6 +33,14 @@ from wealth.policy.debt_picker import (
     UnrankedDebtOption,
     pick_debt_with_unranked,
 )
+from wealth.policy.denmark import account_lines, dkk_from_inr, inr_from_dkk, round_dkk_for_display
+from wealth.policy.denmark_picks import (
+    approved_us_stock_buys,
+    load_eu_etfs,
+    pick_india_vehicle,
+    plain_fund_name,
+    ranked_etfs,
+)
 from wealth.policy.exits import ExitCard, HoldingFacts, build_exit_card, load_exit_rules
 from wealth.policy.foundation import FoundationItem, FoundationReport, foundation_check
 from wealth.policy.global_split import GeoTilts, load_global_rules, split_equity
@@ -54,6 +62,7 @@ from wealth.policy.routes import RouteContext, RouteDecision, select_route
 from wealth.policy.snapshot import WealthSnapshot
 from wealth.policy.stress import load_stress_rules, stress_compare, stress_test
 from wealth.policy.tax import Lot, load_tax_rules, ltcg_harvest
+from wealth.policy.us_situs import us_situs_value_usd
 from wealth.schemas.assets import AnyAsset, TraditionalPolicyAsset
 from wealth.schemas.common import LiquidityClass, Sleeve
 from wealth.schemas.profile import FinancialContext, Goal, InvestingPrefs, MemberTax, Residency
@@ -199,6 +208,7 @@ class WeeklyPlan(BaseModel):
     foundation: list[dict[str, Any]]
     route: dict[str, Any]
     actions: list[dict[str, Any]]
+    abroad_buy_list: list[dict[str, Any]] = Field(default_factory=list)
     exit_cards: list[dict[str, Any]]
     stress: dict[str, Any]
     notes: list[str]
@@ -365,6 +375,261 @@ def _merge_weekly_actions(
     carried = round_paise(buy_list.carry_forward + omitted_buy_amount)
     ranked = [action.model_copy(update={"rank": rank}) for rank, action in enumerate(selected, 1)]
     return ranked, carried
+
+
+def _abroad_exposure(action: Action) -> str | None:
+    if action.sleeve == "equity_india":
+        return "india_equity"
+    if action.sleeve != "equity_global":
+        return None
+    category = action.instrument_category.casefold()
+    for exposure in (
+        "global_all_world",
+        "global_sp500",
+        "global_nasdaq100",
+        "global_developed",
+        "global_em_ex_india",
+    ):
+        if exposure in category:
+            return exposure
+    return "global_all_world"
+
+
+def _abroad_action_rows(
+    actions: Sequence[Action],
+    members: Sequence[MemberProfile],
+    contexts: Sequence[MemberContext],
+    holdings: Sequence[HoldingInput],
+    market: MarketContext,
+    research: ResearchPack | None,
+) -> tuple[list[Action], list[dict[str, Any]], Decimal, list[str]]:
+    """Replace Danish foreign buys with sourced instruments and code-sized DKK lines."""
+    profiles = {member.id: member for member in members}
+    context_by_id = {context.member.id: context for context in contexts}
+    output: list[Action] = []
+    buy_list: list[dict[str, Any]] = []
+    notes: list[str] = []
+    carried = Decimal(0)
+    inr_per_dkk = market.fx_rates.get("DKK/INR")
+    running_ask_room: dict[str, Decimal] = {}
+
+    for action in actions:
+        member = profiles.get(action.member_id)
+        if (
+            member is None
+            or member.residency.country != "DK"
+            or action.kind not in {"BUY_LUMPSUM", "BUY_STP"}
+        ):
+            output.append(action)
+            continue
+        exposure = _abroad_exposure(action)
+        if exposure is None:
+            output.append(action)
+            continue
+        context = context_by_id.get(member.id)
+        if context is None:
+            output.append(action)
+            continue
+        direct_india = (
+            exposure == "india_equity"
+            and pick_india_vehicle(
+                has_indian_nri_share_account=member.investing.has_indian_nri_share_account,
+                broker=member.investing.broker,
+            )
+            == "in_equity_direct_core"
+        )
+        if direct_india:
+            output.append(action)
+            continue
+        if inr_per_dkk is None or inr_per_dkk <= 0:
+            carried += action.amount
+            notes.append("denmark_fx_missing")
+            continue
+
+        if member.id not in running_ask_room:
+            running_ask_room[member.id] = max(
+                Decimal(0), context.limits_room.get("ask_deposit_dkk") or Decimal(0)
+            )
+        requested_account = str(action.params.get("account_type", "ASK")).upper()
+        ask_room = running_ask_room[member.id] if requested_account != "ORDINARY" else Decimal(0)
+        total_dkk = dkk_from_inr(action.amount, inr_per_dkk)
+        ask_only = ask_room > 0
+        picks = ranked_etfs(exposure, member.investing.broker, ask_only=ask_only)
+        if not picks and ask_only:
+            picks = ranked_etfs(exposure, member.investing.broker)
+        broker_availability_unchecked = False
+        if not picks:
+            broker_availability_unchecked = True
+            picks = ranked_etfs(
+                exposure,
+                member.investing.broker,
+                ask_only=ask_only,
+                broker_filter=False,
+            )
+            if not picks and ask_only:
+                picks = ranked_etfs(
+                    exposure,
+                    member.investing.broker,
+                    broker_filter=False,
+                )
+        if not picks:
+            carried += action.amount
+            notes.append("abroad_etf_unavailable")
+            continue
+        pick = picks[0]
+        details: dict[str, Any] = {
+            "alternatives": [
+                {"name": plain_fund_name(str(row.instrument["name"]))} for row in picks[1:4]
+            ],
+            "held_us_etf_notes": [
+                {
+                    "symbol": holding.symbol,
+                    "eu_twin": plain_fund_name(str(pick.instrument["name"])),
+                }
+                for holding in holdings
+                if holding.member_id == member.id
+                and holding.market == "US"
+                and holding.security_type == "etf"
+                and holding.sleeve == "equity_global"
+            ],
+            "pension_note": member.investing.has_danish_pension_account,
+            "tax_verified": False,
+        }
+        stock_lines: list[dict[str, Any]] = []
+        stock_buys: list[tuple[SatelliteIdea, Decimal]] = []
+        if exposure != "india_equity" and member.investing.us_stock_picks_opt_in:
+            investable_inr = max(Decimal(0), context.snapshot.investable_total)
+            investable_dkk = dkk_from_inr(investable_inr, inr_per_dkk)
+            stock_budget = total_dkk * member.investing.us_stock_picks_pct / Decimal(100)
+            selected_ideas = research.ideas if research is not None else ()
+            stock_buys = approved_us_stock_buys(
+                selected_ideas,
+                investable_wealth_dkk=investable_dkk,
+                available_dkk=stock_budget,
+                satellite_pct=member.investing.us_stock_picks_pct,
+                minimum_buy_dkk=Decimal(
+                    str(
+                        load_eu_etfs()
+                        .get("selection", {})
+                        .get("stock_picks", {})
+                        .get("minimum_buy_dkk", "2000")
+                    )
+                ),
+            )
+            stock_total = sum((amount for _idea, amount in stock_buys), Decimal(0))
+            stock_tax_rules = load_eu_etfs().get("selection", {}).get("us_stock_tax", {})
+            stock_tax_sources = stock_tax_rules.get("sources", {})
+            current_situs_usd = us_situs_value_usd(
+                holding for holding in holdings if holding.member_id == member.id
+            )
+            usd_per_inr = market.fx_rates.get("USD/INR")
+            projected_situs_usd = (
+                current_situs_usd + stock_total * inr_per_dkk / usd_per_inr
+                if usd_per_inr is not None and usd_per_inr > 0
+                else None
+            )
+            stock_tax_details = {
+                "dividend_withholding_pct": str(
+                    stock_tax_rules.get("dividend_withholding_pct", "15")
+                ),
+                "current_us_situs_usd": format(current_situs_usd, ".2f"),
+                "projected_us_situs_usd": (
+                    format(projected_situs_usd, ".2f") if projected_situs_usd is not None else None
+                ),
+                "estate_filing_threshold_usd": str(
+                    stock_tax_rules.get("estate_filing_threshold_usd", "60000")
+                ),
+                "verified": False,
+                "sources": [
+                    {"label": key, "url": url}
+                    for key, url in stock_tax_sources.items()
+                    if isinstance(url, str)
+                ],
+            }
+            for idea, amount_dkk in stock_buys:
+                if not isinstance(idea, SatelliteIdea):
+                    continue
+                stock_lines.append(
+                    {
+                        "member_id": member.id,
+                        "account": "ordinary",
+                        "broker": member.investing.broker,
+                        "instrument": {
+                            "name": idea.name,
+                            "ticker": idea.symbol,
+                            "exchange": idea.exchange,
+                            "isin": idea.isin,
+                            "currency": idea.currency,
+                        },
+                        "amount_dkk": format(round_dkk_for_display(amount_dkk), "f"),
+                        "amount_inr": format(inr_from_dkk(amount_dkk, inr_per_dkk), ".2f"),
+                        "reason_codes": ["approved_us_stock_idea"],
+                        "how_to_key": f"how_to.{member.investing.broker}",
+                        "details": {
+                            "tax_verified": False,
+                            "us_stock_tax": stock_tax_details,
+                        },
+                    }
+                )
+        else:
+            stock_total = Decimal(0)
+        etf_amount = max(Decimal(0), total_dkk - stock_total)
+        lines = account_lines(
+            pick,
+            member_id=member.id,
+            broker=member.investing.broker,
+            amount_dkk=etf_amount,
+            ask_room_dkk=ask_room,
+            inr_per_dkk=inr_per_dkk,
+            details=details,
+            broker_availability_unchecked=broker_availability_unchecked,
+        )
+        if exposure == "india_equity":
+            for line in lines:
+                line["reason_codes"] = ["india_fund_from_denmark", *line["reason_codes"]]
+        lines.extend(stock_lines)
+        already = sum(1 for line in buy_list if line["member_id"] == member.id)
+        remaining = max(0, 3 - already)
+        accepted = lines[:remaining]
+        omitted_inr = Decimal(0)
+        if len(accepted) < len(lines):
+            omitted_inr = round_paise(
+                sum(
+                    (Decimal(str(line["amount_inr"])) for line in lines[len(accepted) :]),
+                    Decimal(0),
+                )
+            )
+            carried += omitted_inr
+        if not accepted:
+            carried += action.amount
+            continue
+        for line in accepted:
+            unrounded_dkk = line.pop("_amount_dkk_unrounded", Decimal(0))
+            if line["account"] == "ask":
+                running_ask_room[member.id] = max(
+                    Decimal(0), running_ask_room[member.id] - unrounded_dkk
+                )
+        for line in lines[len(accepted) :]:
+            line.pop("_amount_dkk_unrounded", None)
+        buy_list.extend(accepted)
+        params = {
+            **action.params,
+            "broker": member.investing.broker,
+            "abroad_buy_list": accepted,
+            "account_type": accepted[0]["account"].upper(),
+        }
+        output.append(
+            action.model_copy(
+                update={
+                    "kind": "BUY_ABROAD",
+                    "amount": round_paise(action.amount - omitted_inr),
+                    "instrument_category": "abroad_etf",
+                    "reason_code": "buy_abroad",
+                    "params": params,
+                }
+            )
+        )
+    return output, buy_list, round_paise(carried), list(dict.fromkeys(notes))
 
 
 def _member_sip_actions(week_input: WeekInput, members: Sequence[MemberProfile]) -> list[Action]:
@@ -1114,6 +1379,16 @@ def personalise(
         notes,
     )
     weekly_actions, carry_forward = _merge_weekly_actions(action_list, exits)
+    weekly_actions, abroad_buy_list, abroad_carry, abroad_notes = _abroad_action_rows(
+        weekly_actions,
+        member_profiles,
+        member_contexts,
+        user_data.holdings,
+        market,
+        selected_research,
+    )
+    carry_forward = round_paise(carry_forward + abroad_carry)
+    notes.extend(abroad_notes)
     if market.yield_table_as_of is not None and not market.yield_table_verified:
         notes.append(f"debt_yields_unverified_as_of:{market.yield_table_as_of.isoformat()}")
     notes.extend(action_list.notes)
@@ -1232,6 +1507,7 @@ def personalise(
         foundation=foundation_json,
         route=_route_json(route),
         actions=[action.model_dump(mode="json") for action in weekly_actions],
+        abroad_buy_list=abroad_buy_list,
         exit_cards=[_jsonable(card) for card in exits],
         stress=_stress_json(current_stress, target_stress),
         notes=list(dict.fromkeys(notes)),
