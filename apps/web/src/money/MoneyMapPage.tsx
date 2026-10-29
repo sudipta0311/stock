@@ -11,7 +11,7 @@ import {
 import { Link, useNavigate } from "react-router";
 import { ApiError } from "../api/client";
 import { sumInr } from "../lib/money";
-import { Badge, Button, Card, EmptyState, Progress, Stat } from "../ui";
+import { Badge, Button, Card, EmptyState, Progress, Stat, Term } from "../ui";
 import {
   getNetworth,
   listAssets,
@@ -760,7 +760,15 @@ export function MoneyMapPage() {
           <>
             <div className="flex flex-wrap items-start justify-between gap-3">
               <Stat
-                label="Net worth"
+                label={
+                  <Term
+                    explanation="The value of everything you own, minus what you owe."
+                    prompt="What's this?"
+                    learnMoreHref="/help#term-net-worth"
+                  >
+                    Net worth
+                  </Term>
+                }
                 value={shownAmount(totals.netWorth)}
                 detail={`${secondaryAmount(totals.netWorth) ? `${secondaryAmount(totals.netWorth)} · ` : ""}Updated ${networth?.as_of ? new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric" }).format(new Date(`${networth.as_of}T00:00:00`)) : "recently"}`}
               />
@@ -936,6 +944,7 @@ export function MoneyMapPage() {
         ) : offlineSummaryOnly ? null : (
           <EmptyState
             title={englishCopy.household_ui.money_empty_title}
+            description="Choose one item below to add it to your Money Map."
             icon={<WalletCards aria-hidden="true" className="size-5" />}
             action={
               <Button

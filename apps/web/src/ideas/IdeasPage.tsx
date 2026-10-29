@@ -23,7 +23,7 @@ import {
   getResearchIdeas,
 } from "../planning/api";
 import type { ActionResponse, WeeklyPlan } from "../planning/api";
-import { Badge, Card, Term } from "../ui";
+import { Badge, Card, EmptyState, Term } from "../ui";
 import englishCopy from "../copy/en.json";
 import { Highlights } from "../features/Highlights";
 
@@ -106,8 +106,10 @@ function DenmarkBuyCard({ plan }: { plan?: WeeklyPlan }) {
                 <div className="text-xs">
                   {copy.fund_code_label}:{" "}
                   <Term
+                    code
                     explanation={copy.fund_code_help}
                     prompt={copy.term_prompt}
+                    learnMoreHref="/help#term-isin"
                   >
                     {textValue(instrument.isin)}
                   </Term>
@@ -226,6 +228,7 @@ function DenmarkBuyCard({ plan }: { plan?: WeeklyPlan }) {
                           <Term
                             explanation={copy.us_stock_form_help}
                             prompt={copy.term_prompt}
+                            learnMoreHref="/help#term-w-8ben"
                           >
                             {copy.us_stock_form}
                           </Term>
@@ -494,9 +497,11 @@ function ResearchCard({
           );
         })
       ) : (
-        <p className="text-sm text-muted-foreground">
-          There are no research ideas this week.
-        </p>
+        <EmptyState
+          title="No new ideas this week"
+          description="Open Plan to review your targets and saved money."
+          icon={<Lightbulb aria-hidden="true" className="size-5" />}
+        />
       )}
     </Card>
   );

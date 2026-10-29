@@ -54,6 +54,7 @@ import { HouseholdSharingPanel } from "./HouseholdSharingPanel";
 import { MemberDetailsEditor } from "./MemberDetailsEditor";
 import { FundSipFineTune } from "./FundSipFineTune";
 import { useHousehold } from "../household/HouseholdContext";
+import { SignOutConfirmation } from "../account/SignOutConfirmation";
 
 const LOCAL_CONSENTS_KEY = "wealth.settings.consents";
 const DAILY_CHANGES_KEY = "wealth.settings.show-daily-changes";
@@ -241,6 +242,7 @@ export function SettingsPage() {
   const [riskSaving, setRiskSaving] = useState(false);
   const [exportMessage, setExportMessage] = useState("");
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [signOutOpen, setSignOutOpen] = useState(false);
   const [deleteText, setDeleteText] = useState("");
   const [deleteMessage, setDeleteMessage] = useState("");
   const [deletingAccount, setDeletingAccount] = useState(false);
@@ -572,7 +574,7 @@ export function SettingsPage() {
       await apiFetch<void>("/v1/me", { method: "DELETE" });
       await clearAllDeviceData();
       setDeleteOpen(false);
-      await logout();
+      await logout({ notice: false, preserveTourHistory: false });
     } catch {
       setDeleteMessage(englishCopy.settings.privacy.delete_error);
     } finally {
@@ -1321,7 +1323,7 @@ export function SettingsPage() {
             <Button
               variant="ghost"
               className="w-full"
-              onClick={() => void logout()}
+              onClick={() => setSignOutOpen(true)}
             >
               {englishCopy.settings.family.sign_out}
             </Button>
@@ -1503,6 +1505,15 @@ export function SettingsPage() {
             {englishCopy.settings.family.cancel}
           </Button>
         </div>
+      </Sheet>
+
+      <Sheet open={signOutOpen} onOpenChange={setSignOutOpen} title="Sign out">
+        <SignOutConfirmation
+          onCancel={() => setSignOutOpen(false)}
+          onConfirm={async (disablePush) => {
+            await logout({ disablePush });
+          }}
+        />
       </Sheet>
     </div>
   );

@@ -204,11 +204,7 @@ def highlight_fingerprint(plan: Any, key: str, copy: Mapping[str, Any]) -> str |
     catalog = copy.get("highlights", {}).get("catalog", {})
     if not isinstance(catalog, Mapping) or not catalog:
         return None
-    if (
-        candidate.copy_key not in catalog
-        and candidate.key not in catalog
-        and "other_detail" not in catalog
-    ):
+    if candidate.copy_key not in catalog and candidate.key not in catalog:
         return None
     return _fingerprint(candidate)
 
@@ -223,8 +219,8 @@ def highlights(plan: Any, context: HighlightContext) -> list[Highlight]:
     ranked: list[tuple[tuple[int, Decimal, int, int], Highlight]] = []
     for candidate in _candidate_rows(document):
         definition = catalog.get(candidate.copy_key, catalog.get(candidate.key))
-        if not isinstance(definition, Mapping):
-            definition = catalog.get("other_detail", {})
+        # A note without plain copy (e.g. an internal data-quality flag) stays in the
+        # details views; a vague generic card would only add noise ("when unsure, show less").
         if not isinstance(definition, Mapping):
             continue
         fingerprint = _fingerprint(candidate)

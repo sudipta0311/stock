@@ -11,6 +11,7 @@ import type { components } from "../api/schema";
 import { apiFetch } from "../api/client";
 import { queryClient } from "../api/query-client";
 import { clearAuthToken, getAuthToken, setAuthToken } from "./token";
+import { goToLogin } from "./navigation";
 import { clearAllDeviceData } from "../pwa/offline-cache";
 
 type AuthMode = "oidc" | "dev";
@@ -27,11 +28,17 @@ interface AuthContextValue {
   loginWithOidc(): Promise<void>;
   completeOidcLogin(): Promise<void>;
   completeSilentRenew(): Promise<void>;
-  logout(): Promise<void>;
+  logout(options?: {
+    disablePush?: boolean;
+    notice?: boolean;
+    preserveTourHistory?: boolean;
+  }): Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 const PROFILE_STATUS_KEY = "wealth.auth.has-profile";
+export const AUTH_RETURN_PATH_KEY = "wealth.auth.return-path";
+export const AUTH_NOTICE_STORAGE_KEY = "wealth.auth.notice";
 
 function configuredAuthMode(): AuthMode {
   return import.meta.env.VITE_AUTH_MODE === "dev" ? "dev" : "oidc";
@@ -126,6 +133,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [mode, verifyProfile]);
 
+  useEffect(() => {
+    function expireSession() {
+      if (!getAuthToken()) return;
+      queryClient.clear();
+      clearAuthToken();
+      setHasProfile(null);
+      setState("anonymous");
+      try {
+        const path = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+        window.sessionStorage.clear();
+        if (path.startsWith("/") && !path.startsWith("//")) {
+          window.sessionStorage.setItem(AUTH_RETURN_PATH_KEY, path);
+        }
+        window.sessionStorage.setItem(AUTH_NOTICE_STORAGE_KEY, "expired");
+      } catch {
+        // Sign-in still continues when browser storage is blocked.
+      }
+    }
+    window.addEventListener("wealth:auth-expired", expireSession);
+    return () =>
+      window.removeEventListener("wealth:auth-expired", expireSession);
+  }, []);
+
   const loginWithDevToken = useCallback(
     (token: string) => {
       if (mode !== "dev" || import.meta.env.PROD) {
@@ -163,28 +193,54 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await (await getOidcUserManager()).signinSilentCallback();
   }, []);
 
-  const logout = useCallback(async () => {
-    queryClient.clear();
-    clearAuthToken();
-    setState("anonymous");
-    setHasProfile(null);
-    try {
-      window.sessionStorage.clear();
-    } catch {
-      // Logout continues even when browser storage is blocked.
-    }
-    await clearAllDeviceData();
-    if (mode === "oidc") {
-      try {
-        const { getOidcUserManager } = await import("./oidc");
-        await (await getOidcUserManager()).signoutRedirect();
-        return;
-      } catch {
-        // Fall through to the local login page when the provider is unavailable.
+  const logout = useCallback(
+    async (
+      options: {
+        disablePush?: boolean;
+        notice?: boolean;
+        preserveTourHistory?: boolean;
+      } = {},
+    ) => {
+      if (options.disablePush) {
+        try {
+          const { disablePush } = await import("../pwa/push");
+          await disablePush();
+        } catch {
+          // Signing out still works if this phone cannot reach the push service.
+        }
       }
-    }
-    window.location.assign("/login");
-  }, [mode]);
+      if (mode === "oidc") {
+        try {
+          const { getOidcUserManager } = await import("./oidc");
+          await (await getOidcUserManager()).removeUser();
+        } catch {
+          // The app session still clears when local identity storage is unavailable.
+        }
+      }
+      queryClient.clear();
+      clearAuthToken();
+      setState("anonymous");
+      setHasProfile(null);
+      try {
+        await clearAllDeviceData({
+          preservePushSubscription: options.disablePush !== true,
+          preserveTourHistory: options.preserveTourHistory !== false,
+        });
+      } catch {
+        // Sign-out continues when offline data cannot be cleared.
+      }
+      try {
+        window.sessionStorage.clear();
+        if (options.notice !== false) {
+          window.sessionStorage.setItem(AUTH_NOTICE_STORAGE_KEY, "signed-out");
+        }
+      } catch {
+        // Logout continues even when browser storage is blocked.
+      }
+      goToLogin();
+    },
+    [mode],
+  );
 
   const value = useMemo(
     () => ({

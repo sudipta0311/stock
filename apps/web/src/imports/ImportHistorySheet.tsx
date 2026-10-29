@@ -4,9 +4,9 @@ import type { ImportJob } from "./api";
 import { Badge, Button, Card, Sheet } from "../ui";
 
 function sourceName(source: string | null): string {
-  if (source === "nsdl") return "NSDL CAS";
-  if (source === "cdsl") return "CDSL CAS";
-  if (source === "cams_kfin") return "CAMS / KFintech CAS";
+  if (source === "nsdl") return "NSDL fund statement";
+  if (source === "cdsl") return "CDSL fund statement";
+  if (source === "cams_kfin") return "CAMS / KFintech statement";
   return "Statement import";
 }
 
@@ -72,8 +72,18 @@ export function ImportHistorySheet({ jobs }: { jobs: readonly ImportJob[] }) {
             ))}
           </ul>
         ) : (
-          <Card className="text-sm text-muted-foreground">
-            No statements have been imported yet.
+          <Card className="grid gap-3">
+            <p className="text-sm text-muted-foreground">
+              Upload a statement to see its review here.
+            </p>
+            <Link
+              to="/import"
+              onClick={() => setOpen(false)}
+              data-primary="true"
+              className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground"
+            >
+              Upload a statement
+            </Link>
           </Card>
         )}
       </Sheet>

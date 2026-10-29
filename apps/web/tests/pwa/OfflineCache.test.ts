@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { apiFetch } from "../../src/api/client";
 import {
+  clearAllDeviceData,
   getOfflineSnapshotTime,
   storeOfflineSnapshot,
 } from "../../src/pwa/offline-cache";
@@ -34,6 +35,7 @@ function memoryCacheStorage() {
 afterEach(() => {
   vi.unstubAllGlobals();
   window.localStorage.clear();
+  window.sessionStorage.clear();
 });
 
 describe("offline snapshots", () => {
@@ -73,4 +75,28 @@ describe("offline snapshots", () => {
 
     await expect(getOfflineSnapshotTime()).resolves.toContain("27 Oct 2026");
   });
+});
+
+it("can clear device data while keeping push and tour history", async () => {
+  window.localStorage.setItem(
+    "wealth.push.subscription-id",
+    "synthetic-device",
+  );
+  window.localStorage.setItem("wealth.tour.seen:synthetic-user", "true");
+  window.localStorage.setItem("wealth.theme", "dark");
+  window.sessionStorage.setItem("temporary", "value");
+
+  await clearAllDeviceData({
+    preservePushSubscription: true,
+    preserveTourHistory: true,
+  });
+
+  expect(window.localStorage.getItem("wealth.push.subscription-id")).toBe(
+    "synthetic-device",
+  );
+  expect(window.localStorage.getItem("wealth.tour.seen:synthetic-user")).toBe(
+    "true",
+  );
+  expect(window.localStorage.getItem("wealth.theme")).toBeNull();
+  expect(window.sessionStorage.getItem("temporary")).toBeNull();
 });

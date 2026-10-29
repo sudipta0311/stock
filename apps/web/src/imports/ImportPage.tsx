@@ -318,6 +318,7 @@ export function ImportPage() {
             <Term
               explanation="A combined statement of your investment accounts."
               prompt="What's this?"
+              learnMoreHref="/help#term-cas"
             >
               CAS
             </Term>{" "}

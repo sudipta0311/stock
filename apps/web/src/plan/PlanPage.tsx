@@ -26,7 +26,7 @@ import type {
   LoanListResponse,
 } from "../money/api";
 import type { WeeklyPlan } from "../planning/api";
-import { Card, EmptyState, Progress } from "../ui";
+import { Card, EmptyState, Progress, Term } from "../ui";
 import { Highlights } from "../features/Highlights";
 import { useHousehold } from "../household/HouseholdContext";
 import {
@@ -82,9 +82,16 @@ function LoansPlanDetails({
         <p>
           Total left: <MoneyValue amountInr={summary.remaining_inr} />
         </p>
-        <p>
-          Monthly payments: <MoneyValue amountInr={summary.monthly_emis_inr} />
-        </p>
+        <div className="flex flex-wrap items-center gap-1">
+          <Term
+            explanation="The total amount due on your loans each month."
+            prompt="What's this?"
+            learnMoreHref="/help#term-monthly-payments"
+          >
+            Monthly payments
+          </Term>
+          : <MoneyValue amountInr={summary.monthly_emis_inr} />
+        </div>
         {summary.debt_load_pct !== null ? (
           <p>
             Monthly payments are {summary.debt_load_pct}% of monthly income.
@@ -454,7 +461,16 @@ function AllocationCard({
     <Card className="grid gap-3">
       <div>
         <h2 className="text-base font-semibold">Your money vs your plan</h2>
-        <p className="mt-1 text-sm text-muted-foreground">{summary}</p>
+        <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+          <Term
+            explanation="Your money mix compares each kind of holding with its target."
+            prompt="What's this?"
+            learnMoreHref="/help#term-money-mix"
+          >
+            Money mix
+          </Term>
+          <p className="text-sm text-muted-foreground">{summary}</p>
+        </div>
       </div>
       <div
         role="img"
@@ -652,7 +668,15 @@ function DebtAnswerCard({ plan }: { plan: WeeklyPlan }) {
       : null;
   return (
     <Card>
-      <h2 className="text-base font-semibold">Safe money</h2>
+      <h2 className="text-base font-semibold">
+        <Term
+          explanation="Savings meant for near-term needs and steady access."
+          prompt="What's this?"
+          learnMoreHref="/help#term-safe-money"
+        >
+          Safe money
+        </Term>
+      </h2>
       {primary ? (
         <>
           <p className="mt-2 text-base">

@@ -1,0 +1,485 @@
+{
+  "groups": [
+    {
+      "title": "Getting started",
+      "articles": [
+        {
+          "id": "getting-started",
+          "title": "Start with a rough picture",
+          "summary": "Spend five minutes adding rough numbers; Wealth Copilot organizes them and suggests next steps, but never moves money.",
+          "steps": [
+            "Sign in with an invitation from your family.",
+            "Your four main tabs are Home, Money, Plan, and Ideas; Inbox holds updates.",
+            "Add a few balances in Money, or upload a statement.",
+            "Check Home for this week's short list.",
+            "Open Plan to review targets and saved details."
+          ],
+          "example": "Example: Start with a bank balance of ₹25,000, then add more when ready.",
+          "related": [
+            "adding-money",
+            "uploading-statements",
+            "your-plan"
+          ]
+        },
+        {
+          "id": "adding-money",
+          "title": "Add your money",
+          "summary": "Save what you own and owe so your family can see a clearer picture.",
+          "steps": [
+            "Open Money and choose an item that matches what you have.",
+            "Enter its current value from a passbook, statement, or account app.",
+            "Add the account name and owner when asked.",
+            "Save a rough value now and improve it later."
+          ],
+          "example": "Example: Enter ₹25,000 for a bank deposit and update it after your next statement.",
+          "related": [
+            "deposits",
+            "retirement-savings",
+            "post-office",
+            "insurance",
+            "gold",
+            "shares-funds",
+            "property",
+            "money-abroad"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Add each kind of money",
+      "articles": [
+        {
+          "id": "deposits",
+          "title": "Add a bank deposit",
+          "summary": "Use the latest balance shown by your bank.",
+          "steps": [
+            "Choose Savings for an everyday account or Fixed deposit for a term deposit.",
+            "Enter the balance or starting amount shown on your passbook or bank app.",
+            "Add the interest rate and end date from the certificate when available."
+          ],
+          "example": "Example: A deposit starting at ₹50,000 can be updated with its latest bank value.",
+          "related": [
+            "adding-money",
+            "your-plan"
+          ]
+        },
+        {
+          "id": "retirement-savings",
+          "title": "Add retirement savings",
+          "summary": "Use your latest work or retirement account statement.",
+          "steps": [
+            "Choose PPF or EPF to match the account you want to record.",
+            "Enter the current balance shown in your passbook or annual statement.",
+            "Add your monthly contribution only if the form asks for it."
+          ],
+          "example": "Example: Use the balance printed on your latest EPF statement.",
+          "related": [
+            "adding-money",
+            "your-plan",
+            "uploading-statements"
+          ]
+        },
+        {
+          "id": "post-office",
+          "title": "Add post office savings",
+          "summary": "Record the scheme name and current value from its passbook.",
+          "steps": [
+            "Choose the matching post office savings type.",
+            "Copy the current balance from your passbook or statement.",
+            "Add the start date, rate, and maturity date when shown."
+          ],
+          "example": "Example: A monthly savings account uses its latest passbook balance.",
+          "related": [
+            "adding-money",
+            "deposits",
+            "your-plan"
+          ]
+        },
+        {
+          "id": "insurance",
+          "title": "Add an insurance policy",
+          "summary": "Record cover and payments from your policy schedule.",
+          "steps": [
+            "Choose the policy type shown on your schedule.",
+            "Enter the cover amount and payment amount with its frequency.",
+            "Add the start date and term from the schedule.",
+            "Use a current surrender value only when your insurer confirms it."
+          ],
+          "example": "Example: A yearly premium of ₹12,000 is entered as a yearly payment.",
+          "related": [
+            "adding-money",
+            "your-plan",
+            "family-plans"
+          ]
+        },
+        {
+          "id": "gold",
+          "title": "Add your gold",
+          "summary": "Use a recent value from a receipt, account, or current price estimate.",
+          "steps": [
+            "Choose jewellery, coins, a gold account, or a listed gold fund.",
+            "Enter weight and purity when you know them.",
+            "Add the current value from a receipt or account statement."
+          ],
+          "example": "Example: Enter a rough value now if you do not know the exact weight.",
+          "related": [
+            "adding-money",
+            "shares-funds",
+            "your-plan"
+          ]
+        },
+        {
+          "id": "shares-funds",
+          "title": "Add shares and funds",
+          "summary": "A current statement can fill in many holdings at once.",
+          "steps": [
+            "Upload a fund statement or broker file to review several holdings together.",
+            "To add one item, search for its name and choose the matching account.",
+            "Use a recent statement for units and buy price when available.",
+            "Review every suggested change before saving it."
+          ],
+          "example": "Example: A fund statement can show 12 units and their latest value.",
+          "related": [
+            "uploading-statements",
+            "broker-files",
+            "investing-denmark",
+            "your-plan"
+          ]
+        },
+        {
+          "id": "property",
+          "title": "Add a property",
+          "summary": "Enter a reasonable current estimate for the share your family owns.",
+          "steps": [
+            "Add the estimated value from a recent valuation or local listings.",
+            "Enter your ownership share if the home is jointly owned.",
+            "Add a linked loan separately under Loans."
+          ],
+          "example": "Example: A home estimated at ₹40 lakh can be recorded at a 50 percent share.",
+          "related": [
+            "adding-money",
+            "loans",
+            "your-plan"
+          ]
+        },
+        {
+          "id": "money-abroad",
+          "title": "Add money abroad",
+          "summary": "Use the value and currency shown by your overseas account.",
+          "steps": [
+            "Choose shares, funds, cash, or another matching item.",
+            "Enter the account currency and latest value from its statement.",
+            "Add the owner and account country when asked."
+          ],
+          "example": "Example: Enter a DKK 2,000 balance from a Danish account statement.",
+          "related": [
+            "shares-funds",
+            "broker-files",
+            "investing-denmark",
+            "family-plans"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Statements and your plan",
+      "articles": [
+        {
+          "id": "uploading-statements",
+          "title": "Upload a fund statement",
+          "summary": "A combined fund statement helps you review holdings from several fund houses.",
+          "steps": [
+            "Open CAMS or KFintech and choose its consolidated statement service.",
+            "Select a date range and request a PDF using the service's instructions.",
+            "Upload the PDF in Money and follow the file password hint shown there.",
+            "Check every holding before you confirm the changes."
+          ],
+          "example": "Example: Choose the latest statement date for a current list of fund holdings.",
+          "related": [
+            "shares-funds",
+            "broker-files",
+            "imported-file",
+            "privacy-safety"
+          ]
+        },
+        {
+          "id": "broker-files",
+          "title": "Upload a broker file",
+          "summary": "Use a holdings or trade file from your broker to review listed investments.",
+          "steps": [
+            "In an Indian broker app, look under Reports, Holdings, or Statements.",
+            "In Nordnet, Saxo, or Danske Bank, look for a holdings export or account statement.",
+            "Choose a spreadsheet file when one is offered, then upload it in Money.",
+            "Review the file date and each suggested change before saving."
+          ],
+          "example": "Example: A recent holdings export can refresh a share balance from last month.",
+          "related": [
+            "shares-funds",
+            "money-abroad",
+            "imported-file",
+            "when-something-looks-wrong"
+          ]
+        },
+        {
+          "id": "imported-file",
+          "title": "What happens to an upload",
+          "summary": "The app prepares a review so you can choose which changes to save.",
+          "steps": [
+            "Wait while the app reads the file and matches its items.",
+            "Check new, changed, and duplicate items in the review.",
+            "Confirm the items you want saved to Money.",
+            "Only confirmed items are saved; the uploaded file is not kept.",
+            "Find earlier uploads under Import history."
+          ],
+          "example": "Example: You can leave an uncertain item unchanged and review it later.",
+          "related": [
+            "uploading-statements",
+            "broker-files",
+            "privacy-safety",
+            "when-something-looks-wrong"
+          ]
+        },
+        {
+          "id": "your-plan",
+          "title": "Understand your plan",
+          "summary": "Your plan compares your saved money with targets based on your answers.",
+          "steps": [
+            "Open Plan to see your money mix and any gaps.",
+            "Review each suggestion before acting in your bank or broker app.",
+            "Each suggestion links to the details that led to it.",
+            "Update saved balances when your statements change.",
+            "Revisit goals or family details when your plans change.",
+            "The plan changes as your saved details change."
+          ],
+          "example": "Example: A new savings balance can change how much safe money you already have.",
+          "related": [
+            "safe-money",
+            "this-week",
+            "loans",
+            "investing-denmark"
+          ]
+        },
+        {
+          "id": "safe-money",
+          "title": "Understand safe money",
+          "summary": "Safe money is savings meant for near-term needs and steady access.",
+          "steps": [
+            "Check the target shown on Plan.",
+            "Add savings and loans to make the estimate more useful.",
+            "Keep enough easy-to-reach money for bills and emergencies."
+          ],
+          "example": "Example: A bank balance of ₹25,000 can count toward money you can reach soon.",
+          "related": [
+            "your-plan",
+            "deposits",
+            "loans"
+          ]
+        },
+        {
+          "id": "this-week",
+          "title": "Follow this week",
+          "summary": "Home shows up to three actions chosen from your saved details.",
+          "steps": [
+            "Choose How? to see the next steps in your own account.",
+            "Choose Why? when you want the reason behind a suggestion.",
+            "Choose Done after you complete it in your bank or broker app.",
+            "Review the list again after new information arrives.",
+            "Three keeps your next steps short and easy to review."
+          ],
+          "example": "Example: A suggested deposit is only a reminder; the app never moves money.",
+          "related": [
+            "your-plan",
+            "notes-emails",
+            "investing-denmark"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Loans and Denmark",
+      "articles": [
+        {
+          "id": "loans",
+          "title": "Add and update loans",
+          "summary": "Keep each loan's balance, rate, and monthly payment current.",
+          "steps": [
+            "Open Money and choose Loans to add the lender and current balance.",
+            "Record an extra payment with its date and amount.",
+            "Add a new rate or monthly payment when your lender changes it.",
+            "Update the balance from a recent statement when it is available.",
+            "Compare the loan cost with your savings needs before paying extra.",
+            "An extra payment reduces debt; investing can gain or lose value."
+          ],
+          "example": "Example: A ₹5,000 extra payment can be recorded after it appears in your statement.",
+          "related": [
+            "your-plan",
+            "safe-money",
+            "property"
+          ]
+        },
+        {
+          "id": "investing-denmark",
+          "title": "Investing from Denmark",
+          "summary": "Check your Danish account, fund access, and tax notes before investing.",
+          "steps": [
+            "Review the Danish share savings account, called Aktiesparekonto, first.",
+            "Compare European-listed funds that your account can hold.",
+            "Some United States funds may be unavailable or treated differently in Europe.",
+            "Check current tax notes with official guidance before acting."
+          ],
+          "example": "Example: A DKK 2,000 monthly amount is only an illustration, not a recommendation.",
+          "related": [
+            "money-abroad",
+            "shares-funds",
+            "your-plan",
+            "when-something-looks-wrong"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Family and reminders",
+      "articles": [
+        {
+          "id": "family-plans",
+          "title": "Share a family plan",
+          "summary": "Invite trusted family members and choose what each person can change.",
+          "steps": [
+            "Open Settings and add each family member with their own details.",
+            "Invite a partner by email from the family sharing section.",
+            "Choose can edit or can view for each invited person.",
+            "Record each holding under the person who owns it."
+          ],
+          "example": "Example: A shared deposit belongs to the person or people named by its bank.",
+          "related": [
+            "adding-money",
+            "privacy-safety",
+            "your-plan"
+          ]
+        },
+        {
+          "id": "notes-emails",
+          "title": "Read notes and emails",
+          "summary": "Notes explain important details, while email reminders help you keep up.",
+          "steps": [
+            "Read a note before acting on the screen it explains.",
+            "Hide a note with its close button when you have read it.",
+            "The weekly email is scheduled for Sunday morning.",
+            "Open Settings to turn off weekly emails or reminders."
+          ],
+          "example": "Example: You can turn reminders off and still open Home whenever you like.",
+          "related": [
+            "this-week",
+            "privacy-safety",
+            "when-something-looks-wrong"
+          ]
+        }
+      ]
+    },
+    {
+      "title": "Privacy and help",
+      "articles": [
+        {
+          "id": "privacy-safety",
+          "title": "Keep your account safe",
+          "summary": "Your saved details are private to the family plan and its invited members.",
+          "steps": [
+            "Your profile, saved money, family settings, and reminders live on EU servers.",
+            "A family member can see details allowed by their can view or can edit role.",
+            "Open Settings to export or delete your account and saved data.",
+            "Sign out from the account menu on a shared phone.",
+            "This signs you out of the app, not of Google.",
+            "We never ask for your bank passwords or PINs."
+          ],
+          "example": "Example: Signing out removes this app's session from the phone.",
+          "related": [
+            "family-plans",
+            "uploading-statements",
+            "imported-file"
+          ]
+        },
+        {
+          "id": "glossary",
+          "title": "Plain word list",
+          "summary": "These explanations make short labels in the app easier to understand.",
+          "steps": [
+            "Open a label's What's this? note when you see it in the app.",
+            "Choose Learn more to return to this list.",
+            "Ask your family member before sharing account details."
+          ],
+          "example": "Example: A yearly return estimate summarizes change over one year.",
+          "related": [
+            "getting-started",
+            "your-plan",
+            "investing-denmark"
+          ],
+          "entries": [
+            {
+              "id": "net-worth",
+              "term": "Net worth",
+              "meaning": "The value of what you own after subtracting what you owe."
+            },
+            {
+              "id": "money-mix",
+              "term": "Money mix",
+              "meaning": "The share of your saved money in each kind of holding."
+            },
+            {
+              "id": "safe-money",
+              "term": "Safe money",
+              "meaning": "Savings meant for near-term needs and steady access."
+            },
+            {
+              "id": "monthly-payments",
+              "term": "Monthly payments",
+              "meaning": "The total amount due on your loans each month."
+            },
+            {
+              "id": "monthly-payment",
+              "term": "Monthly payment",
+              "meaning": "The fixed amount you pay toward one loan each month."
+            },
+            {
+              "id": "isin",
+              "term": "ISIN",
+              "meaning": "A code that identifies a listed investment."
+            },
+            {
+              "id": "cas",
+              "term": "CAS",
+              "meaning": "A file that combines fund holdings from several places."
+            },
+            {
+              "id": "w-8ben",
+              "term": "W-8BEN",
+              "meaning": "A United States tax form used by some investors outside that country."
+            },
+            {
+              "id": "etf",
+              "term": "ETF",
+              "meaning": "A fund traded on an exchange like a share."
+            }
+          ]
+        },
+        {
+          "id": "when-something-looks-wrong",
+          "title": "Fix a screen that looks wrong",
+          "summary": "Check the selected family plan and latest statement before changing a number.",
+          "steps": [
+            "Confirm the family plan, person, and currency at the top of the screen.",
+            "Compare the saved value with your latest passbook or statement.",
+            "Wait for a missing price or enter a value when the screen offers that choice.",
+            "Reopen a stuck upload from Import history and check its message.",
+            "If it still looks wrong, tell your support contact the screen name and what happened."
+          ],
+          "example": "Example: A missing price does not mean your saved holding was deleted.",
+          "related": [
+            "imported-file",
+            "broker-files",
+            "investing-denmark"
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -301,7 +301,7 @@ export function LoanDetailPage() {
           ))
         ) : (
           <p className="text-sm text-muted-foreground">
-            No updates have been recorded yet.
+            Record a payment or change to see it here.
           </p>
         )}
       </Card>
@@ -318,8 +318,9 @@ export function LoanDetailPage() {
             <Term
               explanation="The fixed amount you pay each month."
               prompt="What's this?"
+              learnMoreHref="/help#term-monthly-payment"
             >
-              Monthly payment (EMI)
+              Monthly payment
             </Term>
             : <strong>{money(item.emi, item.currency)}</strong>
             {item.rate_type

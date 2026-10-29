@@ -149,9 +149,14 @@ def test_highlight_amount_fingerprint_uses_display_quantum() -> None:
     assert fingerprint == rounded
 
 
-def test_highlighter_does_not_reformat_unknown_plan_content() -> None:
-    plan: dict[str, Any] = {"notes": [{"key": "unlisted_note", "amount": "0"}]}
+def test_notes_without_plain_copy_are_not_shown_as_highlights() -> None:
+    plan: dict[str, Any] = {
+        "notes": [
+            {"key": "unlisted_note", "amount": "0"},
+            "debt_yields_unverified_as_of:2026-10-28",
+        ]
+    }
     result = highlights(plan, HighlightContext(screen="plan", copy=_COPY))
 
-    assert len(result) == 1
-    assert result[0].title == _COPY["highlights"]["catalog"]["other_detail"]["title"]
+    assert result == []
+    assert highlight_fingerprint(plan, "unlisted_note", _COPY) is None

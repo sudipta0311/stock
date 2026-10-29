@@ -1,7 +1,7 @@
 import { Navigate, useLocation } from "react-router";
 import type { ReactNode } from "react";
 import { EmptyState, Skeleton } from "../ui";
-import { useAuth } from "../auth/AuthContext";
+import { AUTH_RETURN_PATH_KEY, useAuth } from "../auth/AuthContext";
 
 export function RouteGuard({
   children,
@@ -26,7 +26,7 @@ export function RouteGuard({
   if (state === "anonymous") {
     try {
       window.sessionStorage.setItem(
-        "wealth.auth.return-path",
+        AUTH_RETURN_PATH_KEY,
         `${location.pathname}${location.search}${location.hash}`,
       );
     } catch {

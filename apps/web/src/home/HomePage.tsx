@@ -32,7 +32,7 @@ import {
   updateActionStatus,
 } from "../planning/api";
 import type { ActionResponse, WeeklyPlan } from "../planning/api";
-import { Button, Card, Sheet } from "../ui";
+import { Button, Card, Sheet, Term } from "../ui";
 import { Highlights } from "../features/Highlights";
 import englishCopy from "../copy/en.json";
 import { useHousehold } from "../household/HouseholdContext";
@@ -443,7 +443,15 @@ export function HomePage() {
   return (
     <div data-copy-screen="home" className="grid gap-4">
       <Card className="home-hero">
-        <p className="text-sm font-medium text-muted-foreground">Net worth</p>
+        <p className="text-sm font-medium text-muted-foreground">
+          <Term
+            explanation="The value of everything you own, minus what you owe."
+            prompt="What's this?"
+            learnMoreHref="/help#term-net-worth"
+          >
+            Net worth
+          </Term>
+        </p>
         {networth.supported && netWorthPrimary ? (
           <p className="mt-1 text-hero font-bold tabular-nums">
             <span className="tracking-tight">{netWorthPrimary}</span>
@@ -454,7 +462,9 @@ export function HomePage() {
             ) : null}
           </p>
         ) : (
-          <p className="mt-1 text-base">Your total will appear here.</p>
+          <p className="mt-1 text-base">
+            Add an item in Money to see your total.
+          </p>
         )}
         <div className="mt-3 grid gap-1.5">
           {fxRate === undefined &&

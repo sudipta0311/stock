@@ -204,7 +204,16 @@ export async function apiFetch<T>(
         }
       } else {
         if (waking) emitWaking(false);
-        if (!response.ok) throw await asApiError(response);
+        if (!response.ok) {
+          if (
+            response.status === 401 &&
+            getAuthToken() &&
+            typeof window !== "undefined"
+          ) {
+            window.dispatchEvent(new Event("wealth:auth-expired"));
+          }
+          throw await asApiError(response);
+        }
         if (response.status === 204) return undefined as T;
         if (snapshotRequest)
           await storeOfflineSnapshot(snapshotUrl, response.clone());

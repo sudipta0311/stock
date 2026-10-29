@@ -6,7 +6,12 @@ import { PwaLifecycle } from "./PwaLifecycle";
 import { RouteGuard } from "./RouteGuard";
 import { WakeIndicator } from "./WakeIndicator";
 import { Button, Card } from "../ui";
-import { OfflineWriteSync } from "../money/OfflineWriteSync";
+
+const OfflineWriteSync = lazy(() =>
+  import("../money/OfflineWriteSync").then((module) => ({
+    default: module.OfflineWriteSync,
+  })),
+);
 
 const ProtectedHouseholdApp = lazy(() =>
   import("./ProtectedHouseholdApp").then((module) => ({
@@ -92,6 +97,12 @@ const SettingsPage = lazy(() =>
   })),
 );
 
+const HelpPage = lazy(() =>
+  import("../help/HelpPage").then((module) => ({
+    default: module.HelpPage,
+  })),
+);
+
 class AppErrorBoundary extends Component<
   { children: ReactNode },
   { hasError: boolean }
@@ -167,7 +178,9 @@ export function App() {
     <AppErrorBoundary>
       <BrowserRouter>
         <PwaLifecycle />
-        <OfflineWriteSync />
+        <Suspense fallback={null}>
+          <OfflineWriteSync />
+        </Suspense>
         <WakeIndicator />
         <Suspense fallback={<RouteLoading />}>
           <Routes>
@@ -197,6 +210,7 @@ export function App() {
                 <Route path="inbox" element={<InboxPage />} />
                 <Route path="inbox/brief/:week" element={<BriefPage />} />
                 <Route path="settings" element={<SettingsPage />} />
+                <Route path="help" element={<HelpPage />} />
               </Route>
             </Route>
             <Route path="/" element={<Navigate to="/login" replace />} />

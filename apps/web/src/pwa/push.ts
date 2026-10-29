@@ -1,8 +1,7 @@
 import { apiFetch } from "../api/client";
 import { apiPathAvailable } from "../api/feature-support";
 import type { components } from "../api/schema";
-
-const PUSH_SUBSCRIPTION_ID_KEY = "wealth.push.subscription-id";
+import { PUSH_SUBSCRIPTION_ID_KEY } from "./storage-keys";
 
 export class PushSetupError extends Error {
   constructor(

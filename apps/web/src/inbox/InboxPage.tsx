@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router";
+import { Inbox } from "lucide-react";
 import { apiFetch } from "../api/client";
 import { apiPathAvailable } from "../api/feature-support";
 import { asArray, asRecord, textValue } from "../features/data";
@@ -9,7 +10,7 @@ import {
   ScreenError,
   ScreenLoading,
 } from "../features/api";
-import { Badge, Card } from "../ui";
+import { Badge, Card, EmptyState } from "../ui";
 
 interface InboxEntry {
   id?: string;
@@ -97,9 +98,28 @@ export function InboxPage({
           Briefs, reminders and updates, newest first.
         </p>
       </header>
-      <InboxGroup title="Briefs" entries={briefs} kind="brief" />
-      <InboxGroup title="Reminders" entries={reminders} kind="reminder" />
-      <InboxGroup title="Alerts" entries={alerts} kind="alert" />
+      {!briefs.length && !reminders.length && !alerts.length ? (
+        <EmptyState
+          title="Nothing new in your inbox"
+          description="Choose which weekly notes and reminders you receive."
+          icon={<Inbox aria-hidden="true" className="size-5" />}
+          action={
+            <Link
+              to="/settings"
+              data-primary="true"
+              className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground"
+            >
+              Review email settings
+            </Link>
+          }
+        />
+      ) : (
+        <>
+          <InboxGroup title="Briefs" entries={briefs} kind="brief" />
+          <InboxGroup title="Reminders" entries={reminders} kind="reminder" />
+          <InboxGroup title="Alerts" entries={alerts} kind="alert" />
+        </>
+      )}
     </div>
   );
 }

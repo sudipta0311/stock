@@ -9,16 +9,24 @@ const sourcePath = fileURLToPath(
 const bannedTermsSourcePath = fileURLToPath(
   new URL("../../../copy/banned_terms.yaml", import.meta.url),
 );
+const helpSourcePath = fileURLToPath(
+  new URL("../../../copy/help.en.yaml", import.meta.url),
+);
 const outputPath = fileURLToPath(
   new URL("../src/copy/en.json", import.meta.url),
 );
 const bannedTermsOutputPath = fileURLToPath(
   new URL("../src/copy/banned-terms.json", import.meta.url),
 );
+const helpOutputPath = fileURLToPath(
+  new URL("../src/copy/help.en.json", import.meta.url),
+);
 const source = await readFile(sourcePath, "utf8");
 const document = yaml.load(source);
 const bannedTermsSource = await readFile(bannedTermsSourcePath, "utf8");
 const bannedTerms = yaml.load(bannedTermsSource);
+const helpSource = await readFile(helpSourcePath, "utf8");
+const helpDocument = yaml.load(helpSource);
 
 if (
   typeof document !== "object" ||
@@ -43,7 +51,20 @@ await writeFile(
   `${JSON.stringify(bannedTerms, null, 2)}\n`,
   "utf8",
 );
+if (
+  typeof helpDocument !== "object" ||
+  helpDocument === null ||
+  Array.isArray(helpDocument)
+) {
+  throw new TypeError("Help copy must be a YAML mapping.");
+}
+await writeFile(
+  helpOutputPath,
+  `${JSON.stringify(helpDocument, null, 2)}\n`,
+  "utf8",
+);
 console.log("Generated src/copy/en.json from copy/en.yaml.");
 console.log(
   "Generated src/copy/banned-terms.json from copy/banned_terms.yaml.",
 );
+console.log("Generated src/copy/help.en.json from copy/help.en.yaml.");

@@ -1,9 +1,24 @@
-import { CircleUserRound } from "lucide-react";
+import { CircleHelp } from "lucide-react";
+import { lazy, Suspense } from "react";
 import { Link, Outlet, useLocation } from "react-router";
 import { BottomNavigation } from "./BottomNavigation";
 import { OfflineStatus } from "./OfflineStatus";
-import { InstallExperience } from "./InstallExperience";
 import { HouseholdControls } from "../household/HouseholdControls";
+import { AccountMenu } from "../account/AccountMenu";
+import { useHousehold } from "../household/HouseholdContext";
+import { helpArticleForPath } from "../help/context";
+
+const InstallExperience = lazy(() =>
+  import("./InstallExperience").then((module) => ({
+    default: module.InstallExperience,
+  })),
+);
+
+const GuidedTour = lazy(() =>
+  import("../tour/GuidedTour").then((module) => ({
+    default: module.GuidedTour,
+  })),
+);
 
 const pageTitles: Array<[string, string]> = [
   ["/money", "Money"],
@@ -12,6 +27,7 @@ const pageTitles: Array<[string, string]> = [
   ["/inbox", "Inbox"],
   ["/settings", "Settings"],
   ["/import", "Import"],
+  ["/help", "Help"],
 ];
 
 function titleForPath(pathname: string): string {
@@ -29,6 +45,7 @@ export function AppShell() {
 
 function AppShellLayout() {
   const location = useLocation();
+  const { me } = useHousehold();
   const title = titleForPath(location.pathname);
 
   return (
@@ -44,22 +61,32 @@ function AppShellLayout() {
             />
             <h1 className="truncate text-page-title font-semibold">{title}</h1>
           </div>
-          <Link
-            to="/settings"
-            aria-label="Settings"
-            className="motion-safe:active:scale-[.98] grid size-11 shrink-0 place-items-center rounded-full border border-line bg-background text-foreground transition hover:bg-muted"
-          >
-            <CircleUserRound aria-hidden="true" className="size-5" />
-          </Link>
+          <div className="flex shrink-0 items-center gap-1">
+            <Link
+              to={`/help#${helpArticleForPath(location.pathname)}`}
+              aria-label={`Help with ${title}`}
+              className="motion-safe:active:scale-[.98] grid size-11 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            >
+              <CircleHelp aria-hidden="true" className="size-5" />
+            </Link>
+            <AccountMenu />
+          </div>
         </div>
       </header>
       <OfflineStatus />
-      <InstallExperience />
+      <Suspense fallback={null}>
+        <InstallExperience />
+      </Suspense>
       <main className="mx-auto grid w-full max-w-3xl gap-4 px-4 py-4 sm:px-6 sm:py-6">
         <HouseholdControls />
         <Outlet />
       </main>
       <BottomNavigation />
+      {me?.id ? (
+        <Suspense fallback={null}>
+          <GuidedTour userId={me.id} />
+        </Suspense>
+      ) : null}
     </div>
   );
 }

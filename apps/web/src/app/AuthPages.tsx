@@ -2,18 +2,34 @@ import { useEffect, useState } from "react";
 import { AlertCircle } from "lucide-react";
 import { Link, Navigate, useNavigate } from "react-router";
 import { Button, Card } from "../ui";
-import { useAuth } from "../auth/AuthContext";
+import {
+  AUTH_NOTICE_STORAGE_KEY,
+  AUTH_RETURN_PATH_KEY,
+  useAuth,
+} from "../auth/AuthContext";
 
 function consumeReturnPath(fallback: string): string {
   try {
-    const stored = window.sessionStorage.getItem("wealth.auth.return-path");
-    window.sessionStorage.removeItem("wealth.auth.return-path");
+    const stored = window.sessionStorage.getItem(AUTH_RETURN_PATH_KEY);
+    window.sessionStorage.removeItem(AUTH_RETURN_PATH_KEY);
     return stored?.startsWith("/") && !stored.startsWith("//")
       ? stored
       : fallback;
   } catch {
     return fallback;
   }
+}
+
+function consumeLoginNotice(): string | null {
+  try {
+    const stored = window.sessionStorage.getItem(AUTH_NOTICE_STORAGE_KEY);
+    window.sessionStorage.removeItem(AUTH_NOTICE_STORAGE_KEY);
+    if (stored === "expired") return "Please sign in again.";
+    if (stored === "signed-out") return "You've signed out.";
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 export function LoginPage() {
@@ -27,6 +43,7 @@ export function LoginPage() {
   } = useAuth();
   const [token, setToken] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [notice] = useState(consumeLoginNotice);
   if (state === "loading")
     return (
       <main className="grid min-h-screen place-items-center p-5">
@@ -61,6 +78,11 @@ export function LoginPage() {
         </p>
       </div>
       <Card>
+        {notice ? (
+          <p role="status" className="mb-4 text-sm text-muted-foreground">
+            {notice}
+          </p>
+        ) : null}
         {configurationError ? (
           <p role="alert" className="mb-4 text-sm text-danger-foreground">
             <AlertCircle
@@ -121,11 +143,10 @@ export function LoginPage() {
                 )
               }
             >
-              Continue with secure sign-in
+              Continue with Google
             </Button>
             <p className="text-sm text-muted-foreground">
-              Your identity provider handles sign-in. Wealth Copilot never
-              stores your password.
+              Only invited family members can sign in.
             </p>
           </div>
         )}

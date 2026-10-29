@@ -31,6 +31,7 @@ import { useHousehold } from "../household/HouseholdContext";
 import { getPlan } from "../planning/api";
 import { apiPathAvailable } from "../api/feature-support";
 import englishCopy from "../copy/en.json";
+import { helpArticleForAssetType } from "../help/context";
 
 type PlanMember = components["schemas"]["PlanMember"];
 
@@ -809,6 +810,12 @@ function AssetForm({
             <p className="mt-1 text-sm text-muted-foreground">
               {englishCopy.household_ui.form_rough_numbers}
             </p>
+            <Link
+              to={`/help#${helpArticleForAssetType(assetType)}`}
+              className="mt-2 inline-flex min-h-10 items-center text-sm font-medium text-brand underline underline-offset-2"
+            >
+              Where do I find this?
+            </Link>
           </div>
           {workflow ? (
             <span className="rounded-full bg-muted px-3 py-2 text-sm tabular-nums">
@@ -959,7 +966,19 @@ export function AddAssetPage() {
     useState<AssetType>("traditional_policy");
   const assetType: AssetType =
     type === "insurance" ? insuranceType : (type as AssetType);
-  if (type === "us_investments") return <USInvestmentStep />;
+  if (type === "us_investments") {
+    return (
+      <div className="grid gap-3">
+        <Link
+          to={`/help#${helpArticleForAssetType(type)}`}
+          className="inline-flex min-h-10 w-fit items-center text-sm font-medium text-brand underline underline-offset-2"
+        >
+          Where do I find this?
+        </Link>
+        <USInvestmentStep />
+      </div>
+    );
+  }
   if (!(assetType in assetForms)) {
     return (
       <Card>

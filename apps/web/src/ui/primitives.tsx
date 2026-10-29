@@ -1,21 +1,12 @@
-import * as Dialog from "@radix-ui/react-dialog";
 import * as ProgressPrimitive from "@radix-ui/react-progress";
-import * as ToastPrimitive from "@radix-ui/react-toast";
 import {
   AlertCircle,
   CheckCircle2,
   LoaderCircle,
   TriangleAlert,
-  X,
 } from "lucide-react";
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useMemo,
-  useState,
-} from "react";
 import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from "react";
+import { useId, useState } from "react";
 import type { ApiFieldError } from "../api/client";
 
 function classes(...names: Array<string | false | undefined>): string {
@@ -81,7 +72,7 @@ export function Stat({
   value,
   detail,
 }: {
-  label: string;
+  label: ReactNode;
   value: string;
   detail?: string;
 }) {
@@ -138,22 +129,47 @@ export function Term({
   children,
   explanation,
   prompt,
+  learnMoreHref,
+  code = false,
 }: {
   children: ReactNode;
   explanation: string;
   prompt: string;
+  learnMoreHref?: string;
+  /** Monospace for identifiers such as fund codes; labels keep the surrounding font. */
+  code?: boolean;
 }) {
+  // A button and span, not <details>: Term sits inside sentences, and <details> inside a
+  // <p> is invalid HTML that browsers repair by splitting the paragraph.
+  const [open, setOpen] = useState(false);
+  const explanationId = useId();
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
-      <span data-term-copy className="font-mono text-xs">
+      <span data-term-copy className={code ? "font-mono text-xs" : undefined}>
         {children}
       </span>
-      <details className="inline-block text-xs text-muted-foreground">
-        <summary className="cursor-pointer underline decoration-dotted underline-offset-2">
+      <span className="inline-block text-xs text-muted-foreground">
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={explanationId}
+          onClick={() => setOpen((value) => !value)}
+          className="cursor-pointer underline decoration-dotted underline-offset-2"
+        >
           {prompt}
-        </summary>
-        <span className="ml-2">{explanation}</span>
-      </details>
+        </button>
+        <span id={explanationId} hidden={!open}>
+          <span className="ml-2">{explanation}</span>
+          {learnMoreHref ? (
+            <a
+              className="ml-2 whitespace-nowrap text-brand underline underline-offset-2"
+              href={learnMoreHref}
+            >
+              Learn more
+            </a>
+          ) : null}
+        </span>
+      </span>
     </span>
   );
 }
@@ -238,137 +254,6 @@ export function EmptyState({
       {action}
     </div>
   );
-}
-
-export function Sheet({
-  open,
-  onOpenChange,
-  title,
-  description,
-  children,
-}: {
-  open: boolean;
-  onOpenChange(open: boolean): void;
-  title: string;
-  description?: string;
-  children: ReactNode;
-}) {
-  return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/40" />
-        <Dialog.Content className="fixed inset-x-0 bottom-0 z-50 max-h-[88vh] overflow-y-auto rounded-t-3xl border border-line bg-surface p-5 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shadow-xl sm:inset-x-auto sm:left-1/2 sm:top-1/2 sm:bottom-auto sm:w-full sm:max-w-lg sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl">
-          <div className="mb-4 flex items-start justify-between gap-4">
-            <div>
-              <Dialog.Title className="text-lg font-semibold">
-                {title}
-              </Dialog.Title>
-              {description ? (
-                <Dialog.Description className="mt-1 text-sm text-muted-foreground">
-                  {description}
-                </Dialog.Description>
-              ) : null}
-            </div>
-            <Dialog.Close asChild>
-              <Button
-                aria-label="Close"
-                variant="ghost"
-                className="size-12 px-0"
-              >
-                <X aria-hidden="true" className="size-5" />
-              </Button>
-            </Dialog.Close>
-          </div>
-          {children}
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
-  );
-}
-
-interface ToastItem {
-  id: number;
-  title: string;
-  description?: string;
-  action?: { label: string; altText: string; onClick(): void };
-}
-
-interface ToastContextValue {
-  toast(item: Omit<ToastItem, "id">): void;
-}
-
-const ToastContext = createContext<ToastContextValue | null>(null);
-
-export function ToastProvider({ children }: { children: ReactNode }) {
-  const [items, setItems] = useState<ToastItem[]>([]);
-  const toast = useCallback((item: Omit<ToastItem, "id">) => {
-    setItems((current) => [
-      ...current,
-      { ...item, id: Date.now() + Math.random() },
-    ]);
-  }, []);
-  const context = useMemo(() => ({ toast }), [toast]);
-  return (
-    <ToastContext.Provider value={context}>
-      <ToastPrimitive.Provider swipeDirection="down">
-        {children}
-        {items.map((item) => (
-          <ToastPrimitive.Root
-            key={item.id}
-            className="rounded-xl border border-line bg-surface p-4 text-foreground shadow-lg"
-            onOpenChange={(open) => {
-              if (!open)
-                setItems((current) =>
-                  current.filter((toastItem) => toastItem.id !== item.id),
-                );
-            }}
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <ToastPrimitive.Title className="text-sm font-semibold">
-                  {item.title}
-                </ToastPrimitive.Title>
-                {item.description ? (
-                  <ToastPrimitive.Description className="mt-1 text-sm text-muted-foreground">
-                    {item.description}
-                  </ToastPrimitive.Description>
-                ) : null}
-              </div>
-              <ToastPrimitive.Close asChild>
-                <button
-                  className="grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted"
-                  aria-label="Dismiss notification"
-                >
-                  <X aria-hidden="true" className="size-4" />
-                </button>
-              </ToastPrimitive.Close>
-            </div>
-            {item.action ? (
-              <ToastPrimitive.Action altText={item.action.altText} asChild>
-                <button
-                  type="button"
-                  onClick={item.action.onClick}
-                  className="mt-3 min-h-12 rounded-lg bg-brand px-4 text-sm font-semibold text-brand-foreground"
-                >
-                  {item.action.label}
-                </button>
-              </ToastPrimitive.Action>
-            ) : null}
-          </ToastPrimitive.Root>
-        ))}
-        <ToastPrimitive.Viewport
-          className="fixed inset-x-3 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-[60] flex flex-col gap-2 outline-none sm:left-auto sm:right-4 sm:top-4 sm:bottom-auto sm:w-96"
-          aria-label="Notifications"
-        />
-      </ToastPrimitive.Provider>
-    </ToastContext.Provider>
-  );
-}
-
-export function useToast(): ToastContextValue {
-  const context = useContext(ToastContext);
-  if (!context) throw new Error("useToast must be used inside ToastProvider.");
-  return context;
 }
 
 export function fieldErrorMessage(

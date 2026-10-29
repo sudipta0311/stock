@@ -1,3 +1,8 @@
+import {
+  PUSH_SUBSCRIPTION_ID_KEY,
+  TOUR_SEEN_STORAGE_PREFIX,
+} from "./storage-keys";
+
 const SNAPSHOT_CACHE = "api-snapshots";
 const SETTINGS_KEY = "wealth.offline-cache.enabled";
 
@@ -145,10 +150,29 @@ export async function clearOfflineData(): Promise<void> {
   await Promise.all([clearAppCaches(), clearAppDatabases()]);
 }
 
-export async function clearAllDeviceData(): Promise<void> {
+export async function clearAllDeviceData(
+  options: {
+    preservePushSubscription?: boolean;
+    preserveTourHistory?: boolean;
+  } = {},
+): Promise<void> {
   await clearOfflineData();
   try {
+    const pushSubscriptionId = options.preservePushSubscription
+      ? window.localStorage.getItem(PUSH_SUBSCRIPTION_ID_KEY)
+      : null;
+    const tourHistory = options.preserveTourHistory
+      ? Object.keys(window.localStorage)
+          .filter((key) => key.startsWith(TOUR_SEEN_STORAGE_PREFIX))
+          .map((key) => [key, window.localStorage.getItem(key)] as const)
+      : [];
     window.localStorage.clear();
+    if (pushSubscriptionId) {
+      window.localStorage.setItem(PUSH_SUBSCRIPTION_ID_KEY, pushSubscriptionId);
+    }
+    for (const [key, value] of tourHistory) {
+      if (value !== null) window.localStorage.setItem(key, value);
+    }
     window.sessionStorage.clear();
   } catch {
     // Deletion and sign-out continue when browser storage is blocked.
