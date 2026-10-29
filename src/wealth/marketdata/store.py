@@ -100,8 +100,11 @@ def _upsert_security(
             set_=update_values,
         )
     else:
+        # Migration 0014 made (market, symbol) a partial unique index, which ON CONFLICT
+        # can only infer from its columns and predicate, not by name.
         statement = statement.on_conflict_do_update(
-            constraint="uq_securities_market_symbol",
+            index_elements=[Security.market, Security.symbol],
+            index_where=Security.symbol.is_not(None),
             set_={
                 "name": statement.excluded.name,
                 "security_type": statement.excluded.security_type,

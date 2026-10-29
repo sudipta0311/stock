@@ -188,6 +188,33 @@ def test_master_refresh_reports_etf_endpoint_failure_and_keeps_equities(
     assert equities[0].symbol in stored_symbols
 
 
+def test_amfi_schemes_without_isin_upsert_by_market_symbol_repeatedly(
+    migrated_database: MigratedDatabase,
+) -> None:
+    # Real AMFI files include schemes with no ISIN; they key on (market, symbol), the
+    # partial unique index from migration 0014. Production failed here before.
+    scheme = AmfiNav(
+        scheme_code="999777",
+        isin_primary=None,
+        isin_reinvestment=None,
+        name="Synthetic Liquid Fund",
+        plan="Direct Plan",
+        option="Growth",
+        nav=Decimal("1000.0000"),
+        as_of=date(2026, 10, 28),
+        category="mf:debt",
+        sleeve="debt",
+    )
+    with Session(migrated_database.owner_engine) as session, session.begin():
+        store.upsert_amfi_master(session, [scheme])
+        store.upsert_amfi_master(session, [scheme])
+        count = session.scalar(
+            select(func.count()).select_from(Security).where(Security.symbol == "AMFI-999777")
+        )
+
+    assert count == 1
+
+
 def test_prune_keeps_recent_held_proxy_and_index_member_prices_only(
     migrated_database: MigratedDatabase,
 ) -> None:
