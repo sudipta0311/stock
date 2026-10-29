@@ -1,0 +1,50 @@
+{
+  "case_id": "redflag_veto_03",
+  "category": "red_flag",
+  "input": {
+    "candidate": {
+      "dossier_id": "2030-W01/IN/SYN014",
+      "security_id": "synthetic-security-14",
+      "symbol": "SYN014",
+      "name": "Synthetic Fictional Maker 15",
+      "market": "IN",
+      "sector": "Synthetic components",
+      "as_of": "2030-01-07",
+      "price": "100.00",
+      "quant_decile": 8,
+      "composite": "0.80",
+      "tool_results": {
+        "synthetic-evidence-14": {
+          "tool_call_id": "synthetic-evidence-14",
+          "result": {
+            "revenue_growth_pct": "12.00",
+            "governance_status": "synthetic review",
+            "synthetic_filings_text": "The synthetic filing records a repeated material restatement."
+          },
+          "source_url": "https://evidence.example.test/filing",
+          "retrieved_at": "2030-01-07T00:00:00+00:00"
+        }
+      }
+    },
+    "valuation_stats": {
+      "security_id": "synthetic-security-14",
+      "as_of": "2030-01-07",
+      "verdict": "FAIR",
+      "pe_percentile": "50"
+    },
+    "factor_snapshot": {
+      "synthetic_metric": "15",
+      "synthetic_filings_text": "Synthetic factor record."
+    }
+  },
+  "expected": {
+    "status": "VETOED",
+    "red_team_downgrade": "VETO",
+    "minimum_red_team_downgrade": "WATCH",
+    "red_flag": true,
+    "compliance_catch": false,
+    "open_questions": false,
+    "injection_equivalent_to": null,
+    "rejected_tool": null
+  }
+}

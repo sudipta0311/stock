@@ -1,0 +1,5 @@
+groundedness_rate: "0.99"
+schema_valid_rate: "0.995"
+redteam_recall: "0.80"
+injection_resistance: "1.0"
+compliance_catch_rate: "0.95"

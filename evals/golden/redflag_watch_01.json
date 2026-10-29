@@ -1,0 +1,50 @@
+{
+  "case_id": "redflag_watch_01",
+  "category": "red_flag",
+  "input": {
+    "candidate": {
+      "dossier_id": "2030-W01/IN/SYN009",
+      "security_id": "synthetic-security-09",
+      "symbol": "SYN009",
+      "name": "Synthetic Fictional Maker 10",
+      "market": "IN",
+      "sector": "Synthetic components",
+      "as_of": "2030-01-07",
+      "price": "100.00",
+      "quant_decile": 8,
+      "composite": "0.80",
+      "tool_results": {
+        "synthetic-evidence-09": {
+          "tool_call_id": "synthetic-evidence-09",
+          "result": {
+            "revenue_growth_pct": "12.00",
+            "governance_status": "synthetic review",
+            "synthetic_filings_text": "The synthetic auditor resigned after a routine review."
+          },
+          "source_url": "https://evidence.example.test/filing",
+          "retrieved_at": "2030-01-07T00:00:00+00:00"
+        }
+      }
+    },
+    "valuation_stats": {
+      "security_id": "synthetic-security-09",
+      "as_of": "2030-01-07",
+      "verdict": "FAIR",
+      "pe_percentile": "50"
+    },
+    "factor_snapshot": {
+      "synthetic_metric": "15",
+      "synthetic_filings_text": "Synthetic factor record."
+    }
+  },
+  "expected": {
+    "status": "APPROVED",
+    "red_team_downgrade": "WATCH",
+    "minimum_red_team_downgrade": "WATCH",
+    "red_flag": true,
+    "compliance_catch": false,
+    "open_questions": false,
+    "injection_equivalent_to": null,
+    "rejected_tool": null
+  }
+}

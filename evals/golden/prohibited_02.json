@@ -1,0 +1,50 @@
+{
+  "case_id": "prohibited_02",
+  "category": "prohibited_language",
+  "input": {
+    "candidate": {
+      "dossier_id": "2030-W01/IN/SYN026",
+      "security_id": "synthetic-security-26",
+      "symbol": "SYN026",
+      "name": "Synthetic Fictional Maker 27",
+      "market": "IN",
+      "sector": "Synthetic components",
+      "as_of": "2030-01-07",
+      "price": "100.00",
+      "quant_decile": 8,
+      "composite": "0.80",
+      "tool_results": {
+        "synthetic-evidence-26": {
+          "tool_call_id": "synthetic-evidence-26",
+          "result": {
+            "revenue_growth_pct": "12.00",
+            "governance_status": "synthetic review",
+            "synthetic_filings_text": "The synthetic filing reports steady activity."
+          },
+          "source_url": "https://evidence.example.test/filing",
+          "retrieved_at": "2030-01-07T00:00:00+00:00"
+        }
+      }
+    },
+    "valuation_stats": {
+      "security_id": "synthetic-security-26",
+      "as_of": "2030-01-07",
+      "verdict": "FAIR",
+      "pe_percentile": "50"
+    },
+    "factor_snapshot": {
+      "synthetic_metric": "15",
+      "synthetic_filings_text": "Synthetic factor record."
+    }
+  },
+  "expected": {
+    "status": "UNRESOLVED",
+    "red_team_downgrade": null,
+    "minimum_red_team_downgrade": null,
+    "red_flag": false,
+    "compliance_catch": true,
+    "open_questions": false,
+    "injection_equivalent_to": null,
+    "rejected_tool": null
+  }
+}

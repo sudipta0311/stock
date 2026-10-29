@@ -1,0 +1,15 @@
+[
+  {
+    "strongest_bear_case": "The synthetic record may be incomplete.",
+    "falsifier": "A later synthetic filing clears the warning.",
+    "downgrade": "VETO",
+    "reasons": [
+      {
+        "text": "The synthetic filing records a governance warning.",
+        "evidence": [
+          "synthetic-evidence-13"
+        ]
+      }
+    ]
+  }
+]

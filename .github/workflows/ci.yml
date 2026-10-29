@@ -59,6 +59,8 @@ jobs:
       - run: alembic upgrade head
       - run: ruff check src tests
       - run: ruff format --check src tests
+      - name: Run deterministic research eval
+        run: python -m wealth.research.evals run --router fake --cases evals/golden --out out/evals/ci
       - run: pytest
 
   pwa:

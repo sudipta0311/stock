@@ -1,0 +1,20 @@
+[
+  {
+    "claims": [],
+    "drivers": [
+      "Repeat orders remain steady."
+    ],
+    "risks": [
+      "A larger buyer could delay a future order."
+    ],
+    "geo_exposure": {
+      "us_revenue_pct": null,
+      "tariff_sensitive": null,
+      "evidence": []
+    },
+    "fundamental_verdict": "NEUTRAL",
+    "open_questions": [
+      "A dated operating update is not available."
+    ]
+  }
+]

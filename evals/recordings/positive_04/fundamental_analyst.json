@@ -1,0 +1,26 @@
+[
+  {
+    "claims": [
+      {
+        "kind": "FACT",
+        "text": "Revenue growth was 12% in the synthetic period.",
+        "evidence": [
+          "synthetic-evidence-04"
+        ]
+      }
+    ],
+    "drivers": [
+      "Repeat orders remain steady."
+    ],
+    "risks": [
+      "A larger buyer could delay a future order."
+    ],
+    "geo_exposure": {
+      "us_revenue_pct": null,
+      "tariff_sensitive": null,
+      "evidence": []
+    },
+    "fundamental_verdict": "POSITIVE",
+    "open_questions": []
+  }
+]

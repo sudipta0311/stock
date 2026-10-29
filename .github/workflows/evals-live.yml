@@ -1,0 +1,37 @@
+name: Live research eval
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  live-eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install -e ".[research]"
+      - name: Run live research eval
+        env:
+          FOUNDRY_ENDPOINT: ${{ secrets.FOUNDRY_ENDPOINT }}
+          FOUNDRY_API_KEY: ${{ secrets.FOUNDRY_API_KEY }}
+          FOUNDRY_MODEL_WORKHORSE: ${{ secrets.FOUNDRY_MODEL_WORKHORSE }}
+          FOUNDRY_MODEL_REDTEAM: ${{ secrets.FOUNDRY_MODEL_REDTEAM }}
+        run: python -m wealth.research.evals run --router live --cases evals/golden --out "out/evals/live-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" --budget-usd 0.50
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: research-eval-${{ github.run_id }}-${{ github.run_attempt }}
+          path: out/evals/live-*
+          if-no-files-found: warn
