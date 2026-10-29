@@ -114,6 +114,7 @@ def _policy_user(
             symbol="SYNTHUS",
             market="US",
             currency="USD",
+            domicile="US",
             security_type="equity",
             sleeve="equity_global",
             category="equity:global",

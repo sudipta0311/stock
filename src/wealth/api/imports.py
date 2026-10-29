@@ -27,7 +27,7 @@ from wealth.importer.models import ParsedHolding, ParsedStatement
 
 MAX_UPLOAD_MB = 10
 PARSE_TIMEOUT_SECONDS = 20
-_MAX_MULTIPART_FIELDS = 5
+_MAX_MULTIPART_FIELDS = 6
 _MAX_FIELD_BYTES = 4096
 _PARSE_SEMAPHORE = threading.BoundedSemaphore(1)
 _ISIN = re.compile(r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$")
@@ -74,6 +74,10 @@ class ImportItemResponse(ImportApiModel):
     quantity: str
     statement_value: str | None
     account_ref: str | None
+    market: str | None = None
+    currency: str | None = None
+    exchange: str | None = None
+    amount: str | None = None
     sleeve: str | None
     status: str
     diff: dict[str, Any] | None
@@ -101,12 +105,27 @@ class ImportDetailResponse(ImportJobResponse):
     headers: list[str] | None = None
     samples: list[list[str]] = Field(default_factory=list)
     suggested_mapping: dict[str, str | None] = Field(default_factory=dict)
+    broker: str | None = None
+    market_default: Literal["IN", "US", "DK", "EU", "GB"] = "US"
+    currency_default: Literal["INR", "USD", "EUR", "DKK", "GBP", "SEK"] = "USD"
+    tax_wrapper: Literal["ask", "ordinary", "pension"] | None = None
+    tax_wrapper_question: bool = False
+    cash_flow_count: int = 0
 
 
 class ImportMappingRequest(ImportApiModel):
     kind: Literal["holdings", "tradebook"]
     columns: dict[str, str]
     save_as: str | None = None
+    broker: Literal["nordnet", "saxo", "danske_bank", "ibkr", "vested", "indmoney", "other"] = (
+        "other"
+    )
+    market_default: Literal["IN", "US", "DK", "EU", "GB"] = "US"
+    currency_default: Literal["INR", "USD", "EUR", "DKK", "GBP", "SEK"] = "USD"
+
+
+class ImportConfirmationRequest(ImportApiModel):
+    tax_wrapper: Literal["ask", "ordinary", "pension"] | None = None
 
 
 class ImportConfirmationResponse(ImportApiModel):
@@ -261,6 +280,10 @@ def _get_item_response(item: Any) -> dict[str, Any]:
         "quantity": str(payload.get("quantity", "0")),
         "statement_value": statement_value,
         "account_ref": payload.get("account_ref"),
+        "market": payload.get("market"),
+        "currency": payload.get("currency"),
+        "exchange": payload.get("exchange"),
+        "amount": payload.get("amount"),
         "sleeve": override.get("sleeve", payload.get("sleeve")),
         "status": item.status,
         "diff": item.diff,
@@ -404,6 +427,7 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                                 "doc_type": {"type": "string", "maxLength": 32},
                                 "account_id": {"type": "string", "format": "uuid"},
                                 "member_id": {"type": "string", "format": "uuid"},
+                                "broker": {"type": "string"},
                             },
                         }
                     }
@@ -441,6 +465,7 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             doc_type_value = form.get("doc_type") if form is not None else None
             account_id_value = form.get("account_id") if form is not None else None
             member_id_value = form.get("member_id") if form is not None else None
+            broker_value = form.get("broker") if form is not None else None
             if not isinstance(file, UploadFile):
                 return _problem(request, 422, "invalid_upload", "A statement file is required.")
             if password_value is not None and not isinstance(password_value, str):
@@ -451,6 +476,19 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                 return _problem(request, 422, "invalid_upload", "The account selection is invalid.")
             if member_id_value is not None and not isinstance(member_id_value, str):
                 return _problem(request, 422, "invalid_upload", "The member selection is invalid.")
+            if broker_value is not None and not isinstance(broker_value, str):
+                return _problem(request, 422, "invalid_upload", "The broker selection is invalid.")
+            broker_name = (broker_value or "other").strip().casefold()
+            if broker_name not in {
+                "nordnet",
+                "saxo",
+                "danske_bank",
+                "ibkr",
+                "vested",
+                "indmoney",
+                "other",
+            }:
+                return _problem(request, 422, "invalid_broker", "Choose a supported broker.")
             doc_type = (doc_type_value or "cas")[:32]
             if doc_type_value is not None and len(doc_type_value) > 32:
                 return _problem(request, 422, "invalid_upload", "The document type is too long.")
@@ -475,21 +513,39 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
         if is_csv or is_xlsx:
             from wealth.api.broker_imports import (
                 available_templates,
+                broker_defaults,
+                broker_for_account,
                 find_layout,
                 header_names,
+                infer_tax_wrapper,
                 keep_pending_rows,
                 mapping_suggestions,
                 masked_samples,
                 stage_broker_items,
+                stage_ibkr_activity,
+                update_tax_wrapper_report,
             )
             from wealth.db.models import Account, HouseholdMember
             from wealth.db.repo import acting_household_member
+            from wealth.importer.brokers import (
+                is_activity_statement_csv,
+                parse_activity_statement_csv,
+            )
 
+            activity = None
             try:
-                headers, rows = await asyncio.wait_for(
-                    asyncio.to_thread(_parse_broker_serialized, data, filename),
-                    timeout=PARSE_TIMEOUT_SECONDS,
-                )
+                if is_csv and is_activity_statement_csv(data):
+                    activity = await asyncio.wait_for(
+                        asyncio.to_thread(parse_activity_statement_csv, data),
+                        timeout=PARSE_TIMEOUT_SECONDS,
+                    )
+                    broker_name = "ibkr"
+                    headers, rows = [], []
+                else:
+                    headers, rows = await asyncio.wait_for(
+                        asyncio.to_thread(_parse_broker_serialized, data, filename),
+                        timeout=PARSE_TIMEOUT_SECONDS,
+                    )
             except TimeoutError:
                 _record_failed_job(
                     user.session, user.household_owner_id, "broker_statement", "parse_timeout"
@@ -550,8 +606,10 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                     user.session, user.user_id, user.household_owner_id
                 ).id
 
+            broker_name = broker_for_account(broker_name, account)
+            market_default, currency_default = broker_defaults(broker_name)
             templates = available_templates(user.session, user.household_owner_id)
-            layout = find_layout(headers, templates)
+            layout = find_layout(headers, templates) if activity is None else None
             now = datetime.now(UTC)
             job = ImportJob(
                 user_id=user.household_owner_id,
@@ -562,20 +620,40 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                 member_id=selected_member_id,
                 account_id=selected_account_id,
                 counts={},
-                parse_report={"warnings": []},
+                parse_report={
+                    "warnings": list(activity.warnings) if activity is not None else [],
+                    "broker": broker_name,
+                    "market_default": market_default,
+                    "currency_default": currency_default,
+                },
                 file_deleted_at=now,
             )
             user.session.add(job)
             user.session.flush()
+            if activity is not None:
+                counts = stage_ibkr_activity(user.session, user.household_owner_id, job, activity)
+                user.session.flush()
+                report = dict(job.parse_report or {})
+                return ImportUploadResponse(
+                    job_id=job.id,
+                    status="ready",
+                    source="broker",
+                    statement_date=job.statement_date,
+                    counts=counts,
+                    warnings=list(report.get("warnings", [])),
+                )
             if layout is None:
                 display_headers = header_names(headers)
                 mapping = mapping_suggestions(headers)
                 job.parse_report = {
+                    **(job.parse_report or {}),
                     "headers": display_headers,
                     "samples": masked_samples(headers, rows),
                     "suggested_mapping": mapping,
                     "warnings": [],
                 }
+                explicit_wrapper = infer_tax_wrapper(headers, rows)
+                update_tax_wrapper_report(job, broker_name, account, explicit_wrapper)
                 job.counts = {"new": 0, "changed": 0, "duplicate": 0, "unknown": 0}
                 keep_pending_rows(job.id, headers, rows)
                 user.session.flush()
@@ -589,6 +667,13 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                 )
             counts = stage_broker_items(
                 user.session, user.household_owner_id, job, headers, rows, layout
+            )
+            report = dict(job.parse_report or {})
+            update_tax_wrapper_report(
+                job,
+                layout.broker,
+                account,
+                str(report["tax_wrapper"]) if report.get("tax_wrapper") else None,
             )
             job.counts = counts
             user.session.flush()
@@ -675,6 +760,12 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             "headers": report.get("headers"),
             "samples": report.get("samples", []),
             "suggested_mapping": report.get("suggested_mapping", {}),
+            "broker": report.get("broker"),
+            "market_default": report.get("market_default", "US"),
+            "currency_default": report.get("currency_default", "USD"),
+            "tax_wrapper": report.get("tax_wrapper"),
+            "tax_wrapper_question": report.get("tax_wrapper_question", False),
+            "cash_flow_count": report.get("cash_flow_count", 0),
         }
 
     @router.post("/v1/imports/{job_id}/mapping", response_model=ImportDetailResponse)
@@ -685,11 +776,14 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
         user: Any = auth_dependency,
     ) -> Any:
         from wealth.api.broker_imports import (
+            broker_defaults,
+            broker_for_account,
             peek_pending_rows,
             persist_template,
             stage_broker_items,
             take_pending_rows,
             template_layout,
+            update_tax_wrapper_report,
             valid_template_mapping,
         )
 
@@ -717,7 +811,20 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             )
         headers, rows = pending
         allowed = (
-            {"isin", "symbol", "name", "quantity", "avg_price", "last_price", "exchange"}
+            {
+                "isin",
+                "symbol",
+                "name",
+                "quantity",
+                "avg_price",
+                "last_price",
+                "exchange",
+                "market",
+                "currency",
+                "market_value",
+                "security_type",
+                "tax_wrapper",
+            }
             if payload.kind == "holdings"
             else {
                 "isin",
@@ -727,8 +834,14 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                 "quantity",
                 "price",
                 "exchange",
+                "market",
+                "currency",
                 "order_id",
                 "trade_id",
+                "amount",
+                "commission",
+                "security_type",
+                "tax_wrapper",
             }
         )
         if (
@@ -754,20 +867,58 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                 kind=payload.kind,
                 headers=headers,
                 columns=payload.columns,
+                market_default=payload.market_default,
+                currency_default=payload.currency_default,
             )
+        from wealth.db.models import Account
+
+        account = (
+            user.session.scalar(
+                select(Account).where(
+                    Account.user_id == user.household_owner_id,
+                    Account.id == job.account_id,
+                )
+            )
+            if job.account_id is not None
+            else None
+        )
+        report = dict(job.parse_report or {})
+        selected_broker = payload.broker
+        if selected_broker == "other":
+            selected_broker = str(report.get("broker") or "other")
+        selected_broker = broker_for_account(selected_broker, account)
+        inferred_market, inferred_currency = broker_defaults(selected_broker)
+        market_default = payload.market_default or str(
+            report.get("market_default") or inferred_market
+        )
+        currency_default = payload.currency_default or str(
+            report.get("currency_default") or inferred_currency
+        )
         layout = template_layout(
             payload.kind,
             payload.columns,
-            broker=payload.save_as.strip() if payload.save_as else "mapped",
+            broker=payload.save_as.strip() if payload.save_as else selected_broker,
+            market_default=market_default,
+            currency_default=currency_default,
         )
         job.counts = stage_broker_items(
             user.session, user.household_owner_id, job, headers, rows, layout
         )
-        if payload.save_as:
-            job.parse_report = {
-                **(job.parse_report or {}),
-                "template_name": payload.save_as.strip(),
-            }
+        report = dict(job.parse_report or {})
+        update_tax_wrapper_report(
+            job,
+            selected_broker,
+            account,
+            str(report["tax_wrapper"]) if report.get("tax_wrapper") else None,
+        )
+        report = dict(job.parse_report or {})
+        job.parse_report = {
+            **report,
+            "broker": selected_broker,
+            "market_default": market_default,
+            "currency_default": currency_default,
+            **({"template_name": payload.save_as.strip()} if payload.save_as else {}),
+        }
         take_pending_rows(job.id)
         user.session.flush()
         items = user.session.scalars(
@@ -781,6 +932,12 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             "headers": (job.parse_report or {}).get("headers"),
             "samples": (job.parse_report or {}).get("samples", []),
             "suggested_mapping": (job.parse_report or {}).get("suggested_mapping", {}),
+            "broker": (job.parse_report or {}).get("broker"),
+            "market_default": (job.parse_report or {}).get("market_default", "US"),
+            "currency_default": (job.parse_report or {}).get("currency_default", "USD"),
+            "tax_wrapper": (job.parse_report or {}).get("tax_wrapper"),
+            "tax_wrapper_question": (job.parse_report or {}).get("tax_wrapper_question", False),
+            "cash_flow_count": (job.parse_report or {}).get("cash_flow_count", 0),
         }
 
     @router.patch("/v1/imports/{job_id}/items/{item_id}", response_model=ImportItemResponse)
@@ -845,6 +1002,7 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
     def confirm_import(
         job_id: UUID,
         request: Request,
+        payload: ImportConfirmationRequest | None = None,
         today: date = today_dependency,
         user: Any = auth_dependency,
     ) -> Any:
@@ -876,6 +1034,24 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                     "Choose which holdings to keep for every quantity difference.",
                 )
             from wealth.api.broker_imports import confirm_broker_items
+            from wealth.db.models import Account
+
+            report = dict(job.parse_report or {})
+            wrapper = report.get("tax_wrapper")
+            if wrapper is None and report.get("tax_wrapper_question"):
+                wrapper = payload.tax_wrapper if payload and payload.tax_wrapper else "ordinary"
+            if wrapper and job.account_id is not None:
+                account = user.session.scalar(
+                    select(Account).where(
+                        Account.user_id == user.household_owner_id,
+                        Account.id == job.account_id,
+                    )
+                )
+                if account is not None:
+                    account.tax_wrapper = wrapper
+                    report["tax_wrapper"] = wrapper
+                    report["tax_wrapper_question"] = False
+                    job.parse_report = report
 
             applied = Counter(
                 confirm_broker_items(user.session, user.household_owner_id, job, items)

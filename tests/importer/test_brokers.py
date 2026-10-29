@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import io
 import re
 from datetime import date
@@ -11,11 +12,15 @@ from openpyxl import Workbook
 from wealth.api.broker_imports import mapping_suggestions, masked_samples
 from wealth.core.ids import isin_check_digit_ok
 from wealth.importer.brokers import (
+    Layout,
     Trade,
     detect_layout,
     fifo_lots,
+    is_activity_statement_csv,
     load_layouts,
     normalize_header,
+    parse_activity_statement_csv,
+    parse_cash_flows,
     parse_holdings,
     parse_tradebook,
     read_table,
@@ -252,3 +257,206 @@ def test_fifo_warns_for_sells_without_buys_and_nets_intraday_trades() -> None:
     assert open_lots == []
     assert realised == []
     assert warnings == ["intraday_netted", "sell_without_buy"]
+
+
+def _synthetic_isin(prefix: str) -> str:
+    base = f"{prefix}{'0' * 9}"
+    for digit in range(10):
+        candidate = f"{base}{digit}"
+        if isin_check_digit_ok(candidate):
+            return candidate
+    raise AssertionError("A synthetic security code could not be generated.")
+
+
+def test_ibkr_activity_reads_supported_sections_and_keeps_foreign_currency() -> None:
+    ucits_isin = _synthetic_isin("IE")
+    output = io.StringIO()
+    csv.writer(output, lineterminator="\n").writerows(
+        [
+            [
+                "Open Positions",
+                "Header",
+                "Asset Category",
+                "Symbol",
+                "Currency",
+                "Quantity",
+                "Cost Price",
+                "Close Price",
+                "Value",
+                "Listing Exchange",
+            ],
+            [
+                "Open Positions",
+                "Data",
+                "Stocks",
+                "VOO",
+                "USD",
+                "100",
+                "400",
+                "500",
+                "50000",
+                "NYSE",
+            ],
+            [
+                "Open Positions",
+                "Data",
+                "ETFs",
+                "CSPX",
+                "GBP",
+                "50",
+                "550",
+                "600",
+                "30000",
+                "LSEETF",
+            ],
+            [
+                "Open Positions",
+                "Data",
+                "Forex",
+                "EUR.USD",
+                "USD",
+                "5000",
+                "1.1",
+                "1.1",
+                "5500",
+                "IDEALPRO",
+            ],
+            [
+                "Trades",
+                "Header",
+                "Asset Category",
+                "Symbol",
+                "Date/Time",
+                "Quantity",
+                "T. Price",
+                "Proceeds",
+                "Comm/Fee",
+                "Currency",
+                "Listing Exchange",
+                "Trade ID",
+            ],
+            [
+                "Trades",
+                "Data",
+                "Stocks",
+                "VOO",
+                "2024-01-01; 10:00:00",
+                "10",
+                "400",
+                "-4000",
+                "-1",
+                "USD",
+                "NYSE",
+                "BUY-1",
+            ],
+            [
+                "Trades",
+                "Data",
+                "Stocks",
+                "VOO",
+                "2026-01-02; 10:00:00",
+                "-4",
+                "500",
+                "2000",
+                "-2",
+                "USD",
+                "NYSE",
+                "SELL-1",
+            ],
+            [
+                "Financial Instrument Information",
+                "Header",
+                "Symbol",
+                "Security ID",
+                "Security ID Type",
+                "Description",
+                "Listing Exchange",
+            ],
+            [
+                "Financial Instrument Information",
+                "Data",
+                "CSPX",
+                ucits_isin,
+                "ISIN",
+                "Global Index Fund",
+                "LSEETF",
+            ],
+            ["Cash Report", "Data", "USD", "50000"],
+        ]
+    )
+    statement = output.getvalue()
+
+    assert is_activity_statement_csv(statement)
+    activity = parse_activity_statement_csv(statement)
+
+    assert [(row.symbol, row.market, row.currency, row.quantity) for row in activity.positions] == [
+        ("VOO", "US", "USD", Decimal("100")),
+        ("CSPX", "GB", "GBP", Decimal("50")),
+    ]
+    assert activity.positions[1].isin == ucits_isin
+    assert activity.positions[1].market_value == Decimal("30000")
+    assert activity.warnings == ("unknown_section", "unsupported_asset_category")
+    assert len(activity.trades) == 2
+    open_lots, realised, warnings = fifo_lots(activity.trades)
+    assert warnings == []
+    assert [(lot.quantity, lot.cost_per_unit, lot.currency) for lot in open_lots] == [
+        (Decimal("6"), Decimal("400"), "USD")
+    ]
+    assert [(lot.quantity, lot.holding_period, lot.commission, lot.gain) for lot in realised] == [
+        (Decimal("4"), "LT", Decimal("2"), Decimal("398"))
+    ]
+
+
+def test_danish_layout_mapping_keeps_native_amounts_and_only_explicit_deposits() -> None:
+    rows = [
+        {
+            "Transaction date": "2026-05-01",
+            "Activity": "Deposit",
+            "Amount": "5.000,25",
+            "Currency": "DKK",
+            "Reference": "SYNTH-DEP-1",
+        },
+        {
+            "Transaction date": "2026-05-02",
+            "Activity": "Buy",
+            "Amount": "-1.250,00",
+            "Currency": "DKK",
+            "Reference": "SYNTH-BUY-1",
+        },
+        {
+            "Transaction date": "2026-05-03",
+            "Activity": "Withdrawal",
+            "Amount": "-750,50",
+            "Currency": "DKK",
+            "Reference": "SYNTH-WD-1",
+        },
+    ]
+    layout = Layout(
+        broker="nordnet",
+        kind="tradebook",
+        fingerprint=frozenset(),
+        columns={
+            "trade_date": "Transaction date",
+            "trade_type": "Activity",
+            "amount": "Amount",
+            "currency": "Currency",
+            "trade_id": "Reference",
+        },
+        market_default="DK",
+        currency_default="DKK",
+    )
+
+    flows = parse_cash_flows(rows, layout)
+    rows_without_reference = [
+        {key: value for key, value in row.items() if key != "Reference"} for row in rows[:1]
+    ]
+    repeat_flows = parse_cash_flows(rows_without_reference, layout)
+
+    assert [(flow.kind, flow.amount, flow.currency) for flow in flows] == [
+        ("deposit", Decimal("5000.25"), "DKK"),
+        ("withdrawal", Decimal("750.50"), "DKK"),
+    ]
+    assert (
+        repeat_flows[0].transaction_id
+        == parse_cash_flows(rows_without_reference, layout)[0].transaction_id
+    )

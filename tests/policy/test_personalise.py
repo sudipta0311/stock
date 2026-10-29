@@ -17,8 +17,10 @@ from wealth.policy.personalise import (
     MarketContext,
     PolicyProfile,
     UserData,
+    _acquisition_fx_notes,
     _exit_action,
     _merge_weekly_actions,
+    _normalised_lots,
     personalise,
     plan_health_score,
 )
@@ -152,6 +154,7 @@ def synthetic_user_data() -> UserData:
             symbol="SYNTH-ETF",
             market="US",
             currency="USD",
+            domicile="US",
             security_type="etf",
             sleeve="equity_global",
             category="etf:global",
@@ -291,6 +294,51 @@ def test_personaliser_merges_triggered_exit_cards_with_buys() -> None:
     assert sell["lots_to_sell"]
     assert sell["tax_estimate"]["gross_proceeds"] == sell["amount"]
     assert isinstance(plan["carry_forward"], str)
+
+
+def test_foreign_tax_lots_use_acquisition_fx_and_skip_missing_basis() -> None:
+    holding = HoldingInput(
+        security_id="synthetic-global-equity",
+        symbol="SYNTH-US",
+        market="US",
+        currency="USD",
+        security_type="equity",
+        sleeve="equity_global",
+        category="equity:global",
+        quantity=Decimal("3"),
+        price=Decimal("200"),
+        domicile="US",
+        lots=(
+            HoldingLotInput(
+                lot_id="priced-foreign-lot",
+                quantity=Decimal("2"),
+                cost_per_unit=Decimal("100"),
+                acquired_on=date(2024, 1, 1),
+                currency="USD",
+                cost_per_unit_inr=Decimal("8300"),
+            ),
+            HoldingLotInput(
+                lot_id="missing-foreign-fx-lot",
+                quantity=Decimal("1"),
+                cost_per_unit=Decimal("150"),
+                acquired_on=date(2024, 2, 1),
+                currency="USD",
+                fx_missing=True,
+            ),
+        ),
+    )
+    notes: list[str] = []
+
+    lots = _normalised_lots(holding, {"USD/INR": Decimal("90")}, notes)
+
+    assert len(lots) == 1
+    assert lots[0].cost_per_unit == Decimal("8300")
+    assert lots[0].market_price == Decimal("18000")
+    assert "holding_lot_fx_missing:SYNTH-US" in notes
+    assert _acquisition_fx_notes(holding) == (
+        "acquisition_fx_missing",
+        "acquisition_fx_approximation",
+    )
 
 
 def test_critical_and_high_exit_actions_precede_foundation_and_buy_actions() -> None:

@@ -16,7 +16,7 @@ Status: ⬜ not started · 🟦 in progress · ✅ accepted · 🔁 rework · �
 | C08 | Importer 1: CAS parsers (NSDL port, CAMS/KFin, CDSL detect) → normalised holdings; synthetic encrypted-PDF fixtures | 3.3 | ✅ |
 | C08b | Importer 1b: upload API (in-memory, no retention), staging + review + confirm → securities/holdings, `app_upsert_security` | 3.3, 7.4 | ✅ |
 | C09 | Importer 2: Indian broker holdings/tradebooks (Zerodha, Groww, ICICI; Angel/Upstox unverified), column-mapping fallback + saved templates, FIFO lots, merge with CAS | 3.3 | ✅ |
-| C09b | Importer 2b: US brokers (IBKR, Vested, INDmoney), USD securities keyed by symbol, FX-aware valuation | 3.3, 4.5 | ⬜ |
+| C09b | Importer 2b: US brokers (IBKR, Vested, INDmoney), USD securities keyed by symbol, FX-aware valuation | 3.3, 4.5 | ✅ |
 | C10 | Market data: securities master, AMFI NAV, EOD prices, FX, gold, point-in-time store, provenance | 6 | ✅ |
 | C11 | Policy 1: foundation check, risk profile, goal buckets, whole-wealth allocation, debt answer | 4.1–4.3 | ✅ |
 | C12 | Policy 2: India/global equity split with bounded geopolitical tilts, global route selector (A–D), after-tax debt-instrument picker | 4.4–4.6 | ✅ |

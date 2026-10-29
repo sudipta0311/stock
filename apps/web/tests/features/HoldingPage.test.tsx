@@ -23,6 +23,10 @@ describe("holding Exit Card", () => {
                 security_type: "equity",
                 quantity: "10.000",
                 value: "20000.00",
+                value_usd: null,
+                currency: "INR",
+                fx_as_of: null,
+                fx_missing: false,
                 price_as_of: "2026-10-28",
                 price_source: "fixture",
                 status: "priced",
@@ -59,6 +63,10 @@ describe("holding Exit Card", () => {
                 tax_estimate: {
                   estimated_tax: "250.00",
                   long_term_date: "2027-01-01",
+                  notes: [
+                    "acquisition_fx_missing",
+                    "acquisition_fx_approximation",
+                  ],
                 },
                 reason_codes: ["valuation_stretch"],
                 params: {},
@@ -94,6 +102,12 @@ describe("holding Exit Card", () => {
       screen.getByText(englishCopy.labels.exit_actions.TRIM_TO_TARGET),
     ).toBeInTheDocument();
     expect(screen.getByText(/Estimated tax if sold/)).toHaveTextContent("₹250");
+    expect(
+      screen.getByText(englishCopy.imports.tax_fx_missing),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(englishCopy.imports.tax_fx_approximation),
+    ).toBeInTheDocument();
     expect((await axe(container)).violations).toEqual([]);
   });
 });

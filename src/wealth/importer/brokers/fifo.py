@@ -58,6 +58,9 @@ def fifo_lots(
                 netted_from_sell = min(sell.quantity, remaining_to_net)
                 remaining_to_net -= netted_from_sell
                 sell_quantity = sell.quantity - netted_from_sell
+                commission_per_unit = (
+                    sell.commission / sell.quantity if sell.quantity else Decimal(0)
+                )
                 while sell_quantity > 0 and inventory:
                     oldest = inventory[0]
                     quantity = min(oldest.remaining, sell_quantity)
@@ -73,10 +76,18 @@ def fifo_lots(
                             acquired_on=buy.trade_date,
                             sold_on=trade_date,
                             holding_period="LT"
-                            if is_long_term(buy.trade_date, trade_date)
+                            if is_long_term(
+                                buy.trade_date,
+                                trade_date,
+                                months=24 if buy.market != "IN" else 12,
+                            )
                             else "ST",
                             buy_trade_ids=(buy.trade_id,) if buy.trade_id else (),
                             sell_trade_id=sell.trade_id,
+                            market=buy.market,
+                            currency=buy.currency,
+                            commission=commission_per_unit * quantity,
+                            security_type=buy.security_type,
                         )
                     )
                     oldest.remaining -= quantity
@@ -99,6 +110,9 @@ def fifo_lots(
                     cost_per_unit=lot.trade.price,
                     acquired_on=lot.trade.trade_date,
                     trade_ids=(lot.trade.trade_id,) if lot.trade.trade_id else (),
+                    market=lot.trade.market,
+                    currency=lot.trade.currency,
+                    security_type=lot.trade.security_type,
                 )
             )
     return open_lots, realised, sorted(warnings)

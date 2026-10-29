@@ -75,3 +75,22 @@ def classify_holding(
     if "fof" in name and "overseas" in name:
         return Sleeve.EQUITY_GLOBAL.value, f"{instrument}:equity_global"
     return Sleeve.EQUITY_INDIA.value, f"{instrument}:equity_india"
+
+
+def classify_broker_security(
+    market: str, symbol: str, name: str, security_type: str
+) -> tuple[str, str]:
+    """Classify broker securities using market and transparent name rules."""
+    normalized_name = re.sub(r"\s+", " ", name.casefold()).strip()
+    normalized_symbol = symbol.upper()
+    if security_type == "etf" and (
+        "gold" in normalized_name or normalized_symbol in {"GLD", "IAU", "GLDM", "SGOL"}
+    ):
+        return Sleeve.GOLD.value, "etf:gold"
+    if security_type == "etf" and any(
+        keyword in normalized_name for keyword in ("bond", "treasury", "tips", "aggregate")
+    ):
+        return Sleeve.DEBT.value, "etf:debt"
+    if market == "IN":
+        return Sleeve.EQUITY_INDIA.value, "equity:india"
+    return Sleeve.EQUITY_GLOBAL.value, "equity:global"

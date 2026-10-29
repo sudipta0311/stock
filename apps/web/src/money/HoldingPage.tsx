@@ -3,6 +3,7 @@ import { useParams } from "react-router";
 import { formatInr } from "../lib/money";
 import { exitLabel, labelForCode, triggerKeyLabel } from "../lib/labels";
 import { asArray, asRecord, reasonCopy, textValue } from "../features/data";
+import englishCopy from "../copy/en.json";
 import {
   ComingSoon,
   isMissingFeature,
@@ -46,6 +47,7 @@ export function ExitCard({ value }: { value: unknown }) {
       tax.long_term_since ??
       asRecord(card.params).long_term_date,
   );
+  const taxNotes = new Set(asArray(tax.notes).map((note) => textValue(note)));
   return (
     <Card className="grid gap-3">
       <div className="flex items-center justify-between gap-3">
@@ -113,6 +115,16 @@ export function ExitCard({ value }: { value: unknown }) {
           Tax estimate is unavailable for this holding.
         </p>
       )}
+      {taxNotes.has("acquisition_fx_missing") ? (
+        <p className="text-sm text-muted-foreground">
+          {englishCopy.imports.tax_fx_missing}
+        </p>
+      ) : null}
+      {taxNotes.has("acquisition_fx_approximation") ? (
+        <p className="text-sm text-muted-foreground">
+          {englishCopy.imports.tax_fx_approximation}
+        </p>
+      ) : null}
       {longTermDate ? (
         <p className="text-sm text-muted-foreground">
           Long-term date: {longTermDate}

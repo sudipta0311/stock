@@ -68,6 +68,10 @@ function reviewDetail(overrides: Partial<ImportDetail> = {}): ImportDetail {
     source: "nsdl",
     statement_date: "2026-10-01",
     counts: { new: 1, changed: 1, duplicate: 1, unknown: 1 },
+    cash_flow_count: 0,
+    tax_wrapper_question: false,
+    currency_default: "INR",
+    market_default: "IN",
     created_at: "2026-10-02T00:00:00Z",
     confirmed_at: null,
     items: [
@@ -347,7 +351,7 @@ describe("statement import review", () => {
     renderReview();
 
     const confirm = await screen.findByRole("button", {
-      name: "Confirm import (0 items)",
+      name: "Confirm import",
     });
     expect(confirm).toBeDisabled();
     await user.click(screen.getByLabelText("Keep current holdings"));

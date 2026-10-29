@@ -1,4 +1,4 @@
-// OpenAPI SHA256: 07a098bac19168296c1b2f59a2970c197d1ac61880ce3464577c4ddecd1f3f63
+// OpenAPI SHA256: 8a15026680d3b9edde3edac48939fd9a68b75342f4309ee8d2d80e1aba1fb400
 export interface paths {
     "/healthz": {
         parameters: {
@@ -784,6 +784,8 @@ export interface components {
             masked_number?: string | null;
             /** Member Id */
             member_id?: string | null;
+            /** Tax Wrapper */
+            tax_wrapper?: ("ask" | "ordinary" | "pension") | null;
         };
         /** AccountResponse */
         AccountResponse: {
@@ -802,6 +804,8 @@ export interface components {
             masked_number: string | null;
             /** Member Id */
             member_id: string | null;
+            /** Tax Wrapper */
+            tax_wrapper?: ("ask" | "ordinary" | "pension") | null;
         };
         /** AccountWrite */
         AccountWrite: {
@@ -818,6 +822,8 @@ export interface components {
             masked_number?: string | null;
             /** Member Id */
             member_id?: string | null;
+            /** Tax Wrapper */
+            tax_wrapper?: ("ask" | "ordinary" | "pension") | null;
         };
         /** ActionResponse */
         ActionResponse: {
@@ -1413,6 +1419,12 @@ export interface components {
         };
         /** HoldingValuationResponse */
         HoldingValuationResponse: {
+            /** Currency */
+            currency: string;
+            /** Fx As Of */
+            fx_as_of: string | null;
+            /** Fx Missing */
+            fx_missing: boolean;
             /** Name */
             name: string;
             /** Price As Of */
@@ -1432,11 +1444,13 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "priced" | "statement_value_used" | "price_unavailable";
+            status: "priced" | "statement_value_used" | "price_unavailable" | "fx_unavailable";
             /** Symbol */
             symbol: string;
             /** Value */
             value: string | null;
+            /** Value Usd */
+            value_usd: string | null;
         };
         /** HouseholdAccessPatch */
         HouseholdAccessPatch: {
@@ -1504,6 +1518,11 @@ export interface components {
              */
             role: "owner" | "partner" | "viewer";
         };
+        /** ImportConfirmationRequest */
+        ImportConfirmationRequest: {
+            /** Tax Wrapper */
+            tax_wrapper?: ("ask" | "ordinary" | "pension") | null;
+        };
         /** ImportConfirmationResponse */
         ImportConfirmationResponse: {
             /** Counts */
@@ -1527,6 +1546,13 @@ export interface components {
         ImportDetailResponse: {
             /** Account Id */
             account_id?: string | null;
+            /** Broker */
+            broker?: string | null;
+            /**
+             * Cash Flow Count
+             * @default 0
+             */
+            cash_flow_count: number;
             /** Confirmed At */
             confirmed_at: string | null;
             /** Counts */
@@ -1538,6 +1564,12 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /**
+             * Currency Default
+             * @default USD
+             * @enum {string}
+             */
+            currency_default: "INR" | "USD" | "EUR" | "DKK" | "GBP" | "SEK";
             /** Doc Type */
             doc_type: string;
             /** Error Code */
@@ -1551,6 +1583,12 @@ export interface components {
             id: string;
             /** Items */
             items: components["schemas"]["ImportItemResponse"][];
+            /**
+             * Market Default
+             * @default US
+             * @enum {string}
+             */
+            market_default: "IN" | "US" | "DK" | "EU" | "GB";
             /** Member Id */
             member_id?: string | null;
             /** Samples */
@@ -1568,6 +1606,13 @@ export interface components {
             suggested_mapping?: {
                 [key: string]: string | null;
             };
+            /** Tax Wrapper */
+            tax_wrapper?: ("ask" | "ordinary" | "pension") | null;
+            /**
+             * Tax Wrapper Question
+             * @default false
+             */
+            tax_wrapper_question: boolean;
         };
         /** ImportItemResponse */
         ImportItemResponse: {
@@ -1575,10 +1620,16 @@ export interface components {
             account_ref: string | null;
             /** Action */
             action?: string | null;
+            /** Amount */
+            amount?: string | null;
+            /** Currency */
+            currency?: string | null;
             /** Diff */
             diff: {
                 [key: string]: unknown;
             } | null;
+            /** Exchange */
+            exchange?: string | null;
             /**
              * Id
              * Format: uuid
@@ -1588,6 +1639,8 @@ export interface components {
             isin: string;
             /** Kind */
             kind: string;
+            /** Market */
+            market?: string | null;
             /** Match */
             match: {
                 [key: string]: string | null;
@@ -1645,15 +1698,33 @@ export interface components {
         };
         /** ImportMappingRequest */
         ImportMappingRequest: {
+            /**
+             * Broker
+             * @default other
+             * @enum {string}
+             */
+            broker: "nordnet" | "saxo" | "danske_bank" | "ibkr" | "vested" | "indmoney" | "other";
             /** Columns */
             columns: {
                 [key: string]: string;
             };
             /**
+             * Currency Default
+             * @default USD
+             * @enum {string}
+             */
+            currency_default: "INR" | "USD" | "EUR" | "DKK" | "GBP" | "SEK";
+            /**
              * Kind
              * @enum {string}
              */
             kind: "holdings" | "tradebook";
+            /**
+             * Market Default
+             * @default US
+             * @enum {string}
+             */
+            market_default: "IN" | "US" | "DK" | "EU" | "GB";
             /** Save As */
             save_as?: string | null;
         };
@@ -4126,6 +4197,7 @@ export interface operations {
                 "multipart/form-data": {
                     /** Format: uuid */
                     account_id?: string;
+                    broker?: string;
                     doc_type?: string;
                     /** Format: binary */
                     file: string;
@@ -4231,7 +4303,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ImportConfirmationRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

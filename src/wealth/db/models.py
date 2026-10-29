@@ -261,6 +261,10 @@ class Account(UserOwned, Base):
             "masked_number IS NULL OR masked_number ~ '^X*[0-9A-Za-z]{0,4}$'",
             name="ck_accounts_masked_number",
         ),
+        CheckConstraint(
+            "tax_wrapper IS NULL OR tax_wrapper IN ('ask', 'ordinary', 'pension')",
+            name="ck_accounts_tax_wrapper",
+        ),
     )
 
     member_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
@@ -268,6 +272,7 @@ class Account(UserOwned, Base):
     institution: Mapped[str] = mapped_column(String(120), nullable=False)
     account_type: Mapped[str] = mapped_column(String(32), nullable=False)
     masked_number: Mapped[str | None] = mapped_column(String(32))
+    tax_wrapper: Mapped[str | None] = mapped_column(String(16))
 
 
 class ManualAsset(UserOwned, Base):
@@ -361,7 +366,13 @@ class AssetCashflow(UserOwned, Base):
 class Security(Base):
     __tablename__ = "securities"
     __table_args__ = (
-        UniqueConstraint("market", "symbol", name="uq_securities_market_symbol"),
+        Index(
+            "uq_securities_market_symbol",
+            "market",
+            "symbol",
+            unique=True,
+            postgresql_where=text("symbol IS NOT NULL"),
+        ),
         UniqueConstraint("isin", name="uq_securities_isin"),
         Index("ix_securities_amfi_scheme_code", "amfi_scheme_code"),
         Index("ix_securities_nse_symbol", "nse_symbol"),
@@ -374,7 +385,15 @@ class Security(Base):
             name="ck_securities_option",
         ),
         CheckConstraint("ter IS NULL OR ter >= 0", name="ck_securities_ter_non_negative"),
-        CheckConstraint("market IN ('IN', 'US')", name="ck_securities_market"),
+        CheckConstraint("market IN ('IN', 'US', 'DK', 'EU', 'GB')", name="ck_securities_market"),
+        CheckConstraint(
+            "currency IN ('INR', 'USD', 'EUR', 'DKK', 'GBP', 'SEK')",
+            name="ck_securities_currency",
+        ),
+        CheckConstraint(
+            "domicile IS NULL OR domicile ~ '^[A-Z]{2}$'",
+            name="ck_securities_domicile",
+        ),
         CheckConstraint(
             "security_type IN ('equity', 'etf', 'mf', 'bond', 'sgb')",
             name="ck_securities_security_type",
@@ -389,8 +408,10 @@ class Security(Base):
 
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
     market: Mapped[str] = mapped_column(String(2), nullable=False)
-    symbol: Mapped[str] = mapped_column(String(32), nullable=False)
+    symbol: Mapped[str | None] = mapped_column(String(32))
     isin: Mapped[str | None] = mapped_column(String(12))
+    exchange: Mapped[str | None] = mapped_column(String(32))
+    domicile: Mapped[str | None] = mapped_column(String(2))
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     security_type: Mapped[str] = mapped_column(String(16), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
@@ -555,6 +576,10 @@ class HoldingLot(UserOwned, Base):
     trade_ids: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
     )
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default="INR")
+    fx_at_acquisition: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    cost_per_unit_inr: Mapped[Decimal | None] = mapped_column(Numeric(16, 4))
+    fx_missing: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
     __table_args__ += (
         CheckConstraint("source IN ('cas', 'broker', 'manual')", name="ck_holdings_lots_source"),
         CheckConstraint(
@@ -813,6 +838,66 @@ class RealisedTrade(UserOwned, Base):
     holding_period: Mapped[str] = mapped_column(String(2), nullable=False)
     trade_id: Mapped[str | None] = mapped_column(String(80))
     source_broker: Mapped[str] = mapped_column(String(32), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default="INR")
+    fx_at_acquisition: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    fx_at_sale: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    cost_per_unit_inr: Mapped[Decimal | None] = mapped_column(Numeric(16, 4))
+    sale_price_inr: Mapped[Decimal | None] = mapped_column(Numeric(16, 4))
+    gain_inr: Mapped[Decimal | None] = mapped_column(Numeric(20, 2))
+    fx_missing: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("false"))
+
+
+class BrokerCashFlowRecord(UserOwned, Base):
+    __tablename__ = "broker_cash_flows"
+    __table_args__ = (
+        _tenant_identity("broker_cash_flows"),
+        ForeignKeyConstraint(
+            ["user_id", "member_id"],
+            ["household_members.user_id", "household_members.id"],
+            name="fk_broker_cash_flows_member_tenant",
+            ondelete="CASCADE",
+            deferrable=True,
+            initially="IMMEDIATE",
+        ),
+        ForeignKeyConstraint(
+            ["user_id", "account_id"],
+            ["accounts.user_id", "accounts.id"],
+            name="fk_broker_cash_flows_account_tenant",
+            ondelete="SET NULL (account_id)",
+            deferrable=True,
+            initially="IMMEDIATE",
+        ),
+        ForeignKeyConstraint(
+            ["user_id", "import_job_id"],
+            ["import_jobs.user_id", "import_jobs.id"],
+            name="fk_broker_cash_flows_import_job_tenant",
+            ondelete="CASCADE",
+            deferrable=True,
+            initially="IMMEDIATE",
+        ),
+        CheckConstraint("kind IN ('deposit', 'withdrawal')", name="ck_broker_cash_flows_kind"),
+        CheckConstraint("amount > 0", name="ck_broker_cash_flows_amount_positive"),
+        CheckConstraint(
+            "currency IN ('INR', 'USD', 'EUR', 'DKK', 'GBP', 'SEK')",
+            name="ck_broker_cash_flows_currency",
+        ),
+        Index(
+            "ix_broker_cash_flows_household_member_date",
+            "user_id",
+            "member_id",
+            "transaction_date",
+        ),
+    )
+
+    member_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    account_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
+    import_job_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    transaction_date: Mapped[date] = mapped_column(Date, nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    source_broker: Mapped[str] = mapped_column(String(32), nullable=False)
+    transaction_id: Mapped[str | None] = mapped_column(String(80))
 
 
 class NetworthSnapshot(UserOwned, Base):

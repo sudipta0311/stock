@@ -36,7 +36,7 @@ export function uploadImport(
   password: string,
   docType: ImportFormat,
   signal?: AbortSignal,
-  selection?: { accountId?: string; memberId?: string },
+  selection?: { accountId?: string; memberId?: string; broker?: string },
 ): Promise<ImportUpload> {
   const body = new FormData();
   body.append("file", file, file.name);
@@ -44,6 +44,7 @@ export function uploadImport(
   if (password) body.append("password", password);
   if (selection?.accountId) body.append("account_id", selection.accountId);
   else if (selection?.memberId) body.append("member_id", selection.memberId);
+  if (selection?.broker) body.append("broker", selection.broker);
   return apiFetch("/v1/imports", { method: "POST", body, signal });
 }
 
@@ -77,9 +78,14 @@ export function patchImportItem(
   );
 }
 
-export function confirmImport(jobId: string): Promise<ImportConfirmation> {
+export function confirmImport(
+  jobId: string,
+  payload: { tax_wrapper?: "ask" | "ordinary" | "pension" } = {},
+): Promise<ImportConfirmation> {
   return apiFetch(`/v1/imports/${encodeURIComponent(jobId)}/confirm`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
   });
 }
 

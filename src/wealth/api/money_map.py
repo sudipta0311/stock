@@ -115,6 +115,7 @@ class AccountWrite(MoneyMapModel):
     institution: str = Field(min_length=1, max_length=120)
     account_type: str = Field(min_length=1, max_length=32)
     masked_number: str | None = Field(default=None, max_length=32)
+    tax_wrapper: Literal["ask", "ordinary", "pension"] | None = None
     member_id: UUID | None = None
     joint: bool = False
 
@@ -130,6 +131,7 @@ class AccountPatch(MoneyMapModel):
     institution: str | None = Field(default=None, min_length=1, max_length=120)
     account_type: str | None = Field(default=None, min_length=1, max_length=32)
     masked_number: str | None = Field(default=None, max_length=32)
+    tax_wrapper: Literal["ask", "ordinary", "pension"] | None = None
     member_id: UUID | None = None
     joint: bool | None = None
 
@@ -148,6 +150,7 @@ class AccountResponse(MoneyMapModel):
     masked_number: str | None
     member_id: UUID | None
     joint: bool
+    tax_wrapper: Literal["ask", "ordinary", "pension"] | None = None
 
 
 class GoalResponse(MoneyMapModel):
@@ -254,9 +257,13 @@ class HoldingValuationResponse(MoneyMapModel):
     security_type: str
     quantity: str
     value: Rupees | None
+    value_usd: str | None
+    currency: str
     price_as_of: date | None
+    fx_as_of: date | None
+    fx_missing: bool
     price_source: str | None
-    status: Literal["priced", "statement_value_used", "price_unavailable"]
+    status: Literal["priced", "statement_value_used", "price_unavailable", "fx_unavailable"]
 
 
 class NetworthResponse(MoneyMapModel):
@@ -580,6 +587,7 @@ def refresh_networth_snapshot(
     """Calculate and persist today's net worth, including imported market holdings."""
     from wealth.core.money import round_paise
     from wealth.db.models import (
+        FxRate,
         HoldingLot,
         ImportJob,
         ManualAsset,
@@ -658,26 +666,57 @@ def refresh_networth_snapshot(
         except PriceUnavailable:
             quote = None
         if isinstance(quote, PriceQuote):
-            value = round_paise(lot.quantity * quote.value)
-            price_as_of = quote.as_of.isoformat()
+            native_value = lot.quantity * quote.value
+            price_as_of = quote.as_of
             price_source = quote.source
             status = "priced"
         else:
-            value = lot.statement_value
-            price_as_of = None
-            price_source = None
-            status = (
-                "statement_value_used" if lot.statement_value is not None else "price_unavailable"
-            )
+            native_value = lot.statement_value
+            price_as_of = lot.statement_date if native_value is not None else None
+            price_source = "statement" if native_value is not None else None
+            status = "statement_value_used" if native_value is not None else "price_unavailable"
+
+        fx_rate: Decimal | None = Decimal(1) if security.currency == "INR" else None
+        fx_as_of: date | None = None
+        if security.currency != "INR":
+            fx_row = session.execute(
+                select(FxRate.rate, FxRate.as_of)
+                .where(
+                    FxRate.pair == f"{security.currency}/INR",
+                    FxRate.as_of <= today,
+                )
+                .order_by(FxRate.as_of.desc())
+                .limit(1)
+            ).one_or_none()
+            if fx_row is not None:
+                fx_rate, fx_as_of = fx_row
+
+        fx_missing = native_value is not None and fx_rate is None
+        if native_value is None:
+            value = None
+        elif fx_rate is None:
+            value = None
+            status = "fx_unavailable"
+        else:
+            value = round_paise(native_value * fx_rate)
+        value_usd = (
+            format(round_paise(native_value), "f")
+            if security.currency == "USD" and native_value is not None
+            else None
+        )
         holding_values.append(
             {
                 "security_id": str(security.id),
-                "symbol": security.nse_symbol or security.symbol,
+                "symbol": security.nse_symbol or security.symbol or security.isin or "",
                 "name": security.name,
                 "security_type": security.security_type,
                 "quantity": format(lot.quantity, ".6f"),
                 "value": _money(value),
-                "price_as_of": price_as_of,
+                "value_usd": value_usd,
+                "currency": security.currency,
+                "price_as_of": price_as_of.isoformat() if price_as_of else None,
+                "fx_as_of": fx_as_of.isoformat() if fx_as_of else None,
+                "fx_missing": fx_missing,
                 "price_source": price_source,
                 "status": status,
             }
@@ -1003,6 +1042,7 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             "masked_number": account.masked_number,
             "member_id": account.member_id,
             "joint": account.joint,
+            "tax_wrapper": account.tax_wrapper,
         }
         merged.update(payload.model_dump(exclude_unset=True))
         try:

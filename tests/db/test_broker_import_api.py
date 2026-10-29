@@ -12,7 +12,7 @@ import jwt
 import pytest
 from alembic import command
 from fastapi.testclient import TestClient
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from conftest import MigratedDatabase
 from wealth.api.fund_check import _member_rows
@@ -23,6 +23,8 @@ from wealth.core.ids import isin_check_digit_ok
 from wealth.db import session as db_session
 from wealth.db.models import (
     Account,
+    BrokerCashFlowRecord,
+    FxRate,
     HoldingLot,
     HouseholdMember,
     ImportJob,
@@ -122,6 +124,29 @@ def test_0013_broker_migration_downgrades_and_upgrades(
     with database.owner_engine.connect() as connection:
         assert connection.scalar(select(func.to_regclass("import_templates"))) is not None
         assert connection.scalar(select(func.to_regclass("realised_trades"))) is not None
+
+
+def test_0014_international_assets_migration_downgrades_and_upgrades(
+    migrated_database: MigratedDatabase,
+) -> None:
+    database = migrated_database
+    command.downgrade(database.config, "-1")
+    with database.owner_engine.connect() as connection:
+        assert connection.scalar(select(func.to_regclass("broker_cash_flows"))) is None
+        columns = connection.exec_driver_sql(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = 'securities'"
+        ).scalars()
+        assert "domicile" not in set(columns)
+
+    command.upgrade(database.config, "head")
+    with database.owner_engine.connect() as connection:
+        assert connection.scalar(select(func.to_regclass("broker_cash_flows"))) is not None
+        columns = connection.exec_driver_sql(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = 'securities'"
+        ).scalars()
+        assert {"domicile", "exchange"} <= set(columns)
 
 
 def test_unknown_file_maps_once_and_reuses_household_template(
@@ -528,3 +553,207 @@ def test_broker_rows_are_hidden_from_another_login(
             session.scalar(select(RealisedTrade.id).where(RealisedTrade.user_id == owner_id))
             is None
         )
+
+
+def test_danish_cash_import_prompts_once_and_saves_member_deposits(
+    broker_api_client: tuple[TestClient, str], migrated_database: MigratedDatabase
+) -> None:
+    client, secret = broker_api_client
+    headers, claims = _identity(secret, "danish-cash")
+    user_id = _user_id(migrated_database, claims)
+    with system_session(migrated_database.owner_engine) as session:
+        member = ensure_self_household_member(session, user_id)
+        account = Account(
+            user_id=user_id,
+            member_id=member.id,
+            institution="Nordnet",
+            account_type="broker",
+            masked_number="X0000",
+        )
+        session.add(account)
+        session.flush()
+        account_id = account.id
+
+    transactions = (
+        b"Transaction date,Activity,Amount,Currency,Reference\n"
+        b'2026-05-01,Deposit,"5.000,25",DKK,SYNTH-DEP-1\n'
+    )
+    uploaded = _upload(
+        client,
+        headers,
+        "synthetic-transactions.csv",
+        transactions,
+        broker="nordnet",
+        account_id=str(account_id),
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    assert uploaded.json()["status"] == "needs_mapping"
+    job_id = uploaded.json()["job_id"]
+    initial = client.get(f"/v1/imports/{job_id}", headers=headers).json()
+    assert initial["member_id"] is not None
+    assert initial["tax_wrapper_question"] is True
+    assert initial["market_default"] == "DK"
+    assert initial["currency_default"] == "DKK"
+
+    mapping = {
+        "kind": "tradebook",
+        "broker": "nordnet",
+        "market_default": "DK",
+        "currency_default": "DKK",
+        "columns": {
+            "trade_date": "Transaction date",
+            "trade_type": "Activity",
+            "amount": "Amount",
+            "currency": "Currency",
+            "trade_id": "Reference",
+        },
+    }
+    mapped = client.post(f"/v1/imports/{job_id}/mapping", headers=headers, json=mapping)
+    assert mapped.status_code == 200, mapped.text
+    assert mapped.json()["cash_flow_count"] == 1
+    assert mapped.json()["tax_wrapper_question"] is True
+    confirmed = client.post(
+        f"/v1/imports/{job_id}/confirm",
+        headers=headers,
+        json={"tax_wrapper": "ask"},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["counts"]["cash_flows"] == 1
+
+    repeated_upload = _upload(
+        client,
+        headers,
+        "synthetic-transactions.csv",
+        transactions,
+        broker="nordnet",
+        account_id=str(account_id),
+    )
+    assert repeated_upload.status_code == 201, repeated_upload.text
+    assert repeated_upload.json()["status"] == "needs_mapping"
+    repeated_job_id = repeated_upload.json()["job_id"]
+    repeated_mapping = client.post(
+        f"/v1/imports/{repeated_job_id}/mapping", headers=headers, json=mapping
+    )
+    assert repeated_mapping.status_code == 200, repeated_mapping.text
+    repeated_confirm = client.post(
+        f"/v1/imports/{repeated_job_id}/confirm", headers=headers, json={}
+    )
+    assert repeated_confirm.status_code == 200, repeated_confirm.text
+    assert "cash_flows" not in repeated_confirm.json()["counts"]
+
+    with system_session(migrated_database.owner_engine) as session:
+        stored_account = session.get(Account, account_id)
+        flow = session.scalar(
+            select(BrokerCashFlowRecord).where(
+                BrokerCashFlowRecord.user_id == user_id,
+                BrokerCashFlowRecord.account_id == account_id,
+            )
+        )
+        assert stored_account is not None and stored_account.tax_wrapper == "ask"
+        assert flow is not None
+        assert flow.kind == "deposit"
+        assert flow.amount == Decimal("5000.2500")
+        assert flow.currency == "DKK"
+        assert flow.member_id == UUID(initial["member_id"])
+        assert flow.transaction_date == date(2026, 5, 1)
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(BrokerCashFlowRecord)
+                .where(BrokerCashFlowRecord.user_id == user_id)
+            )
+            == 1
+        )
+
+
+def test_ibkr_import_keeps_native_lots_and_converts_using_dated_fx(
+    broker_api_client: tuple[TestClient, str], migrated_database: MigratedDatabase
+) -> None:
+    client, secret = broker_api_client
+    headers, claims = _identity(secret, "ibkr-fx")
+    user_id = _user_id(migrated_database, claims)
+    rates = (
+        (date(2024, 1, 1), Decimal("83")),
+        (date(2026, 1, 2), Decimal("85")),
+        (date(2026, 10, 27), Decimal("86")),
+    )
+    with system_session(migrated_database.owner_engine) as session:
+        for as_of, rate in rates:
+            session.add(
+                FxRate(
+                    pair="USD/INR",
+                    as_of=as_of,
+                    rate=rate,
+                    source="synthetic_test",
+                    source_url="https://example.test/fx",
+                    publication_lag_days=0,
+                )
+            )
+
+    statement = (
+        b"Open Positions,Header,Asset Category,Symbol,Currency,Quantity,Cost Price,"
+        b"Close Price,Value,Listing Exchange\n"
+        b"Open Positions,Data,Stocks,VOO,USD,7,400,500,3500,NYSE\n"
+        b"Trades,Header,Asset Category,Symbol,Date/Time,Quantity,T. Price,Proceeds,"
+        b"Comm/Fee,Currency,Listing Exchange,Trade ID\n"
+        b"Trades,Data,Stocks,VOO,2024-01-01; 10:00:00,10,400,-4000,-1,USD,NYSE,BUY-1\n"
+        b"Trades,Data,Stocks,VOO,2026-01-02; 10:00:00,-4,500,2000,-2,USD,NYSE,SELL-1\n"
+        b"Trades,Data,Stocks,VOO,2026-08-01; 10:00:00,1,450,-450,0,USD,NYSE,BUY-2\n"
+    )
+    uploaded = _upload(client, headers, "synthetic-activity.csv", statement, broker="ibkr")
+    assert uploaded.status_code == 201, uploaded.text
+    assert uploaded.json()["status"] == "ready"
+    job_id = uploaded.json()["job_id"]
+    detail = client.get(f"/v1/imports/{job_id}", headers=headers).json()
+    assert detail["member_id"] is not None
+    assert detail["items"][0]["status"] == "quantity_mismatch"
+    assert detail["items"][0]["symbol"] == "VOO"
+    with system_session(migrated_database.owner_engine) as session:
+        assert session.scalar(
+            text("SELECT :symbol ~ :pattern"),
+            {"symbol": "VOO", "pattern": r"^[A-Z0-9.\-]{1,15}$"},
+        )
+    selected = client.patch(
+        f"/v1/imports/{job_id}/items/{detail['items'][0]['id']}",
+        headers=headers,
+        json={"status": "accepted"},
+    )
+    assert selected.status_code == 200, selected.text
+    confirmed = client.post(f"/v1/imports/{job_id}/confirm", headers=headers)
+    assert confirmed.status_code == 200, confirmed.text
+
+    with system_session(migrated_database.owner_engine) as session:
+        security = session.scalar(select(Security).where(Security.symbol == "VOO"))
+        lots = list(
+            session.scalars(
+                select(HoldingLot)
+                .where(HoldingLot.user_id == user_id)
+                .order_by(HoldingLot.acquired_on)
+            )
+        )
+        realised = session.scalar(select(RealisedTrade).where(RealisedTrade.user_id == user_id))
+        assert security is not None
+        assert security.market == "US" and security.currency == "USD"
+        assert security.domicile == "US" and security.sleeve == "equity_global"
+        assert len(lots) == 2
+        assert lots[0].currency == "USD"
+        assert lots[0].cost_per_unit == Decimal("400.0000")
+        assert lots[0].fx_at_acquisition == Decimal("83.000000")
+        assert lots[0].cost_per_unit_inr == Decimal("33200.0000")
+        assert lots[0].fx_missing is False
+        assert lots[1].fx_at_acquisition is None and lots[1].fx_missing is True
+        assert realised is not None
+        assert realised.currency == "USD"
+        assert realised.fx_at_acquisition == Decimal("83.000000")
+        assert realised.fx_at_sale == Decimal("85.000000")
+        assert realised.gain_inr == Decimal("37030.00")
+
+    networth = client.get("/v1/networth", headers=headers)
+    assert networth.status_code == 200, networth.text
+    voo_rows = [row for row in networth.json()["holdings"] if row["symbol"] == "VOO"]
+    assert voo_rows
+    statement_row = next(row for row in voo_rows if row["value_usd"] is not None)
+    assert statement_row["value_usd"] == "3500.00"
+    assert statement_row["value"] == "301000.00"
+    assert statement_row["currency"] == "USD"
+    assert statement_row["fx_as_of"] == "2026-10-27"

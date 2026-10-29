@@ -72,6 +72,16 @@ const FILE_PICKER_ACCEPT = importFeatureSupport.broker
   ? ".pdf,.csv,.xlsx,application/pdf,text/csv"
   : ".pdf,application/pdf";
 
+const brokerOptions = [
+  ["nordnet", englishCopy.imports.broker_nordnet],
+  ["saxo", englishCopy.imports.broker_saxo],
+  ["danske_bank", englishCopy.imports.broker_danske],
+  ["ibkr", englishCopy.imports.broker_ibkr],
+  ["vested", englishCopy.imports.broker_vested],
+  ["indmoney", englishCopy.imports.broker_indmoney],
+  ["other", englishCopy.imports.broker_other],
+] as const;
+
 function sourceLabel(source: string | null): string {
   switch (source) {
     case "nsdl":
@@ -126,6 +136,7 @@ export function ImportPage() {
   const [accounts, setAccounts] = useState<AccountResponse[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState("");
   const [selectedMemberId, setSelectedMemberId] = useState("");
+  const [broker, setBroker] = useState("other");
   const [file, setFile] = useState<File | null>(null);
   const [password, setPassword] = useState("");
   const [problem, setProblem] = useState<{
@@ -256,6 +267,7 @@ export function ImportPage() {
             memberId: selectedAccountId
               ? undefined
               : selectedMemberId || undefined,
+            broker,
           }
         : undefined,
     );
@@ -383,6 +395,25 @@ export function ImportPage() {
 
           {format === "broker_statement" ? (
             <>
+              <label
+                className="grid gap-1.5 text-sm font-medium"
+                htmlFor="broker-name"
+              >
+                {englishCopy.imports.broker_picker_label}
+                <select
+                  id="broker-name"
+                  value={broker}
+                  onChange={(event) => setBroker(event.currentTarget.value)}
+                  disabled={busy}
+                  className="min-h-12 rounded-xl border border-line bg-surface px-3 text-base"
+                >
+                  {brokerOptions.map(([value, label]) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <label
                 className="grid gap-1.5 text-sm font-medium"
                 htmlFor="broker-account"
@@ -605,7 +636,7 @@ function ItemToggle({
         <span className="block text-xs text-muted-foreground">
           {item.quantity} units ·{" "}
           {item.statement_value
-            ? formatValue(item.statement_value)
+            ? formatValue(item.statement_value, item.currency)
             : "Value not provided"}
         </span>
         {actionNote ? (
@@ -671,7 +702,16 @@ function TradebookMismatchChoice({
   );
 }
 
-function formatValue(value: string): string {
+function formatValue(value: string, currency: string | null = "INR"): string {
+  if (currency && currency !== "INR") {
+    const amount = Number(value);
+    return Number.isFinite(amount)
+      ? `${new Intl.NumberFormat("en", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        }).format(amount)} ${currency}`
+      : `${value} ${currency}`;
+  }
   try {
     return formatInr(value, "full", 2);
   } catch {
@@ -696,6 +736,10 @@ export function ImportReviewPage() {
   const [discardOpen, setDiscardOpen] = useState(false);
   const [confirmedCount, setConfirmedCount] = useState<number | null>(null);
   const [alreadyConfirmed, setAlreadyConfirmed] = useState(false);
+  const [taxWrapper, setTaxWrapper] = useState<"ask" | "ordinary" | "pension">(
+    "ordinary",
+  );
+  const [cashFlowsSaved, setCashFlowsSaved] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -704,6 +748,7 @@ export function ImportReviewPage() {
       .then((loaded) => {
         if (!active) return;
         setDetail(loaded);
+        setTaxWrapper(loaded.tax_wrapper ?? "ordinary");
         if (loaded.status === "confirmed") {
           setAlreadyConfirmed(true);
           markValueMoment();
@@ -767,6 +812,7 @@ export function ImportReviewPage() {
   );
   const canConfirm =
     selectedCount > 0 ||
+    (detail?.cash_flow_count ?? 0) > 0 ||
     grouped.changed.some(
       (item) =>
         item.action === "quantity_mismatch" && item.status === "rejected",
@@ -869,9 +915,21 @@ export function ImportReviewPage() {
     setSaving(true);
     setPageError("");
     try {
-      const result = await confirmImport(detail.id);
+      const result = await confirmImport(
+        detail.id,
+        detail.tax_wrapper_question ? { tax_wrapper: taxWrapper } : {},
+      );
       setAlreadyConfirmed(false);
-      setConfirmedCount(sumImportCounts(result.counts));
+      setConfirmedCount(
+        sumImportCounts(
+          Object.fromEntries(
+            Object.entries(result.counts).filter(
+              ([key]) => key !== "cash_flows",
+            ),
+          ),
+        ),
+      );
+      setCashFlowsSaved((result.counts.cash_flows ?? 0) > 0);
       markValueMoment();
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
@@ -917,6 +975,7 @@ export function ImportReviewPage() {
         detail={detail}
         onMapped={(mapped) => {
           setDetail(mapped);
+          setTaxWrapper(mapped.tax_wrapper ?? "ordinary");
           setCategoryById(
             Object.fromEntries(
               mapped.items.map((item) => [item.id, categoryForItem(item)]),
@@ -951,13 +1010,17 @@ export function ImportReviewPage() {
             ? "This import is already confirmed"
             : added > 0
               ? `Added ${added} holdings · Net worth updated`
-              : englishCopy.imports.confirmed_zero_title}
+              : cashFlowsSaved
+                ? englishCopy.imports.cash_flow_saved_title
+                : englishCopy.imports.confirmed_zero_title}
         </h2>
         {added === 0 ? (
           <p className="text-sm text-muted-foreground">
             {wasAlreadyConfirmed
               ? "Your Money Map already includes this statement."
-              : englishCopy.imports.confirmed_zero_description}
+              : cashFlowsSaved
+                ? englishCopy.imports.cash_flow_saved_description
+                : englishCopy.imports.confirmed_zero_description}
           </p>
         ) : null}
         <Link
@@ -1019,7 +1082,49 @@ export function ImportReviewPage() {
         <p className="text-sm text-muted-foreground">
           Your file and password were not stored.
         </p>
+        {detail.cash_flow_count > 0 ? (
+          <p className="text-sm text-muted-foreground">
+            {englishCopy.imports.cash_flow_count.replace(
+              "{count}",
+              String(detail.cash_flow_count),
+            )}
+          </p>
+        ) : null}
       </Card>
+
+      {detail.tax_wrapper_question ? (
+        <Card>
+          <fieldset className="grid gap-2 text-sm">
+            <legend className="font-medium">
+              {englishCopy.imports.tax_wrapper_question}
+            </legend>
+            <label className="flex min-h-10 items-center gap-2">
+              <input
+                type="radio"
+                name="tax-wrapper"
+                value="ask"
+                checked={taxWrapper === "ask"}
+                disabled={saving}
+                onChange={() => setTaxWrapper("ask")}
+                className="size-4 accent-brand"
+              />
+              {englishCopy.imports.tax_wrapper_yes}
+            </label>
+            <label className="flex min-h-10 items-center gap-2">
+              <input
+                type="radio"
+                name="tax-wrapper"
+                value="ordinary"
+                checked={taxWrapper === "ordinary"}
+                disabled={saving}
+                onChange={() => setTaxWrapper("ordinary")}
+                className="size-4 accent-brand"
+              />
+              {englishCopy.imports.tax_wrapper_no}
+            </label>
+          </fieldset>
+        </Card>
+      ) : null}
 
       {pageError ? (
         <Card role="alert" className="border-danger/50 text-sm">
@@ -1175,7 +1280,7 @@ export function ImportReviewPage() {
                   <p className="text-xs text-muted-foreground">
                     {item.quantity} units ·{" "}
                     {item.statement_value
-                      ? formatValue(item.statement_value)
+                      ? formatValue(item.statement_value, item.currency)
                       : "Value not provided"}{" "}
                     · {maskAccountReference(item.account_ref)}
                   </p>
@@ -1292,7 +1397,12 @@ export function ImportReviewPage() {
             loading={saving}
             onClick={() => void confirm()}
           >
-            Confirm import ({selectedCount} items)
+            {selectedCount > 0
+              ? englishCopy.imports.confirm_import_selected.replace(
+                  "{count}",
+                  String(selectedCount),
+                )
+              : englishCopy.imports.cash_flow_confirm_only}
           </Button>
         </div>
       </div>
@@ -1333,6 +1443,11 @@ const HOLDINGS_FIELDS = [
   ["avg_price", "mapping_average_price"],
   ["last_price", "mapping_last_price"],
   ["exchange", "mapping_exchange"],
+  ["market", "mapping_market"],
+  ["currency", "mapping_currency"],
+  ["market_value", "mapping_market_value"],
+  ["security_type", "mapping_security_type"],
+  ["tax_wrapper", "mapping_tax_wrapper"],
 ] as const;
 
 const TRADEBOOK_FIELDS = [
@@ -1343,8 +1458,31 @@ const TRADEBOOK_FIELDS = [
   ["quantity", "mapping_quantity"],
   ["price", "mapping_price"],
   ["exchange", "mapping_exchange"],
+  ["market", "mapping_market"],
+  ["currency", "mapping_currency"],
+  ["amount", "mapping_amount"],
+  ["commission", "mapping_commission"],
   ["order_id", "mapping_order_id"],
   ["trade_id", "mapping_trade_id"],
+  ["security_type", "mapping_security_type"],
+  ["tax_wrapper", "mapping_tax_wrapper"],
+] as const;
+
+const marketDefaultOptions = [
+  ["US", englishCopy.imports.market_us],
+  ["DK", englishCopy.imports.market_dk],
+  ["EU", englishCopy.imports.market_eu],
+  ["GB", englishCopy.imports.market_gb],
+  ["IN", englishCopy.imports.mapping_india],
+] as const;
+
+const currencyDefaultOptions = [
+  ["USD", englishCopy.imports.currency_usd],
+  ["EUR", englishCopy.imports.currency_eur],
+  ["DKK", englishCopy.imports.currency_dkk],
+  ["GBP", englishCopy.imports.currency_gbp],
+  ["SEK", englishCopy.imports.currency_sek],
+  ["INR", englishCopy.imports.currency_inr],
 ] as const;
 
 function BrokerMappingPanel({
@@ -1356,6 +1494,12 @@ function BrokerMappingPanel({
 }) {
   const [kind, setKind] = useState<"holdings" | "tradebook">("holdings");
   const [columns, setColumns] = useState<Record<string, string>>({});
+  const [marketDefault, setMarketDefault] = useState<
+    ImportMappingRequest["market_default"]
+  >(detail.market_default);
+  const [currencyDefault, setCurrencyDefault] = useState<
+    ImportMappingRequest["currency_default"]
+  >(detail.currency_default);
   const [saveAs, setSaveAs] = useState(
     englishCopy.imports.mapping_save_as_default,
   );
@@ -1363,6 +1507,8 @@ function BrokerMappingPanel({
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    setMarketDefault(detail.market_default);
+    setCurrencyDefault(detail.currency_default);
     setColumns(
       Object.fromEntries(
         Object.entries(detail.suggested_mapping ?? {}).filter(
@@ -1386,6 +1532,9 @@ function BrokerMappingPanel({
         ),
       ),
       save_as: saveAs.trim() || null,
+      broker: (detail.broker ?? "other") as ImportMappingRequest["broker"],
+      market_default: marketDefault,
+      currency_default: currencyDefault,
     };
     try {
       onMapped(await mapImportColumns(detail.id, request));
@@ -1464,6 +1613,54 @@ function BrokerMappingPanel({
         </div>
       </details>
       <form className="grid gap-3" onSubmit={(event) => void submit(event)}>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label
+            className="grid gap-1.5 text-sm font-medium"
+            htmlFor="mapping-market-default"
+          >
+            {englishCopy.imports.mapping_market_default}
+            <select
+              id="mapping-market-default"
+              value={marketDefault}
+              onChange={(event) =>
+                setMarketDefault(
+                  event.currentTarget
+                    .value as ImportMappingRequest["market_default"],
+                )
+              }
+              className="min-h-12 rounded-xl border border-line bg-surface px-3 text-base"
+            >
+              {marketDefaultOptions.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label
+            className="grid gap-1.5 text-sm font-medium"
+            htmlFor="mapping-currency-default"
+          >
+            {englishCopy.imports.mapping_currency_default}
+            <select
+              id="mapping-currency-default"
+              value={currencyDefault}
+              onChange={(event) =>
+                setCurrencyDefault(
+                  event.currentTarget
+                    .value as ImportMappingRequest["currency_default"],
+                )
+              }
+              className="min-h-12 rounded-xl border border-line bg-surface px-3 text-base"
+            >
+              {currencyDefaultOptions.map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
         <div className="grid gap-3 sm:grid-cols-2">
           {fields.map(([field, labelKey]) => (
             <label

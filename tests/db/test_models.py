@@ -28,6 +28,7 @@ _POST_INITIAL_TABLES = {
     "alerts_log",
     "import_templates",
     "realised_trades",
+    "broker_cash_flows",
 }
 _NON_USER_ID_TABLES = {"household_access", "household_invites"}
 

@@ -89,6 +89,9 @@ class HoldingLotInput:
     acquired_on: date | None
     fmv_2018_01_31: Decimal | None = None
     member_id: str | None = None
+    currency: str | None = None
+    cost_per_unit_inr: Decimal | None = None
+    fx_missing: bool = False
 
 
 @dataclass(frozen=True)
@@ -97,13 +100,15 @@ class HoldingInput:
 
     security_id: str
     symbol: str
-    market: Literal["IN", "US"]
-    currency: Literal["INR", "USD"]
+    market: str
+    currency: str
     security_type: str
     sleeve: str | None
     category: str | None
     quantity: Decimal
     price: Decimal | None
+    domicile: str | None = None
+    statement_value: Decimal | None = None
     lots: tuple[HoldingLotInput, ...] = ()
     price_as_of: date | None = None
     price_source: str | None = None
@@ -262,12 +267,14 @@ def _digest_inputs(
 def _holding_value(holding: HoldingInput, fx_rates: Mapping[str, Decimal]) -> Decimal | None:
     if holding.price is None:
         return None
-    if holding.currency == "USD":
-        fx = fx_rates.get("USD/INR")
-        if fx is None:
-            return None
-        return round_paise(holding.quantity * holding.price * fx)
-    return round_paise(holding.quantity * holding.price)
+    fx = _currency_fx_to_inr(holding.currency, fx_rates)
+    if fx is None:
+        return None
+    return round_paise(holding.quantity * holding.price * fx)
+
+
+def _currency_fx_to_inr(currency: str, fx_rates: Mapping[str, Decimal]) -> Decimal | None:
+    return Decimal(1) if currency == "INR" else fx_rates.get(f"{currency}/INR")
 
 
 def _money(value: Decimal | None) -> str | None:
@@ -592,7 +599,6 @@ def _exit_cards(
         str(exit_rules["satellite"]["drift"]["max_weight_of_equity_pct"])  # type: ignore[index]
     )
     cards: list[ExitCard] = []
-    fx = market.fx_rates.get("USD/INR")
     for holding in holdings:
         if holding.security_type != "equity":
             continue
@@ -602,10 +608,13 @@ def _exit_cards(
                 notes.append(f"holding_price_missing:{holding.symbol}")
             else:
                 notes.append(f"holding_fx_missing:{holding.symbol}")
-        price_inr = holding.price or Decimal("0")
-        if holding.currency == "USD" and fx is not None:
-            price_inr *= fx
-        lots = _normalised_lots(holding, fx, notes)
+        holding_fx = _currency_fx_to_inr(holding.currency, market.fx_rates)
+        price_inr = (
+            holding.price * holding_fx
+            if holding.price is not None and holding_fx is not None
+            else Decimal("0")
+        )
+        lots = _normalised_lots(holding, market.fx_rates, notes)
         owner = context_by_id.get(holding.member_id or self_member.member_id, self_member)
         equity_total = owner.snapshot.amount_for(Sleeve.EQUITY_INDIA) + owner.snapshot.amount_for(
             Sleeve.EQUITY_GLOBAL
@@ -624,6 +633,13 @@ def _exit_cards(
             target_weight_pct=target_weight,
         )
         card = build_exit_card(facts, as_of, owner.tax_context)
+        tax_notes = list(card.tax_estimate.notes)
+        tax_notes.extend(_acquisition_fx_notes(holding))
+        if tax_notes != list(card.tax_estimate.notes):
+            card = replace(
+                card,
+                tax_estimate=replace(card.tax_estimate, notes=tuple(dict.fromkeys(tax_notes))),
+            )
         cards.append(
             replace(
                 card,
@@ -635,20 +651,41 @@ def _exit_cards(
     return cards
 
 
-def _normalised_lots(holding: HoldingInput, usd_inr: Decimal | None, notes: list[str]) -> list[Lot]:
+def _acquisition_fx_notes(holding: HoldingInput) -> tuple[str, ...]:
+    foreign_lots = [lot for lot in holding.lots if (lot.currency or holding.currency) != "INR"]
+    notes: list[str] = []
+    if any(lot.fx_missing or lot.cost_per_unit_inr is None for lot in foreign_lots):
+        notes.append("acquisition_fx_missing")
+    if any(not lot.fx_missing and lot.cost_per_unit_inr is not None for lot in foreign_lots):
+        notes.append("acquisition_fx_approximation")
+    return tuple(notes)
+
+
+def _normalised_lots(
+    holding: HoldingInput,
+    fx_rates: Mapping[str, Decimal],
+    notes: list[str],
+) -> list[Lot]:
     lots: list[Lot] = []
     for raw_lot in holding.lots:
-        if raw_lot.acquired_on is None or raw_lot.cost_per_unit is None:
+        lot_currency = raw_lot.currency or holding.currency
+        if raw_lot.acquired_on is None:
             notes.append(f"holding_lot_tax_facts_missing:{holding.symbol}")
             continue
-        cost = (
-            raw_lot.cost_per_unit * usd_inr
-            if holding.currency == "USD" and usd_inr
-            else raw_lot.cost_per_unit
+        if lot_currency != "INR":
+            if raw_lot.fx_missing or raw_lot.cost_per_unit_inr is None:
+                notes.append(f"holding_lot_fx_missing:{holding.symbol}")
+                continue
+            cost = raw_lot.cost_per_unit_inr
+        elif raw_lot.cost_per_unit is not None:
+            cost = raw_lot.cost_per_unit
+        else:
+            notes.append(f"holding_lot_tax_facts_missing:{holding.symbol}")
+            continue
+        price_fx = _currency_fx_to_inr(holding.currency, fx_rates)
+        price_inr = (
+            holding.price * price_fx if holding.price is not None and price_fx is not None else None
         )
-        price_inr = holding.price or Decimal(0)
-        if holding.currency == "USD" and usd_inr:
-            price_inr *= usd_inr
         lots.append(
             Lot(
                 lot_id=raw_lot.lot_id,
@@ -657,7 +694,7 @@ def _normalised_lots(holding: HoldingInput, usd_inr: Decimal | None, notes: list
                 cost_per_unit=cost,
                 acquired_on=raw_lot.acquired_on,
                 fmv_2018_01_31=raw_lot.fmv_2018_01_31,
-                market_price=price_inr if holding.price is not None else None,
+                market_price=price_inr,
             )
         )
     return lots
@@ -684,7 +721,7 @@ def _member_ltcg_harvest(
         for holding in holdings:
             if (holding.member_id or fallback_member_id) != member.member_id:
                 continue
-            lots = _normalised_lots(holding, market.fx_rates.get("USD/INR"), notes)
+            lots = _normalised_lots(holding, market.fx_rates, notes)
             member_lots.extend(lots)
             for lot in lots:
                 if lot.market_price is not None:
@@ -904,14 +941,9 @@ def personalise(
     )
     monthly_global = round_paise(household_monthly_sip * global_share)
     annual_global = round_paise(monthly_global * 12 + household_new_money * global_share)
-    us_situs = sum(
-        (
-            holding.quantity * holding.price
-            for holding in user_data.holdings
-            if holding.market == "US" and holding.currency == "USD" and holding.price is not None
-        ),
-        Decimal(0),
-    )
+    from wealth.policy.us_situs import us_situs_value_usd
+
+    us_situs = us_situs_value_usd(user_data.holdings)
     route = select_route(
         RouteContext(
             monthly_global_new_money=monthly_global,

@@ -19,7 +19,7 @@ from openpyxl import load_workbook
 
 from wealth.core.dates import add_months
 from wealth.core.money import parse_inr
-from wealth.importer.brokers.types import BrokerHolding, Layout, Trade
+from wealth.importer.brokers.types import BrokerCashFlow, BrokerHolding, Layout, Trade
 
 _ALIASES: dict[str, tuple[str, ...]] = {
     "isin": ("isin", "isin code"),
@@ -38,10 +38,17 @@ _ALIASES: dict[str, tuple[str, ...]] = {
         "avg buy price",
     ),
     "last_price": ("ltp", "last price", "current price", "market price", "close price", "cmp"),
+    "market_value": ("market value", "value", "net value", "position value"),
+    "security_type": ("security type", "asset category"),
     "exchange": ("exchange",),
+    "market": ("market", "market code", "region"),
+    "currency": ("currency", "ccy", "currency code", "valuta"),
+    "tax_wrapper": ("tax wrapper", "account type", "account product", "wrapper"),
     "trade_date": ("trade date", "date", "transaction date"),
     "trade_type": ("trade type", "type", "action", "transaction type"),
     "price": ("price", "trade price", "rate"),
+    "amount": ("amount", "cash amount", "net amount", "transaction amount"),
+    "commission": ("commission", "commission fee", "fees", "comm fee"),
     "order_id": ("order id", "order number"),
     "trade_id": ("trade id", "trade no", "trade number", "execution id"),
 }
@@ -84,6 +91,8 @@ def load_layouts(path: Path | None = None) -> tuple[Layout, ...]:
                 columns=columns,
                 verified=bool(entry.get("verified", True)),
                 source_note=str(entry.get("source_note", "")),
+                market_default=str(entry.get("market_default", "IN")),
+                currency_default=str(entry.get("currency_default", "INR")),
             )
         )
     return tuple(result)
@@ -102,6 +111,8 @@ def _layout_from_template(template: Mapping[str, Any]) -> Layout:
         columns=columns,
         source_note="Saved by this household.",
         header_fingerprint=str(template["header_fingerprint"]),
+        market_default=str(template.get("market_default", "IN")),
+        currency_default=str(template.get("currency_default", "INR")),
     )
 
 
@@ -168,7 +179,11 @@ def read_table(data: bytes, filename: str) -> tuple[list[str], list[dict[str, An
             continue
     if decoded is None:
         raise ValueError("The CSV encoding is not supported.")
-    rows = list(csv.reader(io.StringIO(decoded, newline="")))
+    try:
+        dialect = csv.Sniffer().sniff(decoded[:8192], delimiters=",;\t")
+    except csv.Error:
+        dialect = csv.excel
+    rows = list(csv.reader(io.StringIO(decoded, newline=""), dialect=dialect))
     row_index = _header_row([tuple(row) for row in rows])
     if row_index is None:
         if rows and len([cell for cell in rows[0] if cell.strip()]) >= 3:
@@ -234,6 +249,35 @@ def _decimal_value(value: Any, *, field: str) -> Decimal:
         return number
 
 
+def _currency_decimal(value: Any, *, field: str, currency: str) -> Decimal:
+    """Read native currency numbers, including comma decimals in Danish exports."""
+    if currency == "INR":
+        return _decimal_value(value, field=field)
+    if isinstance(value, bool) or value is None:
+        raise ValueError(f"{field} must be a number")
+    raw = str(value).strip().replace("\u00a0", "").replace(" ", "")
+    raw = re.sub(r"\b(?:USD|EUR|DKK|GBP|SEK)\b", "", raw, flags=re.IGNORECASE)
+    if not raw:
+        raise ValueError(f"{field} must be a number")
+    if "," in raw and "." in raw:
+        decimal_separator = "," if raw.rfind(",") > raw.rfind(".") else "."
+        grouping_separator = "." if decimal_separator == "," else ","
+        raw = raw.replace(grouping_separator, "").replace(decimal_separator, ".")
+    elif "," in raw:
+        left, _, right = raw.rpartition(",")
+        if currency in {"DKK", "EUR", "GBP", "SEK"} and len(right) in {1, 2}:
+            raw = left.replace(",", "") + "." + right
+        else:
+            raw = raw.replace(",", "")
+    try:
+        number = Decimal(raw)
+    except InvalidOperation as error:
+        raise ValueError(f"{field} must be a number") from error
+    if not number.is_finite():
+        raise ValueError(f"{field} must be finite") from None
+    return number
+
+
 def _date_value(value: Any) -> date:
     if isinstance(value, datetime):
         return value.date()
@@ -267,10 +311,29 @@ def parse_holdings(rows: list[dict[str, Any]], layout: Layout) -> list[BrokerHol
     for row in rows:
         if _is_summary(row, layout):
             continue
+        isin_text = _text(_column_value(row, layout, "isin"))
+        currency = (
+            _text(_column_value(row, layout, "currency")) or layout.currency_default
+        ).upper()
+        market_value = _text(_column_value(row, layout, "market"))
+        market = (
+            market_value
+            or ("IN" if isin_text and isin_text.upper().startswith("IN") else layout.market_default)
+        ).upper()
+        if not _text(_column_value(row, layout, "currency")) and market == "IN":
+            currency = "INR"
+        if currency not in {"INR", "USD", "EUR", "DKK", "GBP", "SEK"}:
+            continue
+        if market not in {"IN", "US", "DK", "EU", "GB"}:
+            continue
         try:
-            quantity = _decimal_value(_column_value(row, layout, "quantity"), field="quantity")
-            avg_price = _decimal_value(
-                _column_value(row, layout, "avg_price"), field="average price"
+            quantity = _currency_decimal(
+                _column_value(row, layout, "quantity"), field="quantity", currency=currency
+            )
+            avg_price = _currency_decimal(
+                _column_value(row, layout, "avg_price"),
+                field="average price",
+                currency=currency,
             )
         except ValueError:
             continue
@@ -284,8 +347,18 @@ def parse_holdings(rows: list[dict[str, Any]], layout: Layout) -> list[BrokerHol
         raw_last = _column_value(row, layout, "last_price")
         if raw_last not in (None, ""):
             with suppress(ValueError):
-                last_price = _decimal_value(raw_last, field="last price")
+                last_price = _currency_decimal(raw_last, field="last price", currency=currency)
+        market_value = None
+        raw_market_value = _column_value(row, layout, "market_value")
+        if raw_market_value not in (None, ""):
+            with suppress(ValueError):
+                market_value = _currency_decimal(
+                    raw_market_value, field="market value", currency=currency
+                )
         isin = _text(_column_value(row, layout, "isin"))
+        raw_security_type = (
+            _text(_column_value(row, layout, "security_type")) or "equity"
+        ).casefold()
         result.append(
             BrokerHolding(
                 isin=isin.upper() if isin else None,
@@ -295,6 +368,10 @@ def parse_holdings(rows: list[dict[str, Any]], layout: Layout) -> list[BrokerHol
                 avg_price=avg_price,
                 last_price=last_price,
                 exchange=_text(_column_value(row, layout, "exchange")),
+                market=market,
+                currency=currency,
+                market_value=market_value,
+                security_type="etf" if raw_security_type in {"etf", "etfs"} else "equity",
             )
         )
     return result
@@ -314,16 +391,52 @@ def parse_tradebook(rows: list[dict[str, Any]], layout: Layout) -> list[Trade]:
             trade_type = "sell"
         else:
             continue
+        isin_text = _text(_column_value(row, layout, "isin"))
+        currency = (
+            _text(_column_value(row, layout, "currency")) or layout.currency_default
+        ).upper()
+        market_value = _text(_column_value(row, layout, "market"))
+        market = (
+            market_value
+            or ("IN" if isin_text and isin_text.upper().startswith("IN") else layout.market_default)
+        ).upper()
+        if not _text(_column_value(row, layout, "currency")) and market == "IN":
+            currency = "INR"
+        if currency not in {"INR", "USD", "EUR", "DKK", "GBP", "SEK"}:
+            continue
+        if market not in {"IN", "US", "DK", "EU", "GB"}:
+            continue
         try:
             trade_date = _date_value(_column_value(row, layout, "trade_date"))
-            quantity = _decimal_value(_column_value(row, layout, "quantity"), field="quantity")
-            price = _decimal_value(_column_value(row, layout, "price"), field="price")
+            quantity = abs(
+                _currency_decimal(
+                    _column_value(row, layout, "quantity"), field="quantity", currency=currency
+                )
+            )
+            price = _currency_decimal(
+                _column_value(row, layout, "price"), field="price", currency=currency
+            )
+            raw_commission = _column_value(row, layout, "commission")
+            commission = (
+                _currency_decimal(raw_commission, field="commission", currency=currency)
+                if raw_commission not in (None, "")
+                else Decimal(0)
+            )
+            raw_proceeds = _column_value(row, layout, "amount")
+            proceeds = (
+                _currency_decimal(raw_proceeds, field="proceeds", currency=currency)
+                if raw_proceeds not in (None, "")
+                else None
+            )
         except ValueError:
             continue
         if quantity <= 0 or price < 0:
             continue
         isin = _text(_column_value(row, layout, "isin"))
         symbol = _text(_column_value(row, layout, "symbol"))
+        raw_security_type = (
+            _text(_column_value(row, layout, "security_type")) or "equity"
+        ).casefold()
         if isin is None and symbol is None:
             continue
         result.append(
@@ -337,11 +450,67 @@ def parse_tradebook(rows: list[dict[str, Any]], layout: Layout) -> list[Trade]:
                 exchange=_text(_column_value(row, layout, "exchange")),
                 order_id=_text(_column_value(row, layout, "order_id")),
                 trade_id=_text(_column_value(row, layout, "trade_id")),
+                market=market,
+                currency=currency,
+                commission=commission,
+                proceeds=proceeds,
+                security_type="etf" if raw_security_type in {"etf", "etfs"} else "equity",
             )
         )
     return result
 
 
-def is_long_term(acquired_on: date, sold_on: date) -> bool:
-    """Listed equity is long-term after twelve calendar months."""
-    return sold_on > add_months(acquired_on, 12)
+def parse_cash_flows(rows: list[dict[str, Any]], layout: Layout) -> list[BrokerCashFlow]:
+    """Extract only explicit cash deposits and withdrawals from mapped transaction rows."""
+    result: list[BrokerCashFlow] = []
+    fingerprint_counts: dict[str, int] = {}
+    for row in rows:
+        raw_kind = str(_column_value(row, layout, "trade_type") or "").strip().casefold()
+        if any(word in raw_kind for word in ("deposit", "contribution", "transfer in")):
+            kind = "deposit"
+        elif any(word in raw_kind for word in ("withdraw", "transfer out")):
+            kind = "withdrawal"
+        else:
+            continue
+        currency = (
+            _text(_column_value(row, layout, "currency")) or layout.currency_default
+        ).upper()
+        if currency not in {"INR", "USD", "EUR", "DKK", "GBP", "SEK"}:
+            continue
+        try:
+            transaction_date = _date_value(_column_value(row, layout, "trade_date"))
+            amount = abs(
+                _currency_decimal(
+                    _column_value(row, layout, "amount"), field="amount", currency=currency
+                )
+            )
+        except ValueError:
+            continue
+        if amount <= 0:
+            continue
+        transaction_id = _text(_column_value(row, layout, "trade_id"))
+        if transaction_id is not None:
+            transaction_id = transaction_id[:80]
+        if transaction_id is None:
+            row_text = "\x1f".join(
+                f"{normalize_header(key)}={str(value or '').strip()}"
+                for key, value in sorted(row.items(), key=lambda item: normalize_header(item[0]))
+            )
+            fingerprint = hashlib.sha256(row_text.encode("utf-8")).hexdigest()[:32]
+            fingerprint_counts[fingerprint] = fingerprint_counts.get(fingerprint, 0) + 1
+            transaction_id = f"row-{fingerprint}-{fingerprint_counts[fingerprint]}"
+        result.append(
+            BrokerCashFlow(
+                transaction_date=transaction_date,
+                kind=kind,
+                amount=amount,
+                currency=currency,
+                transaction_id=transaction_id,
+            )
+        )
+    return result
+
+
+def is_long_term(acquired_on: date, sold_on: date, *, months: int = 12) -> bool:
+    """Apply the configured listed or foreign equity holding period."""
+    return sold_on > add_months(acquired_on, months)

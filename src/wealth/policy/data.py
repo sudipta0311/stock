@@ -141,10 +141,15 @@ def _holdings(
                 "price": None,
                 "price_as_of": None,
                 "price_source": None,
+                "statement_value": Decimal(0),
                 "joint": lot.joint,
             },
         )
         record["quantity"] = record["quantity"] + lot.quantity  # type: ignore[operator]
+        if lot.statement_value is not None:
+            record["statement_value"] = (
+                record["statement_value"] + lot.statement_value  # type: ignore[operator]
+            )
         record["lots"].append(  # type: ignore[union-attr]
             HoldingLotInput(
                 lot_id=str(lot.id),
@@ -152,6 +157,9 @@ def _holdings(
                 cost_per_unit=lot.cost_per_unit,
                 acquired_on=lot.acquired_on,
                 member_id=str(lot.member_id),
+                currency=lot.currency,
+                cost_per_unit_inr=lot.cost_per_unit_inr,
+                fx_missing=lot.fx_missing,
             )
         )
         if record["price"] is None:
@@ -177,14 +185,16 @@ def _holdings(
         holdings.append(
             HoldingInput(
                 security_id=str(security_id),
-                symbol=security.nse_symbol or security.symbol,
+                symbol=security.nse_symbol or security.symbol or security.isin or "",
                 market=security.market,
                 currency=security.currency,
+                domicile=security.domicile,
                 security_type=security.security_type,
                 sleeve=security.sleeve,
                 category=security.category,
                 quantity=record["quantity"],  # type: ignore[arg-type]
                 price=record["price"],  # type: ignore[arg-type]
+                statement_value=record["statement_value"],  # type: ignore[arg-type]
                 lots=tuple(record["lots"]),  # type: ignore[arg-type]
                 price_as_of=record["price_as_of"],  # type: ignore[arg-type]
                 price_source=record["price_source"],  # type: ignore[arg-type]
