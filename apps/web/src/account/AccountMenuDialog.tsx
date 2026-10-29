@@ -103,14 +103,16 @@ export function AccountMenuDialog({
             >
               Help and guide
             </Link>
-            <Button
-              type="button"
-              variant="ghost"
-              className="w-full justify-start border-t border-line px-3"
-              onClick={() => setConfirming(true)}
-            >
-              Sign out
-            </Button>
+            <div className="border-t border-line pt-2">
+              <Button
+                type="button"
+                variant="ghost"
+                className="w-full justify-start px-3"
+                onClick={() => setConfirming(true)}
+              >
+                Sign out
+              </Button>
+            </div>
           </div>
         </div>
       )}

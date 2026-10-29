@@ -184,6 +184,13 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Dialogs lock page scrolling through an injected <style>, which the CSP
+   (style-src 'self') blocks, so the lock lives here instead. */
+body[data-scroll-locked] {
+  overflow: hidden !important;
+  overscroll-behavior: contain;
+}
+
 button,
 input,
 select,
