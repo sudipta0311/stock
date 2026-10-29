@@ -1,4 +1,5 @@
 // Paste this script into your own Apps Script project and run setup once.
+// Helper names end in "_" so the Run menu only offers setup and run.
 const API_URL = "https://wealth-api.example.invalid/v1/statement-inbox/uploads";
 const UPLOAD_KEY = "replace-this-with-your-Wealth-upload-key";
 // Statements come from these domains (e.g. donotreply@camsonline.com). Gmail's from:
@@ -20,7 +21,7 @@ const DAILY_DAYS = 45;
 const FIRST_RUN_DAYS = 365;
 
 // Shown in the Apps Script execution log, so a run never looks like "nothing happened".
-function _log(text) {
+function log_(text) {
   if (typeof console !== "undefined") console.log(text);
 }
 
@@ -41,7 +42,7 @@ function setup() {
   return run();
 }
 
-function _searchQuery(days) {
+function searchQuery_(days) {
   const senderSearch = KNOWN_SENDERS.map(function (sender) {
     return "from:" + sender;
   }).join(" ");
@@ -58,7 +59,7 @@ function _searchQuery(days) {
   );
 }
 
-function _senderOf(thread) {
+function senderOf_(thread) {
   const from = String(thread.getMessages()[0].getFrom() || "").toLowerCase();
   for (let index = 0; index < KNOWN_SENDERS.length; index += 1) {
     if (from.indexOf(KNOWN_SENDERS[index]) !== -1) return KNOWN_SENDERS[index];
@@ -67,23 +68,23 @@ function _senderOf(thread) {
 }
 
 // Gmail returns the newest threads first.
-function _newestPerSender(threads) {
+function newestPerSender_(threads) {
   const seen = {};
   return threads.filter(function (thread) {
-    const sender = _senderOf(thread);
+    const sender = senderOf_(thread);
     if (seen[sender]) return false;
     seen[sender] = true;
     return true;
   });
 }
 
-function _isPdf(attachment) {
+function isPdf_(attachment) {
   const contentType = String(attachment.getContentType() || "").toLowerCase();
   const filename = String(attachment.getName() || "").toLowerCase();
   return contentType === "application/pdf" || filename.endsWith(".pdf");
 }
 
-function _postPdf(message, attachment, apiUrl, uploadKey) {
+function postPdf_(message, attachment, apiUrl, uploadKey) {
   const file = attachment.setName(attachment.getName() || "statement.pdf");
   const payload = {
     file: file,
@@ -108,7 +109,7 @@ function _postPdf(message, attachment, apiUrl, uploadKey) {
         Utilities.sleep(RETRY_DELAY_MS);
         continue;
       }
-      _log("Couldn't reach Wealth. The script will try again tomorrow.");
+      log_("Couldn't reach Wealth. The script will try again tomorrow.");
       return false;
     }
 
@@ -125,7 +126,7 @@ function _postPdf(message, attachment, apiUrl, uploadKey) {
       Utilities.sleep(RETRY_DELAY_MS);
       continue;
     }
-    _log(
+    log_(
       status === 401
         ? "Wealth didn't accept the upload key. Create a new key in Settings and paste the new script."
         : "Wealth couldn't take a statement (status " + status + "). The script will try again tomorrow.",
@@ -149,9 +150,9 @@ function run() {
   const label = GmailApp.getUserLabelByName(IMPORTED_LABEL) || GmailApp.createLabel(IMPORTED_LABEL);
   const firstRun = properties.getProperty("FIRST_RUN_DONE") !== "yes";
   const days = firstRun ? FIRST_RUN_DAYS : DAILY_DAYS;
-  const found = GmailApp.search(_searchQuery(days), 0, 100);
-  const threads = firstRun ? _newestPerSender(found) : found;
-  _log(
+  const found = GmailApp.search(searchQuery_(days), 0, 100);
+  const threads = firstRun ? newestPerSender_(found) : found;
+  log_(
     threads.length
       ? "Found " + threads.length + " statement email(s) from the last " + days + " days."
       : "No new statement emails from CAMS, KFintech, MF Central, NSDL or CDSL in the last " +
@@ -168,9 +169,9 @@ function run() {
     thread.getMessages().forEach(function (message) {
       message.getAttachments({ includeInlineImages: false, includeAttachments: true }).forEach(
         function (attachment) {
-          if (!_isPdf(attachment)) return;
+          if (!isPdf_(attachment)) return;
           foundPdf = true;
-          if (_postPdf(message, attachment, apiUrl, uploadKey)) sent += 1;
+          if (postPdf_(message, attachment, apiUrl, uploadKey)) sent += 1;
           else {
             failed += 1;
             allSent = false;
@@ -185,10 +186,10 @@ function run() {
   });
 
   if (firstRun && failed === 0) properties.setProperty("FIRST_RUN_DONE", "yes");
-  if (sent) _log("Sent " + sent + " statement PDF(s). Open Inbox in Wealth to enter the password.");
+  if (sent) log_("Sent " + sent + " statement PDF(s). Open Inbox in Wealth to enter the password.");
   return { sent: sent, labelled: labelled };
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { setup: setup, run: run, searchQuery: _searchQuery };
+  module.exports = { setup: setup, run: run, searchQuery: searchQuery_ };
 }

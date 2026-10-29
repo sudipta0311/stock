@@ -122,7 +122,7 @@ function makeHarness(
     module: { exports: {} as Record<string, unknown> },
   };
   runInNewContext(
-    `${source}\nmodule.exports = { setup, run, searchQuery: _searchQuery };`,
+    `${source}\nmodule.exports = { setup, run, searchQuery: searchQuery_ };`,
     context,
   );
   const exported = context.module.exports as {
@@ -145,6 +145,16 @@ function makeHarness(
 }
 
 describe("Gmail statement helper", () => {
+  it("offers only setup and run in the Apps Script Run menu", () => {
+    const declared = [...source.matchAll(/^function (\w+)/gm)].map(
+      (match) => match[1],
+    );
+    expect(declared.filter((name) => !name?.endsWith("_"))).toEqual([
+      "setup",
+      "run",
+    ]);
+  });
+
   it("sets up a label and a daily morning trigger, then checks Gmail once now", () => {
     const harness = makeHarness(() => response(202));
 
