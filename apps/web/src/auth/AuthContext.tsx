@@ -17,6 +17,7 @@ import {
   setAuthSession,
   setAuthToken,
 } from "./token";
+import { claimDeviceFor } from "./device-account";
 import { goToLogin } from "./navigation";
 import { clearAllDeviceData } from "../pwa/offline-cache";
 import {
@@ -142,6 +143,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         }
       }
+      if (token) await claimDeviceFor(token);
       if (!active) return;
       completeAuthBootstrap();
       if (!token) {
@@ -203,7 +205,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
       setConfigurationError(null);
-      acceptToken(trimmed);
+      void claimDeviceFor(trimmed).then(() => acceptToken(trimmed));
     },
     [acceptToken, mode],
   );
@@ -219,6 +221,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const user = await manager.signinRedirectCallback();
     const token = user.access_token || user.id_token;
     if (!token) throw new Error("Google sign-in returned no app token.");
+    await claimDeviceFor(token);
     if (user.refresh_token) {
       setAuthSession({
         access_token: token,
