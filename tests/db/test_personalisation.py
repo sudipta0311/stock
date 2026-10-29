@@ -269,8 +269,10 @@ def test_plan_uses_defaults_when_onboarding_skipped_the_optional_questions(
     assert saved.status_code == 200
 
     plan = client.get("/v1/plan", headers=headers)
+    loans = client.get("/v1/loans", headers=headers)
 
     assert plan.status_code == 200
+    assert loans.status_code == 200
 
 
 def test_get_plan_loads_legacy_stored_null_residency_country(

@@ -167,7 +167,8 @@ def _profile_advice_inputs(
 ) -> tuple[Decimal, Decimal | None, Decimal | None, str | None, str]:
     profile = session.scalar(select(Profile).where(Profile.user_id == owner_id))
     context = dict(profile.financial_context or {}) if profile is not None else {}
-    expenses = Decimal(str(context.get("monthly_expenses", "0")))
+    # Skipped onboarding answers are stored as nulls.
+    expenses = Decimal(str(context.get("monthly_expenses") or "0"))
     income = (
         Decimal(str(context["annual_income"])) / Decimal(12)
         if context.get("annual_income")
@@ -175,7 +176,7 @@ def _profile_advice_inputs(
     )
     tax_slab = profile.tax_slab_pct if profile is not None else None
     tax_regime = profile.tax_regime if profile is not None else None
-    country = (profile.residency or {}).get("country", "IN") if profile is not None else "IN"
+    country = ((profile.residency or {}).get("country") or "IN") if profile is not None else "IN"
     return expenses, income, tax_slab, tax_regime, country
 
 
