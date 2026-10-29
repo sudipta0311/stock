@@ -1,6 +1,11 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { CalendarDays } from "lucide-react";
+import {
+  CalendarDays,
+  CheckCircle2,
+  ChevronRight,
+  MoveRight,
+} from "lucide-react";
 import { Link } from "react-router";
 import { getNetworth } from "../money/api";
 import { roundActionAmount } from "../lib/money";
@@ -31,8 +36,12 @@ import { Button, Card, Sheet } from "../ui";
 import { Highlights } from "../features/Highlights";
 import englishCopy from "../copy/en.json";
 import { useHousehold } from "../household/HouseholdContext";
-import { ExchangeRateNote, MoneyValue } from "../household/currency-view";
-import { formatHouseholdAmount } from "../household/currency";
+import { MoneyValue } from "../household/currency-view";
+import {
+  formatHouseholdAmount,
+  formatSecondaryAmount,
+} from "../household/currency";
+import { formatRateToTwoDecimals } from "../household/fx";
 import type { DkkInrRate } from "../household/fx";
 import type { MemberResponse } from "../money/api";
 
@@ -62,6 +71,16 @@ function rawActionAmount(action: ActionResponse): string {
 
 function actionAmount(action: ActionResponse): string {
   return roundActionAmount(rawActionAmount(action));
+}
+
+function networthAsOf(date: string | undefined): string {
+  if (!date) return englishCopy.home.net_worth_as_of_today;
+  const shownDate = new Intl.DateTimeFormat("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(new Date(`${date}T00:00:00`));
+  return englishCopy.home.net_worth_as_of.replace("{date}", shownDate);
 }
 
 function sellDetails(action: ActionResponse): {
@@ -286,19 +305,28 @@ function ActionCard({
     .join(" · ");
   return (
     <article
-      className="grid gap-3 rounded-xl border border-line bg-surface p-4"
+      className="grid gap-3 border-t border-line py-3 first:border-0 first:pt-0"
       aria-label={cardLabel}
     >
-      <div className="flex items-start justify-between gap-3">
-        <h3 className="text-sm font-semibold">
-          {actionTitle(action)}
-          {actionOwner ? ` · ${actionOwner}` : ""}
-        </h3>
-        {amount ? (
-          <span className="shrink-0 text-sm font-semibold tabular-nums">
-            <MoneyValue amountInr={amount} />
-          </span>
-        ) : null}
+      <div className="flex items-start gap-3">
+        <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground">
+          <MoveRight aria-hidden="true" className="size-4" />
+        </span>
+        <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold">{actionTitle(action)}</h3>
+            {actionOwner ? (
+              <p className="mt-1 text-sm text-muted-foreground">
+                {actionOwner}
+              </p>
+            ) : null}
+          </div>
+          {amount ? (
+            <span className="shrink-0 text-sm font-semibold tabular-nums">
+              <MoneyValue amountInr={amount} />
+            </span>
+          ) : null}
+        </div>
       </div>
       <div className="flex flex-wrap gap-2">
         <Button
@@ -384,6 +412,12 @@ export function HomePage() {
   );
   const actionList = activeActions(visibleActions);
   const nextMaturity = upcomingMaturities(networth.data)[0];
+  const netWorthPrimary = networth.data
+    ? formatHouseholdAmount(networth.data.net_worth, primaryCurrency, fxRate)
+    : null;
+  const netWorthSecondary = networth.data
+    ? formatSecondaryAmount(networth.data.net_worth, primaryCurrency, fxRate)
+    : null;
 
   if (
     (networth.supported && networth.isPending) ||
@@ -402,21 +436,33 @@ export function HomePage() {
 
   return (
     <div data-copy-screen="home" className="grid gap-4">
-      <Card>
-        <p className="text-sm text-muted-foreground">Net worth</p>
-        {networth.supported && networth.data ? (
-          <p className="mt-1 text-2xl font-semibold tabular-nums">
-            <MoneyValue amountInr={networth.data.net_worth} />
+      <Card className="home-hero">
+        <p className="text-sm font-medium text-muted-foreground">Net worth</p>
+        {networth.supported && netWorthPrimary ? (
+          <p className="mt-1 text-hero font-bold tabular-nums">
+            <span className="tracking-tight">{netWorthPrimary}</span>
+            {netWorthSecondary ? (
+              <span className="block text-xs font-normal tracking-normal text-muted-foreground">
+                {netWorthSecondary}
+              </span>
+            ) : null}
           </p>
         ) : (
-          <p className="mt-1 text-sm">Your total will appear here.</p>
+          <p className="mt-1 text-base">Your total will appear here.</p>
         )}
-        <div className="mt-2 grid gap-2">
-          <ExchangeRateNote />
+        <div className="mt-3 grid gap-1.5">
           {fxRate === undefined &&
           members.some((member) => member.residency.country === "DK") ? (
             <p className="text-xs text-muted-foreground">
               {englishCopy.household_ui.no_fx_rate}
+            </p>
+          ) : null}
+          {networth.data || fxRate ? (
+            <p className="text-xs text-muted-foreground">
+              {networthAsOf(networth.data?.as_of ?? fxRate?.date)}
+              {fxRate
+                ? ` · 1 DKK = ₹${formatRateToTwoDecimals(fxRate.rate)}`
+                : ""}
             </p>
           ) : null}
         </div>
@@ -444,19 +490,24 @@ export function HomePage() {
               <Link
                 to="/plan"
                 data-primary="true"
-                className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-white"
+                className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground"
               >
                 View your plan
               </Link>
             ) : null}
           </div>
         ) : (
-          <div className="grid gap-3">
-            <p className="text-sm">Nothing to do this week ✓</p>
+          <div className="grid justify-items-center gap-3 py-3 text-center">
+            <span className="grid size-11 place-items-center rounded-full bg-success-soft text-success-foreground">
+              <CheckCircle2 aria-hidden="true" className="size-5" />
+            </span>
+            <p className="text-base font-medium">
+              {englishCopy.home.nothing_to_do}
+            </p>
             <Link
               to="/plan"
               data-primary="true"
-              className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-white"
+              className="motion-safe:active:scale-[.98] inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground transition"
             >
               Review your plan
             </Link>
@@ -515,22 +566,29 @@ export function HomePage() {
         {nextMaturity ? (
           <Link
             to={`/money/asset/${nextMaturity.asset_id}`}
-            className="flex min-h-12 items-center justify-between gap-3 border-t border-line pt-2"
+            className="flex min-h-16 items-center justify-between gap-3 border-t border-line py-2"
           >
-            <span>
-              <strong className="block text-sm">{nextMaturity.label}</strong>
-              <span className="text-xs text-muted-foreground">
-                {new Intl.DateTimeFormat("en-IN", {
-                  day: "numeric",
-                  month: "short",
-                }).format(new Date(`${nextMaturity.date}T00:00:00`))}
+            <span className="flex min-w-0 items-center gap-3">
+              <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground">
+                <CalendarDays aria-hidden="true" className="size-4" />
+              </span>
+              <span className="min-w-0">
+                <strong className="block truncate text-sm">
+                  {nextMaturity.label}
+                </strong>
+                <span className="text-xs text-muted-foreground">
+                  {new Intl.DateTimeFormat("en-IN", {
+                    day: "numeric",
+                    month: "short",
+                  }).format(new Date(`${nextMaturity.date}T00:00:00`))}
+                </span>
               </span>
             </span>
             <span className="flex items-center gap-2 text-sm tabular-nums">
               {nextMaturity.amount ? (
                 <MoneyValue amountInr={nextMaturity.amount} />
               ) : null}
-              <CalendarDays
+              <ChevronRight
                 aria-hidden="true"
                 className="size-4 text-muted-foreground"
               />
@@ -584,7 +642,7 @@ export function HomePage() {
                           )}
                     </p>
                   ) : null}
-                  <p className="text-sm leading-6">
+                  <p className="text-base">
                     {actionHowTo(
                       sheetAction,
                       person,
@@ -613,13 +671,13 @@ export function HomePage() {
                       Why?
                     </summary>
                     <div className="grid gap-3 pt-2">
-                      <p className="text-sm leading-6">
+                      <p className="text-base">
                         {reason
                           ? reasonCopy(reason)
                           : "This step follows your plan."}
                       </p>
                       {hasClubbingCheck ? (
-                        <p className="text-sm leading-6">
+                        <p className="text-base">
                           {englishCopy.household_ui.clubbing_check}
                         </p>
                       ) : null}

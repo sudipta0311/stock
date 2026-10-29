@@ -42,10 +42,23 @@ export function ScreenLoading({
   label?: string;
 }) {
   return (
-    <div className="grid gap-4" aria-label={label}>
-      <Skeleton className="h-24 w-full" />
-      <Skeleton className="h-44 w-full" />
-      <Skeleton className="h-32 w-full" />
+    <div className="grid gap-4" role="status" aria-label={label}>
+      <Card className="grid gap-3">
+        <Skeleton className="h-4 w-24" />
+        <Skeleton className="h-10 w-52 max-w-full" />
+        <Skeleton className="h-3 w-32" />
+      </Card>
+      <Card className="grid gap-4">
+        <Skeleton className="h-5 w-36" />
+        <div className="grid gap-3">
+          <Skeleton className="h-14 w-full" />
+          <Skeleton className="h-14 w-full" />
+        </div>
+      </Card>
+      <Card className="grid gap-3">
+        <Skeleton className="h-5 w-32" />
+        <Skeleton className="h-10 w-full" />
+      </Card>
     </div>
   );
 }

@@ -48,7 +48,7 @@ export const assetFieldCopy: Partial<
   },
   fd: {
     bank: { label: "Bank or post office" },
-    principal: { label: "Amount deposited", help: "Rough numbers are fine." },
+    principal: { label: "Amount deposited" },
     rate_pct: commonFieldCopy.rate_pct,
     maturity: commonFieldCopy.maturity,
     start: commonFieldCopy.start,

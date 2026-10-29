@@ -97,6 +97,9 @@ describe("Plan page", () => {
       screen.getByText("A bit more is in safe money than your plan suggests."),
     ).toBeInTheDocument();
     expect(screen.getByText(/Your safe money target is/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Your safe money target is/).textContent?.trim(),
+    ).toMatch(/\.$/);
     expect(container.querySelectorAll('[data-primary="true"]')).toHaveLength(1);
     const details = screen.getByText("Details").closest("details");
     expect(details).not.toHaveAttribute("open");

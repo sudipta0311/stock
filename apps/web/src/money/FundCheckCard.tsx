@@ -101,7 +101,7 @@ export function FundCheckCard() {
         <h2 id="fund-check-heading" className="text-base font-semibold">
           {englishCopy.fund_check.title}
         </h2>
-        <p className="mt-1 text-sm leading-6" aria-live="polite">
+        <p className="mt-1 text-base" aria-live="polite">
           {failed
             ? englishCopy.fund_check.unavailable
             : !response
@@ -114,7 +114,7 @@ export function FundCheckCard() {
         </p>
       </div>
       {warningBucket && warningMonths ? (
-        <p className="text-sm leading-6 text-muted-foreground">
+        <p className="text-base text-muted-foreground">
           {englishCopy.fund_check.early_warning
             .replace("{bucket}", bucketLabel(warningBucket).toLowerCase())
             .replace("{months}", warningMonths)}
@@ -133,7 +133,7 @@ export function FundCheckCard() {
         </Button>
       ) : (
         <Link
-          className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-white hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
+          className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
           to="/import"
         >
           {englishCopy.fund_check.upload_statement}

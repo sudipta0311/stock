@@ -229,7 +229,7 @@ export function MemberDetailsEditor({
       {open ? (
         <form
           onSubmit={submit}
-          className="grid gap-3 rounded-xl bg-muted/50 p-3"
+          className="grid gap-5 rounded-xl bg-muted/50 p-3"
         >
           <Field
             id={`member-name-${member.id}`}
@@ -283,7 +283,7 @@ export function MemberDetailsEditor({
             <summary className="cursor-pointer text-sm font-medium">
               {englishCopy.household.add_details}
             </summary>
-            <div className="mt-3 grid gap-3">
+            <div className="mt-3 grid gap-5">
               {status === "NRI" ? (
                 <>
                   <Select
@@ -314,6 +314,7 @@ export function MemberDetailsEditor({
                     id={`member-ask-start-value-${member.id}`}
                     label={englishCopy.denmark.ask_start_value_label}
                     help={englishCopy.denmark.ask_start_value_hint}
+                    prefix="DKK"
                   >
                     <input
                       id={`member-ask-start-value-${member.id}`}
@@ -324,7 +325,7 @@ export function MemberDetailsEditor({
                       onChange={(event) =>
                         setAskStartValue(event.currentTarget.value)
                       }
-                      className="min-h-12 w-full rounded-xl border border-line bg-background px-3"
+                      className="min-h-12 w-full rounded-xl border border-line bg-background pl-14 pr-3"
                     />
                   </Field>
                   <label className="flex min-h-10 items-center gap-3 text-sm">
@@ -447,6 +448,7 @@ export function MemberDetailsEditor({
                 <Field
                   id={`member-annual-income-${member.id}`}
                   label={englishCopy.household.onboarding.annual_income}
+                  prefix={incomeCurrency === "DKK" ? "DKK" : "₹"}
                 >
                   <input
                     id={`member-annual-income-${member.id}`}
@@ -455,7 +457,7 @@ export function MemberDetailsEditor({
                     onChange={(event) =>
                       setAnnualIncome(event.currentTarget.value)
                     }
-                    className="min-h-12 w-full rounded-xl border border-line bg-background px-3"
+                    className={`min-h-12 w-full rounded-xl border border-line bg-background pr-3 ${incomeCurrency === "DKK" ? "pl-14" : "pl-9"}`}
                   />
                 </Field>
                 <Select
@@ -475,25 +477,27 @@ export function MemberDetailsEditor({
               <Field
                 id={`member-monthly-sip-${member.id}`}
                 label={englishCopy.settings.family.monthly_sip}
+                prefix="₹"
               >
                 <input
                   id={`member-monthly-sip-${member.id}`}
                   inputMode="decimal"
                   value={monthlySip}
                   onChange={(event) => setMonthlySip(event.currentTarget.value)}
-                  className="min-h-12 w-full rounded-xl border border-line bg-background px-3"
+                  className="min-h-12 w-full rounded-xl border border-line bg-background pl-9 pr-3"
                 />
               </Field>
               <Field
                 id={`member-new-money-${member.id}`}
                 label={englishCopy.settings.family.this_week}
+                prefix="₹"
               >
                 <input
                   id={`member-new-money-${member.id}`}
                   inputMode="decimal"
                   value={newMoney}
                   onChange={(event) => setNewMoney(event.currentTarget.value)}
-                  className="min-h-12 w-full rounded-xl border border-line bg-background px-3"
+                  className="min-h-12 w-full rounded-xl border border-line bg-background pl-9 pr-3"
                 />
               </Field>
             </div>
@@ -519,7 +523,7 @@ export function MemberDetailsEditor({
         title={englishCopy.household.residence_confirm_title}
       >
         <div className="grid gap-4">
-          <p className="text-sm leading-6">
+          <p className="text-base">
             {englishCopy.household.residence_confirm
               .replace("{name}", name.trim() || member.display_name)
               .replace("{residence}", residenceLabel(status).toLowerCase())}

@@ -180,9 +180,7 @@ export function StructuredBrief({ value }: { value: unknown }) {
       <header>
         <h2 className="text-xl font-semibold">{title}</h2>
         {summary ? (
-          <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            {summary}
-          </p>
+          <p className="mt-2 text-base text-muted-foreground">{summary}</p>
         ) : null}
       </header>
       {sections.map((raw, index) => {
@@ -197,7 +195,7 @@ export function StructuredBrief({ value }: { value: unknown }) {
               {textValue(section.title ?? section.heading, "Update")}
             </h3>
             {textValue(section.body ?? section.text) ? (
-              <p className="text-sm leading-6">
+              <p className="text-base">
                 {textValue(section.body ?? section.text)}
               </p>
             ) : null}

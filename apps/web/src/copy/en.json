@@ -792,7 +792,12 @@
   "home": {
     "sell_quantity": "Quantity: {quantity} shares",
     "estimated_tax": "Estimated tax {amount}",
-    "triggered_rows": "Why this is suggested"
+    "triggered_rows": "Why this is suggested",
+    "net_worth_as_of": "As of {date}",
+    "net_worth_as_of_today": "As of today",
+    "nothing_to_do": "Nothing to do this week",
+    "plan_empty": "Add what you have to see your plan",
+    "add_money": "Add your money"
   },
   "email": {
     "subject_actions": "{count} actions this week · Plan health {score}",
@@ -896,6 +901,10 @@
     "plan_for": "Plan for {name}",
     "member_plan_description": "This person's money and available choices.",
     "details": "Details",
+    "money_empty_title": "Your saved items will show here.",
+    "money_empty_action": "Choose what you have",
+    "form_rough_numbers": "Rough numbers are fine. You can edit this anytime.",
+    "year_only_help": "The year is enough.",
     "by_type": "By type",
     "plan_details": "Plan details",
     "placement_yield_note": "The plan compares estimated after-tax returns for each person.",

@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
+import { WalletCards } from "lucide-react";
 import { labelForCode, SLEEVE_LABELS } from "../lib/labels";
 import {
   asArray,
@@ -21,9 +22,13 @@ import { dismissHighlight, getPlan } from "../planning/api";
 import { getNetworth, listAssets, listGoals } from "../money/api";
 import type { AssetResponse, GoalResponse } from "../money/api";
 import type { WeeklyPlan } from "../planning/api";
-import { Card, Progress } from "../ui";
+import { Card, EmptyState, Progress } from "../ui";
 import { Highlights } from "../features/Highlights";
 import { useHousehold } from "../household/HouseholdContext";
+import {
+  formatHouseholdAmount,
+  formatSecondaryAmount,
+} from "../household/currency";
 import {
   DkkMoneyValue,
   ExchangeRateNote,
@@ -156,7 +161,7 @@ function PlacementNotesCard({ plan }: { plan: WeeklyPlan }) {
         <summary className="cursor-pointer text-sm font-semibold">
           {englishCopy.household_ui.placement_details}
         </summary>
-        <ul className="mt-2 grid gap-2 text-sm leading-6">
+        <ul className="mt-2 grid gap-2 text-base">
           {notes.map((note) => (
             <li key={note} className="rounded-xl bg-muted p-3">
               {note}
@@ -371,8 +376,38 @@ function safePercent(value: string): number {
   return Number.isFinite(parsed) ? Math.min(100, Math.max(0, parsed)) : 0;
 }
 
-function AllocationCard({ rows }: { rows: AllocationRow[] }) {
-  const colors = ["#245e76", "#4d8290", "#64748b", "#b88b4a", "#aab3b8"];
+function AllocationCard({
+  rows,
+  empty,
+}: {
+  rows: AllocationRow[];
+  empty: boolean;
+}) {
+  if (empty) {
+    return (
+      <EmptyState
+        title={englishCopy.home.plan_empty}
+        icon={<WalletCards aria-hidden="true" className="size-5" />}
+        action={
+          <Link
+            to="/money"
+            data-primary="true"
+            className="motion-safe:active:scale-[.98] inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground transition"
+          >
+            {englishCopy.home.add_money}
+          </Link>
+        }
+      />
+    );
+  }
+
+  const colors = [
+    "var(--chart-india)",
+    "var(--chart-global)",
+    "var(--chart-debt)",
+    "var(--chart-gold)",
+    "var(--chart-cash)",
+  ];
   const safeMoney = rows.find((row) => row.key === "debt");
   const current = safePercent(safeMoney?.actualPct ?? "0");
   const target = safePercent(safeMoney?.targetPct ?? "0");
@@ -393,15 +428,17 @@ function AllocationCard({ rows }: { rows: AllocationRow[] }) {
         aria-label={rows
           .map((row) => `${row.label}: ${safePercent(row.actualPct)}%`)
           .join(", ")}
-        className="flex h-6 overflow-hidden rounded-full bg-muted"
+        className="flex h-3 gap-0.5 overflow-hidden rounded-full bg-muted"
       >
         {rows.map((row, index) => (
           <span
             key={row.key}
+            className="min-w-0 rounded-full"
             title={row.label}
             style={{
-              width: `${safePercent(row.actualPct)}%`,
-              backgroundColor: colors[index] ?? "#64748b",
+              flexGrow: safePercent(row.actualPct),
+              flexBasis: 0,
+              backgroundColor: colors[index] ?? "var(--chart-debt)",
             }}
           />
         ))}
@@ -412,7 +449,7 @@ function AllocationCard({ rows }: { rows: AllocationRow[] }) {
             <span
               aria-hidden="true"
               className="size-2 rounded-full"
-              style={{ backgroundColor: colors[index] ?? "#64748b" }}
+              style={{ backgroundColor: colors[index] ?? "var(--chart-debt)" }}
             />
             {row.label}
           </span>
@@ -571,18 +608,35 @@ function GlobalCard({ plan }: { plan: WeeklyPlan }) {
 function DebtAnswerCard({ plan }: { plan: WeeklyPlan }) {
   const debt = asRecord(plan.debt_answer);
   const target = textValue(debt.target_debt);
+  const { fxRate, primaryCurrency } = useHousehold();
+  const primary =
+    target && isPositiveAmount(target)
+      ? formatHouseholdAmount(target, primaryCurrency, fxRate)
+      : null;
+  const secondary =
+    target && isPositiveAmount(target)
+      ? formatSecondaryAmount(target, primaryCurrency, fxRate)
+      : null;
   return (
     <Card>
       <h2 className="text-base font-semibold">Safe money</h2>
-      <p className="mt-2 text-sm leading-6">
-        {target && isPositiveAmount(target) ? (
-          <>
-            Your safe money target is <MoneyValue amountInr={target} />.
-          </>
-        ) : (
-          "Add your savings and loans to see a safe money target."
-        )}
-      </p>
+      {primary ? (
+        <>
+          <p className="mt-2 text-base">
+            Your safe money target is{" "}
+            <span className="tabular-nums">{primary}.</span>
+          </p>
+          {secondary ? (
+            <p className="mt-1 text-xs tabular-nums text-muted-foreground">
+              {secondary}
+            </p>
+          ) : null}
+        </>
+      ) : (
+        <p className="mt-2 text-base">
+          Add your savings and loans to see a safe money target.
+        </p>
+      )}
     </Card>
   );
 }
@@ -862,36 +916,42 @@ export function PlanPage() {
         meMemberId,
       )
     : members.find((member) => member.id === activeMemberId)?.display_name;
+  const noAssets =
+    assets.supported &&
+    !assets.isPending &&
+    !assets.error &&
+    (assets.data?.length ?? 0) === 0;
 
   if (!plan.supported || isMissingFeature(plan.error))
     return <ComingSoon title="Your plan is coming soon" />;
-  if (plan.isPending) return <ScreenLoading label="Loading your plan" />;
+  if (plan.isPending || (assets.supported && assets.isPending))
+    return <ScreenLoading label="Loading your plan" />;
   if (plan.error && !isMissingFeature(plan.error))
     return <ScreenError title="Your plan couldn’t load" />;
   if (!planValue) return <ScreenError title="Your plan couldn’t load" />;
 
   return (
     <div data-copy-screen="plan" className="grid gap-4">
-      <header>
-        <h2 className="text-xl font-semibold">
-          {familyView
-            ? "Your plan"
-            : `Plan for ${selectedName || englishCopy.household.family}`}
+      {!familyView ? (
+        <h2 className="text-sm font-medium text-muted-foreground">
+          Plan for {selectedName || englishCopy.household.family}
         </h2>
-      </header>
-      <AllocationCard rows={rows} />
-      <DebtAnswerCard plan={planValue} />
+      ) : null}
+      <AllocationCard rows={rows} empty={noAssets} />
+      {!noAssets ? <DebtAnswerCard plan={planValue} /> : null}
       <Highlights
         items={planValue.highlights_by_screen?.plan}
         onDismiss={(key) => hideHighlight.mutate(key)}
       />
-      <Link
-        to="/money"
-        data-primary="true"
-        className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-white"
-      >
-        Update your money
-      </Link>
+      {!noAssets ? (
+        <Link
+          to="/money"
+          data-primary="true"
+          className="motion-safe:active:scale-[.98] inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground transition"
+        >
+          Update your money
+        </Link>
+      ) : null}
       <details>
         <summary className="min-h-12 cursor-pointer py-3 text-sm font-semibold">
           Details

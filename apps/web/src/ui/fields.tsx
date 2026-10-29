@@ -32,6 +32,7 @@ export function Field({
   help,
   error,
   required,
+  prefix,
   children,
 }: {
   id: string;
@@ -40,10 +41,12 @@ export function Field({
   help?: string;
   error?: string | ApiFieldError[];
   required?: boolean;
+  prefix?: string;
   children: ReactNode;
 }) {
-  const message = fieldErrorMessage(error, errorName);
-  const helpId = help ? `${id}-help` : undefined;
+  const message = fieldErrorMessage(error, errorName)?.trim() || undefined;
+  const helpText = help?.trim() || undefined;
+  const helpId = helpText ? `${id}-help` : undefined;
   const errorId = message ? `${id}-error` : undefined;
   const childDescribedBy = isValidElement<{ "aria-describedby"?: string }>(
     children,
@@ -70,6 +73,19 @@ export function Field({
         },
       )
     : children;
+  const prefixedControl = prefix ? (
+    <div className="relative">
+      <span
+        aria-hidden="true"
+        className={`pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm font-medium text-muted-foreground ${prefix.length > 1 ? "min-w-10" : ""}`}
+      >
+        {prefix}
+      </span>
+      {control}
+    </div>
+  ) : (
+    control
+  );
   return (
     <div className="grid gap-1.5">
       <label htmlFor={id} className="text-sm font-medium">
@@ -83,10 +99,10 @@ export function Field({
           </>
         ) : null}
       </label>
-      {control}
-      {help ? (
+      {prefixedControl}
+      {helpText ? (
         <p id={helpId} className="min-h-5 text-sm text-muted-foreground">
-          {help}
+          {helpText}
         </p>
       ) : null}
       {message ? (
@@ -97,9 +113,7 @@ export function Field({
           />
           {message}
         </p>
-      ) : (
-        <p id={errorId} className="min-h-5" aria-hidden="true" />
-      )}
+      ) : null}
     </div>
   );
 }
@@ -148,12 +162,12 @@ export function MoneyInput<T extends FieldValues>({
     fieldState.error?.message ?? validationError ?? parseError ?? problemErrors;
   const describedBy =
     [
-      help ? `${id}-help` : undefined,
+      help?.trim() ? `${id}-help` : undefined,
       fieldState.error || validationError || parseError
         ? `${id}-error`
         : undefined,
       problemErrors?.length ? `${id}-error` : undefined,
-      `${id}-parsed`,
+      parsed ? `${id}-parsed` : undefined,
     ]
       .filter(Boolean)
       .join(" ") || undefined;
@@ -168,50 +182,60 @@ export function MoneyInput<T extends FieldValues>({
         error={error}
         required={required}
       >
-        <input
-          {...field}
-          id={id}
-          ref={field.ref}
-          type="text"
-          inputMode="decimal"
-          autoComplete="off"
-          required={required}
-          placeholder={placeholder}
-          value={textValue}
-          aria-invalid={
-            Boolean(
-              fieldState.error ||
-              validationError ||
-              parseError ||
-              problemErrors?.length,
-            ) || undefined
-          }
-          aria-describedby={describedBy}
-          className="min-h-12 w-full rounded-xl border border-line bg-surface px-3 text-base tabular-nums shadow-sm outline-none focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/30"
-          onChange={(event) => {
-            field.onChange(event);
-            onValueChange?.(event.currentTarget.value);
-          }}
-          onBlur={(event) => {
-            const text = event.currentTarget.value.trim();
-            if (text) {
-              try {
-                field.onChange(parseInr(text));
-              } catch {
-                // The connected form schema supplies the validation message.
-              }
+        <div className="relative">
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm font-medium text-muted-foreground"
+          >
+            ₹
+          </span>
+          <input
+            {...field}
+            id={id}
+            ref={field.ref}
+            type="text"
+            inputMode="decimal"
+            autoComplete="off"
+            required={required}
+            placeholder={placeholder}
+            value={textValue}
+            aria-invalid={
+              Boolean(
+                fieldState.error ||
+                validationError ||
+                parseError ||
+                problemErrors?.length,
+              ) || undefined
             }
-            field.onBlur();
-          }}
-        />
+            aria-describedby={describedBy}
+            className="min-h-12 w-full rounded-xl border border-line bg-surface pl-9 pr-3 text-base tabular-nums shadow-sm outline-none focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/30"
+            onChange={(event) => {
+              field.onChange(event);
+              onValueChange?.(event.currentTarget.value);
+            }}
+            onBlur={(event) => {
+              const text = event.currentTarget.value.trim();
+              if (text) {
+                try {
+                  field.onChange(parseInr(text));
+                } catch {
+                  // The connected form schema supplies the validation message.
+                }
+              }
+              field.onBlur();
+            }}
+          />
+        </div>
       </Field>
-      <p
-        id={`${id}-parsed`}
-        className="min-h-5 text-sm text-muted-foreground"
-        aria-live="polite"
-      >
-        {parsed ? `= ${formatInr(parsed, "full", parsedDecimals)}` : " "}
-      </p>
+      {parsed ? (
+        <p
+          id={`${id}-parsed`}
+          className="text-sm tabular-nums text-muted-foreground"
+          aria-live="polite"
+        >
+          = {formatInr(parsed, "full", parsedDecimals)}
+        </p>
+      ) : null}
     </div>
   );
 }

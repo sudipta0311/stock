@@ -46,6 +46,14 @@ const STEPS = [
   "consent",
   "done",
 ] as const;
+const STEP_LABELS: Record<OnboardingStep, string> = {
+  welcome: "Welcome",
+  household: "Household",
+  goals: "Goals",
+  risk: "Risk",
+  consent: "Updates",
+  done: "Done",
+};
 type OnboardingStep = (typeof STEPS)[number];
 type TaxRegime = ProfileUpsert["tax_regime"];
 type GoalType = components["schemas"]["GoalType"];
@@ -237,21 +245,22 @@ function StepHeading({
   const index = STEPS.indexOf(step);
   return (
     <div className="grid gap-3">
-      <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
+      <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
         <span>Getting started</span>
         <span>
           {index + 1} of {STEPS.length}
         </span>
       </div>
       <Progress
+        quiet
         value={((index + 1) / STEPS.length) * 100}
         label={`Onboarding step ${index + 1} of ${STEPS.length}`}
       />
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">
-          {description}
-        </p>
+        <h1 className="text-page-title font-semibold tracking-tight">
+          {title}
+        </h1>
+        <p className="mt-2 text-base text-muted-foreground">{description}</p>
       </div>
     </div>
   );
@@ -276,7 +285,7 @@ function QuestionCard({
             type="button"
             aria-pressed={answer === option.id}
             onClick={() => onAnswer(option.id)}
-            className={`min-h-14 rounded-xl border px-4 py-3 text-left text-sm leading-5 ${answer === option.id ? "border-brand bg-brand/10 font-semibold" : "border-line bg-background hover:bg-muted"}`}
+            className={`min-h-14 rounded-xl border px-4 py-3 text-left text-small ${answer === option.id ? "border-brand bg-brand/10 font-semibold" : "border-line bg-background hover:bg-muted"}`}
           >
             {option.text}
           </button>
@@ -662,13 +671,13 @@ export function OnboardingPage() {
       className="mx-auto grid min-h-screen w-full max-w-xl content-start gap-4 px-4 py-6 sm:content-center sm:py-10"
     >
       <Card className="grid gap-5">
-        {step !== "welcome" ? (
+        {step !== "welcome" && step !== "done" ? (
           <Link
-            to="/onboarding/welcome"
-            className="inline-flex min-h-12 items-center gap-2 text-sm text-muted-foreground"
+            to={`/onboarding/${STEPS[STEPS.indexOf(step) - 1]}`}
+            className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-muted-foreground"
           >
             <ArrowLeft aria-hidden="true" className="size-4" />
-            Welcome
+            {STEP_LABELS[STEPS[STEPS.indexOf(step) - 1] ?? "welcome"]}
           </Link>
         ) : null}
         {step === "welcome" ? (
@@ -722,7 +731,7 @@ export function OnboardingPage() {
             {draft.adults.map((adult, index) => (
               <fieldset
                 key={adult.id ?? `adult-${index}`}
-                className="grid gap-3 rounded-xl border border-line p-3"
+                className="grid gap-5 rounded-xl border border-line p-3"
               >
                 <legend className="px-1 text-sm font-semibold">
                   {index === 0
@@ -749,11 +758,7 @@ export function OnboardingPage() {
                     className="min-h-12 w-full rounded-xl border border-line bg-background px-3"
                   />
                 </Field>
-                {index === 0 ? (
-                  <p className="text-sm text-muted-foreground">
-                    {englishCopy.household.member_relationship.self}
-                  </p>
-                ) : (
+                {index === 0 ? null : (
                   <Select
                     id={`adult-${index}-relationship`}
                     label={englishCopy.household.onboarding.relationship}
@@ -798,7 +803,7 @@ export function OnboardingPage() {
                   <summary className="cursor-pointer text-sm font-medium">
                     {englishCopy.household.add_details}
                   </summary>
-                  <div className="mt-3 grid gap-3">
+                  <div className="mt-3 grid gap-5">
                     {adult.residence === "NRI" ? (
                       <Field
                         id={`adult-${index}-return-year`}
@@ -877,6 +882,9 @@ export function OnboardingPage() {
                       <Field
                         id={`adult-${index}-income`}
                         label={englishCopy.household.onboarding.annual_income}
+                        prefix={
+                          adult.annualIncomeCurrency === "DKK" ? "DKK" : "₹"
+                        }
                       >
                         <input
                           id={`adult-${index}-income`}
@@ -887,7 +895,7 @@ export function OnboardingPage() {
                               annualIncome: event.currentTarget.value,
                             })
                           }
-                          className="min-h-12 w-full rounded-xl border border-line bg-background px-3"
+                          className={`min-h-12 w-full rounded-xl border border-line bg-background pr-3 ${adult.annualIncomeCurrency === "DKK" ? "pl-14" : "pl-9"}`}
                         />
                       </Field>
                       <Select
@@ -964,7 +972,7 @@ export function OnboardingPage() {
               onChange={(value) => setGoalType(value as GoalType)}
             />
             <form
-              className="grid gap-4"
+              className="grid gap-5"
               onSubmit={(event) => void addGoal(event)}
             >
               {goalCurrency === "INR" ? (
@@ -980,6 +988,7 @@ export function OnboardingPage() {
                   id="goal-amount-usd"
                   label="Target amount (USD)"
                   help="Enter a dollar amount, without a currency conversion."
+                  prefix="USD"
                 >
                   <input
                     id="goal-amount-usd"
@@ -988,7 +997,7 @@ export function OnboardingPage() {
                     onChange={(event) =>
                       setGoalAmount(event.currentTarget.value)
                     }
-                    className="min-h-12 w-full rounded-xl border border-line bg-background px-3"
+                    className="min-h-12 w-full rounded-xl border border-line bg-background pl-14 pr-3"
                   />
                 </Field>
               )}
@@ -1021,9 +1030,7 @@ export function OnboardingPage() {
                 <p className="text-sm text-danger-foreground" role="alert">
                   {goalError}
                 </p>
-              ) : (
-                <p className="min-h-5" aria-hidden="true" />
-              )}
+              ) : null}
               <Button
                 type="submit"
                 variant="secondary"

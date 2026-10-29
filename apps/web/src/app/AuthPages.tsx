@@ -53,7 +53,7 @@ export function LoginPage() {
         <p className="text-sm font-semibold uppercase tracking-[0.16em] text-brand">
           Wealth Copilot
         </p>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight">
+        <h1 className="mt-2 text-page-title font-semibold tracking-tight">
           A clearer view of your money.
         </h1>
         <p className="mt-2 text-muted-foreground">

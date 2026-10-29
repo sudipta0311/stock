@@ -103,14 +103,17 @@ function optionLabel(value: string | number): string {
   );
 }
 
-function fieldHelp(type: AssetType, name: string, required: boolean): string {
+function fieldHelp(
+  type: AssetType,
+  name: string,
+  required: boolean,
+): string | undefined {
   const copy = fieldCopy(type, name);
   if (copy.help) return copy.help;
   if (name === "member_id") return englishCopy.household_ui.member_help;
-  if (!required)
-    return "Leave blank if you are not sure. Rough numbers are fine.";
-  if (name.endsWith("_year")) return "The year is enough.";
-  return "Rough numbers are fine. You can edit this anytime.";
+  if (!required) return undefined;
+  if (name.endsWith("_year")) return englishCopy.household_ui.year_only_help;
+  return undefined;
 }
 
 function isInstitutionField(name: string): boolean {
@@ -222,14 +225,14 @@ export function USInvestmentStep() {
       </Link>
       <div>
         <h2 className="text-xl font-semibold">US investments</h2>
-        <p className="mt-2 text-sm leading-6 text-muted-foreground">
+        <p className="mt-2 text-base text-muted-foreground">
           Upload a broker CSV to add global holdings. The account import screen
           is the available entry point for these assets.
         </p>
       </div>
       <Link
         to="/import"
-        className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-white"
+        className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground"
       >
         Upload a broker file{" "}
         <ArrowRight aria-hidden="true" className="size-4" />
@@ -724,6 +727,17 @@ function AssetForm({
   );
   const eligibilityKey = eligibilityInstrument(assetType, watched);
   const eligibility = eligibilityNote(planMember, eligibilityKey);
+  const eligibilityLabel = selectedMember
+    ? household.memberLabel(selectedMember)
+    : englishCopy.household_ui.you;
+  // "You" is a standalone label; mid-sentence it reads "What can fit for you".
+  const eligibilityTitle = englishCopy.household_ui.eligibility_title.replace(
+    "{name}",
+    eligibilityLabel === englishCopy.household.you ||
+      eligibilityLabel === englishCopy.household_ui.you
+      ? eligibilityLabel.toLowerCase()
+      : eligibilityLabel,
+  );
   const statusText =
     saveState === "saving"
       ? "Saving…"
@@ -749,7 +763,7 @@ function AssetForm({
           <div>
             <h2 className="text-xl font-semibold">{assetTitles[assetType]}</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Rough numbers are fine. You can edit this anytime.
+              {englishCopy.household_ui.form_rough_numbers}
             </p>
           </div>
           {workflow ? (
@@ -763,27 +777,15 @@ function AssetForm({
             disabled={readOnly}
             className="grid gap-4 disabled:opacity-70"
           >
-            <div className="grid gap-4">
+            <div className="grid gap-5">
               {requiredFields.map((field) => renderField(field, true))}
             </div>
             {eligibility ? (
               <section
                 className="grid gap-1 rounded-xl border border-line bg-muted/40 p-3 text-sm"
-                aria-label={englishCopy.household_ui.eligibility_title.replace(
-                  "{name}",
-                  selectedMember
-                    ? household.memberLabel(selectedMember)
-                    : englishCopy.household_ui.you,
-                )}
+                aria-label={eligibilityTitle}
               >
-                <p className="font-medium">
-                  {englishCopy.household_ui.eligibility_title.replace(
-                    "{name}",
-                    selectedMember
-                      ? household.memberLabel(selectedMember)
-                      : englishCopy.household_ui.you,
-                  )}
-                </p>
+                <p className="font-medium">{eligibilityTitle}</p>
                 <p>{eligibility}</p>
                 {planMember?.eligibility_status?.[eligibilityKey ?? ""] ===
                 "not_allowed" ? (
@@ -799,7 +801,7 @@ function AssetForm({
                   <span>More details (for a closer estimate)</span>
                   <ChevronDown aria-hidden="true" className="size-4" />
                 </summary>
-                <div className="grid gap-4 border-t border-line py-4">
+                <div className="grid gap-5 border-t border-line py-4">
                   {optionalFields.map((field) => renderField(field, false))}
                 </div>
               </details>

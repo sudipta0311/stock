@@ -357,9 +357,12 @@ describe("household screens", () => {
     server.use(...householdHandlers({ onFxRequest: () => fxRequests++ }));
     const { container } = renderHouseholdApp("/plan");
     expect(
-      await screen.findByRole("heading", { name: "Your plan" }),
+      await screen.findByText("Add what you have to see your plan"),
     ).toBeInTheDocument();
-    expect(document.body.textContent).toContain("DKK 50,000.00");
+    expect(
+      screen.queryByRole("heading", { name: "Your plan" }),
+    ).not.toBeInTheDocument();
+    expect(document.body.textContent).toContain("DKK 50,000");
     expect(document.body.textContent).toContain("₹10 L");
     expect(
       await screen.findByText(/Reference rate: 1 DKK = ₹20/),

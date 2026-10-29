@@ -59,11 +59,24 @@ export function dkkToInr(amountDkk: string, rate: DkkInrRate): string | null {
 
 export function formatDkk(value: string): string {
   const match = /^(-?)(\d+)(?:\.(\d+))?$/.exec(value.trim());
-  if (!match) return "DKK 0.00";
-  const sign = match[1] ?? "";
+  if (!match) return "DKK 0";
   const integer = match[2];
-  if (!integer) return "DKK 0.00";
-  const decimals = (match[3] ?? "").padEnd(2, "0").slice(0, 2);
-  const grouped = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  return `${sign}DKK ${grouped}.${decimals}`;
+  if (!integer) return "DKK 0";
+  let rounded = BigInt(integer);
+  if ((match[3]?.[0] ?? "0") >= "5") rounded += 1n;
+  const sign = rounded === 0n ? "" : (match[1] ?? "");
+  const grouped = rounded.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return `${sign}DKK ${grouped}`;
+}
+
+export function formatRateToTwoDecimals(value: string): string {
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(value.trim());
+  if (!match) return "0.00";
+  const integer = match[1];
+  if (!integer) return "0.00";
+  const fraction = match[2] ?? "";
+  let hundredths = BigInt(integer) * 100n;
+  hundredths += BigInt(fraction.slice(0, 2).padEnd(2, "0") || "0");
+  if ((fraction[2] ?? "0") >= "5") hundredths += 1n;
+  return `${hundredths / 100n}.${String(hundredths % 100n).padStart(2, "0")}`;
 }

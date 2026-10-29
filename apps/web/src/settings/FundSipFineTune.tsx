@@ -99,7 +99,7 @@ export function FundSipFineTune() {
         <h2 id="fund-sip-settings-heading" className="text-base font-semibold">
           {englishCopy.fund_check.settings_title}
         </h2>
-        <p className="mt-1 text-sm leading-6 text-muted-foreground">
+        <p className="mt-1 text-base text-muted-foreground">
           {englishCopy.fund_check.settings_help}
         </p>
       </div>
@@ -121,22 +121,30 @@ export function FundSipFineTune() {
                   <span className="text-xs text-muted-foreground">
                     {englishCopy.fund_check.monthly_amount}
                   </span>
-                  <input
-                    className="min-h-11 w-40 rounded-lg border border-line bg-background px-3 text-sm"
-                    id={`fund-sip-${row.securityId}`}
-                    inputMode="decimal"
-                    min="0"
-                    onChange={(event) =>
-                      setDrafts((current) => ({
-                        ...current,
-                        [row.securityId]: event.target.value,
-                      }))
-                    }
-                    step="0.01"
-                    type="number"
-                    value={drafts[row.securityId] ?? row.current}
-                    disabled={isViewer}
-                  />
+                  <div className="relative">
+                    <span
+                      aria-hidden="true"
+                      className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm font-medium text-muted-foreground"
+                    >
+                      ₹
+                    </span>
+                    <input
+                      className="min-h-12 w-40 rounded-lg border border-line bg-background pl-9 pr-3 text-sm tabular-nums"
+                      id={`fund-sip-${row.securityId}`}
+                      inputMode="decimal"
+                      min="0"
+                      onChange={(event) =>
+                        setDrafts((current) => ({
+                          ...current,
+                          [row.securityId]: event.target.value,
+                        }))
+                      }
+                      step="0.01"
+                      type="number"
+                      value={drafts[row.securityId] ?? row.current}
+                      disabled={isViewer}
+                    />
+                  </div>
                 </div>
                 <Button
                   disabled={isViewer}

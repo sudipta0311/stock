@@ -20,9 +20,9 @@ export function MoneyValue({
   const secondary = formatSecondaryAmount(amountInr, primaryCurrency, fxRate);
   return (
     <>
-      <span>{primary}</span>
+      <span className="tabular-nums">{primary}</span>
       {secondary ? (
-        <span className="block text-xs font-normal text-muted-foreground">
+        <span className="block text-xs font-normal tabular-nums text-muted-foreground">
           {secondary}
         </span>
       ) : null}
@@ -45,9 +45,9 @@ export function DkkMoneyValue({ amountDkk }: { amountDkk: string }) {
         : formatHouseholdAmount(amountInr, "INR", undefined);
   return (
     <>
-      <span>{primary}</span>
+      <span className="tabular-nums">{primary}</span>
       {secondary ? (
-        <span className="block text-xs font-normal text-muted-foreground">
+        <span className="block text-xs font-normal tabular-nums text-muted-foreground">
           {secondary}
         </span>
       ) : null}

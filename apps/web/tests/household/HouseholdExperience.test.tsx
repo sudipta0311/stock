@@ -253,7 +253,7 @@ describe("family plan screens", () => {
     );
     expect(ownerCard).toBeDefined();
     if (!ownerCard) throw new Error("The owner's action card was not rendered");
-    await screen.findByText(/Reference rate: 1 DKK/);
+    await screen.findByText(/As of 28 Oct 2026 · 1 DKK = ₹100\.00/);
     const freshOwnerCard = screen
       .getAllByRole("article", { name: /Invest now/ })
       .find((card) => card.textContent?.includes("For Test owner"));
@@ -261,11 +261,11 @@ describe("family plan screens", () => {
     if (!freshOwnerCard)
       throw new Error("The owner's action card was not rendered");
     expect(freshOwnerCard).toHaveTextContent("For Test owner");
-    expect(within(freshOwnerCard).getByText(/DKK 100.00/)).toBeInTheDocument();
+    expect(within(freshOwnerCard).getByText("DKK 100")).toBeInTheDocument();
     expect(within(freshOwnerCard).getByText(/₹10,000/)).toBeInTheDocument();
     expect(freshOwnerCard).not.toHaveTextContent("For you");
     expect(
-      screen.getByText(/Reference rate: 1 DKK = ₹100/),
+      screen.getByText(/As of 28 Oct 2026 · 1 DKK = ₹100\.00/),
     ).toBeInTheDocument();
     await user.click(
       within(freshOwnerCard).getByRole("button", { name: "How to" }),
@@ -309,7 +309,7 @@ describe("family plan screens", () => {
       screen.getByRole("heading", { name: "Test owner" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "You" })).toBeInTheDocument();
-    expect(screen.getAllByText("DKK 5,000.00").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("DKK 5,000").length).toBeGreaterThan(0);
     const ownerSection = screen
       .getByRole("heading", { name: "Test owner" })
       .closest("section");
@@ -370,7 +370,7 @@ describe("family plan screens", () => {
     expect(
       await screen.findByText("Possible with the account's terms"),
     ).toBeInTheDocument();
-    expect(screen.getByText("What can fit for You")).toBeInTheDocument();
+    expect(screen.getByText("What can fit for you")).toBeInTheDocument();
     expect(
       screen.queryByText(/Not available for new deposits/),
     ).not.toBeInTheDocument();

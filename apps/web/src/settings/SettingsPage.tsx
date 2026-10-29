@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Button, Card, Checkbox, Select, Sheet } from "../ui";
+import { Badge, Button, Card, Checkbox, Field, Select, Sheet } from "../ui";
 import englishCopy from "../copy/en.json";
 import { ApiError, apiFetch } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
@@ -152,7 +152,8 @@ function saveBlob(blob: Blob): void {
 export function SettingsPage() {
   const queryClient = useQueryClient();
   const { logout } = useAuth();
-  const { meMemberId, primaryCurrency, setPrimaryCurrency } = useHousehold();
+  const { meMemberId, primaryCurrency, role, setPrimaryCurrency } =
+    useHousehold();
   const { resolved, toggleTheme } = useTheme();
   const meSupported = settingsPathAvailable("/v1/me");
   const membersSupported = settingsPathAvailable("/v1/members");
@@ -252,6 +253,7 @@ export function SettingsPage() {
     [accessQuery.data],
   );
   const canEditHousehold = me?.role !== "viewer";
+  const hasMultipleLogins = role !== "owner" || sharedPeople.length > 0;
   const currentMember =
     members.find((member) => member.id === meMemberId) ?? members[0];
   const currentTax = currentMember?.tax;
@@ -625,6 +627,11 @@ export function SettingsPage() {
             >
               {englishCopy.household.settings.household}
             </h2>
+            {role && hasMultipleLogins ? (
+              <div className="mt-2">
+                <Badge>{englishCopy.household_ui.roles[role]}</Badge>
+              </div>
+            ) : null}
           </div>
           {viewOnly ? (
             <p className="text-sm text-muted-foreground">
@@ -675,7 +682,7 @@ export function SettingsPage() {
             addPersonOpen ? (
               <form
                 onSubmit={(event) => void addPerson(event)}
-                className="grid gap-3 rounded-xl border border-line p-3"
+                className="grid gap-5 rounded-xl border border-line p-3"
               >
                 <label
                   className="grid gap-1 text-sm font-medium"
@@ -789,9 +796,9 @@ export function SettingsPage() {
             </summary>
             <form
               onSubmit={(event) => void savePlanDetails(event)}
-              className="mt-4 grid gap-4"
+              className="mt-4 grid gap-5"
             >
-              <fieldset disabled={viewOnly} className="grid gap-4">
+              <fieldset disabled={viewOnly} className="grid gap-5">
                 <label
                   className="grid gap-1 text-sm font-medium"
                   htmlFor="profile-name"
@@ -880,11 +887,11 @@ export function SettingsPage() {
                     </option>
                   ))}
                 </Select>
-                <label
-                  className="grid gap-1 text-sm font-medium"
-                  htmlFor="monthly-sip"
+                <Field
+                  id="monthly-sip"
+                  label={englishCopy.settings.family.monthly_sip}
+                  prefix={primaryCurrency === "DKK" ? "DKK" : "₹"}
                 >
-                  {englishCopy.settings.family.monthly_sip}
                   <input
                     id="monthly-sip"
                     inputMode="decimal"
@@ -892,22 +899,22 @@ export function SettingsPage() {
                     onChange={(event) =>
                       setMonthlySip(event.currentTarget.value)
                     }
-                    className="min-h-12 rounded-xl border border-line bg-surface px-3 text-base tabular-nums"
+                    className={`min-h-12 rounded-xl border border-line bg-surface pr-3 text-base tabular-nums ${primaryCurrency === "DKK" ? "pl-14" : "pl-9"}`}
                   />
-                </label>
-                <label
-                  className="grid gap-1 text-sm font-medium"
-                  htmlFor="new-money"
+                </Field>
+                <Field
+                  id="new-money"
+                  label={englishCopy.settings.family.this_week}
+                  prefix={primaryCurrency === "DKK" ? "DKK" : "₹"}
                 >
-                  {englishCopy.settings.family.this_week}
                   <input
                     id="new-money"
                     inputMode="decimal"
                     value={newMoney}
                     onChange={(event) => setNewMoney(event.currentTarget.value)}
-                    className="min-h-12 rounded-xl border border-line bg-surface px-3 text-base tabular-nums"
+                    className={`min-h-12 rounded-xl border border-line bg-surface pr-3 text-base tabular-nums ${primaryCurrency === "DKK" ? "pl-14" : "pl-9"}`}
                   />
-                </label>
+                </Field>
                 <div className="grid gap-2">
                   <h3 className="text-sm font-semibold">
                     {englishCopy.settings.family.existing_sips}
@@ -915,7 +922,7 @@ export function SettingsPage() {
                   {existingSips.map((sip, index) => (
                     <div
                       key={`${sip.sleeve}-${index}`}
-                      className="grid gap-3 rounded-xl border border-line p-3"
+                      className="grid gap-5 rounded-xl border border-line p-3"
                     >
                       <Select
                         id={`sip-sleeve-${index}`}
@@ -957,11 +964,11 @@ export function SettingsPage() {
                           </option>
                         ))}
                       </Select>
-                      <label
-                        className="grid gap-1 text-sm font-medium"
-                        htmlFor={`sip-amount-${index}`}
+                      <Field
+                        id={`sip-amount-${index}`}
+                        label={englishCopy.settings.family.monthly_sip}
+                        prefix="₹"
                       >
-                        {englishCopy.settings.family.monthly_sip}
                         <input
                           id={`sip-amount-${index}`}
                           inputMode="decimal"
@@ -973,9 +980,9 @@ export function SettingsPage() {
                               event.currentTarget.value,
                             )
                           }
-                          className="min-h-12 rounded-xl border border-line bg-surface px-3 text-base tabular-nums"
+                          className="min-h-12 rounded-xl border border-line bg-surface pl-9 pr-3 text-base tabular-nums"
                         />
-                      </label>
+                      </Field>
                       <Button
                         type="button"
                         variant="ghost"

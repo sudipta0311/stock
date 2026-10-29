@@ -22,16 +22,20 @@ export function BottomNavigation() {
             to={to}
             end={end}
             className={({ isActive }) =>
-              `flex min-h-16 flex-col items-center justify-center gap-1 px-1 text-xs transition ${isActive ? "font-semibold text-brand" : "text-muted-foreground hover:text-foreground"}`
+              `motion-safe:active:scale-[.98] flex min-h-16 flex-col items-center justify-center gap-0.5 px-1 text-nav font-medium transition ${isActive ? "text-brand" : "text-muted-foreground hover:text-foreground"}`
             }
           >
             {({ isActive }) => (
               <>
-                <Icon
-                  aria-hidden="true"
-                  className="size-5"
-                  strokeWidth={isActive ? 2.5 : 2}
-                />
+                <span
+                  className={`grid size-9 place-items-center rounded-full ${isActive ? "bg-brand/10 text-brand" : ""}`}
+                >
+                  <Icon
+                    aria-hidden="true"
+                    className="size-5"
+                    strokeWidth={isActive ? 2.5 : 2}
+                  />
+                </span>
                 <span>{label}</span>
               </>
             )}

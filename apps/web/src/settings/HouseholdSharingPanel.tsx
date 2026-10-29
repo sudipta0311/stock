@@ -206,7 +206,7 @@ export function HouseholdSharingPanel() {
       ) : (
         <form
           onSubmit={(event) => void createInvite(event)}
-          className="grid gap-3"
+          className="grid gap-5"
         >
           <label
             className="grid gap-1 text-sm font-medium"

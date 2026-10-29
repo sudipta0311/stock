@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
+import { Lightbulb } from "lucide-react";
 import { formatInr } from "../lib/money";
 import { labelForCode } from "../lib/labels";
 import {
@@ -80,11 +81,16 @@ function DenmarkBuyCard({ plan }: { plan?: WeeklyPlan }) {
                 className="grid gap-2 rounded-xl bg-muted p-3"
               >
                 <div className="flex items-start justify-between gap-3">
-                  <h3 className="font-semibold">
-                    <span data-security>
-                      {textValue(instrument.name, copy.fund_fallback)}
+                  <span className="flex min-w-0 items-center gap-3">
+                    <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-surface text-brand">
+                      <Lightbulb aria-hidden="true" className="size-4" />
                     </span>
-                  </h3>
+                    <h3 className="min-w-0 font-semibold">
+                      <span data-security>
+                        {textValue(instrument.name, copy.fund_fallback)}
+                      </span>
+                    </h3>
+                  </span>
                   <span className="shrink-0 text-sm font-semibold tabular-nums">
                     {dkkAmount(line.amount_dkk)}
                   </span>
@@ -122,7 +128,7 @@ function DenmarkBuyCard({ plan }: { plan?: WeeklyPlan }) {
                   <summary className="cursor-pointer text-sm font-semibold text-brand">
                     {copy.how}
                   </summary>
-                  <ol className="mt-2 grid gap-1 pl-5 text-sm leading-6 list-decimal">
+                  <ol className="mt-2 grid gap-1 pl-5 text-base list-decimal">
                     {howTo.map((step, stepIndex) => (
                       <li key={`${broker}-${stepIndex}`}>{String(step)}</li>
                     ))}
@@ -132,7 +138,7 @@ function DenmarkBuyCard({ plan }: { plan?: WeeklyPlan }) {
                   <summary className="cursor-pointer text-sm text-muted-foreground">
                     {copy.why}
                   </summary>
-                  <div className="mt-2 grid gap-2 text-sm leading-6">
+                  <div className="mt-2 grid gap-2 text-base">
                     <p>{copy.why_ranked}</p>
                     {reasonCodes.includes("broker_availability_unchecked") ? (
                       <p>{copy.broker_availability_unchecked}</p>
@@ -406,8 +412,14 @@ function CorePicksCard({
       {picks.length ? (
         <ul className="grid gap-2">
           {picks.map((pick) => (
-            <li key={pick} className="rounded-xl bg-muted p-3 text-sm">
-              {pick}
+            <li
+              key={pick}
+              className="flex min-h-14 items-center gap-3 border-t border-line pt-2 first:border-0 first:pt-0"
+            >
+              <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground">
+                <Lightbulb aria-hidden="true" className="size-4" />
+              </span>
+              <span className="text-sm">{pick}</span>
             </li>
           ))}
         </ul>
@@ -448,30 +460,36 @@ function ResearchCard({
           return (
             <article
               key={`${symbol}-${index}`}
-              className="grid gap-2 border-t border-line pt-3 first:border-0 first:pt-0"
+              className="flex gap-3 border-t border-line pt-3 first:border-0 first:pt-0"
             >
-              <div className="flex items-start justify-between gap-3">
-                <h3 className="font-semibold" data-security>
-                  {symbol}
-                </h3>
-                {confidence ? (
-                  <span className="text-right text-xs text-muted-foreground">
-                    {labelForCode(confidence)}
-                  </span>
+              <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground">
+                <Lightbulb aria-hidden="true" className="size-4" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-start justify-between gap-3">
+                  <h3 className="font-semibold" data-security>
+                    {symbol}
+                  </h3>
+                  {confidence ? (
+                    <span className="text-right text-xs text-muted-foreground">
+                      {labelForCode(confidence)}
+                    </span>
+                  ) : null}
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  {textValue(idea.sector, "Sector unavailable")} ·{" "}
+                  {valuationWords(valuation)}
+                </p>
+                {tranche ? (
+                  <p className="mt-1 text-sm font-medium">{tranche}</p>
+                ) : null}
+                {idea.price ? (
+                  <p className="mt-1 text-xs text-muted-foreground tabular-nums">
+                    Reference price{" "}
+                    {formatInr(textValue(idea.price), "compact")}
+                  </p>
                 ) : null}
               </div>
-              <p className="text-sm text-muted-foreground">
-                {textValue(idea.sector, "Sector unavailable")} ·{" "}
-                {valuationWords(valuation)}
-              </p>
-              {tranche ? (
-                <p className="text-sm font-medium">{tranche}</p>
-              ) : null}
-              {idea.price ? (
-                <p className="text-xs text-muted-foreground">
-                  Reference price {formatInr(textValue(idea.price), "compact")}
-                </p>
-              ) : null}
             </article>
           );
         })
@@ -532,7 +550,7 @@ export function IdeasPage() {
       <Link
         to="/plan"
         data-primary="true"
-        className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-white"
+        className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground"
       >
         Review your plan
       </Link>

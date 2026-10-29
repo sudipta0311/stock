@@ -38,13 +38,14 @@ describe("Home this week", () => {
   it("shows a positive no-action state when the API returns zero actions", async () => {
     server.use(...baseHomeHandlers([]));
     renderHome();
-    expect(
-      await screen.findByText(/Nothing to do this week/),
-    ).toBeInTheDocument();
+    const emptyMessage = await screen.findByText("Nothing to do this week");
+    expect(emptyMessage).toBeInTheDocument();
+    expect(emptyMessage).not.toHaveTextContent("✓");
     expect(screen.getByText("Net worth")).toBeInTheDocument();
     const root = document.querySelector<HTMLElement>(
       '[data-copy-screen="home"]',
     );
+    expect(root?.firstElementChild).toHaveClass("home-hero");
     expect(root?.querySelectorAll('[data-primary="true"]')).toHaveLength(1);
     expect(
       root?.querySelectorAll(":scope > section").length,

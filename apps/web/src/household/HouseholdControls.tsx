@@ -1,4 +1,3 @@
-import { Badge } from "../ui";
 import englishCopy from "../copy/en.json";
 import { useHousehold } from "./HouseholdContext";
 
@@ -9,23 +8,26 @@ export function HouseholdControls() {
     households,
     selectedHouseholdId,
     selectedMemberId,
-    role,
     selectHousehold,
     selectMember,
     memberLabel,
   } = useHousehold();
   const ownHouseholdId = me?.household_owner_id;
   const householdValue = selectedHouseholdId ?? ownHouseholdId ?? "";
+  const hasMemberSwitch = members.length > 1;
+  const hasHouseholdSwitch = households.length > 1;
+
+  if (!hasMemberSwitch && !hasHouseholdSwitch) return null;
 
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
-      {members.length > 1 ? (
+      {hasMemberSwitch ? (
         <select
           id="header-member-filter"
           aria-label={englishCopy.household.member_switcher}
           value={selectedMemberId}
           onChange={(event) => selectMember(event.currentTarget.value)}
-          className="min-h-10 max-w-40 rounded-full border border-line bg-background px-3 text-sm font-medium"
+          className="min-h-11 max-w-40 rounded-full border border-line bg-surface px-3 text-sm font-medium"
         >
           <option value="family">{englishCopy.household.family}</option>
           {members.map((member) => (
@@ -35,7 +37,7 @@ export function HouseholdControls() {
           ))}
         </select>
       ) : null}
-      {households.length > 1 ? (
+      {hasHouseholdSwitch ? (
         <select
           id="header-household-filter"
           aria-label={englishCopy.household.household_switcher}
@@ -44,7 +46,7 @@ export function HouseholdControls() {
             const value = event.currentTarget.value;
             selectHousehold(value === ownHouseholdId ? null : value || null);
           }}
-          className="min-h-10 max-w-44 rounded-full border border-line bg-background px-3 text-sm"
+          className="min-h-11 max-w-44 rounded-full border border-line bg-surface px-3 text-sm"
         >
           {households.map((household) => (
             <option key={household.owner_id} value={household.owner_id}>
@@ -55,18 +57,6 @@ export function HouseholdControls() {
             </option>
           ))}
         </select>
-      ) : null}
-      {role ? (
-        <Badge>
-          {role === "viewer"
-            ? englishCopy.household.role_viewer
-            : role === "owner"
-              ? englishCopy.household.role_owner
-              : englishCopy.household.role_partner}
-        </Badge>
-      ) : null}
-      {role === "viewer" ? (
-        <Badge>{englishCopy.household.read_only}</Badge>
       ) : null}
     </div>
   );

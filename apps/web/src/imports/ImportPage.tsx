@@ -323,7 +323,7 @@ export function ImportPage() {
             </Term>{" "}
             statement
           </h2>
-          <p className="mt-1 text-sm leading-6 text-muted-foreground">
+          <p className="mt-1 text-base text-muted-foreground">
             Choose a statement. We will show every holding before you save
             anything.
           </p>
@@ -365,16 +365,16 @@ export function ImportPage() {
                   <summary className="min-h-10 cursor-pointer py-2 text-foreground">
                     How to get it
                   </summary>
-                  <p className="pb-2 leading-6">{sourceCopy[option].help}</p>
+                  <p className="pb-2 text-base">{sourceCopy[option].help}</p>
                   {sourceCopy[option].steps ? (
-                    <ol className="list-decimal space-y-1 pb-2 pl-5 leading-6">
+                    <ol className="list-decimal space-y-1 pb-2 pl-5 text-base">
                       {sourceCopy[option].steps.map((step) => (
                         <li key={step}>{step}</li>
                       ))}
                     </ol>
                   ) : null}
                   {sourceCopy[option].note ? (
-                    <p className="pb-2 leading-6">{sourceCopy[option].note}</p>
+                    <p className="pb-2 text-base">{sourceCopy[option].note}</p>
                   ) : null}
                 </details>
               </div>
@@ -569,7 +569,7 @@ export function ImportPage() {
           >
             <FileUp aria-hidden="true" className="size-4" /> Upload statement
           </Button>
-          <p className="text-center text-xs leading-5 text-muted-foreground">
+          <p className="text-center text-small text-muted-foreground">
             Your file and password are used once to read your holdings and are
             not stored.
           </p>
@@ -1043,7 +1043,7 @@ export function ImportReviewPage() {
         ) : null}
         <Link
           to="/money"
-          className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 text-sm font-semibold text-white"
+          className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 text-sm font-semibold text-brand-foreground"
         >
           Go to Money
         </Link>
@@ -1059,7 +1059,7 @@ export function ImportReviewPage() {
         <p className="text-sm text-muted-foreground">{copy.nextStep}</p>
         <Link
           to="/import"
-          className="mt-2 inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 text-sm font-semibold text-white"
+          className="mt-2 inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 text-sm font-semibold text-brand-foreground"
         >
           Try another statement
         </Link>

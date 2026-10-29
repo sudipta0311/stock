@@ -38,15 +38,15 @@ export function Button({
   ...props
 }: ButtonProps) {
   const styles: Record<ButtonVariant, string> = {
-    primary: "bg-brand text-white hover:bg-brand-strong",
+    primary: "bg-brand text-brand-foreground hover:bg-brand-strong",
     secondary: "border border-line bg-surface text-foreground hover:bg-muted",
     ghost: "bg-transparent text-foreground hover:bg-muted",
-    danger: "bg-danger text-white hover:opacity-90",
+    danger: "bg-danger text-danger-on-fill hover:opacity-90",
   };
   return (
     <button
       className={classes(
-        "inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60",
+        "motion-safe:active:scale-[.98] inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60",
         styles[variant],
         className,
       )}
@@ -68,7 +68,7 @@ export function Card({ className, ...props }: HTMLAttributes<HTMLElement>) {
   return (
     <section
       className={classes(
-        "rounded-2xl border border-line bg-surface p-4 shadow-sm",
+        "card-surface rounded-2xl border border-line bg-surface",
         className,
       )}
       {...props}
@@ -88,7 +88,7 @@ export function Stat({
   return (
     <div className="space-y-1">
       <p className="text-sm text-muted-foreground">{label}</p>
-      <p className="text-2xl font-semibold tracking-tight tabular-nums">
+      <p className="text-lg font-semibold tracking-tight tabular-nums">
         {value}
       </p>
       {detail ? (
@@ -162,21 +162,29 @@ export function Progress({
   value,
   max = 100,
   label,
+  quiet = false,
 }: {
   value: number;
   max?: number;
   label: string;
+  quiet?: boolean;
 }) {
   const boundedValue = Math.min(Math.max(value, 0), max);
   return (
     <ProgressPrimitive.Root
-      className="h-2.5 w-full overflow-hidden rounded-full bg-muted"
+      className={classes(
+        "w-full overflow-hidden rounded-full bg-muted",
+        quiet ? "h-1.5" : "h-2.5",
+      )}
       value={boundedValue}
       max={max}
       aria-label={label}
     >
       <ProgressPrimitive.Indicator
-        className="h-full rounded-full bg-brand transition-transform"
+        className={classes(
+          "h-full rounded-full bg-brand transition-transform",
+          quiet && "opacity-70",
+        )}
         style={{
           transform: `translateX(-${100 - (boundedValue / max) * 100}%)`,
         }}
@@ -198,20 +206,35 @@ export function EmptyState({
   title,
   description,
   action,
+  icon,
+  tone = "neutral",
 }: {
   title: string;
-  description: string;
+  description?: string;
   action?: ReactNode;
+  icon?: ReactNode;
+  tone?: "neutral" | "success";
 }) {
+  const iconTone =
+    tone === "success"
+      ? "bg-success-soft text-success-foreground"
+      : "bg-muted text-muted-foreground";
   return (
-    <div className="flex min-h-52 flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-line bg-surface/60 p-6 text-center">
-      <span className="grid size-11 place-items-center rounded-full bg-muted text-muted-foreground">
-        <AlertCircle aria-hidden="true" className="size-5" />
+    <div className="flex min-h-52 flex-col items-center justify-center gap-3 rounded-2xl border border-line bg-surface p-6 text-center">
+      <span
+        className={classes(
+          "grid size-11 place-items-center rounded-full",
+          iconTone,
+        )}
+      >
+        {icon ?? <AlertCircle aria-hidden="true" className="size-5" />}
       </span>
-      <h2 className="text-lg font-semibold">{title}</h2>
-      <p className="max-w-sm text-sm leading-6 text-muted-foreground">
-        {description}
-      </p>
+      <h2 className="text-card-title font-semibold">{title}</h2>
+      {description ? (
+        <p className="max-w-sm text-base text-muted-foreground">
+          {description}
+        </p>
+      ) : null}
       {action}
     </div>
   );
@@ -325,7 +348,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 <button
                   type="button"
                   onClick={item.action.onClick}
-                  className="mt-3 min-h-12 rounded-lg bg-brand px-4 text-sm font-semibold text-white"
+                  className="mt-3 min-h-12 rounded-lg bg-brand px-4 text-sm font-semibold text-brand-foreground"
                 >
                   {item.action.label}
                 </button>

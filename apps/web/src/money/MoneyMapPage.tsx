@@ -1,10 +1,17 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
-import { ArrowRight, Building2, CalendarDays, CloudUpload } from "lucide-react";
+import {
+  ArrowRight,
+  Building2,
+  CalendarDays,
+  ChevronRight,
+  CloudUpload,
+  WalletCards,
+} from "lucide-react";
 import { Link, useNavigate } from "react-router";
 import { ApiError } from "../api/client";
 import { sumInr } from "../lib/money";
-import { Badge, Button, Card, Progress, Stat } from "../ui";
+import { Badge, Button, Card, EmptyState, Progress, Stat } from "../ui";
 import { getNetworth, listAssets, quickAdd, updateChecklist } from "./api";
 import type { AssetResponse, NetworthResponse } from "./api";
 import {
@@ -176,7 +183,9 @@ function QuickAddBar({
             onChange={(event) => setText(event.currentTarget.value)}
             placeholder="FD 5L SBI 7.1% till Mar 2027"
             className="min-h-12 min-w-0 flex-1 rounded-xl border border-line bg-background px-3 text-base outline-none focus-visible:border-brand"
-            aria-describedby="quick-add-help quick-add-error"
+            aria-describedby={
+              error ? "quick-add-help quick-add-error" : "quick-add-help"
+            }
           />
           <Button
             type="submit"
@@ -193,13 +202,15 @@ function QuickAddBar({
         >
           A quick note fills what it can. You can review every field.
         </p>
-        <p
-          id="quick-add-error"
-          className="min-h-5 text-sm text-danger-foreground"
-          role="status"
-        >
-          {error}
-        </p>
+        {error ? (
+          <p
+            id="quick-add-error"
+            className="text-sm text-danger-foreground"
+            role="status"
+          >
+            {error}
+          </p>
+        ) : null}
       </form>
     </Card>
   );
@@ -267,7 +278,7 @@ function HouseholdInsights({
     <div className="grid gap-4">
       <Card className="grid gap-2">
         <h2 className="text-base font-semibold">What your Money Map says</h2>
-        <p className="text-sm leading-6 text-muted-foreground">
+        <p className="text-base text-muted-foreground">
           Including EPF, PPF and fixed deposits,{" "}
           <strong className="text-foreground">{debtPercent}%</strong>{" "}
           {englishCopy.household_ui.safe_money_share}
@@ -623,7 +634,7 @@ export function MoneyMapPage() {
           <Link
             to={isViewer ? "/plan" : "/import"}
             data-primary="true"
-            className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-white"
+            className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground"
           >
             {isViewer ? "View your plan" : "Upload statement"}
           </Link>
@@ -716,7 +727,7 @@ export function MoneyMapPage() {
         ) : null}
       </details>
 
-      <details open={!checklistCompleted}>
+      <details id="money-checklist" open={!checklistCompleted}>
         <summary className="min-h-12 cursor-pointer py-3 text-base font-semibold">
           What else do you have?
         </summary>
@@ -743,9 +754,11 @@ export function MoneyMapPage() {
               );
             })}
           </div>
-          <p className="min-h-5 text-sm text-danger-foreground" role="status">
-            {checklistError}
-          </p>
+          {checklistError ? (
+            <p className="text-sm text-danger-foreground" role="status">
+              {checklistError}
+            </p>
+          ) : null}
           <Button
             onClick={startChecklist}
             disabled={isViewer || !orderedSelected.length}
@@ -781,15 +794,20 @@ export function MoneyMapPage() {
                   to={`/money/asset/${asset.id}`}
                   className="flex min-h-16 items-center justify-between gap-3 border-t border-line py-2 hover:text-brand"
                 >
-                  <span className="min-w-0">
-                    <strong className="block truncate text-sm" data-security>
-                      {assetLabel(asset)}
-                    </strong>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {maturityStatus(asset)}
+                  <span className="flex min-w-0 flex-1 items-center gap-3">
+                    <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground">
+                      <Building2 aria-hidden="true" className="size-4" />
+                    </span>
+                    <span className="min-w-0">
+                      <strong className="block truncate text-sm" data-security>
+                        {assetLabel(asset)}
+                      </strong>
+                      <span className="block truncate text-xs text-muted-foreground">
+                        {maturityStatus(asset)}
+                      </span>
                     </span>
                   </span>
-                  <span className="shrink-0 text-right text-sm font-semibold">
+                  <span className="flex shrink-0 items-center gap-2 text-right text-sm font-semibold tabular-nums">
                     {asset.valuation_status === "price_needed" ||
                     !asset.value_cached ? (
                       "—"
@@ -801,20 +819,33 @@ export function MoneyMapPage() {
                         showSecondary={hasDanishMember}
                       />
                     )}
+                    <ChevronRight
+                      aria-hidden="true"
+                      className="size-4 text-muted-foreground"
+                    />
                   </span>
                 </Link>
               ))}
             </Card>
           ))
         ) : offlineSummaryOnly ? null : (
-          <Card className="py-7 text-center">
-            <p className="text-sm font-medium">
-              Your saved items will show here.
-            </p>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Choose a tile above or add a quick note to get started.
-            </p>
-          </Card>
+          <EmptyState
+            title={englishCopy.household_ui.money_empty_title}
+            icon={<WalletCards aria-hidden="true" className="size-5" />}
+            action={
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() =>
+                  document
+                    .getElementById("money-checklist")
+                    ?.scrollIntoView({ block: "start" })
+                }
+              >
+                {englishCopy.household_ui.money_empty_action}
+              </Button>
+            }
+          />
         )}
       </section>
 
@@ -833,26 +864,37 @@ export function MoneyMapPage() {
                 to={`/money/holding/${holding.security_id}`}
                 className="flex min-h-16 items-center justify-between gap-3 border-t border-line py-2 first:border-0 first:pt-0 hover:text-brand"
               >
-                <span className="min-w-0">
-                  <strong className="block truncate text-sm">
-                    <span data-security>{holding.name}</span>
-                  </strong>
-                  <span className="block text-xs text-muted-foreground">
-                    <span data-security>{holding.symbol}</span> ·{" "}
-                    {holding.quantity} shares
+                <span className="flex min-w-0 flex-1 items-center gap-3">
+                  <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground">
+                    <Building2 aria-hidden="true" className="size-4" />
+                  </span>
+                  <span className="min-w-0">
+                    <strong className="block truncate text-sm">
+                      <span data-security>{holding.name}</span>
+                    </strong>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      <span data-security>{holding.symbol}</span> ·{" "}
+                      {holding.quantity} shares
+                    </span>
                   </span>
                 </span>
-                <span className="shrink-0 text-right text-sm font-semibold">
-                  {holding.value ? (
-                    <AmountLabel
-                      amount={holding.value}
-                      primaryCurrency={primaryCurrency}
-                      fxQuote={fxQuote}
-                      showSecondary={hasDanishMember}
-                    />
-                  ) : (
-                    "Not available"
-                  )}
+                <span className="flex shrink-0 items-center gap-2 text-right text-sm font-semibold tabular-nums">
+                  <span>
+                    {holding.value ? (
+                      <AmountLabel
+                        amount={holding.value}
+                        primaryCurrency={primaryCurrency}
+                        fxQuote={fxQuote}
+                        showSecondary={hasDanishMember}
+                      />
+                    ) : (
+                      "Not available"
+                    )}
+                  </span>
+                  <ChevronRight
+                    aria-hidden="true"
+                    className="size-4 text-muted-foreground"
+                  />
                 </span>
               </Link>
             ))}
