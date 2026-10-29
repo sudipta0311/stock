@@ -29,7 +29,12 @@ importer = [
     "pypdf>=6.1",
     "httpx>=0.28",
 ]
-research = []
+research = [
+    "openai>=1.60",
+    "langgraph>=1.0",
+    "langgraph-checkpoint-postgres>=2.0",
+    "tenacity>=9",
+]
 dev = [
     "pytest>=8.3",
     "ruff>=0.8",

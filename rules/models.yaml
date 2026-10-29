@@ -1,0 +1,11 @@
+version: 1
+tiers:
+  nano: {deployment: gpt-6-luna, reasoning_effort: low}
+  mini: {deployment: gpt-6-luna, reasoning_effort: medium}
+  strong: {deployment: gpt-6-luna, reasoning_effort: high}
+  redteam: {deployment: deepseek-v4-flash}
+prices_usd_per_1m:
+  gpt-6-luna: {input: "0.10", output: "0.50", cached_input: "0.01", flex_factor: "0.5"}
+  deepseek-v4-flash: {input: "0.15", output: "0.31"}
+flex: {enabled_for_modes: [weekly], max_flex_retries: 3, fallback_to_default: true}
+timeouts_s: {connect: 10, read: 120}

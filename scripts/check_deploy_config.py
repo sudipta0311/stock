@@ -239,6 +239,9 @@ def _render_issues(root: Path) -> list[str]:
     ):
         issues.append(f"{relative}: wealth-api must be a free Python service in frankfurt")
     api_env = {item.get("key"): item for item in api.get("envVars", []) if isinstance(item, dict)}
+    api_build_command = str(api.get("buildCommand", ""))
+    if re.search(r"\bresearch\b", api_build_command, re.IGNORECASE):
+        issues.append(f"{relative}: wealth-api must not install the research extra")
     required_api = {
         "PYTHON_VERSION",
         "ENV",
@@ -296,6 +299,7 @@ def validate_deployment(root: Path = _REPOSITORY_ROOT) -> list[str]:
             required_ci = (
                 "image: postgres:18",
                 "CREATE ROLE wealth_owner LOGIN CREATEDB CREATEROLE BYPASSRLS",
+                'pip install -e ".[api,importer,research,dev]"',
                 "alembic upgrade head",
                 "pytest",
                 "node-version: 24",

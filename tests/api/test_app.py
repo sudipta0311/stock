@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 from secrets import token_urlsafe
@@ -165,8 +166,21 @@ def test_deep_health_reports_database_failure_as_problem_json() -> None:
 
 
 def test_api_import_does_not_load_research_and_never_references_owner_session() -> None:
-    assert "wealth.research" not in sys.modules
-    assert "langgraph" not in sys.modules
+    root = Path(__file__).resolve().parents[2]
+    code = (
+        "import sys; import wealth.api.main; "
+        "blocked = ('wealth.research', 'langgraph', 'openai'); "
+        "assert not any(name == prefix or name.startswith(prefix + '.') "
+        "for name in sys.modules for prefix in blocked)"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
     api_source = Path(__file__).resolve().parents[2] / "src" / "wealth" / "api"
     source_text = "\n".join(path.read_text(encoding="utf-8") for path in api_source.rglob("*.py"))

@@ -23,7 +23,7 @@ Status: ⬜ not started · 🟦 in progress · ✅ accepted · 🔁 rework · �
 | C12b | Policy 2b: core/satellite targets, buying rules → weekly action list (≤ 3), STP tranching | 4.7–4.8 | ✅ |
 | C13 | Policy 3: India tax engine, tax-aware lot selection, LTCG harvest, rebalancing bands, insurance policy review | 4.10–4.11 | ✅ |
 | C13b | Policy 3b: Exit Engine (exit cards, triggers, tax-aware timing) + personal stress tests | 4.9, 8.4 | ✅ |
-| C14 | Research 1: ModelRouter (Foundry, flex, budgets, JSON outputs), Dossier schema/store, LangGraph skeleton + checkpointer | 5.3, 5.6, 5.7 | ⬜ |
+| C14 | Research 1: ModelRouter (Foundry, flex, budgets, JSON outputs), Dossier schema/store, LangGraph skeleton + checkpointer | 5.3, 5.6, 5.7 | ✅ |
 | C15a | Research 2a: point-in-time fundamentals (SEC EDGAR; NSE XBRL if a free stable source exists), price factors, universes (survivorship-labelled) | 6, 4.7 | ⬜ |
 | C15b | Research 2b: factor Screener (no LLM, sector-neutral), filings Sentinel (8-K item rules first, nano LLM for free text), research tools, sector data | 4.7, 5.2 | ⬜ |
 | C15c | Research 2c: Analyst, Valuation (math in tools), Red Team (DeepSeek), Compliance gate, CIO sign-off → weekly Research Pack | 5.2, 5.3, 5.5 | ⬜ |
@@ -56,6 +56,7 @@ Status: ⬜ not started · 🟦 in progress · ✅ accepted · 🔁 rework · �
 - (C27c review) `wealth_app` has UPDATE/DELETE on `audit_log`. Make the household audit append-only: revoke UPDATE/DELETE from `wealth_app` and check that account deletion cascades still work (FK cascades run as the table owner). → C25
 - (C27c review) The audit trigger skips rows when the session setting `app.household_deleting_user` equals the tenant. Any session can set it, so it's an audit bypass if the API is ever compromised. Replace it with a check that needs no session setting (cascades run after the users row is gone, so the existing NOT EXISTS users check may be enough), with a test. → C25
 - C04: EPF accrual uses actual/365 days; EPFO credits interest on monthly running balances at rate/1200 (~0.02% difference). Align in C25.
+- (C14 review) Flex model calls can queue for minutes; the router uses one 120 s read timeout for every tier. Give Flex calls a longer read timeout (for example 15 minutes) before the weekly run depends on them. → C15c
 - C03: post-office TD rates per tenure are empty (India Post page shows only a range); historical small-savings periods not yet loaded. Rates watcher (C16) + human approval.
 - C05: residual risk accepted: SQL that can call set_config(app.user_id) with another user's UUID would read that tenant. Mitigated by parameterised SQLAlchemy only; owner-role escalation is closed (API logs in as wealth_api).
 - C07: manual assets needing a market price (gold physical/ETF/SGB) store valuation=null and silently drop out of /v1/networth. Add per-asset `valuation_status` and networth `unvalued_assets` (do in C08b); wire PriceProvider from market data in C10.

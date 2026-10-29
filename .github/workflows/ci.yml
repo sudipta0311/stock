@@ -55,7 +55,7 @@ jobs:
               environment.write(f"OWNER_DATABASE_URL={url}\n")
           PY
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install -e ".[api,importer,dev]"
+      - run: python -m pip install -e ".[api,importer,research,dev]"
       - run: alembic upgrade head
       - run: ruff check src tests
       - run: ruff format --check src tests
