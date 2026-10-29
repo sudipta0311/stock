@@ -28,8 +28,12 @@ function response(status: number, body = ""): FakeResponse {
   };
 }
 
-function makeHarness(fetchImpl: () => FakeResponse) {
+function makeHarness(
+  fetchImpl: () => FakeResponse,
+  senders: string[] = ["statements@camsonline.com"],
+) {
   const searches: string[] = [];
+  const logs: string[] = [];
   const posts: Array<{ url: string; options: Record<string, unknown> }> = [];
   const labels: string[] = [];
   const sleeps: number[] = [];
@@ -48,17 +52,19 @@ function makeHarness(fetchImpl: () => FakeResponse) {
       return this;
     }),
   };
-  const message = {
-    getAttachments: () => [attachment],
-    getFrom: () => "statements@example.test",
-    getSubject: () => "Monthly statement",
-    getDate: () => new Date("2026-10-01T07:00:00Z"),
-    getId: () => "synthetic-message-id",
-  };
-  const thread = {
-    getMessages: () => [message],
+  const threads = senders.map((from, index) => ({
+    getMessages: () => [
+      {
+        getAttachments: () => [attachment],
+        getFrom: () => from,
+        getSubject: () => "Monthly statement",
+        getDate: () => new Date("2026-10-01T07:00:00Z"),
+        getId: () => `synthetic-message-${index}`,
+      },
+    ],
     addLabel: vi.fn((label: { name: string }) => labels.push(label.name)),
-  };
+  }));
+  const thread = threads[0];
   const gmailLabel = { name: "Wealth/Imported" };
   const scriptProperties = {
     setProperties: (values: Record<string, string>) => {
@@ -66,13 +72,14 @@ function makeHarness(fetchImpl: () => FakeResponse) {
         properties.set(key, value),
       );
     },
+    setProperty: (key: string, value: string) => properties.set(key, value),
     getProperty: (key: string) => properties.get(key) ?? null,
   };
   const context = {
     GmailApp: {
       search: (query: string) => {
         searches.push(query);
-        return [thread];
+        return threads;
       },
       getUserLabelByName: () => gmailLabel,
       createLabel: (name: string) => {
@@ -87,6 +94,7 @@ function makeHarness(fetchImpl: () => FakeResponse) {
       },
     },
     PropertiesService: { getScriptProperties: () => scriptProperties },
+    console: { log: (text: string) => logs.push(text) },
     Utilities: { sleep: (delay: number) => sleeps.push(delay) },
     ScriptApp: {
       getProjectTriggers: () => [],
@@ -125,6 +133,7 @@ function makeHarness(fetchImpl: () => FakeResponse) {
   return {
     exported,
     searches,
+    logs,
     posts,
     labels,
     sleeps,
@@ -157,7 +166,7 @@ describe("Gmail statement helper", () => {
 
     expect(result).toEqual({ sent: 1, labelled: 1 });
     expect(harness.searches.at(0)).toContain("has:attachment filename:pdf");
-    expect(harness.searches.at(0)).toContain("newer_than:45d");
+    expect(harness.searches.at(0)).toContain("newer_than:365d");
     expect(harness.searches.at(0)).toContain("-label:wealth-imported");
     for (const domain of [
       "camsonline.com",
@@ -176,8 +185,50 @@ describe("Gmail statement helper", () => {
     expect(
       (harness.posts.at(0)?.options.headers as Record<string, string>)
         .Authorization,
-    ).toBe("StatementKey wsk_synthetic-test-key");
+    ).toBe("StatementKey wsk_synthetic-setup-key");
     expect(harness.labels).toEqual(["Wealth/Imported"]);
+    expect(harness.logs).toEqual([
+      "Found 1 statement email(s) from the last 365 days.",
+      "Sent 1 statement PDF(s). Open Inbox in Wealth to enter the password.",
+    ]);
+  });
+
+  it("sends only the newest statement per provider on the first run, then looks at recent mail", () => {
+    const harness = makeHarness(
+      () => response(202),
+      [
+        "donotreply@camsonline.com",
+        "donotreply@camsonline.com",
+        "ecas@cdslstatement.com",
+      ],
+    );
+
+    expect(harness.exported.run()).toEqual({ sent: 2, labelled: 2 });
+    expect(harness.posts).toHaveLength(2);
+
+    harness.exported.run();
+    expect(harness.searches.at(1)).toContain("newer_than:45d");
+    expect(harness.posts).toHaveLength(5);
+  });
+
+  it("says so when there are no statement emails", () => {
+    const harness = makeHarness(() => response(202), []);
+
+    expect(harness.exported.run()).toEqual({ sent: 0, labelled: 0 });
+    expect(harness.logs).toEqual([
+      "No new statement emails from CAMS, KFintech, MF Central, NSDL or CDSL in the last 365 days.",
+    ]);
+  });
+
+  it("explains a rejected upload key and keeps the first run for next time", () => {
+    const harness = makeHarness(() => response(401));
+
+    harness.exported.run();
+
+    expect(harness.logs).toContain(
+      "Wealth didn't accept the upload key. Create a new key in Settings and paste the new script.",
+    );
+    expect(harness.properties.get("FIRST_RUN_DONE")).toBeUndefined();
   });
 
   it("does not label a thread after a failed upload", () => {
