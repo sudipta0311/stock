@@ -160,4 +160,29 @@ describe("Indian fund status card", () => {
       screen.getByRole("link", { name: "Upload CAMS statement" }),
     ).toHaveAttribute("href", "/import");
   });
+
+  it("does not suggest a change when no funds are held", async () => {
+    server.use(
+      http.get(/\/v1\/fund-check$/, () =>
+        HttpResponse.json(
+          fundCheckResponse({
+            status: "fine",
+            summary_key: "fund_check.upload",
+            checks: [],
+            early_warning: null,
+            details: { funds: [], notes: [] },
+          }),
+        ),
+      ),
+    );
+    renderCard();
+
+    expect(
+      await screen.findByText("Upload a detailed statement to see more."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("One change suggested")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Upload CAMS statement" }),
+    ).toBeInTheDocument();
+  });
 });

@@ -30,6 +30,11 @@ _AMOUNT_PATTERN = re.compile(
     r"(?:\s*(?:thousand|lakhs?|lac|cr|crores?|[kKlL])\b)?(?![\w/%/.-])",
     re.IGNORECASE,
 )
+_FOREIGN_SAVINGS_AMOUNT_PATTERN = re.compile(
+    r"(?i)(?<![\w/])(?:(?P<prefix>DKK|EUR|kr\.?|€)\s*)?"
+    r"(?P<amount>\d{1,3}(?:[., ]\d{3})+|\d+)(?:([.,]\d{1,2}))?"
+    r"\s*(?P<suffix>DKK|EUR|kr\.?|€)?(?!\w)"
+)
 
 
 class QuickAddNotUnderstood(ValueError):
@@ -101,6 +106,53 @@ def _amounts(
             continue
         result.append((match, format(amount, ".2f")))
     return result
+
+
+def _foreign_savings_amount(text: str) -> tuple[re.Match[str], str, str] | None:
+    match = next(
+        (
+            candidate
+            for candidate in _FOREIGN_SAVINGS_AMOUNT_PATTERN.finditer(text)
+            if candidate.group("prefix") or candidate.group("suffix")
+        ),
+        None,
+    )
+    if match is None:
+        return None
+    marker = (match.group("prefix") or match.group("suffix") or "").casefold().rstrip(".")
+    currency = "DKK" if marker in {"dkk", "kr"} else "EUR"
+    amount = match.group("amount")
+    decimal_part = match.group(3)
+    if decimal_part is not None:
+        whole = amount
+        fraction = decimal_part[1:]
+        if "." in amount or "," in amount:
+            whole = amount.replace(".", "").replace(",", "").replace(" ", "")
+        normalized = f"{whole}.{fraction}"
+    else:
+        compact = amount.replace(" ", "")
+        if "." in compact and "," in compact:
+            decimal_separator = "." if compact.rfind(".") > compact.rfind(",") else ","
+            grouping_separator = "," if decimal_separator == "." else "."
+            normalized = compact.replace(grouping_separator, "")
+            if decimal_separator == ",":
+                normalized = normalized.replace(",", ".")
+        elif "." in compact or "," in compact:
+            separator = "." if "." in compact else ","
+            groups = compact.split(separator)
+            if all(len(group) == 3 for group in groups[1:]):
+                normalized = "".join(groups)
+            else:
+                normalized = separator.join(groups[:-1]) + "." + groups[-1]
+        else:
+            normalized = compact
+    try:
+        value = Decimal(normalized)
+    except InvalidOperation:
+        return None
+    if not value.is_finite() or value < 0:
+        return None
+    return match, format(value.normalize(), "f"), currency
 
 
 def _party(text: str, ignored: tuple[re.Match[str] | None, ...]) -> str | None:
@@ -224,14 +276,26 @@ def parse_quick_add(text: str) -> QuickAddResult:
         return _finish("gold", draft, ("kind", "grams", "purity"))
 
     if re.search(r"\bsavings\b", lower):
+        foreign_amount = _foreign_savings_amount(source)
         amount = amount_items[0] if amount_items else None
-        bank = _party(source, (amount[0] if amount else None, percent_match, date_match))
+        ignored_amount = foreign_amount[0] if foreign_amount else amount[0] if amount else None
+        bank = _party(source, (ignored_amount, percent_match, date_match))
+        if foreign_amount is not None:
+            draft = {
+                "asset_type": "savings",
+                "balance": foreign_amount[1],
+                "currency": foreign_amount[2],
+            }
+            if bank is not None:
+                draft["bank"] = bank
+            return _finish("savings", draft, ("bank", "balance"))
         return _finish(
             "savings",
             {
                 "asset_type": "savings",
                 **({"bank": bank} if bank is not None else {}),
                 **({"balance": amount[1]} if amount is not None else {}),
+                "currency": "INR",
             },
             ("bank", "balance"),
         )

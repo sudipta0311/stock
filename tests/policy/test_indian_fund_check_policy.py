@@ -148,6 +148,21 @@ def _history(start: str, finish: str, months: int = 60) -> list[tuple[date, Deci
     return rows
 
 
+def test_household_without_fund_holdings_has_only_the_upload_prompt() -> None:
+    result = _check(
+        [],
+        members=[
+            FundMember("member-denmark", residency_country="DK"),
+            FundMember("member-india", residency_country="IN"),
+        ],
+    )
+
+    assert result.status == "fine"
+    assert result.summary_key == "fund_check.upload"
+    assert result.checks == ()
+    assert result.actions == ()
+
+
 def _balanced_holdings(small_pct: str, flexi_pct: str) -> list[FundHolding]:
     equity = Decimal("750000")
     weights = {

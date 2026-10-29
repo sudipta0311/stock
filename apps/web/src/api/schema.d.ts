@@ -1,4 +1,4 @@
-// OpenAPI SHA256: 98ffc7de8e7194c6f865f2113fd99c449950922c2e616b2595e72f07fd5a84c2
+// OpenAPI SHA256: 0525132c37cc749f7e5ce09b3c8cd97318ecb776c262a9175f2171a0b81871ae
 export interface paths {
     "/healthz": {
         parameters: {
@@ -1202,7 +1202,7 @@ export interface components {
              * Valuation Status
              * @enum {string}
              */
-            valuation_status: "valued" | "price_needed" | "rate_needed" | "not_applicable";
+            valuation_status: "valued" | "price_needed" | "rate_needed" | "fx_needed" | "not_applicable";
             /** Value As Of */
             value_as_of: string | null;
             /** Value Cached */
@@ -1276,7 +1276,7 @@ export interface components {
              * Valuation Status
              * @enum {string}
              */
-            valuation_status: "valued" | "price_needed" | "rate_needed" | "not_applicable";
+            valuation_status: "valued" | "price_needed" | "rate_needed" | "fx_needed" | "not_applicable";
             /** Value As Of */
             value_as_of: string | null;
             /** Value Cached */
@@ -1747,6 +1747,10 @@ export interface components {
         Highlight: {
             /** Body */
             body: string;
+            /** Context */
+            context?: {
+                [key: string]: string;
+            };
             /** Key */
             key: string;
             /** Learn More Key */
@@ -3439,6 +3443,12 @@ export interface components {
             balance: string;
             /** Bank */
             bank: string;
+            /**
+             * Currency
+             * @default INR
+             * @enum {string}
+             */
+            currency: "INR" | "DKK" | "EUR";
             /**
              * Joint
              * @default false

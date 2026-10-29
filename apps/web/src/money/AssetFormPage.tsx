@@ -20,6 +20,7 @@ import type {
 } from "./forms.generated";
 import type { components } from "../api/schema";
 import {
+  formatAmountInput,
   type AssetFormValues,
   initialAssetValues,
   serializeAssetValues,
@@ -44,6 +45,43 @@ const INSURANCE_TYPES = [
   "ulip",
 ] as const;
 const EMPTY_DETAILS: Record<string, unknown> = {};
+const EURO_COUNTRIES = new Set([
+  "AD",
+  "AT",
+  "BE",
+  "BG",
+  "CY",
+  "DE",
+  "EE",
+  "ES",
+  "FI",
+  "FR",
+  "GR",
+  "HR",
+  "IE",
+  "IT",
+  "LT",
+  "LU",
+  "LV",
+  "MC",
+  "ME",
+  "MT",
+  "NL",
+  "PT",
+  "SI",
+  "SK",
+  "SM",
+  "VA",
+  "XK",
+]);
+
+function savingsCurrencyForCountry(
+  country: string | undefined,
+): "INR" | "DKK" | "EUR" {
+  if (country === "DK") return "DKK";
+  if (country && EURO_COUNTRIES.has(country.toUpperCase())) return "EUR";
+  return "INR";
+}
 
 function optionLabel(value: string | number): string {
   const labels: Record<string, string> = {
@@ -270,10 +308,25 @@ function AssetForm({
       ...field,
       required:
         field.required ||
+        (assetType === "savings" && field.name === "currency") ||
         (assetType === "loan" && !initialAsset && field.name === "emi") ||
         // Loans can be in kroner, and the amounts below follow this choice.
         (assetType === "loan" && field.name === "currency"),
     }));
+    if (assetType === "savings") {
+      const bank = shaped.find((field) => field.name === "bank");
+      const currency = shaped.find((field) => field.name === "currency");
+      const balance = shaped.find((field) => field.name === "balance");
+      const rest = shaped.filter(
+        (field) => !["bank", "currency", "balance"].includes(field.name),
+      );
+      return [
+        ...[bank, currency, balance].filter(
+          (field): field is (typeof shaped)[number] => field !== undefined,
+        ),
+        ...rest,
+      ];
+    }
     if (assetType !== "loan") return shaped;
     const currency = shaped.filter((field) => field.name === "currency");
     const rest = shaped.filter((field) => field.name !== "currency");
@@ -285,27 +338,63 @@ function AssetForm({
     ];
   }, [assetType, fields, initialAsset]);
   const baseDetails = initialAsset?.details ?? EMPTY_DETAILS;
-  const defaults = useMemo(
-    () =>
-      initialAssetValues(
-        assetType,
-        fields,
-        { ...baseDetails, ...(draft ?? {}) },
-        initialAsset?.member_id ?? activeMemberId,
-      ),
-    [
+  const defaults = useMemo(() => {
+    const detailValues = { ...baseDetails, ...(draft ?? {}) };
+    if (assetType === "savings" && detailValues.currency === undefined) {
+      const member = household.members.find(
+        (item) => item.id === (initialAsset?.member_id ?? activeMemberId),
+      );
+      detailValues.currency = initialAsset
+        ? "INR"
+        : savingsCurrencyForCountry(member?.residency.country);
+    }
+    const values = initialAssetValues(
       assetType,
-      baseDetails,
-      draft,
       fields,
-      initialAsset?.member_id,
-      activeMemberId,
-    ],
-  );
+      detailValues,
+      initialAsset?.member_id ?? activeMemberId,
+    );
+    if (draft) {
+      for (const field of fields) {
+        const raw = draft[field.name];
+        if (
+          (field.kind === "amount" || field.kind === "rupees") &&
+          (typeof raw === "string" || typeof raw === "number")
+        ) {
+          try {
+            values[field.name] = formatAmountInput(
+              String(raw),
+              field.kind === "rupees" ? "INR" : values.currency,
+            );
+          } catch {
+            values[field.name] = String(raw);
+          }
+        }
+      }
+    }
+    return values;
+  }, [
+    assetType,
+    baseDetails,
+    draft,
+    fields,
+    household.members,
+    activeMemberId,
+    initialAsset,
+  ]);
   const form = useForm<AssetFormValues>({
     defaultValues: defaults,
     mode: "onChange",
   });
+  useEffect(() => {
+    if (assetType !== "savings" || initialAsset) return;
+    const member = household.members.find((item) => item.id === activeMemberId);
+    if (!member || form.getFieldState("currency").isDirty) return;
+    const currency = savingsCurrencyForCountry(member.residency.country);
+    if (form.getValues("currency") !== currency) {
+      form.setValue("currency", currency);
+    }
+  }, [activeMemberId, assetType, form, household.members, initialAsset]);
   const watched = useWatch({ control: form.control }) as AssetFormValues;
   const formFields = useMemo(
     () => applyFieldRules(assetType, baseFormFields, watched),

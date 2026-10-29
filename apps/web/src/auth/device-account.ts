@@ -1,6 +1,16 @@
 import { clearAllDeviceData } from "../pwa/offline-cache";
 import { DEVICE_ACCOUNT_KEY } from "../pwa/storage-keys";
 
+async function unsubscribePushSubscription(): Promise<void> {
+  try {
+    const registration = await navigator.serviceWorker?.getRegistration?.();
+    const subscription = await registration?.pushManager?.getSubscription?.();
+    await subscription?.unsubscribe?.();
+  } catch {
+    // A missing or unavailable Push API must not block sign-in.
+  }
+}
+
 function tokenSubject(token: string): string | null {
   try {
     const payload = token.split(".")[1] ?? "";
@@ -27,8 +37,9 @@ export async function claimDeviceFor(token: string): Promise<void> {
     return;
   }
   if (previous !== null && previous !== subject) {
+    await unsubscribePushSubscription();
     try {
-      await clearAllDeviceData({ preservePushSubscription: true });
+      await clearAllDeviceData({ preservePushSubscription: false });
     } catch {
       // Sign-in continues when browser storage cannot be cleared.
     }

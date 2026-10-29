@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from wealth.core.money import format_inr
 
@@ -35,6 +36,7 @@ class Highlight(BaseModel):
     body: str
     learn_more_key: str
     severity: HighlightSeverity
+    context: dict[str, str] = Field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -53,6 +55,7 @@ class _Candidate:
     amount: Decimal | None
     position: int
     rate_pct: Decimal | None = None
+    instrument_code: str | None = None
 
 
 def _document(plan: Any) -> Mapping[str, Any]:
@@ -93,6 +96,13 @@ def _safe_key(value: Any) -> str:
     return f"detail_{digest}"
 
 
+def _instrument_code(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    code = value.casefold()
+    return code if re.fullmatch(r"[a-z][a-z0-9_]{0,59}", code) else None
+
+
 def _note_parts(value: Any) -> tuple[str, Decimal | None, Decimal | None] | None:
     if isinstance(value, str):
         return _safe_key(value), None, None
@@ -118,6 +128,7 @@ def _candidate_rows(plan: Mapping[str, Any]) -> list[_Candidate]:
         copy_key: str | None = None,
         amount: Decimal | None = None,
         rate_pct: Decimal | None = None,
+        instrument_code: str | None = None,
     ) -> None:
         nonlocal position
         candidate_key = _safe_key(key)
@@ -125,11 +136,13 @@ def _candidate_rows(plan: Mapping[str, Any]) -> list[_Candidate]:
         resolved_copy_key = _safe_key(copy_key or key)
         if existing is None:
             rows[candidate_key] = _Candidate(
-                candidate_key, resolved_copy_key, amount, position, rate_pct
+                candidate_key, resolved_copy_key, amount, position, rate_pct, instrument_code
             )
             position += 1
-        elif (existing.amount is None and amount is not None) or (
-            existing.rate_pct is None and rate_pct is not None
+        elif (
+            (existing.amount is None and amount is not None)
+            or (existing.rate_pct is None and rate_pct is not None)
+            or (existing.instrument_code is None and instrument_code is not None)
         ):
             rows[candidate_key] = _Candidate(
                 candidate_key,
@@ -137,6 +150,7 @@ def _candidate_rows(plan: Mapping[str, Any]) -> list[_Candidate]:
                 amount if amount is not None else existing.amount,
                 existing.position,
                 rate_pct if rate_pct is not None else existing.rate_pct,
+                instrument_code if existing.instrument_code is None else existing.instrument_code,
             )
 
     for field_name in ("notes", "residency_notes", "placement_notes"):
@@ -177,7 +191,11 @@ def _candidate_rows(plan: Mapping[str, Any]) -> list[_Candidate]:
             continue
         reason = raw_option.get("reason")
         if isinstance(reason, str) and reason in {"yield_unavailable", "missing_yield"}:
-            add("missing_yield", amount=_positive_amount(raw_option.get("amount")))
+            add(
+                "missing_yield",
+                amount=_positive_amount(raw_option.get("amount")),
+                instrument_code=_instrument_code(raw_option.get("instrument")),
+            )
 
     return list(rows.values())
 
@@ -251,6 +269,11 @@ def highlights(plan: Any, context: HighlightContext) -> list[Highlight]:
             body=body,
             learn_more_key=str(definition.get("learn_more_key", candidate.copy_key)),
             severity=severity,
+            context=(
+                {"instrument_code": candidate.instrument_code}
+                if candidate.instrument_code is not None
+                else {}
+            ),
         )
         score = (
             int(bool(definition.get("needs_action_now", False))),

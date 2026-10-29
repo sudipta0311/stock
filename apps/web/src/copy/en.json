@@ -65,6 +65,30 @@
   "highlights": {
     "dismiss": "Hide",
     "why": "Why?",
+    "missing_yield_named_body": "We don't have today's rate for {name}. Check it with the bank or post office first.",
+    "instrument_names": {
+      "arbitrage_fund": "arbitrage fund",
+      "bank_fd": "bank fixed deposit",
+      "fcnr_b": "foreign currency deposit",
+      "gsec_rbi_retail_direct": "government bond",
+      "liquid_fund": "liquid fund",
+      "local_bank_deposit": "local bank deposit",
+      "nre_fd": "non-resident fixed deposit",
+      "nro_fd": "non-resident ordinary deposit",
+      "nsc": "National Savings Certificate",
+      "po_td": "post office time deposit",
+      "po_td_1y": "one-year post office time deposit",
+      "po_td_2y": "two-year post office time deposit",
+      "po_td_3y": "three-year post office time deposit",
+      "po_td_5y": "five-year post office time deposit",
+      "ppf": "Public Provident Fund",
+      "pomis": "post office monthly income account",
+      "rbi_frsb": "RBI floating rate bond",
+      "scss": "Senior Citizens Savings Scheme",
+      "sweep_fd": "sweep fixed deposit",
+      "target_maturity_fund": "target maturity fund",
+      "vpf": "voluntary provident fund"
+    },
     "catalog": {
       "high_interest_debt_gap": {
         "title": "Pay down costly debt",
@@ -226,7 +250,7 @@
       },
       "missing_yield": {
         "title": "Check today's rate",
-        "body": "A current rate is not available for this choice.",
+        "body": "We don't have today's rate for this option. Check it with the bank or post office first.",
         "learn_more_key": "missing_yield",
         "severity": "info",
         "screens": [

@@ -1,4 +1,4 @@
-import { parseInr } from "../lib/money";
+import { formatInr, parseInr } from "../lib/money";
 import type { GeneratedAssetField } from "./forms.generated";
 import type { AssetType } from "./forms.generated";
 
@@ -36,6 +36,18 @@ export function normalizeAmount(value: string, currency: unknown): string {
     : text;
   if (!/^\d+(?:\.\d{1,2})?$/.test(plain)) throw new Error("Invalid amount");
   return plain;
+}
+
+/** Format a saved draft like a person would type it into its currency field. */
+export function formatAmountInput(value: string, currency: unknown): string {
+  const normalized = normalizeAmount(value, currency);
+  const [whole = "0", rawFraction = ""] = normalized.split(".");
+  const fraction = /[1-9]/.test(rawFraction) ? rawFraction.padEnd(2, "0") : "";
+  if ((currency ?? "INR") === "INR") {
+    return formatInr(normalized, "full", fraction ? 2 : 0).slice(1);
+  }
+  const grouped = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return fraction ? `${grouped}.${fraction}` : grouped;
 }
 
 export function validateAssetValues(

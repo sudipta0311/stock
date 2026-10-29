@@ -47,7 +47,7 @@ from wealth.policy.personalise import (
 )
 from wealth.policy.residency import load_residency_rules
 from wealth.rates.reference import RateUnavailable
-from wealth.schemas.assets import AnyAsset, LoanAsset, parse_asset
+from wealth.schemas.assets import AnyAsset, LoanAsset, SavingsAsset, parse_asset
 from wealth.schemas.common import ValuationMethod
 from wealth.schemas.profile import (
     FinancialContext,
@@ -138,13 +138,10 @@ def _manual_assets(
                 for event in event_rows
             )
             position = loan_position(asset, events, as_of)
-            rate = Decimal(1)
-            if asset.currency != "INR":
-                fx_row = store.latest_fx_rate(session, f"{asset.currency}/INR", as_of)
-                if fx_row is None or (as_of - fx_row[1]).days > 10:
-                    notes.append(f"loan_fx_missing:{asset.currency}")
-                    continue
-                rate = fx_row[0]
+            rate = store.fresh_fx_rate_to_inr(session, asset.currency, as_of)
+            if rate is None:
+                notes.append(f"loan_fx_missing:{asset.currency}")
+                continue
             asset = asset.model_copy(
                 update={
                     "outstanding": position.outstanding * rate,
@@ -161,6 +158,13 @@ def _manual_assets(
                 method=ValuationMethod.USER,
                 notes=(),
             )
+        elif isinstance(asset, SavingsAsset) and asset.currency != "INR":
+            rate = store.fresh_fx_rate_to_inr(session, asset.currency, as_of)
+            if rate is None:
+                notes.append(f"savings_fx_missing:{asset.currency}")
+                continue
+            asset = asset.model_copy(update={"balance": asset.balance * rate, "currency": "INR"})
+            valuation = value_asset(asset, as_of, assumed_start=as_of, prices=prices)
         else:
             try:
                 valuation = value_asset(asset, as_of, assumed_start=as_of, prices=prices)
@@ -214,12 +218,9 @@ def _loan_candidates(
             )
         )
         position = loan_position(asset, events, as_of)
-        fx_rate = Decimal(1)
-        if asset.currency != "INR":
-            fx_row = store.latest_fx_rate(session, f"{asset.currency}/INR", as_of)
-            if fx_row is None or (as_of - fx_row[1]).days > 10:
-                continue
-            fx_rate = fx_row[0]
+        fx_rate = store.fresh_fx_rate_to_inr(session, asset.currency, as_of)
+        if fx_rate is None:
+            continue
         member = session.scalar(
             select(HouseholdMember).where(
                 HouseholdMember.user_id == user_id,

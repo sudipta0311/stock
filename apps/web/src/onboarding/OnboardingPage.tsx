@@ -247,14 +247,11 @@ function StepHeading({
     <div className="grid gap-3">
       <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
         <span>Getting started</span>
-        <span>
-          {index + 1} of {STEPS.length}
-        </span>
       </div>
       <Progress
         quiet
         value={((index + 1) / STEPS.length) * 100}
-        label={`Onboarding step ${index + 1} of ${STEPS.length}`}
+        label="Onboarding progress"
       />
       <div>
         <h1 className="text-page-title font-semibold tracking-tight">

@@ -106,6 +106,29 @@ def test_quick_add_accepts_rupee_sign_and_unknown_institution_as_typed() -> None
     assert result.draft["maturity"] == "2028-03"
 
 
+@pytest.mark.parametrize(
+    ("text", "currency", "balance"),
+    [
+        ("Danske Bank savings 85000 kr", "DKK", "85000"),
+        ("savings DKK 85000", "DKK", "85000"),
+        ("savings 85.000 kr.", "DKK", "85000"),
+    ],
+)
+def test_quick_add_parses_kroner_savings(text: str, currency: str, balance: str) -> None:
+    result = parse_quick_add(text)
+
+    assert result.asset_type == "savings"
+    assert result.draft["currency"] == currency
+    assert result.draft["balance"] == balance
+
+
+def test_quick_add_keeps_rupee_savings_as_inr() -> None:
+    result = parse_quick_add("Demo Bank savings 5L")
+
+    assert result.draft["balance"] == "500000.00"
+    assert result.draft["currency"] == "INR"
+
+
 def test_quick_add_raises_for_unrecognized_text() -> None:
     with pytest.raises(QuickAddNotUnderstood):
         parse_quick_add("random words")

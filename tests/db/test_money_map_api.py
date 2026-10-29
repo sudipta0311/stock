@@ -18,7 +18,8 @@ from wealth.api.main import create_app
 from wealth.api.money_map import get_today
 from wealth.api.settings import Settings
 from wealth.db import session as db_session
-from wealth.db.models import HoldingLot, ManualAsset, NetworthSnapshot, User
+from wealth.db.models import FxRate, HoldingLot, ManualAsset, NetworthSnapshot, User
+from wealth.db.session import system_session
 
 pytestmark = pytest.mark.db
 
@@ -118,7 +119,7 @@ def test_member_account_asset_goal_and_quick_add_endpoints(
         json={
             "asset_type": "savings",
             "bank": "Synthetic Bank",
-            "balance": "5L",
+            "balance": "500000",
             "member_id": self_member_id,
         },
     )
@@ -585,3 +586,106 @@ def test_cross_tenant_resources_and_networth_are_hidden(
     assert client.get(f"/v1/assets/{asset['id']}", headers=headers_b).status_code == 404
     assert client.get(f"/v1/goals/{goal['id']}", headers=headers_b).status_code == 404
     assert client.get("/v1/networth", headers=headers_b).json()["assets_total"] == "0.00"
+
+
+def test_dkk_savings_value_reaches_networth_household_and_plan(
+    api_client: tuple[TestClient, str, object], migrated_database: MigratedDatabase
+) -> None:
+    client, secret, application = api_client
+    today = date(2035, 6, 15)
+    application.dependency_overrides[get_today] = lambda: today
+    with system_session(migrated_database.owner_engine) as session:
+        session.add(
+            FxRate(
+                pair="DKK/INR",
+                as_of=today,
+                rate=Decimal("12.50"),
+                source="synthetic-test",
+                source_url="https://example.test/fx",
+            )
+        )
+
+    headers = _headers(secret, "dkk-savings")
+    member_id = client.get("/v1/me", headers=headers).json()["me_member_id"]
+    created = client.post(
+        "/v1/assets",
+        headers=headers,
+        json={
+            "asset_type": "savings",
+            "bank": "Synthetic Bank",
+            "balance": "10000",
+            "currency": "DKK",
+            "member_id": member_id,
+        },
+    )
+
+    assert created.status_code == 201, created.text
+    asset = created.json()
+    assert asset["details"]["balance"] == "10000.00"
+    assert asset["details"]["currency"] == "DKK"
+    assert asset["valuation"]["value_today"] == "125000.00"
+    updated = client.patch(
+        f"/v1/assets/{asset['id']}", headers=headers, json={"bank": "Synthetic Credit Union"}
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["value_cached"] == "125000.00"
+
+    networth = client.get("/v1/networth", headers=headers).json()
+    cash = next(item for item in networth["by_sleeve"] if item["sleeve"] == "cash")
+    assert networth["assets_total"] == "125000.00"
+    assert cash["amount"] == "125000.00"
+
+    plan = client.get("/v1/plan", headers=headers)
+    assert plan.status_code == 200, plan.text
+    emergency_fund = next(
+        item for item in plan.json()["foundation"] if item["key"] == "emergency_fund"
+    )
+    assert emergency_fund["have"] == "125000.00"
+
+
+@pytest.mark.parametrize("rate_age_days", [None, 11])
+def test_dkk_savings_without_a_fresh_rate_is_unvalued(
+    rate_age_days: int | None,
+    api_client: tuple[TestClient, str, object],
+    migrated_database: MigratedDatabase,
+) -> None:
+    client, secret, application = api_client
+    today = date(2036, 6, 15)
+    application.dependency_overrides[get_today] = lambda: today
+    if rate_age_days is not None:
+        with system_session(migrated_database.owner_engine) as session:
+            session.add(
+                FxRate(
+                    pair="DKK/INR",
+                    as_of=today - timedelta(days=rate_age_days),
+                    rate=Decimal("12.50"),
+                    source="synthetic-test",
+                    source_url="https://example.test/fx",
+                )
+            )
+
+    headers = _headers(secret, f"dkk-savings-stale-{rate_age_days}")
+    created = client.post(
+        "/v1/assets",
+        headers=headers,
+        json={
+            "asset_type": "savings",
+            "bank": "Synthetic Bank",
+            "balance": "10000",
+            "currency": "DKK",
+        },
+    )
+
+    assert created.status_code == 201, created.text
+    assert created.json()["valuation"] is None
+    assert created.json()["valuation_status"] == "fx_needed"
+    networth = client.get("/v1/networth", headers=headers).json()
+    assert networth["assets_total"] == "0.00"
+    assert networth["unvalued_assets"] == [
+        {
+            "id": created.json()["id"],
+            "asset_type": "savings",
+            "label": "savings",
+            "reason": "fx_needed",
+        }
+    ]

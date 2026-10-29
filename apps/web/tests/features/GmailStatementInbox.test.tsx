@@ -99,4 +99,32 @@ describe("Gmail statement inbox", () => {
       screen.getByRole("link", { name: "Upload in Money" }),
     ).toHaveAttribute("href", "/import");
   });
+
+  it("shows a saved wrong password as an error", async () => {
+    api.fetch.mockResolvedValue({
+      items: [
+        {
+          id: "synthetic-wrong-password-item",
+          sender_type: "nsdl",
+          received_at: "2026-10-01T08:00:00Z",
+          status: "needs_password",
+          error_code: "wrong_password",
+          import_job_id: null,
+        },
+      ],
+      cleanup_notice: null,
+    });
+
+    renderWithQueries(
+      <MemoryRouter>
+        <GmailStatementInbox />
+      </MemoryRouter>,
+    );
+
+    const error = await screen.findByRole("alert");
+    expect(error).toHaveTextContent(
+      "A saved password didn’t work. Enter it to continue.",
+    );
+    expect(error).toHaveClass("text-danger-foreground");
+  });
 });

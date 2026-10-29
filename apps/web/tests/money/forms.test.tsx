@@ -7,6 +7,10 @@ import { useForm } from "react-hook-form";
 import { describe, expect, it } from "vitest";
 import { MoneyInput } from "../../src/ui";
 import {
+  formatAmountInput,
+  serializeAssetValues,
+} from "../../src/money/form-utils";
+import {
   assetForms,
   assetSchemaDigest,
   type AssetType,
@@ -62,6 +66,19 @@ describe("schema-generated money forms", () => {
         expect(label, `${assetType}.${field.name}`).toBeTruthy();
       }
     }
+  });
+
+  it("formats quick-add balances for typing and serializes the same amount", () => {
+    expect(formatAmountInput("500000.00", "INR")).toBe("5,00,000");
+    expect(formatAmountInput("125000.50", "INR")).toBe("1,25,000.50");
+    expect(formatAmountInput("85000.00", "DKK")).toBe("85,000");
+    expect(
+      serializeAssetValues("savings", assetForms.savings.fields, {
+        bank: "Synthetic Bank",
+        currency: "INR",
+        balance: "5,00,000",
+      }),
+    ).toMatchObject({ balance: "500000.00", currency: "INR" });
   });
 
   it("shows an exact parsed INR amount and rejects unrecognized text", async () => {

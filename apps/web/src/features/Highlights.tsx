@@ -9,6 +9,7 @@ export type HighlightCardModel = {
   body: string;
   learn_more_key: string;
   severity: "info" | "attention";
+  context?: Record<string, string>;
 };
 
 export function Highlights({
@@ -20,6 +21,11 @@ export function Highlights({
 }) {
   if (!items?.length) return null;
   const learnMore = englishCopy.highlights.learn_more as Record<string, string>;
+  const instrumentNames = englishCopy.highlights.instrument_names as Record<
+    string,
+    string
+  >;
+  const namedYieldBody = englishCopy.highlights.missing_yield_named_body;
   const visibleItems = items.slice(0, 3);
   return (
     <Card className="grid gap-3" aria-label="Helpful notes">
@@ -28,6 +34,13 @@ export function Highlights({
         {visibleItems.map((item) => {
           const attention = item.severity === "attention";
           const SeverityIcon = attention ? TriangleAlert : Info;
+          const instrumentName = item.context?.instrument_code
+            ? instrumentNames[item.context.instrument_code]
+            : undefined;
+          const body =
+            item.key === "missing_yield" && instrumentName
+              ? namedYieldBody.replace("{name}", instrumentName)
+              : item.body;
           return (
             <li
               key={item.key}
@@ -41,9 +54,7 @@ export function Highlights({
                 </span>
                 <div className="min-w-0">
                   <h3 className="text-sm font-semibold">{item.title}</h3>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {item.body}
-                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">{body}</p>
                 </div>
               </div>
               <div className="flex min-h-12 items-center justify-between gap-3 border-t border-line/70 pt-1">

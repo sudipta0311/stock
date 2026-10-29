@@ -530,6 +530,11 @@ def value_other_asset(
     if isinstance(asset, BondAsset):
         return value_bond(asset, as_of)
     if isinstance(asset, SavingsAsset):
+        # Valuations are in rupees; callers convert DKK/EUR balances at a fresh FX rate first.
+        if asset.currency != "INR":
+            raise ValueError(
+                f"Convert the {asset.currency} savings balance to INR before valuing it"
+            )
         return _result(asset.balance, None, None, asset.balance, method=ValuationMethod.USER)
     if isinstance(asset, NPSAsset):
         value = asset.tier1_balance + (asset.tier2_balance or Decimal(0))

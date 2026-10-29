@@ -169,7 +169,9 @@ export function GmailStatementInbox() {
             ? "A saved password didn’t work. Enter it to continue."
             : item.error_code === "parse_timeout"
               ? "This statement took too long to read. Try again."
-              : "";
+              : item.error_code === "unreadable"
+                ? "We couldn’t read this statement before. Try again, or upload it in Money."
+                : "";
         return (
           <Card key={item.id} className="grid gap-3">
             <div>
@@ -261,11 +263,14 @@ export function GmailStatementInbox() {
               </div>
             ) : null}
             {feedback[item.id] ? (
-              <p role="status" className="text-sm text-muted-foreground">
+              <p role="alert" className="text-sm text-danger-foreground">
                 {feedback[item.id]}
               </p>
             ) : savedPasswordMessage ? (
-              <p role="status" className="text-sm text-muted-foreground">
+              <p
+                role={item.error_code === "wrong_password" ? "alert" : "status"}
+                className={`text-sm ${item.error_code === "wrong_password" ? "text-danger-foreground" : "text-muted-foreground"}`}
+              >
                 {savedPasswordMessage}
               </p>
             ) : null}

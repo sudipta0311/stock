@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
-import type { FormEvent } from "react";
+import type { FormEvent, ReactNode } from "react";
 import {
   ArrowRight,
   Building2,
@@ -167,6 +167,7 @@ function assetLabel(asset: AssetResponse): string {
 function maturityStatus(asset: AssetResponse): string {
   if (asset.valuation_status === "price_needed") return "Price needed";
   if (asset.valuation_status === "rate_needed") return "Rate needed";
+  if (asset.valuation_status === "fx_needed") return "Rate needed";
   const maturity = asset.details.maturity;
   if (typeof maturity === "string" && /^\d{4}-\d{2}$/.test(maturity)) {
     const [yearText = "", monthText = ""] = maturity.split("-");
@@ -187,6 +188,48 @@ function formatNativeLoanAmount(amount: string, currency: string): string {
   return `${currency} ${new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0,
   }).format(Number(amount))}`;
+}
+
+function formatSavingsAmount(
+  asset: AssetResponse,
+  primaryCurrency: "INR" | "DKK",
+  fxQuote: DkkInrRate | undefined,
+  showSecondary: boolean,
+): ReactNode {
+  const currency = String(asset.details.currency ?? "INR");
+  const balance = asset.details.balance;
+  if (
+    currency === "INR" ||
+    (typeof balance !== "string" && typeof balance !== "number")
+  ) {
+    return asset.value_cached ? (
+      <AmountLabel
+        amount={asset.value_cached}
+        primaryCurrency={primaryCurrency}
+        fxQuote={fxQuote}
+        showSecondary={showSecondary}
+      />
+    ) : (
+      "Rate needed"
+    );
+  }
+  return (
+    <span className="tabular-nums">
+      {formatNativeLoanAmount(String(balance), currency)}
+      <span className="block text-xs font-normal text-muted-foreground">
+        {asset.value_cached ? (
+          <AmountLabel
+            amount={asset.value_cached}
+            primaryCurrency={primaryCurrency}
+            fxQuote={fxQuote}
+            showSecondary={false}
+          />
+        ) : (
+          "Rate needed"
+        )}
+      </span>
+    </span>
+  );
 }
 
 function LoansGroup({
@@ -504,7 +547,7 @@ function HouseholdInsights({
                   {asset.reason === "price_needed"
                     ? "We'll value this once today's price is in."
                     : asset.reason === "fx_needed"
-                      ? "Add a current currency rate to include this loan."
+                      ? "We'll include this once today's exchange rate is in."
                       : "Add the rate from your certificate."}
                 </span>
               </span>
@@ -668,10 +711,13 @@ export function MoneyMapPage() {
     0,
     Math.min(100, Number(networth?.completeness.pct ?? 0)),
   );
+  const tickedCategories = networth?.completeness.ticked ?? [];
   const nextCategory = checklistTiles.find(
-    (tile) => !networth?.completeness.done.includes(tile.category),
+    (tile) =>
+      tickedCategories.includes(tile.category) &&
+      !networth?.completeness.done.includes(tile.category),
   )?.category;
-  const completenessText = `Money Map ${completenessPct}% complete${nextCategory ? ` · add ${categoryLabel(nextCategory)} to finish` : " · everything is up to date"}`;
+  const completenessText = `Money Map ${completenessPct}% complete${nextCategory ? ` · add ${categoryLabel(nextCategory)} to finish` : tickedCategories.length ? " · everything is up to date" : ""}`;
   const checklistCompleted = (networth?.completeness.done.length ?? 0) > 0;
 
   async function toggleCategory(category: string) {
@@ -955,8 +1001,15 @@ export function MoneyMapPage() {
                     </span>
                   </span>
                   <span className="flex shrink-0 items-center gap-2 text-right text-sm font-semibold tabular-nums">
-                    {asset.valuation_status === "price_needed" ||
-                    !asset.value_cached ? (
+                    {asset.asset_type === "savings" ? (
+                      formatSavingsAmount(
+                        asset,
+                        primaryCurrency,
+                        fxQuote,
+                        hasDanishMember,
+                      )
+                    ) : asset.valuation_status === "price_needed" ||
+                      !asset.value_cached ? (
                       "—"
                     ) : (
                       <AmountLabel

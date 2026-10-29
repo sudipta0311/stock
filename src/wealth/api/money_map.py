@@ -19,7 +19,7 @@ from wealth.core.dates import MonthYear, add_months
 from wealth.importer.quick_add import QuickAddNotUnderstood, parse_quick_add
 from wealth.policy.snapshot import WealthSnapshot
 from wealth.rates.reference import RateUnavailable
-from wealth.schemas.assets import AnyAsset, GoldAsset, LoanAsset, parse_asset
+from wealth.schemas.assets import AnyAsset, GoldAsset, LoanAsset, SavingsAsset, parse_asset
 from wealth.schemas.common import LiquidityClass, Rupees, Sleeve, ValuationMethod
 from wealth.schemas.profile import Goal as GoalInput
 from wealth.schemas.profile import (
@@ -173,7 +173,9 @@ class AssetResponse(MoneyMapModel):
     details: dict[str, Any]
     valuation: dict[str, Any] | None
     valuation_note: str | None
-    valuation_status: Literal["valued", "price_needed", "rate_needed", "not_applicable"]
+    valuation_status: Literal[
+        "valued", "price_needed", "rate_needed", "fx_needed", "not_applicable"
+    ]
     value_cached: Rupees | None
     value_as_of: date | None
     status: Literal["active", "closed"]
@@ -382,7 +384,7 @@ def _valuation_from_json(value: dict[str, Any]) -> Valuation:
 
 def _valuation_note(record: Any) -> str | None:
     status = _valuation_status(record)
-    return status if status in {"price_needed", "rate_needed"} else None
+    return status if status in {"fx_needed", "price_needed", "rate_needed"} else None
 
 
 def _valuation_status(record: Any) -> str:
@@ -392,17 +394,22 @@ def _valuation_status(record: Any) -> str:
         return "valued"
     if record.asset_type == "po_scheme":
         return "rate_needed"
+    if record.asset_type == "savings" and record.details.get("currency", "INR") != "INR":
+        return "fx_needed"
     return "price_needed"
 
 
 def _asset_response(record: Any) -> dict[str, Any]:
+    details = dict(record.details)
+    if record.asset_type == "savings":
+        details.setdefault("currency", "INR")
     return {
         "id": record.id,
         "asset_type": record.asset_type,
         "member_id": record.member_id,
         "joint": record.joint,
         "account_id": record.account_id,
-        "details": record.details,
+        "details": details,
         "valuation": record.valuation,
         "valuation_note": _valuation_note(record),
         "valuation_status": _valuation_status(record),
@@ -429,10 +436,18 @@ def _evaluate_asset(
     asset: AnyAsset,
     as_of: date,
     *,
+    session: Session,
     prices: PriceProvider | None = None,
 ) -> tuple[Valuation | None, str | None]:
     if isinstance(asset, LoanAsset):
         return None, None
+    if isinstance(asset, SavingsAsset) and asset.currency != "INR":
+        from wealth.marketdata.store import fresh_fx_rate_to_inr
+
+        rate = fresh_fx_rate_to_inr(session, asset.currency, as_of)
+        if rate is None:
+            return None, "fx_needed"
+        asset = asset.model_copy(update={"balance": asset.balance * rate, "currency": "INR"})
     try:
         return value_asset(asset, as_of, assumed_start=as_of, prices=prices), None
     except PriceUnavailable:
@@ -618,6 +633,7 @@ def refresh_networth_snapshot(
         Security,
     )
     from wealth.marketdata.provider import DbPriceProvider
+    from wealth.marketdata.store import fresh_fx_rate_to_inr
     from wealth.valuation.prices import PriceQuote
 
     statement = select(ManualAsset).where(
@@ -667,28 +683,17 @@ def refresh_networth_snapshot(
                 ],
                 today,
             )
-            fx_rate = Decimal(1)
-            if asset.currency != "INR":
-                fx_row = session.execute(
-                    select(FxRate.rate, FxRate.as_of)
-                    .where(
-                        FxRate.pair == f"{asset.currency}/INR",
-                        FxRate.as_of <= today,
-                    )
-                    .order_by(FxRate.as_of.desc())
-                    .limit(1)
-                ).one_or_none()
-                if fx_row is None or (today - fx_row.as_of).days > 10:
-                    unvalued_assets.append(
-                        {
-                            "id": str(record.id),
-                            "asset_type": record.asset_type,
-                            "label": record.details.get("label") or record.asset_type,
-                            "reason": "fx_needed",
-                        }
-                    )
-                    continue
-                fx_rate = fx_row.rate
+            fx_rate = fresh_fx_rate_to_inr(session, asset.currency, today)
+            if fx_rate is None:
+                unvalued_assets.append(
+                    {
+                        "id": str(record.id),
+                        "asset_type": record.asset_type,
+                        "label": record.details.get("label") or record.asset_type,
+                        "reason": "fx_needed",
+                    }
+                )
+                continue
             loan_positions[record.id] = (position, fx_rate)
             asset = asset.model_copy(
                 update={
@@ -698,6 +703,37 @@ def refresh_networth_snapshot(
                 }
             )
             valuation = _ZERO_VALUATION
+        elif isinstance(asset, SavingsAsset) and asset.currency != "INR":
+            fx_rate = fresh_fx_rate_to_inr(session, asset.currency, today)
+            if fx_rate is None:
+                record.valuation = None
+                record.value_cached = None
+                record.value_as_of = None
+                unvalued_assets.append(
+                    {
+                        "id": str(record.id),
+                        "asset_type": record.asset_type,
+                        "label": record.details.get("label") or record.asset_type,
+                        "reason": "fx_needed",
+                    }
+                )
+                continue
+            asset = asset.model_copy(update={"balance": asset.balance * fx_rate, "currency": "INR"})
+            try:
+                valuation = value_asset(asset, today, assumed_start=today, prices=prices)
+            except PriceUnavailable:
+                unvalued_assets.append(
+                    {
+                        "id": str(record.id),
+                        "asset_type": record.asset_type,
+                        "label": record.details.get("label") or record.asset_type,
+                        "reason": "price_needed",
+                    }
+                )
+                continue
+            record.valuation = _valuation_json(valuation)
+            record.value_cached = valuation.value_today
+            record.value_as_of = today
         elif stored is not None and not needs_refresh:
             valuation = _valuation_from_json(stored)
         else:
@@ -1253,7 +1289,9 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
         try:
             from wealth.marketdata.provider import DbPriceProvider
 
-            valuation, note = _evaluate_asset(payload, today, prices=DbPriceProvider(user.session))
+            valuation, note = _evaluate_asset(
+                payload, today, session=user.session, prices=DbPriceProvider(user.session)
+            )
         except RateUnavailable:
             return _rate_needed_problem(request)
         record = add_manual_asset(
@@ -1314,7 +1352,10 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             from wealth.marketdata.provider import DbPriceProvider
 
             valuation, _note = _evaluate_asset(
-                validated, today, prices=DbPriceProvider(user.session)
+                validated,
+                today,
+                session=user.session,
+                prices=DbPriceProvider(user.session),
             )
         except RateUnavailable:
             return _rate_needed_problem(request)

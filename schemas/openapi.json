@@ -397,6 +397,7 @@
               "valued",
               "price_needed",
               "rate_needed",
+              "fx_needed",
               "not_applicable"
             ],
             "title": "Valuation Status",
@@ -570,6 +571,7 @@
               "valued",
               "price_needed",
               "rate_needed",
+              "fx_needed",
               "not_applicable"
             ],
             "title": "Valuation Status",
@@ -1964,6 +1966,13 @@
           "body": {
             "title": "Body",
             "type": "string"
+          },
+          "context": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Context",
+            "type": "object"
           },
           "key": {
             "title": "Key",
@@ -6636,13 +6645,22 @@
             "format": "decimal",
             "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
             "title": "Balance",
-            "type": "string",
-            "x-unit": "INR"
+            "type": "string"
           },
           "bank": {
             "maxLength": 120,
             "minLength": 1,
             "title": "Bank",
+            "type": "string"
+          },
+          "currency": {
+            "default": "INR",
+            "enum": [
+              "INR",
+              "DKK",
+              "EUR"
+            ],
+            "title": "Currency",
             "type": "string"
           },
           "joint": {

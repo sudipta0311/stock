@@ -34,7 +34,8 @@ class AssetBase(BaseModel):
 class SavingsAsset(AssetBase):
     asset_type: Literal["savings"]
     bank: str = Field(min_length=1, max_length=120)
-    balance: Rupees
+    balance: CurrencyAmount
+    currency: Literal["INR", "DKK", "EUR"] = "INR"
 
 
 class FixedDepositAsset(AssetBase):

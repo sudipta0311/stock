@@ -53,6 +53,7 @@ Status: ⬜ not started · 🟦 in progress · ✅ accepted · 🔁 rework · �
 | C28b | Visual polish: type scale, spacing, app shell, highlight callouts, empty states, list rows, rounded summaries; fixes from the real-phone test | 8 | ✅ |
 | C24 | End-to-end tests (Playwright), accessibility and performance checks | 10 | ⬜ |
 | C25 | Docs, cleanup, final plan sync | — | ⬜ |
+| C34 | Savings in DKK/EUR; fixes from the mock-data walkthrough (hint, fund check, errors, required marks, quick-add amounts, push on account switch, rate note, onboarding counter) | 3, 8 | ✅ |
 
 ## Follow-ups noted during review
 - (Deploy prep, reviewer) Migration 0002 was edited for managed Postgres. It no longer names SUPERUSER/REPLICATION in ALTER ROLE (it verifies them instead) and only REVOKEs an owner membership that exists. The end state is identical, so existing databases are unaffected. Neon `wealth` (owner's Frankfurt project) is migrated to 0011. → C18 adds a non-superuser CI owner so this class of bug is caught.

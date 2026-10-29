@@ -473,22 +473,27 @@ def check_funds(
                 )
             )
 
-    _too_many_checks(
-        checks, selected_holdings, values_by_fund, limits, member_by_id, as_of, sale_ledger
-    )
-    _closet_index_check(checks, selected_holdings, references, returns, sips, member_by_id)
-    _sector_heavy_check(checks, selected_holdings, limits)
-    _debt_note_check(checks, selected_holdings, best_debt_option)
+    if selected_holdings:
+        _too_many_checks(
+            checks, selected_holdings, values_by_fund, limits, member_by_id, as_of, sale_ledger
+        )
+        _closet_index_check(checks, selected_holdings, references, returns, sips, member_by_id)
+        _sector_heavy_check(checks, selected_holdings, limits)
+        _debt_note_check(checks, selected_holdings, best_debt_option)
 
-    early_warning = _project_warning(
-        values_by_bucket,
-        sips,
-        selected_holdings,
-        member_by_id,
-        target,
-        rules,
-        band_rules or BandRules(),
-        as_of,
+    early_warning = (
+        _project_warning(
+            values_by_bucket,
+            sips,
+            selected_holdings,
+            member_by_id,
+            target,
+            rules,
+            band_rules or BandRules(),
+            as_of,
+        )
+        if selected_holdings
+        else None
     )
     if (
         early_warning is not None
@@ -538,7 +543,8 @@ def check_funds(
                     )
                 )
 
-    _residency_details(checks, selected_members, sips, selected_holdings)
+    if selected_holdings:
+        _residency_details(checks, selected_members, sips, selected_holdings)
     ordered_checks = sorted(
         checks,
         key=lambda item: (

@@ -823,6 +823,18 @@ def latest_fx_rate(session: Session, pair: str, on: date) -> tuple[Decimal, date
     return tuple(row) if row is not None else None
 
 
+def fresh_fx_rate_to_inr(
+    session: Session, currency: str, on: date, *, max_age_days: int = 10
+) -> Decimal | None:
+    """Return the latest usable currency-to-INR rate, or ``None`` when stale or missing."""
+    if currency == "INR":
+        return Decimal(1)
+    row = latest_fx_rate(session, f"{currency}/INR", on)
+    if row is None or (on - row[1]).days > max_age_days:
+        return None
+    return row[0]
+
+
 def latest_market_data_as_of(session: Session, on: date) -> date | None:
     """Return the newest available daily market-data date no later than ``on``."""
     dates = [

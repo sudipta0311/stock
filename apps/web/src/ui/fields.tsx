@@ -245,6 +245,7 @@ export function MonthYearInput({
   label,
   help,
   error,
+  required,
   ...props
 }: InputHTMLAttributes<HTMLInputElement> & {
   id: string;
@@ -253,11 +254,12 @@ export function MonthYearInput({
   error?: string;
 }) {
   return (
-    <Field id={id} label={label} help={help} error={error}>
+    <Field id={id} label={label} help={help} error={error} required={required}>
       <input
         {...props}
         id={id}
         type="month"
+        required={required}
         className="min-h-12 w-full rounded-xl border border-line bg-surface px-3 text-base outline-none focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/30"
       />
     </Field>
@@ -269,6 +271,7 @@ export function Select({
   label,
   help,
   error,
+  required,
   children,
   ...props
 }: SelectHTMLAttributes<HTMLSelectElement> & {
@@ -279,10 +282,11 @@ export function Select({
   children: ReactNode;
 }) {
   return (
-    <Field id={id} label={label} help={help} error={error}>
+    <Field id={id} label={label} help={help} error={error} required={required}>
       <select
         {...props}
         id={id}
+        required={required}
         className="min-h-12 w-full rounded-xl border border-line bg-surface px-3 text-base outline-none focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/30"
       >
         {children}
@@ -324,17 +328,32 @@ export function Checkbox({
 
 export function TileToggle({
   label,
+  required,
   options,
   value,
   onChange,
 }: {
   label: string;
+  required?: boolean;
   options: Array<{ value: string; label: string; description?: string }>;
   value: string;
   onChange(value: string): void;
 }) {
   return (
-    <div role="group" aria-label={label} className="grid grid-cols-2 gap-3">
+    <div
+      role="group"
+      aria-label={`${label}${required ? " (required)" : ""}`}
+      className="grid grid-cols-2 gap-3"
+    >
+      {required ? (
+        <span className="col-span-2 text-sm font-medium">
+          {label}
+          <span aria-hidden="true" className="ml-1 text-muted-foreground">
+            *
+          </span>
+          <span className="sr-only"> (required)</span>
+        </span>
+      ) : null}
       {options.map((option) => (
         <button
           key={option.value}

@@ -170,6 +170,10 @@ describe("Money Map onboarding", () => {
     expect(
       await screen.findByRole("heading", { name: "Your plan is ready" }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("progressbar", { name: "Onboarding progress" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/\bof 6\b/)).not.toBeInTheDocument();
     expect(memberBodies).toHaveLength(2);
     expect(memberBodies[0]).toMatchObject({
       display_name: "You",

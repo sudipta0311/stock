@@ -17,7 +17,7 @@ from wealth.schemas.assets import (
 from wealth.schemas.common import LiquidityClass, Sleeve
 
 ASSET_CASES: dict[str, tuple[dict[str, object], dict[str, object]]] = {
-    "savings": ({"bank": "Test Bank", "balance": "₹5,00,000"}, {"bank": "Test Bank"}),
+    "savings": ({"bank": "Test Bank", "balance": "500000"}, {"bank": "Test Bank"}),
     "fd": (
         {"bank": "Test Bank", "principal": "5L", "rate_pct": "7.10", "maturity": "Mar 2027"},
         {"bank": "Test Bank", "principal": 5000, "maturity": "2027-03"},
@@ -133,6 +133,24 @@ def test_legacy_loan_rows_keep_loading_with_safe_optional_defaults() -> None:
     assert loan.lender is None
 
 
+def test_savings_currency_defaults_to_inr_and_accepts_foreign_balances() -> None:
+    legacy = parse_asset({"asset_type": "savings", "bank": "Example Bank", "balance": "10000"})
+    kroner = parse_asset(
+        {
+            "asset_type": "savings",
+            "bank": "Example Bank",
+            "balance": "10000",
+            "currency": "DKK",
+        }
+    )
+
+    assert legacy.currency == "INR"
+    assert legacy.balance == Decimal("10000.00")
+    assert kroner.currency == "DKK"
+    assert kroner.balance == Decimal("10000.00")
+    assert kroner.model_dump(mode="json")["balance"] == "10000.00"
+
+
 def test_nps_scheme_mix_is_validated_and_mapped_to_sleeves() -> None:
     nps = parse_asset(
         {
@@ -179,8 +197,8 @@ def test_month_year_fields_serialize_as_canonical_strings() -> None:
     assert fd.model_dump(mode="json")["maturity"] == "2027-03"
 
 
-@pytest.mark.parametrize("value", ["5L", 500000, Decimal("5E+5")])
-def test_rupees_normalize_all_input_forms_to_two_fixed_decimals(value: object) -> None:
+@pytest.mark.parametrize("value", ["500000", 500000, Decimal("5E+5")])
+def test_currency_amount_normalizes_numeric_inputs_to_two_fixed_decimals(value: object) -> None:
     asset = parse_asset({"asset_type": "savings", "bank": "Test Bank", "balance": value})
     assert asset.balance == Decimal("500000.00")
     assert asset.balance.as_tuple().exponent == -2

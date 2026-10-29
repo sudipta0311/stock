@@ -149,6 +149,29 @@ def test_highlight_amount_fingerprint_uses_display_quantum() -> None:
     assert fingerprint == rounded
 
 
+def test_missing_yield_keeps_instrument_code_out_of_dismissal_fingerprint() -> None:
+    original = {
+        "unranked_options": [
+            {"instrument": "po_td_5y", "reason": "yield_unavailable", "amount": "25000"}
+        ]
+    }
+    changed_instrument = {
+        "unranked_options": [
+            {"instrument": "bank_fd", "reason": "yield_unavailable", "amount": "25000"}
+        ]
+    }
+
+    result = highlights(original, HighlightContext(screen="plan", copy=_COPY))
+    fingerprint = highlight_fingerprint(original, "missing_yield", _COPY)
+
+    assert result[0].context == {"instrument_code": "po_td_5y"}
+    assert result[0].body == (
+        "We don't have today's rate for this option. Check it with the bank or post office first."
+    )
+    assert fingerprint is not None
+    assert highlight_fingerprint(changed_instrument, "missing_yield", _COPY) == fingerprint
+
+
 def test_notes_without_plain_copy_are_not_shown_as_highlights() -> None:
     plan: dict[str, Any] = {
         "notes": [

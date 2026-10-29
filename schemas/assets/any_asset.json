@@ -1490,13 +1490,22 @@
         "balance": {
           "format": "decimal",
           "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
-          "type": "string",
-          "x-unit": "INR"
+          "type": "string"
         },
         "bank": {
           "maxLength": 120,
           "minLength": 1,
           "title": "Bank",
+          "type": "string"
+        },
+        "currency": {
+          "default": "INR",
+          "enum": [
+            "INR",
+            "DKK",
+            "EUR"
+          ],
+          "title": "Currency",
           "type": "string"
         },
         "joint": {

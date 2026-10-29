@@ -9,6 +9,7 @@ export const commonFieldCopy: Record<string, FieldCopy> = {
   label: { label: "Name this item" },
   notes: { label: "Notes" },
   member_id: { label: "Owned by" },
+  currency: { label: "Currency" },
   balance_as_of: { label: "Balance as of (month and year)" },
   rate_pct: {
     label: "Interest rate (%)",

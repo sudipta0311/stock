@@ -109,7 +109,12 @@ describe("fields that depend on the kind of item", () => {
     );
     expect(screen.queryByLabelText(/Units held/)).not.toBeInTheDocument();
     await user.type(screen.getByLabelText(/Weight in grams/), "80");
-    await user.selectOptions(screen.getByLabelText(/Purity/), "22");
+    const purity = screen.getByLabelText(/Purity/);
+    await user.selectOptions(purity, "22");
+    expect(purity).toBeRequired();
+    expect(
+      document.querySelector(`label[for="${purity.id}"]`),
+    ).toHaveTextContent("Purity (karat)*");
 
     await waitFor(() => expect(postBody).not.toBeNull(), { timeout: 2500 });
     expect(postBody).toMatchObject({

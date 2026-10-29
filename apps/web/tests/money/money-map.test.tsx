@@ -146,6 +146,117 @@ describe("Money Map", () => {
     ).toBeInTheDocument();
   });
 
+  it("defaults Denmark savings to DKK and posts the normalized balance", async () => {
+    const user = userEvent.setup();
+    let postBody: Record<string, unknown> | null = null;
+    const member = {
+      id: memberId,
+      created_at: "2026-10-28T00:00:00Z",
+      display_name: "Test member",
+      is_self: true,
+      relationship: "self",
+      residency: {
+        country: "DK",
+        status: "NRI",
+        settle_plan: "undecided",
+        us_person: false,
+      },
+      tax: {},
+      investing: {},
+    };
+    server.use(
+      http.get(/\/v1\/members$/, () => HttpResponse.json([member])),
+      http.get("https://api.frankfurter.dev/v2/rate/dkk/inr", () =>
+        HttpResponse.json({ date: "2026-10-28", rate: "12.5" }),
+      ),
+      http.post(/\/v1\/assets$/, async ({ request }) => {
+        postBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(savedAsset(postBody), { status: 201 });
+      }),
+      ...baseHandlers(),
+    );
+    renderMap("/money/add/savings");
+
+    const bank = await screen.findByLabelText(/Bank/);
+    const currency = screen.getByLabelText(/Currency/);
+    const balance = screen.getByLabelText(/Current balance/);
+    await waitFor(() => expect(currency).toHaveValue("DKK"));
+    expect(
+      bank.compareDocumentPosition(currency) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      currency.compareDocumentPosition(balance) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    await user.type(bank, "Synthetic Bank");
+    await user.type(balance, "85,000");
+
+    await waitFor(() => expect(postBody).not.toBeNull(), { timeout: 2500 });
+    expect(postBody).toMatchObject({ currency: "DKK", balance: "85000" });
+  });
+
+  it("shows a DKK savings balance with the household-currency value", async () => {
+    const asset = savedAsset({
+      asset_type: "savings",
+      bank: "Synthetic Bank",
+      balance: "85000.00",
+      currency: "DKK",
+    });
+    server.use(
+      http.get(/\/v1\/assets$/, () =>
+        HttpResponse.json([
+          {
+            ...asset,
+            id: "asset-dkk-savings",
+            value_cached: "125000.00",
+            details: {
+              ...asset.details,
+              balance: "85000.00",
+              currency: "DKK",
+            },
+          },
+        ]),
+      ),
+      ...baseHandlers(),
+    );
+    renderMap();
+
+    const row = await screen.findByRole("link", { name: /Synthetic Bank/ });
+    expect(within(row).getByText("DKK 85,000")).toBeInTheDocument();
+    expect(within(row).getByText("₹1.25 L")).toBeInTheDocument();
+  });
+
+  it("quick-adds a Danish bank balance with DKK formatting", async () => {
+    const user = userEvent.setup();
+    server.use(
+      ...baseHandlers(),
+      http.post(/\/v1\/assets\/quick-add$/, () =>
+        HttpResponse.json({
+          asset_type: "savings",
+          draft: {
+            asset_type: "savings",
+            bank: "Danske Bank",
+            currency: "DKK",
+            balance: "85000.00",
+          },
+          missing: [],
+          confidence: "high",
+        }),
+      ),
+    );
+    renderMap();
+
+    await user.type(
+      await screen.findByLabelText("Quick add"),
+      "Danske Bank savings 85000 kr",
+    );
+    await user.click(screen.getByRole("button", { name: "Add details" }));
+
+    expect(await screen.findByLabelText(/Bank/)).toHaveValue("Danske Bank");
+    expect(screen.getByLabelText(/Currency/)).toHaveValue("DKK");
+    expect(screen.getByLabelText(/Current balance/)).toHaveValue("85,000");
+  });
+
   it.each([
     {
       phrase: "FD 5L Demo Bank 7.1% till Mar 2027",
@@ -174,7 +285,7 @@ describe("Money Map", () => {
       },
       label: "Current PPF balance",
       missingLabel: "Year opened",
-      expected: "650000.00",
+      expected: "6,50,000",
     },
     {
       phrase: "LIC 10L premium 52000",
@@ -270,12 +381,36 @@ describe("Money Map", () => {
     ).toEqual(["nps", "fd", "epf"]);
   });
 
-  it("shows the completeness sentence from the API response", async () => {
+  it("shows only the percentage when no checklist categories were selected", async () => {
     server.use(...baseHandlers());
     renderMap();
     expect(
-      await screen.findByText(/Money Map 80% complete · add EPF to finish/),
+      await screen.findByText("Money Map 80% complete"),
     ).toBeInTheDocument();
+    expect(screen.queryByText(/add EPF to finish/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/everything is up to date/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("names the next incomplete category the household selected", async () => {
+    server.use(
+      ...baseHandlers(
+        networth({
+          completeness: {
+            ticked: ["property", "savings"],
+            done: [],
+            pct: "0",
+          },
+        }),
+      ),
+    );
+    renderMap();
+
+    expect(
+      await screen.findByText("Money Map 0% complete · add Savings to finish"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/add EPF to finish/)).not.toBeInTheDocument();
   });
 
   it("shows plain names and whole percentages instead of codes", async () => {
