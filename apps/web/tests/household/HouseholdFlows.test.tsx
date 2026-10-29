@@ -307,11 +307,20 @@ describe("household screens", () => {
       }),
     );
     renderHouseholdApp();
-    expect(await screen.findByText("For Demo Owner")).toBeInTheDocument();
-    expect(screen.getAllByText("For you").length).toBeGreaterThan(0);
+    const actionCards = await screen.findAllByRole("article", {
+      name: /Invest now/,
+    });
+    const ownerCard = actionCards.find((card) =>
+      card.textContent?.includes("For Demo Owner"),
+    );
+    const partnerCard = actionCards.find((card) =>
+      card.textContent?.includes("For you"),
+    );
+    expect(ownerCard).toBeDefined();
+    expect(partnerCard).toBeDefined();
     expect(
-      screen.getByText(englishCopy.household_ui.clubbing_check),
-    ).toBeInTheDocument();
+      screen.queryByText(englishCopy.household_ui.clubbing_check),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText("clubbing_check")).not.toBeInTheDocument();
 
     const howToButtons = await screen.findAllByRole("button", {
@@ -324,6 +333,10 @@ describe("household screens", () => {
     expect(askDialog).toHaveTextContent("For Demo Owner");
     expect(askDialog).toHaveTextContent("Nordnet");
     expect(askDialog).toHaveTextContent("share savings account");
+    await user.click(within(askDialog).getByText("Why?"));
+    expect(
+      within(askDialog).getByText(englishCopy.household_ui.clubbing_check),
+    ).toBeInTheDocument();
     await user.click(within(askDialog).getByRole("button", { name: "Close" }));
 
     await user.click(screen.getAllByRole("button", { name: "How to" })[1]!);
@@ -335,13 +348,6 @@ describe("household screens", () => {
     await user.click(
       within(ordinaryDialog).getByRole("button", { name: "Close" }),
     );
-
-    await user.click(screen.getByText(englishCopy.household_ui.done_this_week));
-    expect(
-      screen.getByText(
-        englishCopy.household_ui.done_by.replace("{name}", "Demo Partner"),
-      ),
-    ).toBeInTheDocument();
   });
 
   it("shows member holdings, limits, and plain clubbing guidance with INR and DKK", async () => {
@@ -351,7 +357,7 @@ describe("household screens", () => {
     server.use(...householdHandlers({ onFxRequest: () => fxRequests++ }));
     const { container } = renderHouseholdApp("/plan");
     expect(
-      await screen.findByRole("heading", { name: "Your family plan" }),
+      await screen.findByRole("heading", { name: "Your plan" }),
     ).toBeInTheDocument();
     expect(document.body.textContent).toContain("DKK 50,000.00");
     expect(document.body.textContent).toContain("₹10 L");

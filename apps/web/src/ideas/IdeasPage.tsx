@@ -1,3 +1,4 @@
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { formatInr } from "../lib/money";
 import { labelForCode } from "../lib/labels";
@@ -14,10 +15,16 @@ import {
   ScreenLoading,
   useFeatureQuery,
 } from "../features/api";
-import { getActions, getPlan, getResearchIdeas } from "../planning/api";
+import {
+  dismissHighlight,
+  getActions,
+  getPlan,
+  getResearchIdeas,
+} from "../planning/api";
 import type { ActionResponse, WeeklyPlan } from "../planning/api";
 import { Badge, Card, Term } from "../ui";
 import englishCopy from "../copy/en.json";
+import { Highlights } from "../features/Highlights";
 
 function dkkAmount(raw: unknown): string {
   const amount = String(raw ?? "").trim();
@@ -74,7 +81,9 @@ function DenmarkBuyCard({ plan }: { plan?: WeeklyPlan }) {
               >
                 <div className="flex items-start justify-between gap-3">
                   <h3 className="font-semibold">
-                    {textValue(instrument.name, copy.fund_fallback)}
+                    <span data-security>
+                      {textValue(instrument.name, copy.fund_fallback)}
+                    </span>
                   </h3>
                   <span className="shrink-0 text-sm font-semibold tabular-nums">
                     {dkkAmount(line.amount_dkk)}
@@ -186,13 +195,24 @@ function DenmarkBuyCard({ plan }: { plan?: WeeklyPlan }) {
                         </ul>
                       </div>
                     ) : null}
-                    {heldNotes.slice(0, 1).map((note, noteIndex) => (
-                      <p key={`${textValue(note.symbol)}-${noteIndex}`}>
-                        {copy.held_us_etf
-                          .replace("{symbol}", textValue(note.symbol))
-                          .replace("{name}", textValue(note.eu_twin))}
-                      </p>
-                    ))}
+                    {heldNotes.slice(0, 1).map((note, noteIndex) => {
+                      const [beforeSymbol = "", afterSymbol = ""] =
+                        copy.held_us_etf.split("{symbol}");
+                      const [between = "", afterName = ""] =
+                        afterSymbol.split("{name}");
+                      const symbol = textValue(note.symbol);
+                      const name = textValue(note.eu_twin);
+                      if (!symbol || !name) return null;
+                      return (
+                        <p key={`${symbol}-${noteIndex}`}>
+                          {beforeSymbol}
+                          <span data-security>{symbol}</span>
+                          {between}
+                          <span data-security>{name}</span>
+                          {afterName}
+                        </p>
+                      );
+                    })}
                     {Object.keys(usStockTax).length ? (
                       <div className="grid gap-1">
                         <p>
@@ -431,7 +451,9 @@ function ResearchCard({
               className="grid gap-2 border-t border-line pt-3 first:border-0 first:pt-0"
             >
               <div className="flex items-start justify-between gap-3">
-                <h3 className="font-semibold">{symbol}</h3>
+                <h3 className="font-semibold" data-security>
+                  {symbol}
+                </h3>
                 {confidence ? (
                   <span className="text-right text-xs text-muted-foreground">
                     {labelForCode(confidence)}
@@ -463,6 +485,12 @@ function ResearchCard({
 }
 
 export function IdeasPage() {
+  const queryClient = useQueryClient();
+  const hideHighlight = useMutation({
+    mutationFn: dismissHighlight,
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["c22", "plan"] }),
+  });
   const research = useFeatureQuery(
     ["c22", "research-ideas"],
     "/v1/research/ideas",
@@ -479,23 +507,44 @@ export function IdeasPage() {
   if (research.isPending) return <ScreenLoading label="Loading ideas" />;
   if (research.error && !isMissingFeature(research.error))
     return <ScreenError title="Ideas couldn’t load" />;
+  const planValue = plan.data as WeeklyPlan | undefined;
+  const planMembers = asArray(planValue?.members).map(asRecord);
+  const denmarkResident =
+    asRecord(planValue?.residency).country === "DK" ||
+    planMembers.some((member) => asRecord(member.residency).country === "DK");
   return (
-    <div className="grid gap-4">
+    <div data-copy-screen="ideas" className="grid gap-4">
       <header>
         <h2 className="text-xl font-semibold">Ideas</h2>
         <p className="mt-1 text-sm text-muted-foreground">
           Ideas are research to review, not a reason to rush.
         </p>
       </header>
-      <CorePicksCard
-        actions={actions.data}
-        plan={plan.data as WeeklyPlan | undefined}
+      {denmarkResident ? (
+        <DenmarkBuyCard plan={planValue} />
+      ) : (
+        <CorePicksCard actions={actions.data} plan={planValue} />
+      )}
+      <Highlights
+        items={planValue?.highlights_by_screen?.ideas}
+        onDismiss={(key) => hideHighlight.mutate(key)}
       />
-      <DenmarkBuyCard plan={plan.data as WeeklyPlan | undefined} />
-      <ResearchCard
-        ideas={asArray(research.data?.ideas)}
-        actions={actions.data}
-      />
+      <Link
+        to="/plan"
+        data-primary="true"
+        className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-white"
+      >
+        Review your plan
+      </Link>
+      <details>
+        <summary className="min-h-12 cursor-pointer py-3 text-sm font-semibold">
+          More ideas
+        </summary>
+        <ResearchCard
+          ideas={asArray(research.data?.ideas)}
+          actions={actions.data}
+        />
+      </details>
       <Card className="grid gap-2">
         <h2 className="text-base font-semibold">Explore the wider picture</h2>
         <p className="text-sm text-muted-foreground">

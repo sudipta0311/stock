@@ -86,7 +86,7 @@ const DEFAULT_DRAFT: OnboardingDraft = {
   householdMode: "me",
   adults: [
     {
-      displayName: "",
+      displayName: "You",
       relationship: "self",
       residence: "RI",
       plannedReturnYear: "",
@@ -372,7 +372,19 @@ export function OnboardingPage() {
         const context = profile?.financial_context;
         setDraft((current) => ({
           ...current,
-          adults: adults.length ? adults : current.adults,
+          adults: adults.length
+            ? adults
+            : current.adults.map((adult, index) =>
+                index === 0 && !adult.id
+                  ? {
+                      ...adult,
+                      displayName:
+                        me.display_name?.trim() ||
+                        adult.displayName.trim() ||
+                        "You",
+                    }
+                  : adult,
+              ),
           householdMode: adults.some(
             (member) => member.relationship === "spouse",
           )
@@ -484,6 +496,7 @@ export function OnboardingPage() {
               { ...self, relationship: "self" as const },
               spouse ?? {
                 ...DEFAULT_DRAFT.adults[0]!,
+                displayName: "Spouse",
                 relationship: "spouse" as const,
               },
               ...(mode === "family" ? otherAdults : []),
@@ -559,7 +572,7 @@ export function OnboardingPage() {
       if (!savedMembers.length) throw new Error("No adult details to save.");
       await updateProfile(profilePayload());
       await refreshProfile();
-      moveTo("goals");
+      moveTo("done");
     } catch (error) {
       setPageError(
         error instanceof Error && error.message === "No adult details to save."
@@ -630,7 +643,7 @@ export function OnboardingPage() {
     } catch {
       /* the account still opens */
     }
-    navigate("/money?checklist=open");
+    navigate("/plan");
   }
 
   if (!profileLoaded && step !== "welcome") {
@@ -644,7 +657,10 @@ export function OnboardingPage() {
   }
 
   return (
-    <main className="mx-auto grid min-h-screen w-full max-w-xl content-start gap-4 px-4 py-6 sm:content-center sm:py-10">
+    <main
+      data-copy-screen="onboarding"
+      className="mx-auto grid min-h-screen w-full max-w-xl content-start gap-4 px-4 py-6 sm:content-center sm:py-10"
+    >
       <Card className="grid gap-5">
         {step !== "welcome" ? (
           <Link
@@ -665,7 +681,7 @@ export function OnboardingPage() {
               title="Your money, in one clear place"
               description="Start with what you have. Approximate amounts are welcome, and you can add or change details anytime."
             />
-            <Button onClick={() => moveTo("household")}>
+            <Button data-primary="true" onClick={() => moveTo("household")}>
               Set up my Money Map{" "}
               <ArrowRight aria-hidden="true" className="size-4" />
             </Button>
@@ -921,6 +937,7 @@ export function OnboardingPage() {
             ) : null}
             <Button
               type="button"
+              data-primary="true"
               onClick={() => void saveHousehold()}
               loading={saving}
             >
@@ -1044,7 +1061,11 @@ export function OnboardingPage() {
                 You can skip goals and add them later.
               </p>
             )}
-            <Button type="button" onClick={() => moveTo("risk")}>
+            <Button
+              type="button"
+              data-primary="true"
+              onClick={() => moveTo("risk")}
+            >
               Continue
             </Button>
             <Button
@@ -1096,9 +1117,12 @@ export function OnboardingPage() {
               </p>
             ) : null}
             {riskSaved ? (
-              <Button onClick={() => moveTo("consent")}>Continue</Button>
+              <Button data-primary="true" onClick={() => moveTo("consent")}>
+                Continue
+              </Button>
             ) : (
               <Button
+                data-primary="true"
                 onClick={() => void saveRiskAnswers()}
                 loading={saving}
                 disabled={!answersComplete}
@@ -1176,7 +1200,9 @@ export function OnboardingPage() {
               Consent settings are saved on this device for now. Account sync is
               coming soon.
             </p>
-            <Button onClick={() => moveTo("done")}>Continue</Button>
+            <Button data-primary="true" onClick={() => moveTo("done")}>
+              Continue
+            </Button>
             <Button variant="ghost" onClick={() => moveTo("done")}>
               Skip for now
             </Button>
@@ -1190,8 +1216,8 @@ export function OnboardingPage() {
             </div>
             <StepHeading
               step="done"
-              title="You're ready to build your Money Map"
-              description="Add the items you know now. You can come back for the rest anytime."
+              title="Your plan is ready"
+              description="Add a statement or a few items whenever you're ready."
             />
             {riskResult ? (
               <p className="text-sm text-muted-foreground">
@@ -1202,10 +1228,16 @@ export function OnboardingPage() {
                 .
               </p>
             ) : null}
-            <Button onClick={finish}>
-              Go to Money Map{" "}
+            <Button data-primary="true" onClick={finish}>
+              View your plan{" "}
               <ArrowRight aria-hidden="true" className="size-4" />
             </Button>
+            <Link
+              to="/money?checklist=open"
+              className="inline-flex min-h-12 items-center justify-center text-sm font-medium text-brand"
+            >
+              Add a statement or a few items first
+            </Link>
           </>
         ) : null}
       </Card>

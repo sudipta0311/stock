@@ -1027,6 +1027,35 @@ class PushSubscription(UserOwned, Base):
     )
 
 
+class HighlightDismissal(Base):
+    """A login's dismissal state for one highlight in one shared household."""
+
+    __tablename__ = "highlight_dismissals"
+    __table_args__ = (
+        CheckConstraint("highlight_key ~ '^[a-z0-9_]{1,100}$'", name="ck_highlight_dismissals_key"),
+        CheckConstraint(
+            "fingerprint ~ '^[0-9a-f]{24}$'", name="ck_highlight_dismissals_fingerprint"
+        ),
+        Index(
+            "ix_highlight_dismissals_household_login",
+            "household_owner_id",
+            "login_user_id",
+        ),
+    )
+
+    login_user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    household_owner_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    highlight_key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    fingerprint: Mapped[str] = mapped_column(String(24), nullable=False)
+    dismissed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class Consent(UserOwned, Base):
     __tablename__ = "consents"
     __table_args__ = (_tenant_identity("consents"),)

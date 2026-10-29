@@ -17,6 +17,7 @@ from wealth.alerts.brief import Brief, build_brief, render_html, render_text
 from wealth.alerts.consent import create_unsubscribe_token
 from wealth.alerts.copy import load_copy
 from wealth.alerts.email import rendered_body_hash
+from wealth.core.plain_language import find_banned_terms
 
 _ROOT = Path(__file__).resolve().parents[2]
 _GOLDEN_PLAN = _ROOT / "tests" / "golden" / "weekly_plan_user1.json"
@@ -300,10 +301,8 @@ def test_india_stress_sentence_explains_when_target_loses_more() -> None:
     headline = _brief_with_stress("-2250.00", "-157745.50").sections["world_and_money"]["headline"]
 
     assert "If Indian shares fall 25%" in headline
-    assert "your money today would drop about ₹2,250" in headline
-    assert (
-        "your target mix would drop about ₹1.58 L, because it holds more Indian shares." in headline
-    )
+    assert "today's money would drop about ₹2,250" in headline
+    assert "Your planned mix would drop ₹1.58 L, because it has more Indian shares." in headline
     assert "difference" not in headline
     assert "-₹" not in headline
 
@@ -311,7 +310,7 @@ def test_india_stress_sentence_explains_when_target_loses_more() -> None:
 def test_india_stress_sentence_says_when_target_loses_less() -> None:
     headline = _brief_with_stress("-2500.00", "-1000.00").sections["world_and_money"]["headline"]
 
-    assert "your target mix would lose ₹1,500 less." in headline
+    assert "Your planned mix would lose ₹1,500 less." in headline
     assert "difference" not in headline
 
 
@@ -376,3 +375,33 @@ def test_danish_abroad_buy_list_renders_dkk_account_and_broker_steps() -> None:
     assert "Nordnet" in html
     assert "Search the fund code." in html
     assert "IE00ABC00001" in text
+
+
+def test_nri_household_email_has_no_banned_terms() -> None:
+    plan = json.loads(_GOLDEN_PLAN.read_text(encoding="utf-8"))
+    plan["residency"] = {"status": "NRI", "country": "DK", "us_person": False}
+    plan["residency_notes"] = ["dk_share_income", "dk_worldwide_income"]
+    plan["members"] = [
+        {
+            "id": "synthetic-self",
+            "name": "Self",
+            "relationship": "self",
+            "net_worth": "1000000.00",
+            "residency": {"status": "NRI", "country": "DK", "us_person": False},
+        },
+        {
+            "id": "synthetic-partner",
+            "name": "Partner",
+            "relationship": "spouse",
+            "net_worth": "500000.00",
+            "residency": {"status": "RI", "country": "IN", "us_person": False},
+        },
+    ]
+    brief = _brief_from_plan(plan)
+    html = render_html(brief)
+    text = render_text(brief)
+    parser = _VisibleText()
+    parser.feed(html)
+
+    assert find_banned_terms(" ".join(parser.parts)) == []
+    assert find_banned_terms(text) == []

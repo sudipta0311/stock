@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { ArrowRight, Building2, CalendarDays, CloudUpload } from "lucide-react";
 import { Link, useNavigate } from "react-router";
@@ -17,24 +17,30 @@ import {
 import type { ChecklistWorkflow } from "./config";
 import { listImports } from "../imports/api";
 import type { ImportJob } from "../imports/api";
-import { shouldShowCasNudge } from "../imports/domain";
 import { ImportHistorySheet } from "../imports/ImportHistorySheet";
 import { markValueMoment } from "../pwa/install";
 import englishCopy from "../copy/en.json";
 import { apiPathAvailable } from "../api/feature-support";
 import { useHousehold } from "../household/HouseholdContext";
-import { getPlan } from "../planning/api";
+import { dismissHighlight, getPlan } from "../planning/api";
 import type { WeeklyPlan } from "../planning/api";
+import { Highlights } from "../features/Highlights";
 import {
   formatHouseholdAmount,
   formatSecondaryAmount,
 } from "../household/currency";
 import type { DkkInrRate } from "../household/fx";
-import { FundCheckCard } from "./FundCheckCard";
+
+const FundCheckCard = lazy(() =>
+  import("./FundCheckCard").then((module) => ({
+    default: module.FundCheckCard,
+  })),
+);
 
 const SLEEVE_ORDER = [
   englishCopy.household_ui.indian_shares,
-  englishCopy.household_ui.safe_money,
+  "Deposits & PPF",
+  "Gold",
   englishCopy.household_ui.abroad,
   englishCopy.household_ui.other_holdings,
 ];
@@ -62,13 +68,12 @@ function toMinorUnits(value: string): bigint {
 function sleeveForAsset(asset: AssetResponse): string {
   switch (asset.asset_type) {
     case "gold":
+      return "Gold";
     case "property":
     case "term_insurance":
     case "health_insurance":
     case "loan":
       return englishCopy.household_ui.other_holdings;
-    case "traditional_policy":
-    case "ulip":
     case "fd":
     case "rd":
     case "ppf":
@@ -77,7 +82,9 @@ function sleeveForAsset(asset: AssetResponse): string {
     case "po_scheme":
     case "bond":
     case "savings":
-      return englishCopy.household_ui.safe_money;
+    case "traditional_policy":
+    case "ulip":
+      return "Deposits & PPF";
     default:
       return englishCopy.household_ui.indian_shares;
   }
@@ -88,6 +95,7 @@ function displaySleeveName(value: string): string {
   if (key.includes("equity_global")) return englishCopy.household_ui.abroad;
   if (key.includes("equity_india"))
     return englishCopy.household_ui.indian_shares;
+  if (key === "gold") return "Gold";
   if (key === "debt" || key === "cash")
     return englishCopy.household_ui.safe_money;
   if (["gold", "property", "protection", "liabilities"].includes(key)) {
@@ -170,7 +178,12 @@ function QuickAddBar({
             className="min-h-12 min-w-0 flex-1 rounded-xl border border-line bg-background px-3 text-base outline-none focus-visible:border-brand"
             aria-describedby="quick-add-help quick-add-error"
           />
-          <Button type="submit" loading={loading} disabled={!text.trim()}>
+          <Button
+            type="submit"
+            variant="secondary"
+            loading={loading}
+            disabled={!text.trim()}
+          >
             Add details
           </Button>
         </div>
@@ -377,7 +390,6 @@ export function MoneyMapPage() {
   } = useHousehold();
   const [assets, setAssets] = useState<AssetResponse[]>([]);
   const [importJobs, setImportJobs] = useState<ImportJob[]>([]);
-  const [importsLoaded, setImportsLoaded] = useState(false);
   const [networth, setNetworth] = useState<NetworthResponse | null>(null);
   const [plan, setPlan] = useState<WeeklyPlan | null>(null);
   const [checklist, setChecklist] = useState<string[]>(readChecklist);
@@ -385,6 +397,7 @@ export function MoneyMapPage() {
   const [pageError, setPageError] = useState("");
   const [offlineSummaryOnly, setOfflineSummaryOnly] = useState(false);
   const [checklistError, setChecklistError] = useState("");
+  const [showFundCheck, setShowFundCheck] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -395,7 +408,6 @@ export function MoneyMapPage() {
     setNetworth(null);
     setPlan(null);
     setImportJobs([]);
-    setImportsLoaded(false);
     const planRequest = apiPathAvailable("/v1/plan")
       ? getPlan()
       : Promise.resolve(null);
@@ -441,9 +453,7 @@ export function MoneyMapPage() {
       .catch(() => {
         if (active) setImportJobs([]);
       })
-      .finally(() => {
-        if (active) setImportsLoaded(true);
-      });
+      .finally(() => {});
     return () => {
       active = false;
     };
@@ -514,6 +524,7 @@ export function MoneyMapPage() {
     (tile) => !networth?.completeness.done.includes(tile.category),
   )?.category;
   const completenessText = `Money Map ${completenessPct}% complete${nextCategory ? ` · add ${categoryLabel(nextCategory)} to finish` : " · everything is up to date"}`;
+  const checklistCompleted = (networth?.completeness.done.length ?? 0) > 0;
 
   async function toggleCategory(category: string) {
     if (isViewer) return;
@@ -569,6 +580,15 @@ export function MoneyMapPage() {
     });
   }
 
+  async function hideHighlight(key: string) {
+    try {
+      await dismissHighlight(key);
+      setPlan(await getPlan());
+    } catch {
+      setPageError("We couldn't hide this note. Please try again.");
+    }
+  }
+
   const visibleGroups = useMemo(() => {
     const groups = new Map<string, AssetResponse[]>();
     for (const asset of assets) {
@@ -581,12 +601,39 @@ export function MoneyMapPage() {
   }, [assets]);
 
   return (
-    <div className="grid gap-4">
+    <div data-copy-screen="money" className="grid gap-4">
       {pageError ? (
         <Card role="alert" className="border-danger/50 text-sm">
           {pageError}
         </Card>
       ) : null}
+      {!offlineSummaryOnly ? (
+        <Card className="grid gap-3 border-brand/40 bg-brand/5">
+          <div className="flex items-center gap-3">
+            <span className="grid size-11 place-items-center rounded-xl bg-brand/10 text-brand">
+              <CloudUpload aria-hidden="true" className="size-5" />
+            </span>
+            <div>
+              <h2 className="text-base font-semibold">Upload your statement</h2>
+              <p className="text-sm text-muted-foreground">
+                Add account and investment details in one go.
+              </p>
+            </div>
+          </div>
+          <Link
+            to={isViewer ? "/plan" : "/import"}
+            data-primary="true"
+            className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-white"
+          >
+            {isViewer ? "View your plan" : "Upload statement"}
+          </Link>
+        </Card>
+      ) : null}
+      {!isViewer ? <QuickAddBar onDraft={startQuickDraft} /> : null}
+      <Highlights
+        items={plan?.highlights_by_screen?.money}
+        onDismiss={(key) => void hideHighlight(key)}
+      />
       <Card className="grid gap-4">
         {loading || !totals ? (
           <div className="grid gap-3" aria-label="Loading your net worth">
@@ -656,84 +703,57 @@ export function MoneyMapPage() {
         )}
       </Card>
 
-      {!offlineSummaryOnly && !isViewer ? (
-        <Link to="/import" className="block">
-          <Card className="flex min-h-20 items-center justify-between gap-4 hover:border-brand">
-            <span className="flex items-center gap-3">
-              <span className="grid size-11 place-items-center rounded-xl bg-brand/10 text-brand">
-                <CloudUpload aria-hidden="true" className="size-5" />
-              </span>
-              <span>
-                <strong className="block text-sm">Upload what you have</strong>
-                <span className="text-sm text-muted-foreground">
-                  CAS, broker or US holdings file
-                </span>
-              </span>
-            </span>
-            <ArrowRight
-              aria-hidden="true"
-              className="size-5 shrink-0 text-muted-foreground"
-            />
-          </Card>
-        </Link>
-      ) : null}
-
-      {!isViewer && importsLoaded && shouldShowCasNudge(importJobs) ? (
-        <Card className="flex flex-wrap items-center justify-between gap-3 border-brand/30 bg-brand/5">
-          <p className="text-sm leading-6">
-            Your new CAS usually arrives around the 10th, upload it.
-          </p>
-          <Link
-            to="/import"
-            className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 text-sm font-semibold text-white"
-          >
-            Upload CAS
-          </Link>
-        </Card>
-      ) : null}
-
       <ImportHistorySheet jobs={importJobs} />
 
-      {!isViewer ? <QuickAddBar onDraft={startQuickDraft} /> : null}
+      <details onToggle={(event) => setShowFundCheck(event.currentTarget.open)}>
+        <summary className="min-h-12 cursor-pointer py-3 text-sm font-semibold">
+          Check an investment
+        </summary>
+        {showFundCheck ? (
+          <Suspense fallback={<p className="py-3 text-sm">Loading…</p>}>
+            <FundCheckCard />
+          </Suspense>
+        ) : null}
+      </details>
 
-      <FundCheckCard />
-
-      <Card className="grid gap-4">
-        <div>
-          <h2 className="text-lg font-semibold">What else do you have?</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
+      <details open={!checklistCompleted}>
+        <summary className="min-h-12 cursor-pointer py-3 text-base font-semibold">
+          What else do you have?
+        </summary>
+        <Card className="grid gap-4">
+          <p className="text-sm text-muted-foreground">
             Tap everything that applies. Rough numbers are fine; you can edit
             anytime.
           </p>
-        </div>
-        <div className="grid grid-cols-2 gap-2 [@media(min-width:360px)]:grid-cols-3">
-          {checklistTiles.map((tile) => {
-            const selected = checklist.includes(tile.category);
-            return (
-              <button
-                key={tile.category}
-                type="button"
-                aria-pressed={selected}
-                disabled={isViewer}
-                onClick={() => void toggleCategory(tile.category)}
-                className={`min-h-16 rounded-xl border px-2 py-3 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-brand ${selected ? "border-brand bg-brand/10 text-brand" : "border-line bg-background hover:bg-muted"}`}
-              >
-                {selected ? <span aria-hidden="true">✓ </span> : null}
-                {tile.shortLabel}
-              </button>
-            );
-          })}
-        </div>
-        <p className="min-h-5 text-sm text-danger-foreground" role="status">
-          {checklistError}
-        </p>
-        <Button
-          onClick={startChecklist}
-          disabled={isViewer || !orderedSelected.length}
-        >
-          Continue ({orderedSelected.length} selected)
-        </Button>
-      </Card>
+          <div className="grid grid-cols-2 gap-2 [@media(min-width:360px)]:grid-cols-3">
+            {checklistTiles.map((tile) => {
+              const selected = checklist.includes(tile.category);
+              return (
+                <button
+                  key={tile.category}
+                  type="button"
+                  aria-pressed={selected}
+                  disabled={isViewer}
+                  onClick={() => void toggleCategory(tile.category)}
+                  className={`min-h-16 rounded-xl border px-2 py-3 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-brand ${selected ? "border-brand bg-brand/10 text-brand" : "border-line bg-background hover:bg-muted"}`}
+                >
+                  {selected ? <span aria-hidden="true">✓ </span> : null}
+                  {tile.shortLabel}
+                </button>
+              );
+            })}
+          </div>
+          <p className="min-h-5 text-sm text-danger-foreground" role="status">
+            {checklistError}
+          </p>
+          <Button
+            onClick={startChecklist}
+            disabled={isViewer || !orderedSelected.length}
+          >
+            Continue ({orderedSelected.length} selected)
+          </Button>
+        </Card>
+      </details>
 
       <section className="grid gap-3" aria-labelledby="assets-heading">
         <div className="flex items-center justify-between">
@@ -762,7 +782,7 @@ export function MoneyMapPage() {
                   className="flex min-h-16 items-center justify-between gap-3 border-t border-line py-2 hover:text-brand"
                 >
                   <span className="min-w-0">
-                    <strong className="block truncate text-sm">
+                    <strong className="block truncate text-sm" data-security>
                       {assetLabel(asset)}
                     </strong>
                     <span className="block truncate text-xs text-muted-foreground">
@@ -815,10 +835,11 @@ export function MoneyMapPage() {
               >
                 <span className="min-w-0">
                   <strong className="block truncate text-sm">
-                    {holding.name}
+                    <span data-security>{holding.name}</span>
                   </strong>
                   <span className="block text-xs text-muted-foreground">
-                    {holding.symbol} · {holding.quantity} shares
+                    <span data-security>{holding.symbol}</span> ·{" "}
+                    {holding.quantity} shares
                   </span>
                 </span>
                 <span className="shrink-0 text-right text-sm font-semibold">

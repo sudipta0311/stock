@@ -33,3 +33,9 @@ export function getStress(): Promise<StressResponse> {
 export function getResearchIdeas(): Promise<ResearchIdeasResponse> {
   return apiFetch("/v1/research/ideas");
 }
+
+export function dismissHighlight(key: string): Promise<void> {
+  return apiFetch(`/v1/highlights/${encodeURIComponent(key)}/dismiss`, {
+    method: "POST",
+  });
+}

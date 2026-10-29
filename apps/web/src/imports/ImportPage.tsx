@@ -10,7 +10,7 @@ import {
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { ApiError } from "../api/client";
 import { formatInr } from "../lib/money";
-import { Badge, Button, Card, Sheet } from "../ui";
+import { Badge, Button, Card, Sheet, Term } from "../ui";
 import { useHousehold } from "../household/HouseholdContext";
 import { listAccounts } from "../money/api";
 import type { AccountResponse } from "../money/api";
@@ -53,8 +53,8 @@ const sourceCopy: Record<
   { title: string; help: string; steps?: string[]; note?: string }
 > = {
   nsdl_cas: {
-    title: "NSDL / CDSL CAS (PDF)",
-    help: "Your CAS usually arrives by email each month. You can also request it from your depository.",
+    title: "Depository statement (PDF)",
+    help: "Your monthly statement usually arrives by email. You can also request it from your depository.",
   },
   cams_kfin_cas: {
     title: englishCopy.fund_check.cams_title,
@@ -85,11 +85,11 @@ const brokerOptions = [
 function sourceLabel(source: string | null): string {
   switch (source) {
     case "nsdl":
-      return "NSDL CAS";
+      return "Depository statement";
     case "cdsl":
-      return "CDSL CAS";
+      return "Depository statement";
     case "cams_kfin":
-      return "CAMS / KFintech CAS";
+      return "CAMS / KFintech statement";
     case "broker":
       return englishCopy.imports.broker_source_label;
     default:
@@ -217,11 +217,13 @@ export function ImportPage() {
       shareError === "missing-file"
         ? {
             message: "No statement file came through.",
-            nextStep: "Choose your CAS with the file picker and try again.",
+            nextStep:
+              "Choose your statement with the file picker and try again.",
           }
         : {
             message: "We couldn't keep the shared file ready.",
-            nextStep: "Choose your CAS with the file picker and try again.",
+            nextStep:
+              "Choose your statement with the file picker and try again.",
           },
     );
     setSearchParams({}, { replace: true });
@@ -308,10 +310,19 @@ export function ImportPage() {
   }
 
   return (
-    <div className="grid gap-4">
+    <div data-copy-screen="import" className="grid gap-4">
       <Card className="grid gap-4">
         <div>
-          <h2 className="text-xl font-semibold">Upload your CAS</h2>
+          <h2 className="text-xl font-semibold">
+            Upload your{" "}
+            <Term
+              explanation="A combined statement of your investment accounts."
+              prompt="What's this?"
+            >
+              CAS
+            </Term>{" "}
+            statement
+          </h2>
           <p className="mt-1 text-sm leading-6 text-muted-foreground">
             Choose a statement. We will show every holding before you save
             anything.
@@ -550,7 +561,12 @@ export function ImportPage() {
             </div>
           ) : null}
 
-          <Button type="submit" disabled={!file || busy} loading={inFlight}>
+          <Button
+            type="submit"
+            data-primary="true"
+            disabled={!file || busy}
+            loading={inFlight}
+          >
             <FileUp aria-hidden="true" className="size-4" /> Upload statement
           </Button>
           <p className="text-center text-xs leading-5 text-muted-foreground">
@@ -576,7 +592,7 @@ export function ImportPage() {
 
 const kindOptions = [
   ["equity", "Equity"],
-  ["etf", "ETF"],
+  ["etf", "Exchange traded fund"],
   ["mf", "Mutual fund"],
   ["bond", "Bond"],
   ["sgb", "Sovereign gold bond"],
@@ -632,7 +648,9 @@ function ItemToggle({
         className="size-5 accent-brand"
       />
       <span className="min-w-0 flex-1">
-        <strong className="block truncate">{item.name}</strong>
+        <strong className="block truncate" data-security>
+          {item.name}
+        </strong>
         <span className="block text-xs text-muted-foreground">
           {item.quantity} units ·{" "}
           {item.statement_value
@@ -1057,7 +1075,7 @@ export function ImportReviewPage() {
   ];
 
   return (
-    <div className="grid gap-4 pb-36">
+    <div data-copy-screen="import" className="grid gap-4 pb-36">
       <Card className="grid gap-3">
         <div>
           <h2 className="text-xl font-semibold">Review your import</h2>
@@ -1187,7 +1205,9 @@ export function ImportReviewPage() {
                   <>
                     <div className="flex items-center gap-3 border-t border-line pt-2 text-sm">
                       <span className="min-w-0 flex-1">
-                        <strong className="block truncate">{item.name}</strong>
+                        <strong className="block truncate" data-security>
+                          {item.name}
+                        </strong>
                         <span className="block text-xs text-muted-foreground">
                           {item.quantity} units
                         </span>
@@ -1240,7 +1260,7 @@ export function ImportReviewPage() {
               <ul className="grid gap-2 border-t border-line pt-3">
                 {grouped.duplicate.map((item) => (
                   <li key={item.id} className="text-sm">
-                    <strong>{item.name}</strong>
+                    <strong data-security>{item.name}</strong>
                     <span className="block text-xs text-muted-foreground">
                       {item.quantity} units ·{" "}
                       {maskAccountReference(item.account_ref)}
@@ -1276,7 +1296,9 @@ export function ImportReviewPage() {
                 className="grid gap-3 border-t border-line pt-3"
               >
                 <div>
-                  <strong className="text-sm">{item.name}</strong>
+                  <strong className="text-sm" data-security>
+                    {item.name}
+                  </strong>
                   <p className="text-xs text-muted-foreground">
                     {item.quantity} units ·{" "}
                     {item.statement_value
@@ -1392,6 +1414,7 @@ export function ImportReviewPage() {
           </Button>
           <Button
             type="button"
+            data-primary="true"
             className="flex-1"
             disabled={saving || !canConfirm}
             loading={saving}
@@ -1546,7 +1569,7 @@ function BrokerMappingPanel({
   }
 
   return (
-    <Card className="grid gap-4">
+    <Card data-copy-screen="import" className="grid gap-4">
       <div>
         <h2 className="text-xl font-semibold">
           {englishCopy.imports.mapping_title}
@@ -1585,7 +1608,7 @@ function BrokerMappingPanel({
           {englishCopy.imports.mapping_preview_rows}
         </summary>
         <div className="overflow-x-auto pt-2">
-          <table className="min-w-full text-left text-xs">
+          <table data-security className="min-w-full text-left text-xs">
             <thead>
               <tr>
                 {(detail.headers ?? []).map((header, index) => (
@@ -1713,7 +1736,12 @@ function BrokerMappingPanel({
             {error}
           </p>
         ) : null}
-        <Button type="submit" loading={saving} disabled={saving}>
+        <Button
+          type="submit"
+          data-primary="true"
+          loading={saving}
+          disabled={saving}
+        >
           {englishCopy.imports.mapping_submit}
         </Button>
       </form>

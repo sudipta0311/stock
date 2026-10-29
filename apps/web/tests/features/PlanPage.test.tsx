@@ -86,17 +86,28 @@ function planHandlers(planOverrides: Partial<WeeklyPlan> = {}) {
 }
 
 describe("Plan page", () => {
-  it("shows text values beside allocation bars and explains the debt answer", async () => {
+  it("shows the money mix first and keeps supporting detail closed", async () => {
+    const user = userEvent.setup();
     server.use(...planHandlers());
-    renderPlan();
-    expect(await screen.findByText(/Indian shares/)).toBeInTheDocument();
-    expect(screen.getByText(/38% actual → 45% target/)).toBeInTheDocument();
-    expect(document.body).toHaveTextContent(/Actual ₹3.8 L · target ₹4.5 L/);
+    const { container } = renderPlan();
     expect(
-      screen.getByText(
-        "You already hold enough debt and deposits for your plan.",
-      ),
+      await screen.findByRole("heading", { name: "Your money vs your plan" }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText("A bit more is in safe money than your plan suggests."),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Your safe money target is/)).toBeInTheDocument();
+    expect(container.querySelectorAll('[data-primary="true"]')).toHaveLength(1);
+    const details = screen.getByText("Details").closest("details");
+    expect(details).not.toHaveAttribute("open");
+    expect(
+      screen.getByText("Shares abroad: US-listed index fund"),
+    ).not.toBeVisible();
+
+    await user.click(screen.getByText("Show amounts"));
+    expect(document.body).toHaveTextContent(/Now: ₹3.8 L \(38%\)/);
+    expect(document.body).toHaveTextContent(/Plan: ₹4.5 L \(45%\)/);
+    await user.click(screen.getByText("Details"));
     expect(
       screen.getByText("Shares abroad: US-listed index fund"),
     ).toBeInTheDocument();
@@ -129,10 +140,25 @@ describe("Plan page", () => {
             notes: ["ask_start_value_missing", "dk_share_income"],
           },
         ],
+        highlights_by_screen: {
+          home: [],
+          plan: [
+            {
+              key: "ask_start_value_missing",
+              screen: "plan",
+              title: "Add your account value",
+              body: "Add its value from the start of the year.",
+              learn_more_key: "ask_start_value_missing",
+              severity: "attention",
+            },
+          ],
+          ideas: [],
+          money: [],
+        },
       }),
     );
     renderPlan();
-    await user.click(await screen.findByText("Why this?"));
+    await user.click(await screen.findByText("Why?"));
     expect(
       screen.getByText(
         "Add your share savings account's value on 1 January so we can use it.",
@@ -142,6 +168,7 @@ describe("Plan page", () => {
   });
 
   it("shows eligible debt options when their yields are unavailable", async () => {
+    const user = userEvent.setup();
     server.use(
       ...planHandlers({
         unranked_options: [
@@ -151,6 +178,7 @@ describe("Plan page", () => {
       }),
     );
     renderPlan();
+    await user.click(await screen.findByText("Details"));
     expect(
       await screen.findByText(
         /Local DKK\/EUR bank deposit: Rate not available: check your bank\./,
@@ -164,8 +192,10 @@ describe("Plan page", () => {
   });
 
   it("compares insurance options and never tells someone to surrender", async () => {
+    const user = userEvent.setup();
     server.use(...planHandlers());
     renderPlan();
+    await user.click(await screen.findByText("Details"));
     const title = await screen.findByText("Your LIC / insurance policies");
     const card = title.closest("section");
     expect(card).not.toBeNull();
@@ -176,8 +206,10 @@ describe("Plan page", () => {
   });
 
   it("shows goals with target dates and passes axe", async () => {
+    const user = userEvent.setup();
     server.use(...planHandlers());
     const { container } = renderPlan();
+    await user.click(await screen.findByText("Details"));
     expect(await screen.findByText("Education")).toBeInTheDocument();
     expect(document.body).toHaveTextContent(/Target ₹5 L/);
     expect(screen.getByText("By 2032")).toBeInTheDocument();

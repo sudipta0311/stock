@@ -15,6 +15,8 @@ export const API_PATHS = [
   "/v1/fund-check/sips/{security_id}",
   "/v1/goals",
   "/v1/goals/{goal_id}",
+  "/v1/highlights/dismissals",
+  "/v1/highlights/{key}/dismiss",
   "/v1/households",
   "/v1/households/access",
   "/v1/households/access/{grantee_user_id}",

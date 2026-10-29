@@ -207,11 +207,17 @@ describe("statement upload screen", () => {
       http.get(`/v1/imports/${jobId}`, () => HttpResponse.json(reviewDetail())),
     );
     const upload = renderUpload();
+    expect(
+      upload.container.querySelectorAll('[data-primary="true"]'),
+    ).toHaveLength(1);
     expect((await axe(upload.container)).violations).toHaveLength(0);
     upload.unmount();
 
     const review = renderReview();
     expect(await screen.findByText("Review your import")).toBeInTheDocument();
+    expect(
+      review.container.querySelectorAll('[data-primary="true"]'),
+    ).toHaveLength(1);
     expect((await axe(review.container)).violations).toHaveLength(0);
   });
 });

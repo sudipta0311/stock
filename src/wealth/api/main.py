@@ -664,6 +664,13 @@ def create_app(settings: "Settings | None" = None) -> FastAPI:
         from sqlalchemy import text
 
         user.session.execute(
+            text(
+                "DELETE FROM highlight_dismissals "
+                "WHERE login_user_id = :me AND household_owner_id = :owner"
+            ),
+            {"me": user.user_id, "owner": user.household_owner_id},
+        )
+        user.session.execute(
             text("DELETE FROM users WHERE id = :me"),
             {"me": user.user_id},
         )

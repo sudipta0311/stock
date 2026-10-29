@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { MemoryRouter } from "react-router";
@@ -39,9 +39,16 @@ describe("Home this week", () => {
     server.use(...baseHomeHandlers([]));
     renderHome();
     expect(
-      await screen.findByText("You’re on plan. Nothing to do this week ✓"),
+      await screen.findByText(/Nothing to do this week/),
     ).toBeInTheDocument();
     expect(screen.getByText("Net worth")).toBeInTheDocument();
+    const root = document.querySelector<HTMLElement>(
+      '[data-copy-screen="home"]',
+    );
+    expect(root?.querySelectorAll('[data-primary="true"]')).toHaveLength(1);
+    expect(
+      root?.querySelectorAll(":scope > section").length,
+    ).toBeLessThanOrEqual(4);
   });
 
   it("shows one action and removes it after Mark done succeeds", async () => {
@@ -58,13 +65,19 @@ describe("Home this week", () => {
     );
     renderHome();
     expect(
-      await screen.findByText("Invest now · Indian index fund"),
+      await screen.findByRole("article", {
+        name: /Invest now.*Indian index fund/,
+      }),
     ).toBeInTheDocument();
     expect(screen.getByText("₹10,000")).toBeInTheDocument();
+    const root = document.querySelector<HTMLElement>(
+      '[data-copy-screen="home"]',
+    );
+    expect(root?.querySelectorAll('[data-primary="true"]')).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: "Mark done" }));
     await waitFor(() => expect(patched).toBe(true));
     expect(
-      await screen.findByText("You’re on plan. Nothing to do this week ✓"),
+      await screen.findByText(/Nothing to do this week/),
     ).toBeInTheDocument();
   });
 
@@ -98,13 +111,43 @@ describe("Home this week", () => {
     ];
     server.use(...baseHomeHandlers(actions));
     renderHome();
-    expect(await screen.findByText("3 actions")).toBeInTheDocument();
+    const articles = await screen.findAllByRole("article");
+    expect(articles).toHaveLength(3);
     const emergencyFundLabel = `${englishCopy.labels.action_kinds.BUILD_EMERGENCY_FUND} · ${englishCopy.labels.instrument_categories.sweep_fd}`;
-    expect(screen.getByText(emergencyFundLabel)).toBeInTheDocument();
+    expect(articles[2]).toHaveTextContent(emergencyFundLabel);
     expect(screen.queryByText("action-four")).not.toBeInTheDocument();
   });
 
-  it("shows sell quantity, estimated tax, and triggered exit rows in Why", async () => {
+  it("rounds the action summary and keeps the full amount in How", async () => {
+    const user = userEvent.setup();
+    const rawAction = action({
+      payload: {
+        kind: "BUY_LUMPSUM",
+        sleeve: "equity_india",
+        instrument_category: "in_core_index",
+        amount: "12345.67",
+        route: "A",
+        security_id: null,
+        tranche: null,
+        reason_code: "target_gap",
+        params: { market: "IN" },
+      },
+    });
+    server.use(...baseHomeHandlers([rawAction]));
+    renderHome();
+
+    const article = await screen.findByRole("article", {
+      name: /Invest now.*Indian index fund/,
+    });
+    expect(within(article).getByText("₹12,300")).toBeInTheDocument();
+
+    await user.click(within(article).getByRole("button", { name: "How to" }));
+    expect(
+      screen.getByRole("dialog", { name: "How to take this step" }),
+    ).toHaveTextContent("monthly investment for ₹12,345.67");
+  });
+
+  it("shows the action details inside How and Why", async () => {
     const user = userEvent.setup();
     const sell = action({
       kind: "SELL_TRIM",
@@ -148,13 +191,17 @@ describe("Home this week", () => {
     expect(
       await screen.findByText(englishCopy.labels.action_kinds.SELL_TRIM),
     ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "How to" }));
+    const dialog = screen.getByRole("dialog", {
+      name: "How to take this step",
+    });
     expect(
-      screen.getByText(
+      within(dialog).getByText(
         englishCopy.home.sell_quantity.replace("{quantity}", "2.500"),
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText("₹250")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Why" }));
+    expect(within(dialog).getByText("₹250")).toBeInTheDocument();
+    await user.click(within(dialog).getByText("Why?"));
     expect(
       await screen.findByText(englishCopy.home.triggered_rows),
     ).toBeInTheDocument();
@@ -186,23 +233,25 @@ describe("Home this week", () => {
     ).toHaveTextContent(expected);
   });
 
-  it("explains the reason and action parameters in the Why sheet", async () => {
+  it("explains the reason and action parameters inside How", async () => {
     const user = userEvent.setup();
     server.use(...baseHomeHandlers([action()]));
     renderHome();
-    await user.click(await screen.findByRole("button", { name: "Why" }));
-    expect(
-      screen.getByRole("dialog", { name: "Why this is in your plan" }),
-    ).toHaveTextContent(
+    await user.click(await screen.findByRole("button", { name: "How to" }));
+    const dialog = screen.getByRole("dialog", {
+      name: "How to take this step",
+    });
+    await user.click(within(dialog).getByText("Why?"));
+    expect(dialog).toHaveTextContent(
       "This brings this part of your plan closer to its target.",
     );
-    expect(screen.getByText("market")).toBeInTheDocument();
+    expect(within(dialog).getByText("market")).toBeInTheDocument();
   });
 
   it("has no axe violations", async () => {
     server.use(...baseHomeHandlers([]));
     const { container } = renderHome();
-    await screen.findByText("You’re on plan. Nothing to do this week ✓");
+    await screen.findByText(/Nothing to do this week/);
     expect((await axe(container)).violations).toEqual([]);
   });
 });

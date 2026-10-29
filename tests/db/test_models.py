@@ -29,8 +29,13 @@ _POST_INITIAL_TABLES = {
     "import_templates",
     "realised_trades",
     "broker_cash_flows",
+    "highlight_dismissals",
 }
-_NON_USER_ID_TABLES = {"household_access", "household_invites"}
+_NON_USER_ID_TABLES = {
+    "household_access",
+    "household_invites",
+    "highlight_dismissals",
+}
 
 
 def test_all_user_tables_have_required_tenant_keys_and_indexes() -> None:

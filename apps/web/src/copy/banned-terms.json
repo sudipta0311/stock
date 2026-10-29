@@ -1,0 +1,99 @@
+{
+  "terms": [
+    {
+      "term": "sleeve",
+      "replacement": "part of your plan"
+    },
+    {
+      "term": "satellite",
+      "replacement": "other stock picks"
+    },
+    {
+      "term": "tranche",
+      "replacement": "part"
+    },
+    {
+      "term": "STP",
+      "replacement": "scheduled transfers"
+    },
+    {
+      "term": "route",
+      "replacement": "way to invest"
+    },
+    {
+      "term": "PFIC",
+      "replacement": "foreign fund tax rule"
+    },
+    {
+      "term": "ABIS",
+      "replacement": "Denmark's approved tax list"
+    },
+    {
+      "term": "PRIIPs",
+      "replacement": "European fund access rules"
+    },
+    {
+      "term": "LRS",
+      "replacement": "overseas transfer allowance"
+    },
+    {
+      "term": "TCS",
+      "replacement": "tax collected on transfers abroad"
+    },
+    {
+      "term": "Schedule FA",
+      "replacement": "foreign asset report"
+    },
+    {
+      "term": "XIRR",
+      "replacement": "yearly return estimate"
+    },
+    {
+      "term": "IRR",
+      "replacement": "yearly return estimate"
+    },
+    {
+      "term": "RNOR",
+      "replacement": "resident with limited tax status"
+    },
+    {
+      "term": "glide path",
+      "replacement": "gradual change over time"
+    },
+    {
+      "term": "rebalance",
+      "replacement": "bring your money mix back in line"
+    },
+    {
+      "term": "allocation",
+      "replacement": "money mix"
+    },
+    {
+      "term": "tax lot",
+      "replacement": "purchase record"
+    },
+    {
+      "term": "drift",
+      "replacement": "difference from plan"
+    },
+    {
+      "term": "CAS",
+      "replacement": "consolidated statement",
+      "allowed_context": "import_statement"
+    },
+    {
+      "term": "ETF",
+      "replacement": "exchange-traded fund",
+      "allowed_context": "term_component"
+    },
+    {
+      "term": "UCITS",
+      "replacement": "European fund rules"
+    },
+    {
+      "term": "ISIN",
+      "replacement": "fund code",
+      "allowed_context": "term_component"
+    }
+  ]
+}

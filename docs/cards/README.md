@@ -45,7 +45,7 @@ Status: ⬜ not started · 🟦 in progress · ✅ accepted · 🔁 rework · �
 | C27c | Shared household access (core): spouse logs in with own account, both see and edit the same household (partner/viewer), invites, bring-my-data merge, RLS by household grant | 7.3, 7.4 | ✅ |
 | C29a | Invest from Denmark: curated UCITS/ABIS ETF list, Aktiesparekonto-first account order, US stocks (no US-listed ETFs), India via UCITS ETF or NRI shares, broker how-tos, EU/US prices | 4.5, 4.7, 3.4 | ✅ |
 | C29b | Indian funds check from CAMS/KFintech CAS: sub-categories, direct vs regular, too many funds, lagging funds, SIP detection, 12-month early warning, least-tax fix | 3.3, 4, 4.10 | ✅ |
-| C28 | Simplicity pass: backend highlights (≤ 3 per screen), banned-jargon + sentence-length tests, one primary action per screen, collapsed details, 5-tap onboarding, rounded numbers | 2.3, 8 | ⬜ |
+| C28 | Simplicity pass: backend highlights (≤ 3 per screen), banned-jargon + sentence-length tests, one primary action per screen, collapsed details, 5-tap onboarding, rounded numbers | 2.3, 8 | ✅ |
 | C24 | End-to-end tests (Playwright), accessibility and performance checks | 10 | ⬜ |
 | C25 | Docs, cleanup, final plan sync | — | ⬜ |
 

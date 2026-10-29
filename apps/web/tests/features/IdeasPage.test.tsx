@@ -85,7 +85,7 @@ describe("Ideas page", () => {
               account: "ask",
               broker: "nordnet",
               instrument: {
-                name: "European world fund",
+                name: "Example UCITS ETF Fund",
                 ticker: "WLDX",
                 exchange: "Xetra",
                 isin: "IE00ABC00001",
@@ -116,7 +116,12 @@ describe("Ideas page", () => {
     expect(
       await screen.findByRole("heading", { name: "Buy from Denmark" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("European world fund")).toBeInTheDocument();
+    expect(screen.getByText("Example UCITS ETF Fund")).toBeInTheDocument();
+    expect(
+      screen.getByText("We use your share savings account first when it fits."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Core picks for you")).not.toBeInTheDocument();
+    expect(container.querySelectorAll('[data-primary="true"]')).toHaveLength(1);
     expect(screen.getByText("DKK 10,000")).toBeInTheDocument();
     expect(screen.getByText(/Share savings account/)).toBeInTheDocument();
     expect(screen.getByText("IE00ABC00001")).toBeInTheDocument();

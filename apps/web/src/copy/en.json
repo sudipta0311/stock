@@ -57,6 +57,171 @@
     "global_under_target": "Your global share is {gap_pct}% below target.",
     "fd_maturity": "FD {amount} ({bank}) matures {date}."
   },
+  "highlights": {
+    "dismiss": "Hide",
+    "why": "Why?",
+    "catalog": {
+      "high_interest_debt_gap": {
+        "title": "Pay down costly debt",
+        "body": "Paying costly debt can reduce interest charges.",
+        "learn_more_key": "high_interest_debt_gap",
+        "severity": "attention",
+        "needs_action_now": true,
+        "screens": [
+          "home",
+          "plan",
+          "money"
+        ]
+      },
+      "emergency_fund_gap": {
+        "title": "Build money for surprises",
+        "body": "Keep enough money close by for an unexpected expense.",
+        "learn_more_key": "emergency_fund_gap",
+        "severity": "attention",
+        "needs_action_now": true,
+        "screens": [
+          "home",
+          "plan",
+          "money"
+        ]
+      },
+      "term_cover_gap": {
+        "title": "Review your life cover",
+        "body": "Your current cover may be below the amount your family needs.",
+        "learn_more_key": "term_cover_gap",
+        "severity": "attention",
+        "screens": [
+          "home",
+          "plan",
+          "money"
+        ]
+      },
+      "health_cover_gap": {
+        "title": "Review your health cover",
+        "body": "Your current cover may be below the amount in your plan.",
+        "learn_more_key": "health_cover_gap",
+        "severity": "attention",
+        "screens": [
+          "plan",
+          "money"
+        ]
+      },
+      "ask_start_value_missing": {
+        "title": "Add your account value",
+        "body": "Your broker statement has the value to enter.",
+        "learn_more_key": "ask_start_value_missing",
+        "severity": "attention",
+        "needs_action_now": true,
+        "screens": [
+          "home",
+          "plan",
+          "ideas",
+          "money"
+        ]
+      },
+      "dk_fund_tax_review": {
+        "title": "Check local tax details",
+        "body": "Your country may tax these funds differently.",
+        "learn_more_key": "dk_fund_tax_review",
+        "severity": "info",
+        "screens": [
+          "plan",
+          "ideas"
+        ]
+      },
+      "tax_residence_country_may_apply": {
+        "title": "Check tax where you live",
+        "body": "Your country of residence may tax this money too.",
+        "learn_more_key": "tax_residence_country_may_apply",
+        "severity": "info",
+        "screens": [
+          "plan",
+          "ideas",
+          "money"
+        ]
+      },
+      "global_under_target": {
+        "title": "Add more shares abroad",
+        "body": "More of your savings could go to shares from around the world.",
+        "learn_more_key": "global_under_target",
+        "severity": "info",
+        "screens": [
+          "home",
+          "plan",
+          "ideas"
+        ]
+      },
+      "target_gap": {
+        "title": "Bring your plan closer",
+        "body": "Your next step could bring this part of your plan closer to its goal.",
+        "learn_more_key": "target_gap",
+        "severity": "info",
+        "screens": [
+          "home",
+          "plan",
+          "ideas",
+          "money"
+        ]
+      },
+      "route_warning": {
+        "title": "Check an overseas option",
+        "body": "A rule may affect where this money can go.",
+        "learn_more_key": "route_warning",
+        "severity": "attention",
+        "screens": [
+          "plan",
+          "ideas"
+        ]
+      },
+      "missing_yield": {
+        "title": "Check today's rate",
+        "body": "A current rate is not available for this choice.",
+        "learn_more_key": "missing_yield",
+        "severity": "info",
+        "screens": [
+          "plan",
+          "money"
+        ]
+      },
+      "band_breach": {
+        "title": "Check this monthly amount",
+        "body": "This payment could move your mix past its limit.",
+        "learn_more_key": "band_breach",
+        "severity": "attention",
+        "screens": [
+          "home",
+          "plan"
+        ]
+      },
+      "other_detail": {
+        "title": "Review a plan detail",
+        "body": "One detail may change what to do next.",
+        "learn_more_key": "plan_details",
+        "severity": "info",
+        "screens": [
+          "home",
+          "plan",
+          "ideas",
+          "money"
+        ]
+      }
+    },
+    "learn_more": {
+      "high_interest_debt_gap": "The suggested next step uses the debt details in your plan.",
+      "emergency_fund_gap": "The plan counts only money you can reach today.",
+      "term_cover_gap": "Review the cover amount and your family's needs before changing a policy.",
+      "health_cover_gap": "Review the cover amount and existing benefits before changing a policy.",
+      "ask_start_value_missing": "Add the value shown on your broker's statement for 1 January.",
+      "dk_fund_tax_review": "Keep current investments in place while you check local tax treatment.",
+      "tax_residence_country_may_apply": "This plan does not calculate tax in your country of residence.",
+      "global_under_target": "Your plan compares the current share with your chosen long-term mix.",
+      "target_gap": "The amount comes from your current money and the mix in your plan.",
+      "route_warning": "Check availability and costs with your broker before taking this step.",
+      "missing_yield": "Ask the provider for a current rate before comparing this choice.",
+      "band_breach": "The plan checks whether monthly payments could pass a set limit.",
+      "plan_details": "Open the plan details to see the values behind this note."
+    }
+  },
   "fund_check": {
     "title": "Your Indian funds",
     "good_summary": "Your Indian funds look good ✓",
@@ -394,7 +559,7 @@
       "high_interest_debt": "Costly loan",
       "in_core_index": "Indian index fund",
       "in_equity_direct_core": "Direct Indian equities (core basket)",
-      "us_listed_india_etf": "US-listed India ETF",
+      "us_listed_india_etf": "US-listed India fund",
       "ucits_global_etf": "Ireland-listed international fund",
       "us_broad_market_etf": "Broad US share fund",
       "local_bank_deposit": "Local DKK/EUR bank deposit",
@@ -405,7 +570,7 @@
       "in_listed_international_etf": "India-listed international fund",
       "ucits_etf": "Ireland-listed international fund",
       "us_etf": "US-listed index fund",
-      "gold_etf": "Gold ETF",
+      "gold_etf": "Gold fund",
       "monthly_sip": "Monthly investment",
       "stock": "Company shares",
       "equity_holding": "Shares"
@@ -664,9 +829,9 @@
     "net_worth": "Net worth {amount}",
     "week_change": "Week change {amount}",
     "year_change": "1-year change {amount}",
-    "india_stress_more_risk": "If Indian shares fall 25%: your money today would drop about {current}; your target mix would drop about {target}, because it holds more Indian shares.",
-    "india_stress_less_risk": "If Indian shares fall 25%: your money today would drop about {current}; your target mix would lose {less} less.",
-    "india_stress_equal_risk": "If Indian shares fall 25%: your money today and your target mix would drop by about the same amount, {current}.",
+    "india_stress_more_risk": "If Indian shares fall 25%, today's money would drop about {current}. Your planned mix would drop {target}, because it has more Indian shares.",
+    "india_stress_less_risk": "If Indian shares fall 25%, today's money would drop about {current}. Your planned mix would lose {less} less.",
+    "india_stress_equal_risk": "If Indian shares fall 25%, today's money and your planned mix would drop by about the same amount: {current}.",
     "tilt_notes": "Plan notes",
     "disclaimer": "Research and education only, not personalised investment advice; we're not SEBI-registered.",
     "why_received": "You received this because you opted in to weekly email.",
@@ -687,12 +852,12 @@
   "residency_notes": {
     "dk_share_income": "Directly held shares are generally share income in Denmark: 27% up to DKK 79,400 and 42% above for 2026. The threshold and household rules can change.",
     "dk_abis_list": "Investment funds on Denmark's approved tax list are generally taxed each year on gains before sale as share income.",
-    "dk_non_abis_capital_income": "Funds outside Denmark's approved tax list, often including Indian mutual funds and exchange-traded funds, may be taxed each year on gains before sale as capital income. Check each fund's classification.",
+    "dk_non_abis_capital_income": "Funds outside Denmark's approved tax list can be taxed each year before sale. This may include Indian mutual funds. Check each fund's local tax class.",
     "dk_aktiesparekonto": "The Danish share savings account is taxed at 17%; its 2026 deposit cap is DKK 174,200. Check your available room and eligibility.",
     "dk_pension_pal": "Danish pension returns are generally subject to PAL tax; SKAT lists a 15.3% rate. Your arrangement may differ.",
     "dk_worldwide_income": "Danish tax residents may need to report worldwide income. Treaty relief can apply; NRE/FCNR interest exempt in India may still be taxable in Denmark.",
     "dk_abis_check": "Check whether the selected fund appears on Denmark's current tax list.",
-    "dk_fund_tax_review": "Review existing Indian mutual funds and ETFs for Danish tax treatment; this note does not recommend selling them.",
+    "dk_fund_tax_review": "Review existing Indian mutual funds and exchange-traded funds for Danish tax treatment; this note does not recommend selling them.",
     "dk_use_ask_first": "Consider the Danish share savings account first for new eligible equity investments, up to your available contribution room.",
     "ucits_via_lrs_broker": "An overseas transfer from India may need extra bank checks and paperwork.",
     "eu_priips_kid": "EU rules for retail investors require a key information sheet. Your broker decides which products are available.",
@@ -706,13 +871,13 @@
     "sgb_residency_review": "Sovereign Gold Bond subscription eligibility is restricted by residency; review existing holdings and the current issue terms.",
     "gsec_nri_eligibility": "Eligible non-resident retail investors may access Indian government securities under applicable RBI/FEMA rules.",
     "frsb_nri_eligibility": "NRIs cannot subscribe to RBI Floating Rate Savings Bonds. Existing holdings need individual FEMA review.",
-    "nri_capital_gains_tds": "TDS may be withheld on NRI investment proceeds. Current listed-equity planning rates are 20% for short-term gains and 12.5% for long-term gains; final tax depends on the transaction and current law.",
+    "nri_capital_gains_tds": "Tax may be withheld on NRI investment proceeds. Planning rates are 20% on short-term listed gains and 12.5% on long-term gains. Final tax depends on the transaction and current law.",
     "nre_interest_exempt_in_india": "Qualifying NRE deposit interest is exempt from Indian income tax while FEMA eligibility conditions are met.",
     "fcnr_interest_exempt_in_india": "Qualifying FCNR(B) deposit interest is exempt from Indian income tax; currency and bank availability should be checked.",
     "nro_interest_tds": "NRO deposit interest is taxable in India and may have tax deducted at source.",
-    "rnor_foreign_income_window": "A returning Indian resident's temporary tax status can depend on being non-resident in 9 of the previous 10 years, or spending 729 days or fewer in India during the previous 7 years. Foreign-income treatment depends on its source and circumstances.",
+    "rnor_foreign_income_window": "A returning Indian resident may have temporary tax treatment. It depends on non-residence in 9 of 10 past years or at most 729 days in India over 7 years. Foreign income depends on its source and personal details.",
     "resident_only_lrs_tcs": "Overseas transfer and tax collection rules apply to people who live in India for tax purposes. They do not apply to this non-resident plan.",
-    "resident_only_schedule_fa": "People living outside India or qualifying returning residents may not need to complete the foreign-assets section of the Indian tax return.",
+    "resident_only_schedule_fa": "People living outside India and some returning residents may not need the foreign assets section of their Indian tax return.",
     "pfic_avoid": "US taxpayers may face special tax and reporting rules for non-US pooled funds. Review before buying new Indian mutual funds or exchange-traded funds.",
     "pfic_holding_review": "Review existing Indian mutual funds and exchange-traded funds for special US tax reporting. This note does not recommend selling them.",
     "fbar_fatca_reporting": "US taxpayers may need to report foreign accounts when total balances pass a threshold. Check current US account-reporting rules.",
@@ -816,7 +981,7 @@
     "remove_adult": "Remove adult",
     "save_members": "Save people",
     "member_save_error": "We couldn't save these details. Try again.",
-    "residency_change_india": "Plan will be recalculated: {name} is resident in India, so PPF, NSC and Indian mutual funds can be suggested in their name.",
+    "residency_change_india": "Plan will update: {name} lives in India, so we may suggest PPF, NSC, and Indian funds for them.",
     "residency_change_denmark": "Plan will be recalculated: {name} lives in Denmark, so local account and tax suggestions may change.",
     "residency_change_returning": "Plan will be recalculated: {name} is a returning NRI, so tax and savings suggestions may change.",
     "confirm": "Confirm",

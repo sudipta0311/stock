@@ -1,4 +1,4 @@
-// OpenAPI SHA256: aae8847c7d927772391f6fde0c226e61d6b328404d141f2d0382d8c1af9e64be
+// OpenAPI SHA256: 17e7d8999ae348f54f50e72245719280f0ae862f0180951293a44bdb1cafee67
 export interface paths {
     "/healthz": {
         parameters: {
@@ -262,6 +262,40 @@ export interface paths {
         head?: never;
         /** Patch Goal */
         patch: operations["patch_goal_v1_goals__goal_id__patch"];
+        trace?: never;
+    };
+    "/v1/highlights/dismissals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Highlight Dismissals */
+        get: operations["get_highlight_dismissals_v1_highlights_dismissals_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/highlights/{key}/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Dismiss Highlight */
+        post: operations["dismiss_highlight_v1_highlights__key__dismiss_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/households": {
@@ -1416,6 +1450,42 @@ export interface components {
             status: "ok";
             /** Version */
             version: string;
+        };
+        /**
+         * Highlight
+         * @description Small, plain-language item suitable for a screen summary.
+         */
+        Highlight: {
+            /** Body */
+            body: string;
+            /** Key */
+            key: string;
+            /** Learn More Key */
+            learn_more_key: string;
+            /**
+             * Screen
+             * @enum {string}
+             */
+            screen: "home" | "plan" | "ideas" | "money";
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "info" | "attention";
+            /** Title */
+            title: string;
+        };
+        /** HighlightDismissalResponse */
+        HighlightDismissalResponse: {
+            /**
+             * Dismissed At
+             * Format: date-time
+             */
+            dismissed_at: string;
+            /** Fingerprint */
+            fingerprint: string;
+            /** Key */
+            key: string;
         };
         /** HoldingValuationResponse */
         HoldingValuationResponse: {
@@ -3052,6 +3122,10 @@ export interface components {
             }[];
             /** Fresh */
             fresh: boolean;
+            /** Highlights By Screen */
+            highlights_by_screen?: {
+                [key: string]: components["schemas"]["Highlight"][];
+            };
             /** Inputs Digest */
             inputs_digest: string;
             /** Insurance Reviews */
@@ -3911,6 +3985,68 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["GoalResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_highlight_dismissals_v1_highlights_dismissals_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Household"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HighlightDismissalResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dismiss_highlight_v1_highlights__key__dismiss_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Household"?: string | null;
+            };
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

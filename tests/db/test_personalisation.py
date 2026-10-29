@@ -19,7 +19,7 @@ from wealth.api.main import create_app
 from wealth.api.money_map import get_today
 from wealth.api.settings import Settings
 from wealth.db import session as db_session
-from wealth.db.models import Action, AuditLog, HouseholdMember, User
+from wealth.db.models import Action, AuditLog, HighlightDismissal, HouseholdMember, User
 from wealth.db.models import WeeklyPlan as WeeklyPlanRow
 from wealth.db.session import user_session
 from wealth.policy.personalise import WeeklyPlan
@@ -148,6 +148,85 @@ def test_plan_is_computed_on_demand_and_reused_when_inputs_match(
     ideas = client.get("/v1/research/ideas", headers=headers)
     assert ideas.status_code == 200
     assert ideas.json()["ideas"] == []
+
+
+def test_highlight_dismissal_is_persisted_per_login_and_household(
+    api_client: tuple[TestClient, str, object],
+    migrated_database: MigratedDatabase,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from wealth.api import personalisation
+    from wealth.policy.highlights import Highlight, HighlightContext
+
+    client, secret, _application = api_client
+    owner_headers, owner_subject = _auth(secret, "highlight-owner")
+    other_headers, _other_subject = _auth(secret, "highlight-other")
+    fingerprint = "a" * 24
+
+    def fake_highlights(_plan: WeeklyPlan, context: HighlightContext) -> list[Highlight]:
+        dismissed = context.dismissed_fingerprints
+        if dismissed.get("synthetic_notice") == fingerprint:
+            return []
+        return [
+            Highlight(
+                key="synthetic_notice",
+                screen=context.screen,
+                title="Review one detail",
+                body="This detail may change your next step.",
+                learn_more_key="plan_details",
+                severity="info",
+            )
+        ]
+
+    monkeypatch.setattr(personalisation, "highlights", fake_highlights)
+    monkeypatch.setattr(
+        personalisation,
+        "highlight_fingerprint",
+        lambda _plan, key, _copy: fingerprint if key == "synthetic_notice" else None,
+    )
+
+    before = client.get("/v1/plan", headers=owner_headers)
+    assert before.status_code == 200
+    assert before.json()["highlights_by_screen"]["home"][0]["key"] == "synthetic_notice"
+
+    dismissed = client.post("/v1/highlights/synthetic_notice/dismiss", headers=owner_headers)
+    assert dismissed.status_code == 204
+
+    saved = client.get("/v1/highlights/dismissals", headers=owner_headers)
+    assert saved.status_code == 200
+    assert len(saved.json()) == 1
+    assert saved.json()[0]["key"] == "synthetic_notice"
+    assert saved.json()[0]["fingerprint"] == fingerprint
+    assert saved.json()[0]["dismissed_at"]
+    after = client.get("/v1/plan", headers=owner_headers)
+    assert after.status_code == 200
+    assert after.json()["highlights_by_screen"]["home"] == []
+
+    other_login = client.get("/v1/highlights/dismissals", headers=other_headers)
+    assert other_login.status_code == 200
+    assert other_login.json() == []
+
+    owner_id = _user_id(migrated_database, owner_subject)
+    with migrated_database.owner_engine.connect() as connection:
+        dismissal_count = connection.scalar(
+            select(func.count())
+            .select_from(HighlightDismissal)
+            .where(
+                HighlightDismissal.login_user_id == owner_id,
+                HighlightDismissal.household_owner_id == owner_id,
+            )
+        )
+    assert dismissal_count == 1
+
+    removed = client.delete("/v1/me", headers=owner_headers)
+    assert removed.status_code == 204
+    with migrated_database.owner_engine.connect() as connection:
+        remaining = connection.scalar(
+            select(func.count())
+            .select_from(HighlightDismissal)
+            .where(HighlightDismissal.login_user_id == owner_id)
+        )
+    assert remaining == 0
 
 
 def test_plan_loads_fx_for_member_residency_without_a_matching_goal(

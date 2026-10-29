@@ -130,7 +130,7 @@ def test_0014_international_assets_migration_downgrades_and_upgrades(
     migrated_database: MigratedDatabase,
 ) -> None:
     database = migrated_database
-    command.downgrade(database.config, "-1")
+    command.downgrade(database.config, "0013_broker_imports")
     with database.owner_engine.connect() as connection:
         assert connection.scalar(select(func.to_regclass("broker_cash_flows"))) is None
         columns = connection.exec_driver_sql(

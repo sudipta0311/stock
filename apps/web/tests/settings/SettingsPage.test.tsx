@@ -151,6 +151,15 @@ function settingsHandlers() {
       ]),
     ),
     http.get("*/v1/households/invites", () => HttpResponse.json([])),
+    http.get("*/v1/highlights/dismissals", () =>
+      HttpResponse.json([
+        {
+          key: "synthetic_notice",
+          fingerprint: "a".repeat(24),
+          dismissed_at: "2026-10-28T00:00:00Z",
+        },
+      ]),
+    ),
     http.get("*/v1/me/consents", () => HttpResponse.json(consentValues)),
     http.put("*/v1/me/consents", async ({ request }) =>
       HttpResponse.json(await request.json()),
@@ -615,6 +624,13 @@ describe("Settings", () => {
         imports: [],
         actions: [],
         inbox: [],
+        highlight_dismissals: [
+          {
+            key: "synthetic_notice",
+            fingerprint: "a".repeat(24),
+            dismissed_at: "2026-10-28T00:00:00Z",
+          },
+        ],
       }),
     );
     expect(JSON.stringify(exported).toLowerCase()).not.toContain("token");

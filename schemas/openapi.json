@@ -1902,6 +1902,81 @@
         "title": "HealthResponse",
         "type": "object"
       },
+      "Highlight": {
+        "additionalProperties": false,
+        "description": "Small, plain-language item suitable for a screen summary.",
+        "properties": {
+          "body": {
+            "title": "Body",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "learn_more_key": {
+            "title": "Learn More Key",
+            "type": "string"
+          },
+          "screen": {
+            "enum": [
+              "home",
+              "plan",
+              "ideas",
+              "money"
+            ],
+            "title": "Screen",
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "info",
+              "attention"
+            ],
+            "title": "Severity",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "screen",
+          "title",
+          "body",
+          "learn_more_key",
+          "severity"
+        ],
+        "title": "Highlight",
+        "type": "object"
+      },
+      "HighlightDismissalResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "dismissed_at": {
+            "format": "date-time",
+            "title": "Dismissed At",
+            "type": "string"
+          },
+          "fingerprint": {
+            "title": "Fingerprint",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "fingerprint",
+          "dismissed_at"
+        ],
+        "title": "HighlightDismissalResponse",
+        "type": "object"
+      },
       "HoldingValuationResponse": {
         "additionalProperties": false,
         "properties": {
@@ -6322,6 +6397,24 @@
             "title": "Fresh",
             "type": "boolean"
           },
+          "highlights_by_screen": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/Highlight"
+              },
+              "type": "array"
+            },
+            "propertyNames": {
+              "enum": [
+                "home",
+                "plan",
+                "ideas",
+                "money"
+              ]
+            },
+            "title": "Highlights By Screen",
+            "type": "object"
+          },
           "inputs_digest": {
             "pattern": "^[0-9a-f]{64}$",
             "title": "Inputs Digest",
@@ -8012,6 +8105,115 @@
           }
         ],
         "summary": "Patch Goal"
+      }
+    },
+    "/v1/highlights/dismissals": {
+      "get": {
+        "operationId": "get_highlight_dismissals_v1_highlights_dismissals_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Household",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Household"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/HighlightDismissalResponse"
+                  },
+                  "title": "Response Get Highlight Dismissals V1 Highlights Dismissals Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Highlight Dismissals"
+      }
+    },
+    "/v1/highlights/{key}/dismiss": {
+      "post": {
+        "operationId": "dismiss_highlight_v1_highlights__key__dismiss_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "pattern": "^[a-z0-9_]{1,100}$",
+              "title": "Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Household",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Household"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Dismiss Highlight"
       }
     },
     "/v1/households": {

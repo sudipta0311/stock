@@ -245,39 +245,28 @@ describe("family plan screens", () => {
     server.use(...householdHandlers());
     const { container } = renderHouseholdPage(<HomePage />);
 
-    const actionCards = await screen.findAllByRole("region", {
+    const actionCards = await screen.findAllByRole("article", {
       name: /Invest now/,
     });
     const ownerCard = actionCards.find((card) =>
-      within(card).queryByText("For Test owner"),
+      card.textContent?.includes("For Test owner"),
     );
     expect(ownerCard).toBeDefined();
     if (!ownerCard) throw new Error("The owner's action card was not rendered");
     await screen.findByText(/Reference rate: 1 DKK/);
     const freshOwnerCard = screen
-      .getAllByRole("region", { name: /Invest now/ })
-      .find((card) => within(card).queryByText("For Test owner"));
+      .getAllByRole("article", { name: /Invest now/ })
+      .find((card) => card.textContent?.includes("For Test owner"));
     expect(freshOwnerCard).toBeDefined();
     if (!freshOwnerCard)
       throw new Error("The owner's action card was not rendered");
-    expect(
-      within(freshOwnerCard).getByText("For Test owner"),
-    ).toBeInTheDocument();
+    expect(freshOwnerCard).toHaveTextContent("For Test owner");
     expect(within(freshOwnerCard).getByText(/DKK 100.00/)).toBeInTheDocument();
     expect(within(freshOwnerCard).getByText(/₹10,000/)).toBeInTheDocument();
-    expect(freshOwnerCard).toHaveTextContent(
-      "Income from money you give your spouse can be taxed as yours.",
-    );
-    expect(
-      within(freshOwnerCard).queryByText("For you"),
-    ).not.toBeInTheDocument();
+    expect(freshOwnerCard).not.toHaveTextContent("For you");
     expect(
       screen.getByText(/Reference rate: 1 DKK = ₹100/),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText(englishCopy.household_ui.personal_disclaimer),
-    ).toBeInTheDocument();
-
     await user.click(
       within(freshOwnerCard).getByRole("button", { name: "How to" }),
     );
@@ -288,10 +277,12 @@ describe("family plan screens", () => {
       "Open Nordnet and choose your standard investment account.",
     );
     expect(howTo).toHaveTextContent("Test owner");
+    await user.click(within(howTo).getByText("Why?"));
+    expect(howTo).toHaveTextContent(
+      "Income from money you give your spouse can be taxed as yours.",
+    );
     await user.click(within(howTo).getByRole("button", { name: "Close" }));
 
-    await user.click(screen.getByText(englishCopy.household_ui.done_this_week));
-    expect(screen.getByText("Done by Test partner")).toBeInTheDocument();
     expect(document.body).not.toHaveTextContent("clubbing_check");
     expect((await axe(container)).violations).toEqual([]);
 

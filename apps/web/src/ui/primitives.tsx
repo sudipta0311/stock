@@ -145,7 +145,9 @@ export function Term({
 }) {
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
-      <span className="font-mono text-xs">{children}</span>
+      <span data-term-copy className="font-mono text-xs">
+        {children}
+      </span>
       <details className="inline-block text-xs text-muted-foreground">
         <summary className="cursor-pointer underline decoration-dotted underline-offset-2">
           {prompt}

@@ -157,6 +157,18 @@ export function roundPaise(value: string): string {
   );
 }
 
+/** Round displayed action amounts to the nearest ₹100 from ₹10,000 upward. */
+export function roundActionAmount(value: string): string {
+  const negative = hasNegativeSign(value);
+  const magnitude = value.trim().replace(/^-/, "");
+  const paise = scaledInteger(magnitude, 2);
+  if (paise < 1_000_000n) {
+    return formatScaled(negative ? -paise : paise, 2, "none");
+  }
+  const rounded = ((paise + 5_000n) / 10_000n) * 10_000n;
+  return formatScaled(negative ? -rounded : rounded, 2, "none");
+}
+
 /** Add rupee values without converting them to binary floating point. */
 export function sumInr(values: readonly string[]): string {
   const total = values.reduce((sum, value) => {

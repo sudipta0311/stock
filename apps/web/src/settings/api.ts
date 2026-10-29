@@ -183,6 +183,7 @@ export async function downloadSettingsExport(): Promise<Blob> {
     ["imports", "/v1/imports"],
     ["actions", "/v1/actions"],
     ["inbox", "/v1/inbox"],
+    ["highlight_dismissals", "/v1/highlights/dismissals"],
   ];
   const entries = await Promise.all(
     paths.map(async ([key, path]) => {

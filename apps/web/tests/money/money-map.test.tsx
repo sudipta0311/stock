@@ -68,7 +68,7 @@ function savedAsset(
   };
 }
 
-function baseHandlers() {
+function baseHandlers(networthResponse = networth()) {
   return [
     http.get(/\/v1\/me$/, () =>
       HttpResponse.json({
@@ -90,7 +90,7 @@ function baseHandlers() {
       }),
     ),
     http.get(/\/v1\/assets$/, () => HttpResponse.json([])),
-    http.get(/\/v1\/networth$/, () => HttpResponse.json(networth())),
+    http.get(/\/v1\/networth$/, () => HttpResponse.json(networthResponse)),
     http.get(/\/v1\/members$/, () => HttpResponse.json([])),
     http.get(/\/v1\/households$/, () => HttpResponse.json([])),
     http.get(/\/v1\/plan$/, () => HttpResponse.json({ members: [] })),
@@ -248,6 +248,28 @@ describe("Money Map", () => {
     ).toBeInTheDocument();
   });
 
+  it("puts one upload action first and closes the completed checklist", async () => {
+    server.use(
+      ...baseHandlers(
+        networth({
+          completeness: { ticked: ["epf"], done: ["epf"], pct: "80" },
+        }),
+      ),
+    );
+    const { container } = renderMap();
+    const root = await screen
+      .findByText("Upload your statement")
+      .then(() => container.querySelector('[data-copy-screen="money"]'));
+    expect(root?.firstElementChild).toHaveTextContent("Upload your statement");
+    expect(root?.querySelectorAll('[data-primary="true"]')).toHaveLength(1);
+    const checklist = Array.from(root?.querySelectorAll("details") ?? []).find(
+      (details) =>
+        details.querySelector("summary")?.textContent ===
+        "What else do you have?",
+    );
+    expect(checklist).not.toHaveAttribute("open");
+  });
+
   it("passes the selected household member as member_id", async () => {
     const user = userEvent.setup();
     const assetRequests: string[] = [];
@@ -370,7 +392,7 @@ describe("Money Map", () => {
         </MemoryRouter>
       </main>,
     );
-    await screen.findByRole("heading", { name: "What else do you have?" });
+    await screen.findByText("What else do you have?");
     const results = await axe(container);
     expect(results.violations).toEqual([]);
   });

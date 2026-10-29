@@ -7,15 +7,22 @@ from datetime import date, datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from wealth.db.models import Action as ActionRow
-from wealth.db.models import AuditLog, Profile, ResearchPackRecord
+from wealth.db.models import AuditLog, HighlightDismissal, Profile, ResearchPackRecord
 from wealth.policy.actions import SatelliteIdea
 from wealth.policy.data import load_policy_inputs
+from wealth.policy.highlights import (
+    Highlight,
+    HighlightContext,
+    HighlightScreen,
+    highlight_fingerprint,
+    highlights,
+)
 from wealth.policy.personalise import WeeklyPlan, personalise
 from wealth.policy.store import actions_for_week, latest_plan, save_weekly_plan
 from wealth.schemas.common import Rupees
@@ -29,6 +36,15 @@ class ApiModel(BaseModel):
 class WeeklyPlanResponse(WeeklyPlan):
     fresh: bool
     me_member_id: UUID
+    highlights_by_screen: dict[HighlightScreen, list[Highlight]] = Field(default_factory=dict)
+
+
+class HighlightDismissalResponse(ApiModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, from_attributes=True)
+
+    key: str
+    fingerprint: str
+    dismissed_at: datetime
 
 
 class ActionResponse(ApiModel):
@@ -221,7 +237,83 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
 
     @router.get("/v1/plan", response_model=WeeklyPlanResponse)
     def get_plan(user: Any = user_dependency, today: date = today_dependency) -> WeeklyPlanResponse:
-        return _compute_if_stale(user, today)
+        plan = _compute_if_stale(user, today)
+        saved_dismissals = user.session.scalars(
+            select(HighlightDismissal).where(
+                HighlightDismissal.login_user_id == user.user_id,
+                HighlightDismissal.household_owner_id == user.household_owner_id,
+            )
+        ).all()
+        dismissed_fingerprints = {row.highlight_key: row.fingerprint for row in saved_dismissals}
+        from wealth.alerts.copy import load_copy
+
+        copy = load_copy()
+        plan_data = WeeklyPlan.model_validate(
+            plan.model_dump(mode="python", include=set(WeeklyPlan.model_fields))
+        )
+        per_screen = {
+            screen: highlights(
+                plan_data,
+                HighlightContext(
+                    screen=screen,
+                    copy=copy,
+                    dismissed_fingerprints=dismissed_fingerprints,
+                ),
+            )
+            for screen in ("home", "plan", "ideas", "money")
+        }
+        return plan.model_copy(update={"highlights_by_screen": per_screen})
+
+    @router.get("/v1/highlights/dismissals", response_model=list[HighlightDismissalResponse])
+    def get_highlight_dismissals(user: Any = user_dependency) -> list[HighlightDismissal]:
+        rows = list(
+            user.session.scalars(
+                select(HighlightDismissal)
+                .where(
+                    HighlightDismissal.login_user_id == user.user_id,
+                    HighlightDismissal.household_owner_id == user.household_owner_id,
+                )
+                .order_by(HighlightDismissal.highlight_key)
+            ).all()
+        )
+        return [
+            HighlightDismissalResponse(
+                key=row.highlight_key,
+                fingerprint=row.fingerprint,
+                dismissed_at=row.dismissed_at,
+            )
+            for row in rows
+        ]
+
+    @router.post("/v1/highlights/{key}/dismiss", status_code=204, response_class=Response)
+    def dismiss_highlight(
+        key: Annotated[str, Path(pattern=r"^[a-z0-9_]{1,100}$")],
+        user: Any = user_dependency,
+        today: date = today_dependency,
+    ) -> Response:
+        plan = _compute_if_stale(user, today)
+        from wealth.alerts.copy import load_copy
+
+        fingerprint = highlight_fingerprint(plan, key, load_copy())
+        if fingerprint is None:
+            raise HTTPException(status_code=404, detail="The highlight was not found.")
+        statement = pg_insert(HighlightDismissal).values(
+            login_user_id=user.user_id,
+            household_owner_id=user.household_owner_id,
+            highlight_key=key,
+            fingerprint=fingerprint,
+        )
+        user.session.execute(
+            statement.on_conflict_do_update(
+                index_elements=[
+                    HighlightDismissal.login_user_id,
+                    HighlightDismissal.household_owner_id,
+                    HighlightDismissal.highlight_key,
+                ],
+                set_={"fingerprint": statement.excluded.fingerprint, "dismissed_at": text("now()")},
+            )
+        )
+        return Response(status_code=204)
 
     @router.get("/v1/actions", response_model=list[ActionResponse])
     def get_actions(

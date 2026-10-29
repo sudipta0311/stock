@@ -615,7 +615,7 @@ export function SettingsPage() {
   const viewOnly = me?.role === "viewer";
 
   return (
-    <div className="grid gap-4">
+    <div data-copy-screen="settings" className="grid gap-4">
       <section aria-labelledby="settings-family-heading" className="grid gap-3">
         <Card className="grid gap-4">
           <div>

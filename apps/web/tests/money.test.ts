@@ -4,6 +4,7 @@ import {
   formatUsd,
   parseInr,
   pct,
+  roundActionAmount,
   roundPaise,
 } from "../src/lib/money";
 
@@ -84,4 +85,10 @@ it("rounds to paise and validates percentage boundaries", () => {
   expect(pct(100)).toBe("100");
   for (const invalid of ["-0.1", "100.01", "NaN", 3.14])
     expect(() => pct(invalid)).toThrow();
+});
+
+it("rounds displayed action amounts from ten thousand to the nearest hundred", () => {
+  expect(roundActionAmount("10049.99")).toBe("10000.00");
+  expect(roundActionAmount("10050.00")).toBe("10100.00");
+  expect(roundActionAmount("9999.99")).toBe("9999.99");
 });

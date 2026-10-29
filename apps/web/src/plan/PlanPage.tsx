@@ -1,16 +1,13 @@
-import { lazy, Suspense } from "react";
-import { ArrowDown, ArrowUp } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router";
 import { labelForCode, SLEEVE_LABELS } from "../lib/labels";
 import {
   asArray,
   asRecord,
-  compareDecimalStrings,
   friendlyRouteReason,
   friendlyRouteWarning,
   instrumentLabel,
   isPositiveAmount,
-  messageCopy,
-  plainName,
   textValue,
 } from "../features/data";
 import {
@@ -20,11 +17,12 @@ import {
   ScreenLoading,
   useFeatureQuery,
 } from "../features/api";
-import { getPlan } from "../planning/api";
+import { dismissHighlight, getPlan } from "../planning/api";
 import { getNetworth, listAssets, listGoals } from "../money/api";
 import type { AssetResponse, GoalResponse } from "../money/api";
 import type { WeeklyPlan } from "../planning/api";
 import { Card, Progress } from "../ui";
+import { Highlights } from "../features/Highlights";
 import { useHousehold } from "../household/HouseholdContext";
 import {
   DkkMoneyValue,
@@ -33,12 +31,6 @@ import {
 } from "../household/currency-view";
 import type { MemberResponse, NetworthResponse } from "../money/api";
 import englishCopy from "../copy/en.json";
-
-const AllocationDonut = lazy(() =>
-  import("./AllocationDonut").then((module) => ({
-    default: module.AllocationDonut,
-  })),
-);
 
 const SLEEVES = [
   "equity_india",
@@ -381,86 +373,79 @@ function safePercent(value: string): number {
 
 function AllocationCard({ rows }: { rows: AllocationRow[] }) {
   const colors = ["#245e76", "#4d8290", "#64748b", "#b88b4a", "#aab3b8"];
-  const segments = rows.map((row, index) => ({
-    key: row.key,
-    label: row.label,
-    percent: safePercent(row.actualPct),
-    color: colors[index] ?? "#64748b",
-  }));
+  const safeMoney = rows.find((row) => row.key === "debt");
+  const current = safePercent(safeMoney?.actualPct ?? "0");
+  const target = safePercent(safeMoney?.targetPct ?? "0");
+  const summary =
+    current > target + 5
+      ? "A bit more is in safe money than your plan suggests."
+      : current + 5 < target
+        ? "Your plan suggests keeping more in safe money."
+        : "Your safe money is close to your plan.";
   return (
-    <Card className="grid gap-4">
+    <Card className="grid gap-3">
       <div>
-        <h2 className="text-base font-semibold">
-          {englishCopy.household_ui.plan_mix_title}
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {englishCopy.household_ui.plan_mix_description}
-        </p>
+        <h2 className="text-base font-semibold">Your money vs your plan</h2>
+        <p className="mt-1 text-sm text-muted-foreground">{summary}</p>
       </div>
-      <Suspense
-        fallback={
-          <div className="h-28 text-sm text-muted-foreground">
-            {englishCopy.household_ui.loading_plan_mix}
-          </div>
-        }
+      <div
+        role="img"
+        aria-label={rows
+          .map((row) => `${row.label}: ${safePercent(row.actualPct)}%`)
+          .join(", ")}
+        className="flex h-6 overflow-hidden rounded-full bg-muted"
       >
-        <AllocationDonut segments={segments} />
-      </Suspense>
-      <div className="grid gap-4">
-        {rows.map((row) => {
-          const gap = compareDecimalStrings(row.gapAmount, "0.00");
-          return (
-            <div key={row.key} className="grid gap-2">
-              <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                <span className="font-medium">{row.label}</span>
-                <span className="tabular-nums">
-                  {row.actualPct}% actual → {row.targetPct}% target
-                </span>
-              </div>
-              <div
-                className="relative"
-                aria-label={`${row.label}: ${row.actualPct}% actual, ${row.targetPct}% target`}
-              >
-                <Progress
-                  value={safePercent(row.actualPct)}
-                  label={`${row.label} actual share`}
-                />
-                <span
-                  className="pointer-events-none absolute top-0 h-2.5 w-0.5 bg-foreground"
-                  style={{ left: `${safePercent(row.targetPct)}%` }}
-                  aria-hidden="true"
-                />
-              </div>
-              <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                <span>
-                  Actual <MoneyValue amountInr={row.actualAmount} /> · target{" "}
-                  <MoneyValue amountInr={row.targetAmount} />
-                </span>
-                {gap !== 0 ? (
-                  <span className="inline-flex items-center gap-1">
-                    {gap > 0 ? (
-                      <ArrowUp aria-hidden="true" className="size-3.5" />
-                    ) : (
-                      <ArrowDown aria-hidden="true" className="size-3.5" />
-                    )}
-                    <MoneyValue amountInr={row.gapAmount.replace(/^-/, "")} />{" "}
-                    to target
-                  </span>
-                ) : (
-                  <span>At target</span>
-                )}
-              </div>
-            </div>
-          );
-        })}
+        {rows.map((row, index) => (
+          <span
+            key={row.key}
+            title={row.label}
+            style={{
+              width: `${safePercent(row.actualPct)}%`,
+              backgroundColor: colors[index] ?? "#64748b",
+            }}
+          />
+        ))}
       </div>
-      <p className="text-xs text-muted-foreground">
-        The bars include text values so the plan is clear without the chart.
-      </p>
+      <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+        {rows.map((row, index) => (
+          <span key={row.key} className="inline-flex items-center gap-1.5">
+            <span
+              aria-hidden="true"
+              className="size-2 rounded-full"
+              style={{ backgroundColor: colors[index] ?? "#64748b" }}
+            />
+            {row.label}
+          </span>
+        ))}
+      </div>
+      <details>
+        <summary className="cursor-pointer text-sm font-medium text-brand">
+          Show amounts
+        </summary>
+        <dl className="mt-3 grid gap-2 text-sm">
+          {rows.map((row) => (
+            <div
+              key={row.key}
+              className="grid gap-1 border-t border-line pt-2 first:border-0 first:pt-0"
+            >
+              <dt className="font-medium">{row.label}</dt>
+              <dd className="flex flex-wrap justify-between gap-2 text-muted-foreground">
+                <span>
+                  Now: <MoneyValue amountInr={row.actualAmount} />
+                  {` (${row.actualPct}%)`}
+                </span>
+                <span>
+                  Plan: <MoneyValue amountInr={row.targetAmount} />
+                  {` (${row.targetPct}%)`}
+                </span>
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </details>
     </Card>
   );
 }
-
 function foundationMap(
   plan: WeeklyPlan | undefined,
 ): Map<string, Record<string, unknown>> {
@@ -583,17 +568,26 @@ function GlobalCard({ plan }: { plan: WeeklyPlan }) {
   );
 }
 
-function debtSentence(plan: WeeklyPlan): string {
+function DebtAnswerCard({ plan }: { plan: WeeklyPlan }) {
   const debt = asRecord(plan.debt_answer);
-  const key = textValue(debt.message_key);
-  const fallback =
-    textValue(debt.status) === "enough"
-      ? "You already hold enough debt and deposits for your plan."
-      : "Your debt and deposits are below the amount in your plan.";
-  return key ? messageCopy(key, fallback) : fallback;
+  const target = textValue(debt.target_debt);
+  return (
+    <Card>
+      <h2 className="text-base font-semibold">Safe money</h2>
+      <p className="mt-2 text-sm leading-6">
+        {target && isPositiveAmount(target) ? (
+          <>
+            Your safe money target is <MoneyValue amountInr={target} />.
+          </>
+        ) : (
+          "Add your savings and loans to see a safe money target."
+        )}
+      </p>
+    </Card>
+  );
 }
 
-function DebtAnswerCard({ plan }: { plan: WeeklyPlan }) {
+function SafeMoneyDetails({ plan }: { plan: WeeklyPlan }) {
   const debt = asRecord(plan.debt_answer);
   const plannedDebtAction = asArray(plan.actions)
     .map(asRecord)
@@ -610,16 +604,13 @@ function DebtAnswerCard({ plan }: { plan: WeeklyPlan }) {
   const afterTaxYield = textValue(
     debtPick.after_tax_yield_pct ?? debtPick.after_tax_yield,
   );
-  const tenure = textValue(debtPick.tenure ?? debtPick.tenure_years);
+  const timePeriod = textValue(debtPick.tenure ?? debtPick.tenure_years);
   return (
     <Card className="grid gap-3">
-      <div>
-        <h2 className="text-base font-semibold">How much in debt?</h2>
-        <p className="mt-2 text-sm leading-6">{debtSentence(plan)}</p>
-      </div>
+      <h2 className="text-base font-semibold">Safe money details</h2>
       <dl className="grid grid-cols-2 gap-3 text-sm">
         <div>
-          <dt className="text-muted-foreground">Current</dt>
+          <dt className="text-muted-foreground">Current amount</dt>
           <dd className="mt-1 font-semibold tabular-nums">
             {debt.current_debt ? (
               <MoneyValue amountInr={textValue(debt.current_debt)} />
@@ -629,7 +620,7 @@ function DebtAnswerCard({ plan }: { plan: WeeklyPlan }) {
           </dd>
         </div>
         <div>
-          <dt className="text-muted-foreground">Target</dt>
+          <dt className="text-muted-foreground">Target amount</dt>
           <dd className="mt-1 font-semibold tabular-nums">
             {debt.target_debt ? (
               <MoneyValue amountInr={textValue(debt.target_debt)} />
@@ -639,7 +630,7 @@ function DebtAnswerCard({ plan }: { plan: WeeklyPlan }) {
           </dd>
         </div>
         <div>
-          <dt className="text-muted-foreground">Locked amount</dt>
+          <dt className="text-muted-foreground">Hard-to-reach money</dt>
           <dd className="mt-1 tabular-nums">
             {debt.locked_debt ? (
               <MoneyValue amountInr={textValue(debt.locked_debt)} />
@@ -649,16 +640,16 @@ function DebtAnswerCard({ plan }: { plan: WeeklyPlan }) {
           </dd>
         </div>
         <div>
-          <dt className="text-muted-foreground">Top debt pick</dt>
+          <dt className="text-muted-foreground">Suggested option</dt>
           <dd className="mt-1">
-            {destination ? plainName(destination) : "Not available yet"}
+            {destination ? instrumentLabel(destination) : "Not available yet"}
           </dd>
         </div>
       </dl>
       {unrankedOptions.length ? (
         <ul
           className="grid gap-1 border-t border-line pt-3 text-sm"
-          aria-label="Debt rates not available"
+          aria-label="Options without a current rate"
         >
           {unrankedOptions.map((option) => {
             const instrument = textValue(option.instrument);
@@ -671,21 +662,16 @@ function DebtAnswerCard({ plan }: { plan: WeeklyPlan }) {
           })}
         </ul>
       ) : null}
-      {afterTaxYield || tenure ? (
+      {afterTaxYield || timePeriod ? (
         <p className="text-sm text-muted-foreground">
-          {afterTaxYield ? `After-tax yield ${afterTaxYield}%` : ""}
-          {afterTaxYield && tenure ? " · " : ""}
-          {tenure ? `Tenure ${tenure}` : ""}
+          {afterTaxYield ? `Estimated return after tax ${afterTaxYield}%` : ""}
+          {afterTaxYield && timePeriod ? " · " : ""}
+          {timePeriod ? `Time period ${timePeriod}` : ""}
         </p>
-      ) : (
-        <p className="text-xs text-muted-foreground">
-          After-tax yield and tenure will show when a debt pick is available.
-        </p>
-      )}
+      ) : null}
     </Card>
   );
 }
-
 function policyDetails(asset: AssetResponse): Record<string, unknown> {
   return asRecord(asset.details);
 }
@@ -836,6 +822,14 @@ export function PlanPage() {
     fxRate,
   } = household;
   const familyView = selectedMemberId === "family";
+  const queryClient = useQueryClient();
+  const hideHighlight = useMutation({
+    mutationFn: dismissHighlight,
+    onSuccess: () =>
+      queryClient.invalidateQueries({
+        queryKey: ["c27b", "plan", selectedHouseholdId, activeMemberId],
+      }),
+  });
   const plan = useFeatureQuery(
     ["c27b", "plan", selectedHouseholdId, activeMemberId],
     "/v1/plan",
@@ -877,78 +871,87 @@ export function PlanPage() {
   if (!planValue) return <ScreenError title="Your plan couldn’t load" />;
 
   return (
-    <div className="grid gap-4">
+    <div data-copy-screen="plan" className="grid gap-4">
       <header>
         <h2 className="text-xl font-semibold">
           {familyView
-            ? englishCopy.household_ui.family_plan
-            : englishCopy.household_ui.plan_for.replace(
-                "{name}",
-                selectedName || englishCopy.household.family,
-              )}
+            ? "Your plan"
+            : `Plan for ${selectedName || englishCopy.household.family}`}
         </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {familyView
-            ? englishCopy.household_ui.family_plan_description
-            : englishCopy.household_ui.member_plan_description}
-        </p>
       </header>
-      <ExchangeRateNote />
-      {!fxRate &&
-      members.some((member) => member.residency.country === "DK") ? (
-        <p className="text-xs text-muted-foreground">
-          {englishCopy.household_ui.no_fx_rate}
-        </p>
-      ) : null}
-      {familyView ? (
-        <AllocationCard rows={rows} />
-      ) : (
-        <SelectedMemberCard
-          member={selectedPlanMember}
-          person={members.find((member) => member.id === activeMemberId)}
-          networth={networth.data}
-          meMemberId={meMemberId}
-        />
-      )}
-      {familyView ? (
-        <>
-          <DebtAnswerCard plan={planValue} />
-          <GlobalCard plan={planValue} />
-          <FoundationCard plan={planValue} />
-        </>
-      ) : null}
-      {familyView && planValue.members?.length ? (
-        <MemberHoldingsCard
-          members={members}
-          planMembers={planValue.members}
-          meMemberId={meMemberId}
-        />
-      ) : null}
-      <PlacementNotesCard plan={planValue} />
-      <section aria-labelledby="insurance-heading">
-        <OptionalAssetsSection
-          supported={assets.supported}
-          loading={assets.isPending}
-          error={assets.error}
-          assets={assets.data}
-        />
-      </section>
-      {familyView ? (
-        <OptionalGoalsSection
-          supported={goals.supported}
-          loading={goals.isPending}
-          error={goals.error}
-          goals={goals.data}
-        />
-      ) : null}
-      {networth.data?.completeness ? (
-        <p className="text-xs text-muted-foreground">
-          Money Map {networth.data.completeness.pct}% complete.
-        </p>
-      ) : null}
-      <p className="text-xs text-muted-foreground">
-        {englishCopy.disclaimers.personal}
-      </p>
+      <AllocationCard rows={rows} />
+      <DebtAnswerCard plan={planValue} />
+      <Highlights
+        items={planValue.highlights_by_screen?.plan}
+        onDismiss={(key) => hideHighlight.mutate(key)}
+      />
+      <Link
+        to="/money"
+        data-primary="true"
+        className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-white"
+      >
+        Update your money
+      </Link>
+      <details>
+        <summary className="min-h-12 cursor-pointer py-3 text-sm font-semibold">
+          Details
+        </summary>
+        <div className="grid gap-4 border-t border-line pt-3">
+          <SafeMoneyDetails plan={planValue} />
+          <ExchangeRateNote />
+          {!fxRate &&
+          members.some((member) => member.residency.country === "DK") ? (
+            <p className="text-xs text-muted-foreground">
+              {englishCopy.household_ui.no_fx_rate}
+            </p>
+          ) : null}
+          {familyView ? (
+            <>
+              <GlobalCard plan={planValue} />
+              <FoundationCard plan={planValue} />
+            </>
+          ) : (
+            <SelectedMemberCard
+              member={selectedPlanMember}
+              person={members.find((member) => member.id === activeMemberId)}
+              networth={networth.data}
+              meMemberId={meMemberId}
+            />
+          )}
+          {familyView && planValue.members?.length ? (
+            <MemberHoldingsCard
+              members={members}
+              planMembers={planValue.members}
+              meMemberId={meMemberId}
+            />
+          ) : null}
+          <PlacementNotesCard plan={planValue} />
+          <section aria-labelledby="insurance-heading">
+            <OptionalAssetsSection
+              supported={assets.supported}
+              loading={assets.isPending}
+              error={assets.error}
+              assets={assets.data}
+            />
+          </section>
+          {familyView ? (
+            <OptionalGoalsSection
+              supported={goals.supported}
+              loading={goals.isPending}
+              error={goals.error}
+              goals={goals.data}
+            />
+          ) : null}
+          {networth.data?.completeness ? (
+            <p className="text-xs text-muted-foreground">
+              Money Map {networth.data.completeness.pct}% complete.
+            </p>
+          ) : null}
+          <p className="text-xs text-muted-foreground">
+            {englishCopy.disclaimers.personal}
+          </p>
+        </div>
+      </details>
     </div>
   );
 }
@@ -1001,4 +1004,4 @@ function OptionalGoalsSection({
   return <GoalsCard goals={goals ?? []} />;
 }
 
-export { allocationRows, debtSentence, friendlyRouteWarning, labelForCode };
+export { allocationRows, friendlyRouteWarning, labelForCode };
