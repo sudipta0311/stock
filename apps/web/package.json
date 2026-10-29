@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node scripts/generate-icons.mjs && node scripts/gen-forms.mjs && vite --configLoader native",
+    "dev": "node scripts/generate-icons.mjs && node scripts/gen-forms.mjs && node scripts/generate-gmail-script.mjs && vite --configLoader native",
     "build": "node scripts/build.mjs",
     "preview": "vite preview",
     "test": "vitest run --configLoader native",
@@ -14,7 +14,8 @@
     "gen:api": "node scripts/generate-api.mjs",
     "gen:forms": "node scripts/gen-forms.mjs",
     "budget": "node scripts/budget.mjs",
-    "gen:copy": "node scripts/generate-copy.mjs"
+    "gen:copy": "node scripts/generate-copy.mjs",
+    "gen:gmail": "node scripts/generate-gmail-script.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "1.3.1",

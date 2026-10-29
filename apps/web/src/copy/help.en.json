@@ -203,6 +203,26 @@
           ]
         },
         {
+          "id": "gmail-statements",
+          "title": "Get statements from Gmail automatically",
+          "summary": "A small script can send matching statement PDFs to your inbox each day.",
+          "steps": [
+            "Ask CAMS or KFintech to email a combined statement. NSDL and CDSL usually email statements each month.",
+            "In Settings, choose Get statements from Gmail. Create a key and copy the script.",
+            "Paste the script at script.google.com, run setup, and approve access.",
+            "Google may show an unverified app warning. It's your own script, so Google asks you to confirm.",
+            "Each adult can use their own Gmail. You can also forward statements to one Gmail account.",
+            "It checks matching PDFs and sends them to Inbox. It cannot read or change your saved holdings.",
+            "Enter the password in Inbox, then review before saving. Upload in Money if email import fails. To stop, delete the trigger and revoke the key."
+          ],
+          "example": "Example: A monthly statement email can wait in Inbox until you enter its password.",
+          "related": [
+            "uploading-statements",
+            "imported-file",
+            "privacy-safety"
+          ]
+        },
+        {
           "id": "broker-files",
           "title": "Upload a broker file",
           "summary": "Use a holdings or trade file from your broker to review listed investments.",

@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
+import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { axe } from "vitest-axe";
 import { server } from "../msw";
@@ -231,13 +232,15 @@ function renderSettings() {
     defaultOptions: { queries: { retry: false, gcTime: 0, staleTime: 0 } },
   });
   const view = render(
-    <QueryClientProvider client={queryClient}>
-      <ThemeProvider>
-        <HouseholdProvider>
-          <SettingsPage />
-        </HouseholdProvider>
-      </ThemeProvider>
-    </QueryClientProvider>,
+    <MemoryRouter>
+      <QueryClientProvider client={queryClient}>
+        <ThemeProvider>
+          <HouseholdProvider>
+            <SettingsPage />
+          </HouseholdProvider>
+        </ThemeProvider>
+      </QueryClientProvider>
+    </MemoryRouter>,
   );
   return { ...view, queryClient };
 }

@@ -34,6 +34,9 @@ _POST_INITIAL_TABLES = {
     "highlight_dismissals",
     "loan_events",
     "auth_sessions",
+    "statement_inbox_keys",
+    "statement_inbox_items",
+    "statement_saved_passwords",
 }
 _NON_USER_ID_TABLES = {
     "household_access",

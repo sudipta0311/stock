@@ -257,6 +257,7 @@ def _render_issues(root: Path) -> list[str]:
         "GOOGLE_CLIENT_ID",
         "GOOGLE_CLIENT_SECRET",
         "APP_SESSION_SECRET",
+        "STATEMENT_PASSWORD_KEY",
         "ALLOWED_EMAILS",
         "ALLOWED_ORIGINS",
         "EMAIL_LINK_SECRET",

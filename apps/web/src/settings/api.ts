@@ -4,6 +4,10 @@ import type { components } from "../api/schema";
 
 export type SettingsMe = components["schemas"]["MeResponse"];
 export type SettingsMember = components["schemas"]["MemberResponse"];
+export type StatementInboxKey =
+  components["schemas"]["StatementInboxKeyResponse"];
+export type StatementInboxKeyCreated =
+  components["schemas"]["StatementInboxKeyCreated"];
 export type SettingsHousehold = components["schemas"]["HouseholdSummary"];
 export type SettingsHouseholdAccess =
   components["schemas"]["HouseholdAccessResponse"];
@@ -31,6 +35,30 @@ export interface SignedInDevice {
 
 export function settingsPathAvailable(path: string): boolean {
   return apiPathAvailable(path);
+}
+
+export function listStatementInboxKeys(): Promise<StatementInboxKey[]> {
+  return apiFetch("/v1/statement-inbox/keys");
+}
+
+export function createStatementInboxKey(
+  label: string,
+): Promise<StatementInboxKeyCreated> {
+  return apiFetch("/v1/statement-inbox/keys", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ label }),
+  });
+}
+
+export function revokeStatementInboxKey(id: string): Promise<void> {
+  return apiFetch(`/v1/statement-inbox/keys/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+}
+
+export function forgetStatementPasswords(): Promise<void> {
+  return apiFetch("/v1/statement-inbox/passwords", { method: "DELETE" });
 }
 
 export function getSettingsMe(): Promise<SettingsMe> {

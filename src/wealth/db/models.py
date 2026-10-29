@@ -16,6 +16,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    LargeBinary,
     Numeric,
     SmallInteger,
     String,
@@ -1162,6 +1163,106 @@ class AuthSession(UserOwned, Base):
     absolute_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     device_label: Mapped[str] = mapped_column(String(60), nullable=False)
+
+
+class StatementInboxKey(UserOwned, Base):
+    """A one-way upload credential for a household's Gmail helper."""
+
+    __tablename__ = "statement_inbox_keys"
+    __table_args__ = (
+        UniqueConstraint("user_id", "id", name="uq_statement_inbox_keys_user_id_id"),
+        UniqueConstraint("key_hash", name="uq_statement_inbox_keys_key_hash"),
+        CheckConstraint("key_hash ~ '^[0-9a-f]{64}$'", name="ck_statement_inbox_keys_key_hash"),
+        Index("ix_statement_inbox_keys_user_created", "user_id", "created_at"),
+    )
+
+    created_by: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    label: Mapped[str] = mapped_column(String(80), nullable=False)
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class StatementInboxItem(UserOwned, Base):
+    """An unparsed email attachment waiting for household review."""
+
+    __tablename__ = "statement_inbox_items"
+    __table_args__ = (
+        UniqueConstraint("user_id", "id", name="uq_statement_inbox_items_user_id_id"),
+        UniqueConstraint(
+            "user_id", "message_id", "file_hash", name="uq_statement_inbox_items_message_file"
+        ),
+        ForeignKeyConstraint(
+            ["user_id", "key_id"],
+            ["statement_inbox_keys.user_id", "statement_inbox_keys.id"],
+            name="fk_statement_inbox_items_key_tenant",
+            ondelete="CASCADE",
+            deferrable=True,
+            initially="IMMEDIATE",
+        ),
+        ForeignKeyConstraint(
+            ["user_id", "import_job_id"],
+            ["import_jobs.user_id", "import_jobs.id"],
+            name="fk_statement_inbox_items_job_tenant",
+            ondelete="SET NULL (import_job_id)",
+            deferrable=True,
+            initially="IMMEDIATE",
+        ),
+        CheckConstraint(
+            "sender_type IN ('cams', 'kfintech', 'mfcentral', 'nsdl', 'cdsl', 'other')",
+            name="ck_statement_inbox_items_sender_type",
+        ),
+        CheckConstraint(
+            "status IN ('needs_password', 'review', 'unreadable')",
+            name="ck_statement_inbox_items_status",
+        ),
+        CheckConstraint("file_hash ~ '^[0-9a-f]{64}$'", name="ck_statement_inbox_items_file_hash"),
+        Index("ix_statement_inbox_items_user_received", "user_id", "received_at"),
+        Index("ix_statement_inbox_items_key_received", "key_id", "received_at"),
+    )
+
+    key_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    sender_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    sender: Mapped[str] = mapped_column(String(320), nullable=False)
+    subject: Mapped[str] = mapped_column(String(512), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    message_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    pdf_data: Mapped[bytes | None] = mapped_column(LargeBinary)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, server_default="needs_password")
+    error_code: Mapped[str | None] = mapped_column(String(40))
+    import_job_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class StatementSavedPassword(UserOwned, Base):
+    """An AES-GCM protected password remembered for one statement sender."""
+
+    __tablename__ = "statement_saved_passwords"
+    __table_args__ = (
+        UniqueConstraint("user_id", "id", name="uq_statement_saved_passwords_user_id_id"),
+        UniqueConstraint("user_id", "sender_type", name="uq_statement_saved_passwords_sender"),
+        CheckConstraint(
+            "sender_type IN ('cams', 'kfintech', 'mfcentral', 'nsdl', 'cdsl', 'other')",
+            name="ck_statement_saved_passwords_sender_type",
+        ),
+        CheckConstraint("octet_length(nonce) = 12", name="ck_statement_saved_passwords_nonce"),
+    )
+
+    sender_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    nonce: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    ciphertext: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class HighlightDismissal(Base):

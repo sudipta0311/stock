@@ -1,4 +1,4 @@
-// OpenAPI SHA256: 55a70dae6e45ba8624be1e475fc83e8379098193780fe9de472b2805ebbdee86
+// OpenAPI SHA256: 98ffc7de8e7194c6f865f2113fd99c449950922c2e616b2595e72f07fd5a84c2
 export interface paths {
     "/healthz": {
         parameters: {
@@ -932,6 +932,109 @@ export interface paths {
         get: operations["get_research_ideas_v1_research_ideas_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/statement-inbox/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Items */
+        get: operations["list_items_v1_statement_inbox_items_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/statement-inbox/items/{item_id}/process": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Process Item */
+        post: operations["process_item_v1_statement_inbox_items__item_id__process_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/statement-inbox/keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Keys */
+        get: operations["list_keys_v1_statement_inbox_keys_get"];
+        put?: never;
+        /** Create Key */
+        post: operations["create_key_v1_statement_inbox_keys_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/statement-inbox/keys/{key_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke Key */
+        delete: operations["revoke_key_v1_statement_inbox_keys__key_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/statement-inbox/passwords": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Forget Passwords */
+        delete: operations["forget_passwords_v1_statement_inbox_passwords_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/statement-inbox/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Upload Statement */
+        post: operations["upload_statement_v1_statement_inbox_uploads_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3381,6 +3484,116 @@ export interface components {
             pct: string;
             /** Sleeve */
             sleeve: string;
+        };
+        /** StatementInboxItemResponse */
+        StatementInboxItemResponse: {
+            /** Error Code */
+            error_code: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Import Job Id */
+            import_job_id: string | null;
+            /**
+             * Received At
+             * Format: date-time
+             */
+            received_at: string;
+            /**
+             * Sender Type
+             * @enum {string}
+             */
+            sender_type: "cams" | "kfintech" | "mfcentral" | "nsdl" | "cdsl" | "other";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "needs_password" | "review" | "unreadable";
+        };
+        /** StatementInboxKeyCreate */
+        StatementInboxKeyCreate: {
+            /** Label */
+            label: string;
+        };
+        /** StatementInboxKeyCreated */
+        StatementInboxKeyCreated: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Last Used At */
+            last_used_at: string | null;
+        };
+        /** StatementInboxKeyResponse */
+        StatementInboxKeyResponse: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Label */
+            label: string;
+            /** Last Used At */
+            last_used_at: string | null;
+        };
+        /** StatementInboxListResponse */
+        StatementInboxListResponse: {
+            /** Cleanup Notice */
+            cleanup_notice?: string | null;
+            /** Items */
+            items: components["schemas"]["StatementInboxItemResponse"][];
+        };
+        /** StatementInboxProcessRequest */
+        StatementInboxProcessRequest: {
+            /** Password */
+            password: string;
+            /**
+             * Remember
+             * @default false
+             */
+            remember: boolean;
+        };
+        /** StatementInboxProcessResponse */
+        StatementInboxProcessResponse: {
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+            /** Notice */
+            notice?: string | null;
+            /** Password Saved */
+            password_saved: boolean;
+            /**
+             * Status
+             * @constant
+             */
+            status: "review";
+        };
+        /** StatementInboxUploadResponse */
+        StatementInboxUploadResponse: {
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "received" | "duplicate";
         };
         /** StressResponse */
         StressResponse: {
@@ -6144,6 +6357,243 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_items_v1_statement_inbox_items_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Household"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatementInboxListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    process_item_v1_statement_inbox_items__item_id__process_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Household"?: string | null;
+            };
+            path: {
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StatementInboxProcessRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatementInboxProcessResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_keys_v1_statement_inbox_keys_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Household"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatementInboxKeyResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_key_v1_statement_inbox_keys_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Household"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StatementInboxKeyCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatementInboxKeyCreated"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_key_v1_statement_inbox_keys__key_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Household"?: string | null;
+            };
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    forget_passwords_v1_statement_inbox_passwords_delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Household"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_statement_v1_statement_inbox_uploads_post: {
+        parameters: {
+            query?: never;
+            header: {
+                Authorization: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                    message_id: string;
+                    /** Format: date-time */
+                    received_at: string;
+                    sender: string;
+                    subject: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatementInboxUploadResponse"];
+                };
+            };
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatementInboxUploadResponse"];
                 };
             };
         };

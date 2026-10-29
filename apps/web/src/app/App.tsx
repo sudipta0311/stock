@@ -101,6 +101,11 @@ const SettingsPage = lazy(() =>
     default: module.SettingsPage,
   })),
 );
+const GmailStatementsSettingsPage = lazy(() =>
+  import("../settings/GmailStatementsSettingsPage").then((module) => ({
+    default: module.GmailStatementsSettingsPage,
+  })),
+);
 
 const HelpPage = lazy(() =>
   import("../help/HelpPage").then((module) => ({
@@ -211,6 +216,10 @@ export function App() {
                 <Route path="inbox" element={<InboxPage />} />
                 <Route path="inbox/brief/:week" element={<BriefPage />} />
                 <Route path="settings" element={<SettingsPage />} />
+                <Route
+                  path="settings/gmail"
+                  element={<GmailStatementsSettingsPage />}
+                />
                 <Route path="help" element={<HelpPage />} />
               </Route>
             </Route>

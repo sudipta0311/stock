@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router";
 import { Inbox } from "lucide-react";
@@ -32,6 +33,12 @@ export interface InboxData {
 }
 
 export type FeatureCheck = (path: string) => boolean;
+
+const GmailStatementInbox = lazy(() =>
+  import("./GmailStatementInbox").then((module) => ({
+    default: module.GmailStatementInbox,
+  })),
+);
 
 function entries(
   data: unknown,
@@ -92,6 +99,9 @@ export function InboxPage({
   const alerts = entries(query.data, "alerts");
   return (
     <div className="grid gap-4">
+      <Suspense fallback={null}>
+        <GmailStatementInbox />
+      </Suspense>
       <header>
         <h2 className="text-xl font-semibold">Inbox</h2>
         <p className="mt-1 text-sm text-muted-foreground">

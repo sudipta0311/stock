@@ -22,6 +22,7 @@ await run(["scripts/generate-icons.mjs"]);
 await run(["scripts/gen-forms.mjs"]);
 await run(["scripts/generate-api.mjs"]);
 await run(["scripts/generate-copy.mjs"]);
+await run(["scripts/generate-gmail-script.mjs"]);
 await run([
   "node_modules/vite/bin/vite.js",
   "build",

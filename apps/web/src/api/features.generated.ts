@@ -54,5 +54,11 @@ export const API_PATHS = [
   "/v1/push/subscriptions",
   "/v1/push/subscriptions/{subscription_id}",
   "/v1/research/ideas",
+  "/v1/statement-inbox/items",
+  "/v1/statement-inbox/items/{item_id}/process",
+  "/v1/statement-inbox/keys",
+  "/v1/statement-inbox/keys/{key_id}",
+  "/v1/statement-inbox/passwords",
+  "/v1/statement-inbox/uploads",
   "/v1/stress"
 ] as const;

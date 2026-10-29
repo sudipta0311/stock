@@ -259,6 +259,9 @@ def create_app(settings: "Settings | None" = None) -> FastAPI:
     auth_limiter = AuthRateLimiter()
     application.state.auth_rate_limiter = auth_limiter
     application.state.google_exchange_limiter = auth_limiter
+    application.state.statement_upload_ip_limiter = AuthRateLimiter(
+        limit=100, window_seconds=24 * 60 * 60
+    )
     application.add_middleware(
         CORSMiddleware,
         allow_origins=(
@@ -733,6 +736,9 @@ def create_app(settings: "Settings | None" = None) -> FastAPI:
     from wealth.api.auth_sessions import build_router as build_auth_sessions_router
 
     application.include_router(build_auth_sessions_router(authenticated_user))
+    from wealth.api.statement_inbox import build_router as build_statement_inbox_router
+
+    application.include_router(build_statement_inbox_router(authenticated_user))
 
     return application
 

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
+import { Link } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge, Button, Card, Checkbox, Field, Select, Sheet } from "../ui";
 import englishCopy from "../copy/en.json";
@@ -1147,6 +1148,26 @@ export function SettingsPage() {
           </details>
         </Card>
         <HouseholdSharingPanel />
+        <section aria-labelledby="settings-statements-heading">
+          <Card className="grid gap-3">
+            <h2
+              id="settings-statements-heading"
+              className="text-base font-semibold"
+            >
+              Statements from Gmail
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              PDFs wait in Inbox. Enter each password and review changes before
+              saving.
+            </p>
+            <Link
+              to="/settings/gmail"
+              className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground"
+            >
+              Get statements from Gmail
+            </Link>
+          </Card>
+        </section>
         <section
           aria-labelledby="fund-sip-settings-heading"
           className="grid gap-3"

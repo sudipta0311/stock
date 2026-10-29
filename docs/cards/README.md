@@ -47,7 +47,7 @@ Status: ⬜ not started · 🟦 in progress · ✅ accepted · 🔁 rework · �
 | C30 | Loans: balances roll down monthly, record extra payments/rate changes/statement balances, payoff date and interest left, 'pay extra or invest' decided by code, EMI reminders, loan detail screen | 3, 8 | ✅ |
 | C31 | Account menu (who's signed in, sign out), detailed help centre with contextual '?' links, a guided first visit, intuitiveness pass | 8 | ✅ |
 | C32 | Stay signed in: app sessions (30-day sliding, 90-day max) with rotating refresh tokens, reuse detection, sign out everywhere, signed-in devices list | sec | ✅ |
-| C33 | Statements from Gmail: own-account Apps Script posts CAMS/KFintech/NSDL/CDSL PDFs with a revocable upload key; password prompt or encrypted remember; same review flow; manual upload stays the fallback | import | ⬜ |
+| C33 | Statements from Gmail: own-account Apps Script posts CAMS/KFintech/NSDL/CDSL PDFs with a revocable upload key; password prompt or encrypted remember; same review flow; manual upload stays the fallback | import | ✅ |
 | C29b | Indian funds check from CAMS/KFintech CAS: sub-categories, direct vs regular, too many funds, lagging funds, SIP detection, 12-month early warning, least-tax fix | 3.3, 4, 4.10 | ✅ |
 | C28 | Simplicity pass: backend highlights (≤ 3 per screen), banned-jargon + sentence-length tests, one primary action per screen, collapsed details, 5-tap onboarding, rounded numbers | 2.3, 8 | ✅ |
 | C28b | Visual polish: type scale, spacing, app shell, highlight callouts, empty states, list rows, rounded summaries; fixes from the real-phone test | 8 | ✅ |

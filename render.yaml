@@ -76,6 +76,8 @@ services:
         sync: false
       - key: APP_SESSION_SECRET
         sync: false
+      - key: STATEMENT_PASSWORD_KEY
+        sync: false
       - key: ALLOWED_EMAILS
         sync: false
       - key: ALLOWED_ORIGINS

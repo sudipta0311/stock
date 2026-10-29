@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 from typing import Literal
 
 from pydantic import Field, SecretStr, model_validator
@@ -37,6 +39,9 @@ class Settings(BaseSettings):
     )
     app_session_secret: SecretStr | None = Field(
         default=None, validation_alias="APP_SESSION_SECRET", repr=False
+    )
+    statement_password_key: SecretStr | None = Field(
+        default=None, validation_alias="STATEMENT_PASSWORD_KEY", repr=False
     )
     allowed_origins: str = Field(
         default="http://localhost:3000,http://localhost:5173",
@@ -140,6 +145,19 @@ class Settings(BaseSettings):
             if self.app_session_secret is not None
             else None
         )
+
+    @property
+    def statement_password_key_value(self) -> bytes | None:
+        """Return a valid 32-byte AES key, or disable saved passwords."""
+        if self.statement_password_key is None:
+            return None
+        try:
+            key = base64.b64decode(
+                self.statement_password_key.get_secret_value().encode("ascii"), validate=True
+            )
+        except (binascii.Error, UnicodeEncodeError, ValueError):
+            return None
+        return key if len(key) == 32 else None
 
     @property
     def google_client_secret_value(self) -> str | None:

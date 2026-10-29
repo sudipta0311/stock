@@ -6757,6 +6757,278 @@
         "title": "SleeveSummary",
         "type": "object"
       },
+      "StatementInboxItemResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "import_job_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Import Job Id"
+          },
+          "received_at": {
+            "format": "date-time",
+            "title": "Received At",
+            "type": "string"
+          },
+          "sender_type": {
+            "enum": [
+              "cams",
+              "kfintech",
+              "mfcentral",
+              "nsdl",
+              "cdsl",
+              "other"
+            ],
+            "title": "Sender Type",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "needs_password",
+              "review",
+              "unreadable"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "sender_type",
+          "received_at",
+          "status",
+          "error_code",
+          "import_job_id"
+        ],
+        "title": "StatementInboxItemResponse",
+        "type": "object"
+      },
+      "StatementInboxKeyCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "title": "StatementInboxKeyCreate",
+        "type": "object"
+      },
+      "StatementInboxKeyCreated": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "created_at",
+          "last_used_at",
+          "key"
+        ],
+        "title": "StatementInboxKeyCreated",
+        "type": "object"
+      },
+      "StatementInboxKeyResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "created_at",
+          "last_used_at"
+        ],
+        "title": "StatementInboxKeyResponse",
+        "type": "object"
+      },
+      "StatementInboxListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "cleanup_notice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cleanup Notice"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/StatementInboxItemResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "StatementInboxListResponse",
+        "type": "object"
+      },
+      "StatementInboxProcessRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "password": {
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Password",
+            "type": "string"
+          },
+          "remember": {
+            "default": false,
+            "title": "Remember",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "password"
+        ],
+        "title": "StatementInboxProcessRequest",
+        "type": "object"
+      },
+      "StatementInboxProcessResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "job_id": {
+            "format": "uuid",
+            "title": "Job Id",
+            "type": "string"
+          },
+          "notice": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notice"
+          },
+          "password_saved": {
+            "title": "Password Saved",
+            "type": "boolean"
+          },
+          "status": {
+            "const": "review",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "job_id",
+          "password_saved"
+        ],
+        "title": "StatementInboxProcessResponse",
+        "type": "object"
+      },
+      "StatementInboxUploadResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "enum": [
+              "received",
+              "duplicate"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "StatementInboxUploadResponse",
+        "type": "object"
+      },
       "StressResponse": {
         "additionalProperties": false,
         "properties": {
@@ -11962,6 +12234,418 @@
           }
         ],
         "summary": "Get Research Ideas"
+      }
+    },
+    "/v1/statement-inbox/items": {
+      "get": {
+        "operationId": "list_items_v1_statement_inbox_items_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Household",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Household"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatementInboxListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Items"
+      }
+    },
+    "/v1/statement-inbox/items/{item_id}/process": {
+      "post": {
+        "operationId": "process_item_v1_statement_inbox_items__item_id__process_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Household",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Household"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StatementInboxProcessRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatementInboxProcessResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Process Item"
+      }
+    },
+    "/v1/statement-inbox/keys": {
+      "get": {
+        "operationId": "list_keys_v1_statement_inbox_keys_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Household",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Household"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/StatementInboxKeyResponse"
+                  },
+                  "title": "Response List Keys V1 Statement Inbox Keys Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Keys"
+      },
+      "post": {
+        "operationId": "create_key_v1_statement_inbox_keys_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Household",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Household"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StatementInboxKeyCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatementInboxKeyCreated"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create Key"
+      }
+    },
+    "/v1/statement-inbox/keys/{key_id}": {
+      "delete": {
+        "operationId": "revoke_key_v1_statement_inbox_keys__key_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Household",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Household"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Revoke Key"
+      }
+    },
+    "/v1/statement-inbox/passwords": {
+      "delete": {
+        "operationId": "forget_passwords_v1_statement_inbox_passwords_delete",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Household",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Household"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Forget Passwords"
+      }
+    },
+    "/v1/statement-inbox/uploads": {
+      "post": {
+        "operationId": "upload_statement_v1_statement_inbox_uploads_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Authorization",
+            "required": true,
+            "schema": {
+              "pattern": "^StatementKey wsk_[A-Za-z0-9_-]{43}$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "file": {
+                    "format": "binary",
+                    "type": "string"
+                  },
+                  "message_id": {
+                    "maxLength": 255,
+                    "type": "string"
+                  },
+                  "received_at": {
+                    "format": "date-time",
+                    "type": "string"
+                  },
+                  "sender": {
+                    "maxLength": 320,
+                    "type": "string"
+                  },
+                  "subject": {
+                    "maxLength": 512,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "file",
+                  "sender",
+                  "subject",
+                  "received_at",
+                  "message_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatementInboxUploadResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatementInboxUploadResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Upload Statement"
       }
     },
     "/v1/stress": {
