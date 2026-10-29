@@ -15,7 +15,7 @@ concurrency:
 jobs:
   refresh:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     env:
       OWNER_DATABASE_URL: ${{ secrets.OWNER_DATABASE_URL }}
     steps:
@@ -27,12 +27,5 @@ jobs:
           cache-dependency-path: pyproject.toml
       - run: python -m pip install --upgrade pip
       - run: python -m pip install --no-cache-dir ".[api,importer]"
-      - name: Refresh monthly fund history when the source is available
-        run: |
-          if python -c "import sys; from wealth.marketdata import refresh; sys.exit(0 if 'amfi_history' in refresh._SOURCES else 78)"; then
-            python -m wealth.marketdata.refresh --only amfi_history
-          else
-            result=$?
-            if [ "$result" -ne 78 ]; then exit "$result"; fi
-            echo "::notice::Monthly fund history is not available yet; skipping."
-          fi
+      - name: Refresh month-end AMFI history
+        run: python -m wealth.marketdata.refresh --only amfi_history

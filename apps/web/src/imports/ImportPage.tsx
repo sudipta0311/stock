@@ -37,15 +37,21 @@ import {
 } from "./progress";
 import { takeSharedFile } from "./share-target";
 import { markValueMoment } from "../pwa/install";
+import englishCopy from "../copy/en.json";
 
-const sourceCopy: Record<ImportFormat, { title: string; help: string }> = {
+const sourceCopy: Record<
+  ImportFormat,
+  { title: string; help: string; steps?: string[]; note?: string }
+> = {
   nsdl_cas: {
     title: "NSDL / CDSL CAS (PDF)",
     help: "Your CAS usually arrives by email each month. You can also request it from your depository.",
   },
   cams_kfin_cas: {
-    title: "CAMS / KFintech CAS (PDF)",
-    help: "Request a consolidated statement from mfcentral.com or camsonline.com.",
+    title: englishCopy.fund_check.cams_title,
+    help: englishCopy.fund_check.cams_request,
+    steps: englishCopy.fund_check.cams_steps,
+    note: englishCopy.fund_check.cams_summary_note,
   },
   broker_statement: {
     title: "Broker statement (CSV/XLSX)",
@@ -293,6 +299,16 @@ export function ImportPage() {
                     How to get it
                   </summary>
                   <p className="pb-2 leading-6">{sourceCopy[option].help}</p>
+                  {sourceCopy[option].steps ? (
+                    <ol className="list-decimal space-y-1 pb-2 pl-5 leading-6">
+                      {sourceCopy[option].steps.map((step) => (
+                        <li key={step}>{step}</li>
+                      ))}
+                    </ol>
+                  ) : null}
+                  {sourceCopy[option].note ? (
+                    <p className="pb-2 leading-6">{sourceCopy[option].note}</p>
+                  ) : null}
                 </details>
               </div>
             );

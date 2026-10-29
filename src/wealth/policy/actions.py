@@ -31,6 +31,10 @@ ActionKind = Literal[
     "SELL_TRIM",
     "REVIEW_EXIT",
     "SWAP",
+    "SWITCH_TO_DIRECT",
+    "REDIRECT_SIP",
+    "CONSOLIDATE_FUNDS",
+    "REVIEW_FUND",
 ]
 Confidence = Literal["HIGH", "MEDIUM", "LOW"]
 DossierStatus = Literal["APPROVED", "PENDING", "VETOED", "UNRESOLVED"]

@@ -97,15 +97,32 @@ def _compute_if_stale(user: Any, today: date) -> WeeklyPlanResponse:
         deployment_mode=getattr(user, "deployment_mode", "personal"),
     )
     computed = personalise(user_data, market, research, week, today)
+    from wealth.api.fund_check import add_weekly_fund_action
+
+    computed = computed.model_copy(
+        update={
+            "actions": add_weekly_fund_action(
+                user.session,
+                household_owner_id,
+                today,
+                computed.actions,
+                can_write=getattr(user, "role", "owner") != "viewer",
+            )
+        }
+    )
     from wealth.db.repo import acting_household_member
 
     me_member_id = acting_household_member(user.session, user.user_id, household_owner_id).id
     if stored is not None and stored.week == week:
         saved = WeeklyPlan.model_validate(stored.plan)
-        if saved.inputs_digest == computed.inputs_digest:
+        if saved.inputs_digest == computed.inputs_digest and saved.actions == computed.actions:
             return WeeklyPlanResponse(
                 **saved.model_dump(mode="python"), fresh=False, me_member_id=me_member_id
             )
+    if getattr(user, "role", "owner") == "viewer":
+        return WeeklyPlanResponse(
+            **computed.model_dump(mode="python"), fresh=False, me_member_id=me_member_id
+        )
     save_weekly_plan(user.session, household_owner_id, computed)
     return WeeklyPlanResponse(
         **computed.model_dump(mode="python"), fresh=True, me_member_id=me_member_id

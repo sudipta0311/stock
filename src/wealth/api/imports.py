@@ -8,7 +8,7 @@ import threading
 from collections import Counter
 from collections.abc import Callable
 from datetime import UTC, date, datetime
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, Literal
 from uuid import UUID
 
@@ -597,6 +597,15 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             _replace_cas_lots(
                 user.session, user.household_owner_id, job, item, holding, security_id, member_id
             )
+            if kind == "mf" and job.source == "cams_kfin":
+                _persist_fund_transactions(
+                    user.session,
+                    user.household_owner_id,
+                    member_id,
+                    security_id,
+                    payload,
+                    holding.account_ref,
+                )
             item.match_security_id = security_id
             applied[item.status] += 1
 
@@ -732,6 +741,68 @@ def _transaction_lots(payload: dict[str, Any]) -> list[dict[str, Any]]:
             }
         )
     return lot_rows
+
+
+def _persist_fund_transactions(
+    session: Session,
+    user_id: UUID,
+    member_id: UUID,
+    security_id: UUID,
+    payload: dict[str, Any],
+    fallback_account_ref: str | None,
+) -> None:
+    from wealth.db.models import FundTransaction
+
+    allowed_kinds = {"buy", "sell", "switch_in", "switch_out", "dividend_reinvest", "other"}
+    seen: set[tuple[date, str, Decimal, Decimal, str | None]] = set()
+    for transaction in payload.get("transactions") or []:
+        try:
+            transaction_date = date.fromisoformat(str(transaction["date"]))
+            kind = str(transaction["kind"])
+            amount = Decimal(str(transaction["amount"]))
+            units = Decimal(str(transaction["units"]))
+        except (InvalidOperation, KeyError, TypeError, ValueError):
+            continue
+        if (
+            kind not in allowed_kinds
+            or not amount.is_finite()
+            or not units.is_finite()
+            or amount < 0
+            or units < 0
+        ):
+            continue
+        account_ref = transaction.get("account_ref") or fallback_account_ref
+        if account_ref is not None and not re.fullmatch(r"XXXX[A-Z0-9]{4}", str(account_ref)):
+            account_ref = None
+        signature = (transaction_date, kind, amount, units, account_ref)
+        if signature in seen:
+            continue
+        seen.add(signature)
+        exists = session.scalar(
+            select(FundTransaction.id).where(
+                FundTransaction.user_id == user_id,
+                FundTransaction.member_id == member_id,
+                FundTransaction.security_id == security_id,
+                FundTransaction.transaction_date == transaction_date,
+                FundTransaction.kind == kind,
+                FundTransaction.amount == amount,
+                FundTransaction.units == units,
+                FundTransaction.account_ref.is_not_distinct_from(account_ref),
+            )
+        )
+        if exists is None:
+            session.add(
+                FundTransaction(
+                    user_id=user_id,
+                    member_id=member_id,
+                    security_id=security_id,
+                    transaction_date=transaction_date,
+                    kind=kind,
+                    amount=amount,
+                    units=units,
+                    account_ref=account_ref,
+                )
+            )
 
 
 def _replace_cas_lots(

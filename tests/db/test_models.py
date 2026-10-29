@@ -11,6 +11,7 @@ from wealth.db.session import make_engine, normalize_database_url
 _SHARED_MARKET_TABLES = {
     "prices_eod",
     "nav_daily",
+    "nav_monthly",
     "fx_rates",
     "gold_prices",
     "marketdata_runs",
@@ -18,6 +19,8 @@ _SHARED_MARKET_TABLES = {
     "sentinel_events",
 }
 _POST_INITIAL_TABLES = {
+    "fund_lagging_checks",
+    "fund_transactions",
     "household_access",
     "household_invites",
     "weekly_plans",

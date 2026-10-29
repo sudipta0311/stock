@@ -52,6 +52,7 @@ import { SUPPORTED_LANGUAGES } from "../i18n/config";
 import packageMetadata from "../../package.json";
 import { HouseholdSharingPanel } from "./HouseholdSharingPanel";
 import { MemberDetailsEditor } from "./MemberDetailsEditor";
+import { FundSipFineTune } from "./FundSipFineTune";
 import { useHousehold } from "../household/HouseholdContext";
 
 const LOCAL_CONSENTS_KEY = "wealth.settings.consents";
@@ -1129,6 +1130,12 @@ export function SettingsPage() {
           </details>
         </Card>
         <HouseholdSharingPanel />
+        <section
+          aria-labelledby="fund-sip-settings-heading"
+          className="grid gap-3"
+        >
+          <FundSipFineTune />
+        </section>
         <Card className="grid gap-3">
           <h3 className="text-sm font-semibold">
             {englishCopy.household.primary_currency}

@@ -24,6 +24,7 @@ class AmfiCategory:
     category: str
     sleeve: str
     tax_note: str | None = None
+    sub_category: str | None = None
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,40 @@ class AmfiNav:
     category: str | None
     sleeve: str | None
     tax_note: str | None = None
+    sub_category: str | None = None
+    plan_type: str | None = None
+    option_type: str | None = None
+
+
+def classify_amfi_scheme_name(
+    name: str, plan_field: str | None = None, option_field: str | None = None
+) -> tuple[str | None, str | None]:
+    """Return normalized plan and payout option from a scheme name or AMFI fields."""
+    value = re.sub(r"[^a-z0-9]+", " ", name.casefold()).strip()
+    plan_value = re.sub(r"[^a-z0-9]+", " ", (plan_field or "").casefold()).strip()
+    option_value = re.sub(r"[^a-z0-9]+", " ", (option_field or "").casefold()).strip()
+    if re.search(r"\bdirect(?: plan)?\b", value):
+        plan_type = "direct"
+    elif re.search(r"\bregular(?: plan)?\b", value):
+        plan_type = "regular"
+    elif "direct" in plan_value:
+        plan_type = "direct"
+    elif "regular" in plan_value:
+        plan_type = "regular"
+    else:
+        plan_type = None
+
+    if re.search(r"\b(idcw|dividend|payout|reinvestment)\b", value):
+        option_type = "idcw"
+    elif re.search(r"\bgrowth\b", value):
+        option_type = "growth"
+    elif re.search(r"\b(idcw|dividend|payout|reinvestment)\b", option_value):
+        option_type = "idcw"
+    elif "growth" in option_value:
+        option_type = "growth"
+    else:
+        option_type = None
+    return plan_type, option_type
 
 
 def classify_amfi_section(section: str) -> AmfiCategory | None:
@@ -46,29 +81,64 @@ def classify_amfi_section(section: str) -> AmfiCategory | None:
     value = re.sub(r"\s+", " ", section.casefold()).strip()
     if not value:
         return None
-    if "arbitrage" in value:
-        return AmfiCategory("mf:arbitrage", "debt", "arbitrage funds have distinct tax treatment")
-    if "gold" in value or "silver" in value:
-        return AmfiCategory("mf:gold", "gold")
     if any(term in value for term in ("overseas", "international", "global", "foreign")):
-        return AmfiCategory("mf:equity_global", "equity_global")
+        return AmfiCategory("mf:equity_global", "equity_global", sub_category="FoF Overseas")
+    if "arbitrage" in value:
+        return AmfiCategory(
+            "mf:arbitrage",
+            "debt",
+            "arbitrage funds have distinct tax treatment",
+            "Arbitrage",
+        )
+    if "gold" in value or "silver" in value:
+        return AmfiCategory("mf:gold", "gold", sub_category="Gold")
     if "liquid" in value:
-        return AmfiCategory("mf:debt:liquid", "debt")
+        return AmfiCategory("mf:debt:liquid", "debt", sub_category="Liquid")
     if "gilt" in value:
-        return AmfiCategory("mf:debt:gilt", "debt")
+        return AmfiCategory("mf:debt:gilt", "debt", sub_category="Gilt")
     if "debt" in value or any(
         term in value
         for term in ("bond", "money market", "overnight", "credit risk", "duration fund")
     ):
-        return AmfiCategory("mf:debt", "debt")
+        return AmfiCategory("mf:debt", "debt", sub_category="Other Debt")
+    sub_category = _equity_sub_category(value)
+    if sub_category is not None:
+        return AmfiCategory("mf:equity_india", "equity_india", sub_category=sub_category)
     if any(term in value for term in ("equity", "hybrid", "index")):
-        return AmfiCategory("mf:equity_india", "equity_india")
+        return AmfiCategory("mf:equity_india", "equity_india", sub_category="Other Equity")
+    return None
+
+
+def _equity_sub_category(value: str) -> str | None:
+    if "sectoral" in value or "thematic" in value:
+        return "Sectoral/Thematic"
+    if "large" in value and ("mid" in value or "&" in value):
+        return "Large & Mid Cap"
+    for term, label in (
+        ("large cap", "Large Cap"),
+        ("mid cap", "Mid Cap"),
+        ("small cap", "Small Cap"),
+        ("flexi cap", "Flexi Cap"),
+        ("multi cap", "Multi Cap"),
+        ("elss", "ELSS"),
+        ("tax saver", "ELSS"),
+    ):
+        if term in value:
+            return label
+    if "index" in value or "etf" in value:
+        return "Index Funds/ETFs"
+    if "hybrid" in value or "balanced" in value or "asset allocation" in value:
+        if "aggressive" in value:
+            return "Aggressive Hybrid"
+        if "conservative" in value:
+            return "Conservative Hybrid"
+        return "Balanced Hybrid"
     return None
 
 
 def _section_title(line: str) -> str | None:
     stripped = line.strip()
-    if not stripped.casefold().startswith(("open ended schemes(", "close ended schemes(")):
+    if not re.match(r"^(?:open|close) ended schemes\s*\(", stripped, re.IGNORECASE):
         return None
     start = stripped.find("(")
     end = stripped.rfind(")")
@@ -136,6 +206,9 @@ def parse_nav_all(text: str) -> list[AmfiNav]:
                     category=section.category if section else None,
                     sleeve=section.sleeve if section else None,
                     tax_note=section.tax_note if section else None,
+                    sub_category=section.sub_category if section else None,
+                    plan_type=classify_amfi_scheme_name(name, plan, option)[0],
+                    option_type=classify_amfi_scheme_name(name, plan, option)[1],
                 )
             )
         except (InvalidOperation, ValueError):

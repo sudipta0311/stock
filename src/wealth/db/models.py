@@ -365,6 +365,15 @@ class Security(Base):
         UniqueConstraint("isin", name="uq_securities_isin"),
         Index("ix_securities_amfi_scheme_code", "amfi_scheme_code"),
         Index("ix_securities_nse_symbol", "nse_symbol"),
+        CheckConstraint(
+            "plan_type IS NULL OR plan_type IN ('direct', 'regular')",
+            name="ck_securities_plan_type",
+        ),
+        CheckConstraint(
+            "option IS NULL OR option IN ('growth', 'idcw')",
+            name="ck_securities_option",
+        ),
+        CheckConstraint("ter IS NULL OR ter >= 0", name="ck_securities_ter_non_negative"),
         CheckConstraint("market IN ('IN', 'US')", name="ck_securities_market"),
         CheckConstraint(
             "security_type IN ('equity', 'etf', 'mf', 'bond', 'sgb')",
@@ -388,6 +397,12 @@ class Security(Base):
     sleeve: Mapped[str | None] = mapped_column(String(32))
     category: Mapped[str | None] = mapped_column(String(80))
     amfi_scheme_code: Mapped[str | None] = mapped_column(String(16))
+    sub_category: Mapped[str | None] = mapped_column(String(80))
+    plan_type: Mapped[str | None] = mapped_column(String(12))
+    option: Mapped[str | None] = mapped_column(String(12))
+    ter: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    ter_as_of: Mapped[date | None] = mapped_column(Date)
+    ter_source: Mapped[str | None] = mapped_column(String(80))
     nse_symbol: Mapped[str | None] = mapped_column(String(32))
     series: Mapped[str | None] = mapped_column(String(8))
 
@@ -427,6 +442,21 @@ class NavDaily(Base):
     fetched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class NavMonthly(Base):
+    __tablename__ = "nav_monthly"
+    __table_args__ = (
+        Index("ix_nav_monthly_month_end", "month_end"),
+        CheckConstraint("nav > 0", name="ck_nav_monthly_nav_positive"),
+    )
+
+    security_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("securities.id", ondelete="CASCADE"), primary_key=True
+    )
+    month_end: Mapped[date] = mapped_column(Date, primary_key=True)
+    nav: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    source: Mapped[str] = mapped_column(String(40), nullable=False)
 
 
 class FxRate(Base):
@@ -529,6 +559,84 @@ class HoldingLot(UserOwned, Base):
             name="ck_holdings_lots_account_ref_masked",
         ),
     )
+
+
+class FundLaggingCheck(UserOwned, Base):
+    __tablename__ = "fund_lagging_checks"
+    __table_args__ = (
+        _tenant_identity("fund_lagging_checks"),
+        ForeignKeyConstraint(
+            ["user_id", "member_id"],
+            ["household_members.user_id", "household_members.id"],
+            name="fk_fund_lagging_checks_member_tenant",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["security_id"],
+            ["securities.id"],
+            name="fk_fund_lagging_checks_security",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "month_end = (date_trunc('month', month_end) + interval '1 month - 1 day')::date",
+            name="ck_fund_lagging_checks_month_end",
+        ),
+        Index(
+            "ix_fund_lagging_checks_household_member_security_month",
+            "user_id",
+            "member_id",
+            "security_id",
+            "month_end",
+        ),
+    )
+
+    member_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    security_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    month_end: Mapped[date] = mapped_column(Date, nullable=False)
+    bottom_quartile: Mapped[bool] = mapped_column(Boolean, nullable=False)
+
+
+class FundTransaction(UserOwned, Base):
+    __tablename__ = "fund_transactions"
+    __table_args__ = (
+        _tenant_identity("fund_transactions"),
+        ForeignKeyConstraint(
+            ["user_id", "member_id"],
+            ["household_members.user_id", "household_members.id"],
+            name="fk_fund_transactions_member_tenant",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["security_id"],
+            ["securities.id"],
+            name="fk_fund_transactions_security",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "kind IN ('buy', 'sell', 'switch_in', 'switch_out', 'dividend_reinvest', 'other')",
+            name="ck_fund_transactions_kind",
+        ),
+        CheckConstraint("amount >= 0 AND units >= 0", name="ck_fund_transactions_non_negative"),
+        CheckConstraint(
+            "account_ref IS NULL OR account_ref ~ '^XXXX[A-Z0-9]{4}$'",
+            name="ck_fund_transactions_account_ref_masked",
+        ),
+        Index(
+            "ix_fund_transactions_household_member_security_date",
+            "user_id",
+            "member_id",
+            "security_id",
+            "transaction_date",
+        ),
+    )
+
+    member_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    security_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    transaction_date: Mapped[date] = mapped_column(Date, nullable=False)
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(16, 2), nullable=False)
+    units: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    account_ref: Mapped[str | None] = mapped_column(String(16))
 
 
 class ImportJob(UserOwned, Base):

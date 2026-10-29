@@ -27,6 +27,8 @@ from wealth.db.models import (
     Action,
     AuditLog,
     Consent,
+    FundLaggingCheck,
+    FundTransaction,
     HoldingLot,
     HouseholdAccess,
     HouseholdInvite,
@@ -705,6 +707,13 @@ def test_bring_my_data_moves_rows_to_linked_member_and_preserves_login_data(
     )
     assert partner_asset.status_code == 201
     source_asset_id = UUID(partner_asset.json()["id"])
+    partner_child = client.post(
+        "/v1/members",
+        headers=partner_headers,
+        json={"display_name": "Synthetic Child", "relationship": "child"},
+    )
+    assert partner_child.status_code == 201, partner_child.text
+    partner_child_id = UUID(partner_child.json()["id"])
 
     with system_session(database.owner_engine) as session:
         source_member = session.scalar(
@@ -754,6 +763,30 @@ def test_bring_my_data_moves_rows_to_linked_member_and_preserves_login_data(
                 import_job_id=job.id,
             )
         )
+        # Member-keyed rows in tables added after 0011 must move with their member. The
+        # child row only works if the member foreign key is deferrable: the table sorts
+        # before household_members in the merge loop.
+        for member_id in (source_member.id, partner_child_id):
+            session.add(
+                FundTransaction(
+                    user_id=partner_id,
+                    member_id=member_id,
+                    security_id=security.id,
+                    transaction_date=date(2026, 1, 15),
+                    kind="buy",
+                    amount=Decimal("200"),
+                    units=Decimal("2"),
+                )
+            )
+        session.add(
+            FundLaggingCheck(
+                user_id=partner_id,
+                member_id=source_member.id,
+                security_id=security.id,
+                month_end=date(2026, 9, 30),
+                bottom_quartile=True,
+            )
+        )
         session.add(
             ImportItem(
                 user_id=partner_id,
@@ -785,6 +818,8 @@ def test_bring_my_data_moves_rows_to_linked_member_and_preserves_login_data(
     assert body["merge_counts"]["holdings_lots"] == 1
     assert body["merge_counts"]["import_jobs"] == 1
     assert body["merge_counts"]["import_items"] == 1
+    assert body["merge_counts"]["fund_transactions"] == 2
+    assert body["merge_counts"]["fund_lagging_checks"] == 1
     assert {"residency", "tax", "investing"} <= set(body["overwritten_fields"])
     assert invite["member_id"] == str(linked_member_id)
 
@@ -793,6 +828,17 @@ def test_bring_my_data_moves_rows_to_linked_member_and_preserves_login_data(
         assert moved_asset is not None
         assert moved_asset.user_id == owner_id
         assert moved_asset.member_id == linked_member_id
+        moved_transactions = session.scalars(
+            select(FundTransaction).where(FundTransaction.user_id == owner_id)
+        ).all()
+        assert {row.member_id for row in moved_transactions} == {
+            linked_member_id,
+            partner_child_id,
+        }
+        moved_checks = session.scalars(
+            select(FundLaggingCheck).where(FundLaggingCheck.user_id == owner_id)
+        ).all()
+        assert [row.member_id for row in moved_checks] == [linked_member_id]
         assert (
             session.scalar(
                 select(func.count()).select_from(Account).where(Account.user_id == partner_id)
@@ -871,3 +917,23 @@ def test_bring_my_data_moves_rows_to_linked_member_and_preserves_login_data(
         )
         assert all(count == 0 for count in repeated["counts"].values())
         assert repeated["overwritten_fields"] == []
+
+
+def test_every_member_foreign_key_is_deferrable_for_household_merge(
+    migrated_database: MigratedDatabase,
+) -> None:
+    # app_merge_into_household defers constraints and moves tables before their members.
+    with migrated_database.owner_engine.connect() as connection:
+        immediate = connection.execute(
+            text(
+                """
+                SELECT con.conrelid::regclass::text
+                FROM pg_catalog.pg_constraint AS con
+                WHERE con.contype = 'f'
+                  AND con.confrelid = 'household_members'::regclass
+                  AND cardinality(con.conkey) > 1
+                  AND NOT con.condeferrable
+                """
+            )
+        ).scalars()
+        assert sorted(immediate) == []

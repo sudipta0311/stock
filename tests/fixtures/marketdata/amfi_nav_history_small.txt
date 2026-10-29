@@ -1,0 +1,6 @@
+Open Ended Schemes (Equity Scheme - Large Cap Fund)
+Scheme Code;Scheme Name;ISIN Div Payout/ ISIN Growth;ISIN Div Reinvestment;Net Asset Value;Repurchase Price;Sale Price;Date
+710001;Synthetic Alpha Direct Growth;;;101.2500;;;30-Sep-2026
+710002;Synthetic Alpha Regular IDCW;;;99.8750;;;30-Sep-2026
+Open Ended Schemes (Debt Scheme - Liquid Fund)
+710003;Synthetic Cash Regular Plan Growth;;;10.1250;;;30-Sep-2026

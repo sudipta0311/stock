@@ -1,0 +1,71 @@
+version: 1
+source_note: "Conservative monthly planning assumptions; not verified return forecasts."
+verified: false
+limits:
+  regular_plan_max_payback_years: "2"
+  max_funds_per_sub_category: 2
+  max_funds_total: 7
+  sector_thematic_max_pct_of_indian_equity: "10"
+  idcw_switch_cost_limit_inr: "2500"
+  projection_months: 12
+  history_years: 5
+  ltcg_exemption_inr: "125000"
+targets:
+  conservative:
+    asset_mix_pct:
+      equity: "40"
+      hybrid: "20"
+      debt: "40"
+    indian_equity_pct:
+      large: "50"
+      mid: "8"
+      small: "2"
+      flexi_multi: "15"
+      sector_thematic: "5"
+      international: "20"
+  moderate:
+    asset_mix_pct:
+      equity: "60"
+      hybrid: "15"
+      debt: "25"
+    indian_equity_pct:
+      large: "40"
+      mid: "15"
+      small: "8"
+      flexi_multi: "20"
+      sector_thematic: "10"
+      international: "7"
+  growth:
+    asset_mix_pct:
+      equity: "75"
+      hybrid: "10"
+      debt: "15"
+    indian_equity_pct:
+      large: "30"
+      mid: "20"
+      small: "15"
+      flexi_multi: "20"
+      sector_thematic: "10"
+      international: "5"
+  aggressive:
+    asset_mix_pct:
+      equity: "85"
+      hybrid: "5"
+      debt: "10"
+    indian_equity_pct:
+      large: "25"
+      mid: "20"
+      small: "20"
+      flexi_multi: "20"
+      sector_thematic: "10"
+      international: "5"
+monthly_return_pct:
+  large: "0.45"
+  mid: "0.50"
+  small: "0.55"
+  flexi_multi: "0.45"
+  sector_thematic: "0.45"
+  international: "0.40"
+  hybrid: "0.35"
+  debt: "0.35"
+  gold: "0.30"

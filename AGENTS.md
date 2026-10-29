@@ -58,6 +58,7 @@ Apply these to every PWA screen and every user-facing string (emails included):
   - only per-login records (like `consents`, `push_subscriptions`) use `app.user_id` isolation
   - never re-create the old C05 per-user policy
   - `app_merge_into_household` loops over every table with `user_id`, so add a duplicate rule there if the table has a per-user unique key
+  - a composite `(user_id, member_id)` foreign key to `household_members` must be `DEFERRABLE INITIALLY IMMEDIATE`: the merge moves rows before their members (a guard test enforces this)
 - **Never edit a migration created by an earlier card.** Databases (including the developer's) have already applied it, so edits never reach them. Schema changes always go in a **new** migration with the next free number that revises the current head. Editing a migration you created in the *same* card is fine.
 
 ## Code style

@@ -30,6 +30,7 @@ import {
   formatSecondaryAmount,
 } from "../household/currency";
 import type { DkkInrRate } from "../household/fx";
+import { FundCheckCard } from "./FundCheckCard";
 
 const SLEEVE_ORDER = [
   englishCopy.household_ui.indian_shares,
@@ -694,6 +695,8 @@ export function MoneyMapPage() {
       <ImportHistorySheet jobs={importJobs} />
 
       {!isViewer ? <QuickAddBar onDraft={startQuickDraft} /> : null}
+
+      <FundCheckCard />
 
       <Card className="grid gap-4">
         <div>

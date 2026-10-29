@@ -16,17 +16,37 @@ from wealth.db.models import (
     GoldPrice,
     HoldingLot,
     NavDaily,
+    NavMonthly,
     PriceEod,
     Security,
 )
 
 if TYPE_CHECKING:
     from wealth.marketdata.sources.amfi import AmfiNav
+    from wealth.marketdata.sources.amfi_history import AmfiHistoricalNav
     from wealth.marketdata.sources.fred import FxObservation
     from wealth.marketdata.sources.ibja import GoldObservation
     from wealth.marketdata.sources.nse import NseClose, NseSecurity
 
 _INDEX_PROXIES = ("NIFTYBEES", "JUNIORBEES", "GOLDBEES")
+
+
+def _month_end(year: int, month: int) -> date:
+    next_year, next_month = _shift_month(year, month, 1)
+    return date(next_year, next_month, 1) - timedelta(days=1)
+
+
+def _month_start(value: date) -> date:
+    return date(value.year, value.month, 1)
+
+
+def _shift_month(year: int, month: int, offset: int) -> tuple[int, int]:
+    index = year * 12 + month - 1 + offset
+    return index // 12, index % 12 + 1
+
+
+def _previous_month(value: date) -> tuple[int, int]:
+    return _shift_month(value.year, value.month, -1)
 
 
 def _upsert_security(
@@ -48,12 +68,25 @@ def _upsert_security(
             "sleeve": func.coalesce(excluded.sleeve, Security.sleeve),
             "category": func.coalesce(excluded.category, Security.category),
             "amfi_scheme_code": func.coalesce(excluded.amfi_scheme_code, Security.amfi_scheme_code),
+            "sub_category": func.coalesce(excluded.sub_category, Security.sub_category),
+            "plan_type": func.coalesce(excluded.plan_type, Security.plan_type),
+            "option": func.coalesce(excluded.option, Security.option),
             "nse_symbol": func.coalesce(excluded.nse_symbol, Security.nse_symbol),
             "series": func.coalesce(excluded.series, Security.series),
         }
         if preserve_nse_security:
             has_nse_identity = Security.nse_symbol.is_not(None)
-            for field in ("symbol", "name", "security_type", "sleeve", "category", "series"):
+            for field in (
+                "symbol",
+                "name",
+                "security_type",
+                "sleeve",
+                "category",
+                "sub_category",
+                "plan_type",
+                "option",
+                "series",
+            ):
                 update_values[field] = case(
                     (has_nse_identity, getattr(Security, field)),
                     else_=update_values[field],
@@ -71,6 +104,11 @@ def _upsert_security(
                 "currency": statement.excluded.currency,
                 "sleeve": func.coalesce(statement.excluded.sleeve, Security.sleeve),
                 "category": func.coalesce(statement.excluded.category, Security.category),
+                "sub_category": func.coalesce(
+                    statement.excluded.sub_category, Security.sub_category
+                ),
+                "plan_type": func.coalesce(statement.excluded.plan_type, Security.plan_type),
+                "option": func.coalesce(statement.excluded.option, Security.option),
                 "amfi_scheme_code": func.coalesce(
                     statement.excluded.amfi_scheme_code, Security.amfi_scheme_code
                 ),
@@ -141,6 +179,9 @@ def upsert_amfi_master(session: Session, records: list[AmfiNav]) -> int:
                 "currency": "INR",
                 "sleeve": record.sleeve,
                 "category": record.category,
+                "sub_category": record.sub_category,
+                "plan_type": record.plan_type,
+                "option": record.option_type,
                 "amfi_scheme_code": scheme_code,
                 "nse_symbol": None,
                 "series": None,
@@ -149,6 +190,147 @@ def upsert_amfi_master(session: Session, records: list[AmfiNav]) -> int:
             preserve_nse_security=True,
         )
     return len(variants)
+
+
+def amfi_history_targets(session: Session) -> set[UUID]:
+    """Return direct-growth equity/hybrid schemes plus every Indian MF currently held."""
+    direct_growth = set(
+        session.scalars(
+            select(Security.id).where(
+                Security.market == "IN",
+                Security.security_type == "mf",
+                Security.plan_type == "direct",
+                Security.option == "growth",
+                Security.category.in_(("mf:equity_india", "mf:equity_global")),
+            )
+        )
+    )
+    held = set(
+        session.scalars(
+            select(HoldingLot.security_id)
+            .join(Security, Security.id == HoldingLot.security_id)
+            .where(
+                Security.market == "IN",
+                Security.security_type == "mf",
+                HoldingLot.quantity > 0,
+            )
+        )
+    )
+    return direct_growth | held
+
+
+def missing_amfi_history_windows(session: Session, on: date) -> list[tuple[date, date]]:
+    """Return month-aligned gaps in the rolling five-year history, in AMFI-safe windows."""
+    target_ids = amfi_history_targets(session)
+    if not target_ids:
+        return []
+    last_month_end = (
+        _month_end(on.year, on.month)
+        if on.day == _month_end(on.year, on.month).day
+        else _month_end(*_previous_month(on))
+    )
+    months = [
+        _month_end(*_shift_month(last_month_end.year, last_month_end.month, offset))
+        for offset in range(-59, 1)
+    ]
+    saved = session.execute(
+        select(NavMonthly.security_id, NavMonthly.month_end).where(
+            NavMonthly.security_id.in_(target_ids), NavMonthly.month_end.in_(months)
+        )
+    ).all()
+    saved_by_security: dict[UUID, set[date]] = {}
+    for security_id, month_end in saved:
+        saved_by_security.setdefault(security_id, set()).add(month_end)
+    missing: set[date] = set()
+    for security_id in target_ids:
+        available = saved_by_security.get(security_id, set())
+        missing.update(month_end for month_end in months if month_end not in available)
+    if not missing:
+        return []
+    ordered = sorted(missing)
+    ranges: list[tuple[date, date]] = []
+    range_start = _month_start(ordered[0])
+    range_end = ordered[0]
+    for month_end in ordered[1:]:
+        next_start = _month_start(month_end)
+        proposed_end = month_end
+        if (
+            next_start == range_end + timedelta(days=1)
+            and (proposed_end - range_start).days + 1 <= 90
+        ):
+            range_end = proposed_end
+            continue
+        ranges.append((range_start, range_end))
+        range_start, range_end = next_start, month_end
+    ranges.append((range_start, range_end))
+    return ranges
+
+
+def prune_amfi_monthly_navs(session: Session, on: date) -> int:
+    """Keep only the latest 60 completed calendar months of shared fund history."""
+    month_end = (
+        _month_end(on.year, on.month)
+        if on.day == _month_end(on.year, on.month).day
+        else _month_end(*_previous_month(on))
+    )
+    oldest_month_end = _month_end(*_shift_month(month_end.year, month_end.month, -59))
+    result = session.execute(delete(NavMonthly).where(NavMonthly.month_end < oldest_month_end))
+    return result.rowcount or 0
+
+
+def upsert_amfi_monthly_navs(session: Session, records: list[AmfiHistoricalNav]) -> int:
+    """Keep the last available NAV for each target security and calendar month."""
+    target_ids = amfi_history_targets(session)
+    if not target_ids or not records:
+        return 0
+    security_rows = session.execute(
+        select(Security.id, Security.amfi_scheme_code, Security.isin).where(
+            Security.id.in_(target_ids)
+        )
+    ).all()
+    by_scheme_code: dict[str, set[UUID]] = {}
+    by_isin: dict[str, UUID] = {}
+    for security_id, scheme_code, isin in security_rows:
+        if scheme_code:
+            by_scheme_code.setdefault(scheme_code, set()).add(security_id)
+        if isin:
+            by_isin[isin] = security_id
+
+    latest: dict[tuple[UUID, date], tuple[date, Decimal]] = {}
+    for record in records:
+        identifiers = {record.isin_primary, record.isin_reinvestment} - {None}
+        matched = {by_isin[isin] for isin in identifiers if isin in by_isin}
+        if not identifiers:
+            matched.update(by_scheme_code.get(record.scheme_code, set()))
+        month_end = _month_end(record.as_of.year, record.as_of.month)
+        for security_id in matched:
+            key = (security_id, month_end)
+            previous = latest.get(key)
+            if previous is None or record.as_of > previous[0]:
+                latest[key] = (record.as_of, record.nav)
+
+    if not latest:
+        return 0
+    values = [
+        {
+            "security_id": security_id,
+            "month_end": month_end,
+            "nav": nav,
+            "source": "AMFI",
+        }
+        for (security_id, month_end), (_as_of, nav) in sorted(
+            latest.items(), key=lambda item: (str(item[0][0]), item[0][1])
+        )
+    ]
+    for start in range(0, len(values), 1000):
+        statement = pg_insert(NavMonthly).values(values[start : start + 1000])
+        session.execute(
+            statement.on_conflict_do_update(
+                index_elements=[NavMonthly.security_id, NavMonthly.month_end],
+                set_={"nav": statement.excluded.nav, "source": statement.excluded.source},
+            )
+        )
+    return len(values)
 
 
 def upsert_eod_price(

@@ -11,6 +11,8 @@ export const API_PATHS = [
   "/v1/auth/google/exchange",
   "/v1/brief/{week}",
   "/v1/email/unsubscribe",
+  "/v1/fund-check",
+  "/v1/fund-check/sips/{security_id}",
   "/v1/goals",
   "/v1/goals/{goal_id}",
   "/v1/households",

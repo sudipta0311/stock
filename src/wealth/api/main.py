@@ -678,6 +678,9 @@ def create_app(settings: "Settings | None" = None) -> FastAPI:
     from wealth.api.personalisation import build_router as build_personalisation_router
 
     application.include_router(build_personalisation_router(authenticated_user))
+    from wealth.api.fund_check import build_router as build_fund_check_router
+
+    application.include_router(build_fund_check_router(authenticated_user))
     from wealth.api.households import build_router as build_households_router
 
     application.include_router(build_households_router(authenticated_user))

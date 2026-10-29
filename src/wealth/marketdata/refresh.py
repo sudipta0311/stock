@@ -17,14 +17,15 @@ from sqlalchemy.orm import Session
 from wealth.db.models import MarketdataRun
 from wealth.db.session import make_engine, system_session
 from wealth.marketdata import store
-from wealth.marketdata.sources import amfi, ecb, fred, ibja, manual, nse
+from wealth.marketdata.sources import amfi, amfi_history, ecb, fred, ibja, manual, nse
 from wealth.marketdata.sources.amfi import AmfiNav
+from wealth.marketdata.sources.amfi_history import AmfiHistoricalNav
 from wealth.marketdata.sources.ecb import FxFetchResult
 from wealth.marketdata.sources.fred import FxObservation
 from wealth.marketdata.sources.ibja import GoldObservation
 from wealth.marketdata.sources.nse import NseClose, NseSecurity
 
-_SOURCES = ("nse", "amfi", "fx", "gold", "master")
+_SOURCES = ("nse", "amfi", "fx", "gold", "master", "amfi_history")
 _RETENTION_DAYS = 400
 
 
@@ -71,13 +72,23 @@ def _fetch_nse_master() -> NseMasterBatch:
     return NseMasterBatch(equities + etfs, len(etfs))
 
 
-def _default_fetchers(on: date) -> dict[str, Callable[[], Any]]:
+def _fetch_missing_amfi_history(session: Session, on: date) -> list[AmfiHistoricalNav]:
+    records: list[AmfiHistoricalNav] = []
+    for start, end in store.missing_amfi_history_windows(session, on):
+        records.extend(amfi_history.fetch_nav_history(start, end))
+    return records
+
+
+def _default_fetchers(on: date, session: Session | None = None) -> dict[str, Callable[[], Any]]:
     return {
         "nse": lambda: nse.fetch_bhavcopy(on),
         "amfi": amfi.fetch_nav_all,
         "fx": lambda: _fetch_fx(on),
         "gold": lambda: ibja.fetch_gold_rate(on=on),
         "master": _fetch_nse_master,
+        "amfi_history": (
+            lambda: _fetch_missing_amfi_history(session, on) if session is not None else []
+        ),
     }
 
 
@@ -110,6 +121,15 @@ def _store_source(
         return {
             "amfi_master": master_count,
             "nav_daily": store.upsert_amfi_navs(session, recent, fetched_at=fetched_at),
+        }
+    if source == "amfi_history":
+        if not isinstance(records, list) or any(
+            not isinstance(item, AmfiHistoricalNav) for item in records
+        ):
+            raise TypeError("AMFI history adapter returned invalid rows")
+        return {
+            "nav_monthly": store.upsert_amfi_monthly_navs(session, records),
+            "nav_monthly_pruned": store.prune_amfi_monthly_navs(session, on),
         }
     if source == "fx":
         if not isinstance(records, list) or any(
@@ -157,7 +177,7 @@ def run_refresh(
     unknown = set(selected_sources) - set(_SOURCES)
     if unknown:
         raise ValueError(f"Unknown market-data sources: {', '.join(sorted(unknown))}")
-    effective_fetchers = dict(fetchers or _default_fetchers(on))
+    effective_fetchers = dict(fetchers or _default_fetchers(on, session))
     started_at = fetched_at or datetime.now(UTC)
     run = MarketdataRun(
         started_at=started_at,

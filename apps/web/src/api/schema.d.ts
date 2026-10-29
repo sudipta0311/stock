@@ -1,4 +1,4 @@
-// OpenAPI SHA256: 9ded3fc8331253b57ac32ee8ea9eae079937f20bb4de28f0495f362a2635a17d
+// OpenAPI SHA256: 3eb64f16559379a5ae86b772f1eeb7dc8d7280925cdeb93f334877c15d005df6
 export interface paths {
     "/healthz": {
         parameters: {
@@ -187,6 +187,40 @@ export interface paths {
         put?: never;
         /** Post Unsubscribe */
         post: operations["post_unsubscribe_v1_email_unsubscribe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/fund-check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Fund Check */
+        get: operations["get_fund_check_v1_fund_check_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/fund-check/sips/{security_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Put Sip Override */
+        put: operations["put_sip_override_v1_fund_check_sips__security_id__put"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1182,6 +1216,35 @@ export interface components {
              */
             rate_pct: string;
             start?: string | null;
+        };
+        /** FundCheckResponse */
+        FundCheckResponse: {
+            /** Checks */
+            checks: {
+                [key: string]: unknown;
+            }[];
+            /** Details */
+            details: {
+                [key: string]: unknown;
+            };
+            /** Early Warning */
+            early_warning: {
+                [key: string]: unknown;
+            } | null;
+            /** Status */
+            status: string;
+            /** Summary Key */
+            summary_key: string;
+        };
+        /** FundSipOverride */
+        FundSipOverride: {
+            /**
+             * Member Id
+             * Format: uuid
+             */
+            member_id: string;
+            /** Monthly Amount Inr */
+            monthly_amount_inr: number | string;
         };
         /** Goal */
         Goal: {
@@ -3423,6 +3486,78 @@ export interface operations {
                 };
                 content: {
                     "text/html": string;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_fund_check_v1_fund_check_get: {
+        parameters: {
+            query?: {
+                member?: string;
+            };
+            header?: {
+                "X-Household"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FundCheckResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_sip_override_v1_fund_check_sips__security_id__put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Household"?: string | null;
+            };
+            path: {
+                security_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FundSipOverride"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
                 };
             };
             /** @description Validation Error */
