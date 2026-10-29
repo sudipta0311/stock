@@ -19,6 +19,7 @@ from wealth.db.models import (
     BrokerCashFlowRecord,
     HoldingLot,
     HouseholdMember,
+    LoanEventRecord,
     ManualAsset,
     Profile,
     RealisedTrade,
@@ -34,6 +35,7 @@ from wealth.policy.actions import SatelliteIdea
 from wealth.policy.debt_yields import load_debt_yields
 from wealth.policy.global_split import GeoTilts
 from wealth.policy.household import MemberProfile
+from wealth.policy.loans import LoanCandidate
 from wealth.policy.personalise import (
     HoldingInput,
     HoldingLotInput,
@@ -55,6 +57,7 @@ from wealth.schemas.profile import (
     residency_from_stored,
 )
 from wealth.valuation import PriceUnavailable, Valuation, value_asset
+from wealth.valuation.loans import LoanEvent, loan_position
 
 _MANUAL_PRICES_PATH = Path(__file__).resolve().parents[3] / "rules" / "manual_prices.yaml"
 
@@ -107,10 +110,48 @@ def _manual_assets(
     valued: list[tuple[AnyAsset, Valuation]] = []
     notes: list[str] = []
     for row in rows:
-        asset = parse_asset(dict(row.details)).model_copy(
+        details = dict(row.details)
+        if row.asset_type == "loan" and "outstanding_as_of" not in details:
+            saved_at = row.updated_at.date() if row.updated_at is not None else as_of
+            details["outstanding_as_of"] = f"{saved_at.year:04d}-{saved_at.month:02d}"
+        asset = parse_asset(details).model_copy(
             update={"member_id": str(row.member_id), "joint": row.joint}
         )
         if isinstance(asset, LoanAsset):
+            event_rows = session.scalars(
+                select(LoanEventRecord)
+                .where(
+                    LoanEventRecord.user_id == user_id,
+                    LoanEventRecord.loan_id == row.id,
+                )
+                .order_by(LoanEventRecord.on_date, LoanEventRecord.created_at, LoanEventRecord.id)
+            )
+            events = tuple(
+                LoanEvent(
+                    kind=event.kind,
+                    on_date=event.on_date,
+                    amount=event.amount,
+                    rate_pct=event.rate_pct,
+                    emi=event.emi,
+                    note=event.note,
+                )
+                for event in event_rows
+            )
+            position = loan_position(asset, events, as_of)
+            rate = Decimal(1)
+            if asset.currency != "INR":
+                fx_row = store.latest_fx_rate(session, f"{asset.currency}/INR", as_of)
+                if fx_row is None or (as_of - fx_row[1]).days > 10:
+                    notes.append(f"loan_fx_missing:{asset.currency}")
+                    continue
+                rate = fx_row[0]
+            asset = asset.model_copy(
+                update={
+                    "outstanding": position.outstanding * rate,
+                    "emi": asset.emi * rate if asset.emi is not None else None,
+                    "currency": "INR",
+                }
+            )
             valuation = Valuation(
                 value_today=Decimal("0.00"),
                 maturity_value=None,
@@ -131,6 +172,81 @@ def _manual_assets(
                 continue
         valued.append((asset, valuation))
     return tuple(valued), notes
+
+
+def _loan_candidates(
+    session: Session, user_id: UUID, as_of: date, profile: Profile | None
+) -> tuple[LoanCandidate, ...]:
+    rows = session.scalars(
+        select(ManualAsset)
+        .where(
+            ManualAsset.user_id == user_id,
+            ManualAsset.asset_type == "loan",
+            ManualAsset.status == "active",
+        )
+        .order_by(ManualAsset.created_at, ManualAsset.id)
+    )
+    candidates: list[LoanCandidate] = []
+    for row in rows:
+        details = dict(row.details)
+        if "outstanding_as_of" not in details:
+            saved_at = row.updated_at.date() if row.updated_at is not None else as_of
+            details["outstanding_as_of"] = f"{saved_at.year:04d}-{saved_at.month:02d}"
+        asset = parse_asset(details)
+        if not isinstance(asset, LoanAsset):
+            continue
+        events = tuple(
+            LoanEvent(
+                kind=event.kind,
+                on_date=event.on_date,
+                amount=event.amount,
+                rate_pct=event.rate_pct,
+                emi=event.emi,
+                note=event.note,
+            )
+            for event in session.scalars(
+                select(LoanEventRecord)
+                .where(
+                    LoanEventRecord.user_id == user_id,
+                    LoanEventRecord.loan_id == row.id,
+                )
+                .order_by(LoanEventRecord.on_date, LoanEventRecord.created_at, LoanEventRecord.id)
+            )
+        )
+        position = loan_position(asset, events, as_of)
+        fx_rate = Decimal(1)
+        if asset.currency != "INR":
+            fx_row = store.latest_fx_rate(session, f"{asset.currency}/INR", as_of)
+            if fx_row is None or (as_of - fx_row[1]).days > 10:
+                continue
+            fx_rate = fx_row[0]
+        member = session.scalar(
+            select(HouseholdMember).where(
+                HouseholdMember.user_id == user_id,
+                HouseholdMember.id == row.member_id,
+            )
+        )
+        member_tax = dict(member.tax or {}) if member is not None else {}
+        member_residency = dict(member.residency or {}) if member is not None else {}
+        regime = member_tax.get("tax_regime") or (profile.tax_regime if profile else None)
+        slab = member_tax.get("tax_slab_pct") or (profile.tax_slab_pct if profile else None)
+        country = member_residency.get("country") or (
+            (profile.residency or {}).get("country", "IN") if profile else "IN"
+        )
+        candidates.append(
+            LoanCandidate(
+                id=str(row.id),
+                loan=asset,
+                outstanding_inr=position.outstanding * fx_rate,
+                emi_inr=asset.emi * fx_rate if asset.emi is not None else None,
+                tax_regime=regime if regime in {"old", "new"} else None,
+                tax_slab_pct=Decimal(str(slab)) if slab is not None else None,
+                country="DK" if country == "DK" else "IN",
+                member_id=str(row.member_id),
+                never_pays_off=position.never_pays_off,
+            )
+        )
+    return tuple(candidates)
 
 
 def _holdings(
@@ -564,6 +680,7 @@ def load_policy_inputs(
             equity_stcg=self_member.realised_equity_stcg,
         ),
         members=members,
+        loan_candidates=_loan_candidates(session, user_id, as_of, profile),
         deployment_mode=deployment_mode,
         notes=tuple(notes),
     )

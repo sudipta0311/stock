@@ -52,6 +52,7 @@ class _Candidate:
     copy_key: str
     amount: Decimal | None
     position: int
+    rate_pct: Decimal | None = None
 
 
 def _document(plan: Any) -> Mapping[str, Any]:
@@ -92,9 +93,9 @@ def _safe_key(value: Any) -> str:
     return f"detail_{digest}"
 
 
-def _note_parts(value: Any) -> tuple[str, Decimal | None] | None:
+def _note_parts(value: Any) -> tuple[str, Decimal | None, Decimal | None] | None:
     if isinstance(value, str):
-        return _safe_key(value), None
+        return _safe_key(value), None, None
     if not isinstance(value, Mapping):
         return None
     key = value.get("key", value.get("code", value.get("reason")))
@@ -104,24 +105,38 @@ def _note_parts(value: Any) -> tuple[str, Decimal | None] | None:
         (_positive_amount(value.get(field)) for field in ("amount", "gap", "value")),
         None,
     )
-    return _safe_key(key), amount
+    rate_pct = _decimal(value.get("rate_pct"))
+    return _safe_key(key), amount, rate_pct
 
 
 def _candidate_rows(plan: Mapping[str, Any]) -> list[_Candidate]:
     rows: dict[str, _Candidate] = {}
     position = 0
 
-    def add(key: str, copy_key: str | None = None, amount: Decimal | None = None) -> None:
+    def add(
+        key: str,
+        copy_key: str | None = None,
+        amount: Decimal | None = None,
+        rate_pct: Decimal | None = None,
+    ) -> None:
         nonlocal position
         candidate_key = _safe_key(key)
         existing = rows.get(candidate_key)
         resolved_copy_key = _safe_key(copy_key or key)
         if existing is None:
-            rows[candidate_key] = _Candidate(candidate_key, resolved_copy_key, amount, position)
-            position += 1
-        elif existing.amount is None and amount is not None:
             rows[candidate_key] = _Candidate(
-                candidate_key, existing.copy_key, amount, existing.position
+                candidate_key, resolved_copy_key, amount, position, rate_pct
+            )
+            position += 1
+        elif (existing.amount is None and amount is not None) or (
+            existing.rate_pct is None and rate_pct is not None
+        ):
+            rows[candidate_key] = _Candidate(
+                candidate_key,
+                existing.copy_key,
+                amount if amount is not None else existing.amount,
+                existing.position,
+                rate_pct if rate_pct is not None else existing.rate_pct,
             )
 
     for field_name in ("notes", "residency_notes", "placement_notes"):
@@ -131,8 +146,8 @@ def _candidate_rows(plan: Mapping[str, Any]) -> list[_Candidate]:
         for raw_value in raw_values:
             parsed = _note_parts(raw_value)
             if parsed is not None:
-                key, amount = parsed
-                add(key, amount=amount)
+                key, amount, rate_pct = parsed
+                add(key, amount=amount, rate_pct=rate_pct)
 
     for raw_item in plan.get("foundation", ()):
         if not isinstance(raw_item, Mapping):
@@ -154,8 +169,8 @@ def _candidate_rows(plan: Mapping[str, Any]) -> list[_Candidate]:
             parsed = _note_parts(raw_warning)
             if parsed is None:
                 continue
-            key, amount = parsed
-            add(key, amount=amount)
+            key, amount, rate_pct = parsed
+            add(key, amount=amount, rate_pct=rate_pct)
 
     for raw_option in plan.get("unranked_options", ()):
         if not isinstance(raw_option, Mapping):
@@ -223,8 +238,13 @@ def highlights(plan: Any, context: HighlightContext) -> list[Highlight]:
         title = str(definition.get("title", "Review a plan detail"))
         body = str(definition.get("body", "One detail may change what to do next."))
         amount_text = format_inr(candidate.amount, style="compact") if candidate.amount else ""
-        title = title.format(amount=amount_text)
-        body = body.format(amount=amount_text)
+        rate_text = (
+            f"{format(candidate.rate_pct.normalize(), 'f')}%"
+            if candidate.rate_pct is not None
+            else ""
+        )
+        title = title.format(amount=amount_text, rate=rate_text)
+        body = body.format(amount=amount_text, rate=rate_text)
         severity = definition.get("severity", "info")
         if severity not in {"info", "attention"}:
             severity = "info"

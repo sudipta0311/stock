@@ -35,6 +35,11 @@ const AssetDetailPage = lazy(() =>
     default: module.AssetDetailPage,
   })),
 );
+const LoanDetailPage = lazy(() =>
+  import("../money/LoanDetailPage").then((module) => ({
+    default: module.LoanDetailPage,
+  })),
+);
 const OnboardingPage = lazy(() =>
   import("../onboarding/OnboardingPage").then((module) => ({
     default: module.OnboardingPage,
@@ -182,6 +187,7 @@ export function App() {
                 <Route path="money" element={<MoneyMapPage />} />
                 <Route path="money/add/:type" element={<AddAssetPage />} />
                 <Route path="money/asset/:id" element={<AssetDetailPage />} />
+                <Route path="money/loan/:id" element={<LoanDetailPage />} />
                 <Route path="money/holding/:id" element={<HoldingPage />} />
                 <Route path="import" element={<ImportPage />} />
                 <Route path="import/:jobId" element={<ImportReviewPage />} />

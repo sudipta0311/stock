@@ -352,6 +352,7 @@ def test_networth_snapshot_calculates_sleeves_debt_liquidity_and_calendar(
             "asset_type": "loan",
             "loan_kind": "home",
             "outstanding": "2000000",
+            "outstanding_as_of": "2027-02",
             "rate_pct": "8.5",
         },
     ]

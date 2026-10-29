@@ -51,14 +51,22 @@ from wealth.policy.household import (
     build_member_contexts,
 )
 from wealth.policy.insurance_review import review_policy
+from wealth.policy.loans import (
+    LoanPlanContext,
+    load_loan_policy_rules,
+    load_tax_relief_rules,
+    pay_extra_or_invest,
+)
 from wealth.policy.placement import place_actions
 from wealth.policy.rebalance import band_breaches
 from wealth.policy.residency import (
     deployment_disclaimer,
     india_core_vehicle,
+    load_residency_rules,
     residency_note_codes,
 )
 from wealth.policy.routes import RouteContext, RouteDecision, select_route
+from wealth.policy.rules import decimal_rule, resolve_rules
 from wealth.policy.snapshot import WealthSnapshot
 from wealth.policy.stress import load_stress_rules, stress_compare, stress_test
 from wealth.policy.tax import Lot, load_tax_rules, ltcg_harvest
@@ -139,6 +147,7 @@ class UserData:
     realised_trades_this_fy: RealisedTradesThisFy = RealisedTradesThisFy()
     notes: tuple[str, ...] = ()
     members: tuple[MemberProfile, ...] = ()
+    loan_candidates: tuple[Any, ...] = ()
     deployment_mode: Literal["personal", "public"] = "personal"
 
 
@@ -212,6 +221,7 @@ class WeeklyPlan(BaseModel):
     exit_cards: list[dict[str, Any]]
     stress: dict[str, Any]
     notes: list[str]
+    warnings: list[dict[str, Any]] = Field(default_factory=list)
     residency: Residency = Field(default_factory=Residency)
     residency_notes: list[str] = Field(default_factory=list)
     members: list[PlanMember] = Field(default_factory=list)
@@ -297,7 +307,11 @@ _EXIT_ACTION_KINDS: dict[str, ActionKind] = {
     "REVIEW_THEN_EXIT": "REVIEW_EXIT",
     "SWAP": "SWAP",
 }
-_FOUNDATION_ACTION_KINDS = {"PAY_DOWN_DEBT", "BUILD_EMERGENCY_FUND"}
+_FOUNDATION_ACTION_KINDS = {
+    "PAY_DOWN_DEBT",
+    "PAY_EXTRA_ON_LOAN",
+    "BUILD_EMERGENCY_FUND",
+}
 _BUY_ACTION_KINDS = {"BUY_LUMPSUM", "BUY_STP", "BUY_STOCK_TRANCHE"}
 
 
@@ -1339,17 +1353,135 @@ def personalise(
         week=week,
         india_core_vehicle=india_core_vehicle(residency),
     )
+    loan_warnings: list[dict[str, Any]] = []
+    loan_action: Action | None = None
+    if user_data.loan_candidates:
+        foundation_rules = resolve_rules()["foundation"]
+        high_interest_threshold = decimal_rule(
+            foundation_rules["high_interest_debt_rate_pct"],
+            "foundation.high_interest_debt_rate_pct",
+        )
+        tax_slab = user_data.profile.tax_slab_pct or Decimal(0)
+        safe_return = (
+            market.debt_yields.get("bank_fd", Decimal(0)) * (Decimal(100) - tax_slab) / Decimal(100)
+        )
+        monthly_income = (
+            household_financial_context.annual_income / Decimal(12)
+            if household_financial_context.annual_income is not None
+            else None
+        )
+        residency_rules = load_residency_rules()
+        loan_decision = pay_extra_or_invest(
+            user_data.loan_candidates,
+            LoanPlanContext(
+                spare_money_inr=household_new_money,
+                emergency_fund_gap_inr=foundation["emergency_fund"].gap or Decimal(0),
+                monthly_income_inr=monthly_income,
+                expected_safe_return_pct=safe_return,
+                high_interest_threshold_pct=high_interest_threshold,
+                tax_rules=load_tax_relief_rules(),
+                debt_load_rules=load_loan_policy_rules(),
+                danish_interest_rule=residency_rules.get("denmark", {}).get("interest_deduction"),
+            ),
+        )
+        if loan_decision.debt_load_level in {"attention", "high"}:
+            loan_warnings.append(
+                {
+                    "key": f"loan_debt_load_{loan_decision.debt_load_level}",
+                    "rate_pct": loan_decision.debt_load_pct,
+                }
+            )
+        high_card = max(
+            (
+                candidate
+                for candidate in user_data.loan_candidates
+                if candidate.loan.loan_kind == "credit_card"
+                and candidate.loan.rate_pct >= high_interest_threshold
+            ),
+            key=lambda item: (item.loan.rate_pct, item.id),
+            default=None,
+        )
+        if high_card is not None:
+            loan_warnings.append(
+                {"key": "loan_high_interest_card", "rate_pct": high_card.loan.rate_pct}
+            )
+        if any(candidate.never_pays_off for candidate in user_data.loan_candidates):
+            loan_warnings.append({"key": "loan_never_pays_off"})
+        selected_loan = next(
+            (
+                candidate
+                for candidate in user_data.loan_candidates
+                if candidate.id == loan_decision.loan_id
+            ),
+            None,
+        )
+        if (
+            loan_decision.action == "PAY_EXTRA"
+            and loan_decision.suggested_amount_inr > 0
+            and selected_loan is not None
+        ):
+            loan_action = Action(
+                rank=1,
+                kind="PAY_EXTRA_ON_LOAN",
+                sleeve="debt",
+                instrument_category="loan",
+                amount=loan_decision.suggested_amount_inr,
+                reason_code=loan_decision.reason_codes[0],
+                params={
+                    "loan_id": selected_loan.id,
+                    "loan_kind": selected_loan.loan.loan_kind,
+                    "effective_rate_pct": format(loan_decision.effective_rate_pct or 0, "f"),
+                    "safe_return_pct": format(loan_decision.safe_return_pct, "f"),
+                    "advice": loan_decision.answer,
+                },
+                member_id=selected_loan.member_id or self_member.id,
+            )
+            week_input = week_input.model_copy(
+                update={
+                    "new_money": max(
+                        Decimal(0), household_new_money - loan_decision.suggested_amount_inr
+                    )
+                }
+            )
     action_list = build_action_list(week_input, apply_weekly_cap=False)
     member_sips = _member_sip_actions(week_input, member_profiles)
+    loan_carry = Decimal(0)
+    if loan_action is not None:
+        candidate = next(
+            (
+                item
+                for item in user_data.loan_candidates
+                if item.id == loan_action.params.get("loan_id")
+            ),
+            None,
+        )
+        existing_debt_amount = sum(
+            (action.amount for action in action_list.actions if action.kind == "PAY_DOWN_DEBT"),
+            Decimal(0),
+        )
+        combined_amount = loan_action.amount + existing_debt_amount
+        if candidate is not None:
+            applied_amount = min(combined_amount, candidate.outstanding_inr)
+            loan_carry = round_paise(combined_amount - applied_amount)
+            loan_action = loan_action.model_copy(update={"amount": round_paise(applied_amount)})
     action_list = action_list.model_copy(
         update={
             "actions": [
-                *(action for action in action_list.actions if action.kind != "REBALANCE_SIPS"),
+                *(
+                    action
+                    for action in action_list.actions
+                    if action.kind != "REBALANCE_SIPS"
+                    and (loan_action is None or action.kind != "PAY_DOWN_DEBT")
+                ),
                 *member_sips,
+                *([loan_action] if loan_action is not None else []),
             ],
             "status": "ACTIONS"
-            if any(action.kind != "REBALANCE_SIPS" for action in action_list.actions) or member_sips
+            if any(action.kind != "REBALANCE_SIPS" for action in action_list.actions)
+            or member_sips
+            or loan_action is not None
             else "NONE",
+            "carry_forward": round_paise(action_list.carry_forward + loan_carry),
         }
     )
     placement = place_actions(

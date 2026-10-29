@@ -142,6 +142,17 @@ def test_development_settings_leave_email_allow_list_optional() -> None:
     assert settings.allowed_email_list == []
 
 
+def test_loan_endpoints_are_in_the_openapi_contract() -> None:
+    paths = app.openapi()["paths"]
+
+    assert "/v1/loans" in paths
+    assert {"get"} <= paths["/v1/loans"].keys()
+    assert {"get"} <= paths["/v1/loans/{loan_id}"].keys()
+    assert {"post"} <= paths["/v1/loans/{loan_id}/events"].keys()
+    assert {"delete"} <= paths["/v1/loans/{loan_id}/events/{event_id}"].keys()
+    assert {"post"} <= paths["/v1/loans/{loan_id}/prepay-preview"].keys()
+
+
 def test_production_settings_require_email_allow_list() -> None:
     with pytest.raises(ValidationError, match="ALLOWED_EMAILS"):
         Settings(

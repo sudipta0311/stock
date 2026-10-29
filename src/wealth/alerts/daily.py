@@ -62,7 +62,15 @@ def reminders_due(calendar: list[dict[str, Any]], today: date) -> list[dict[str,
         except (KeyError, ValueError):
             continue
         days_until = (event_date - today).days
-        if days_until not in _REMINDER_OFFSETS:
+        kind = str(event.get("kind", "event"))
+        allowed_offsets = (
+            {3}
+            if kind == "loan_payment"
+            else {0}
+            if kind == "loan_rate_review"
+            else set(_REMINDER_OFFSETS)
+        )
+        if days_until not in allowed_offsets:
             continue
         scheduled.append(
             {
@@ -70,7 +78,7 @@ def reminders_due(calendar: list[dict[str, Any]], today: date) -> list[dict[str,
                 "event_on": event_date.isoformat(),
                 "notify_on": today.isoformat(),
                 "offset_days": days_until,
-                "reminder_kind": f"{event.get('kind', 'event')}_{days_until}",
+                "reminder_kind": f"{kind}_{days_until}",
             }
         )
     return sorted(

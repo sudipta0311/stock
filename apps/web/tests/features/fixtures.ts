@@ -1,4 +1,4 @@
-import type { NetworthResponse } from "../../src/money/api";
+import type { LoanListResponse, NetworthResponse } from "../../src/money/api";
 import type { ActionResponse, WeeklyPlan } from "../../src/planning/api";
 import { HttpResponse, http } from "msw";
 
@@ -27,6 +27,40 @@ export function networth(
     maturity_calendar: [],
     net_worth: "1000000.00",
     unvalued_assets: [],
+    ...overrides,
+  };
+}
+
+export function loanSummary(
+  overrides: Partial<LoanListResponse> = {},
+): LoanListResponse {
+  return {
+    advice: "Pay extra toward this loan.",
+    advice_kind: "PAY_EXTRA",
+    debt_load_level: "fine",
+    debt_load_pct: "25.0",
+    loans: [
+      {
+        id: "loan-test-1",
+        name: "Home loan",
+        lender: "Sample Bank",
+        currency: "INR",
+        outstanding: "1000000.00",
+        outstanding_inr: "1000000.00",
+        rate_pct: "8.5",
+        emi: "10000.00",
+        emi_inr: "10000.00",
+        months_left: 54,
+        payoff_month: { year: 2031, month: 3 },
+        percent_repaid: "25.00",
+        never_pays_off: false,
+        fx_missing: false,
+      },
+    ],
+    remaining_inr: "1000000.00",
+    monthly_emis_inr: "10000.00",
+    suggested_amount_inr: "5000.00",
+    reason_codes: [],
     ...overrides,
   };
 }

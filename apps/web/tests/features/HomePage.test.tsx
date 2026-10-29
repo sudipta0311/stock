@@ -5,7 +5,7 @@ import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 import { axe } from "vitest-axe";
 import englishCopy from "../../src/copy/en.json";
-import { HomePage } from "../../src/home/HomePage";
+import { actionHowTo, HomePage } from "../../src/home/HomePage";
 import type { ActionResponse } from "../../src/planning/api";
 import { action, baseHomeHandlers, weeklyPlan } from "./fixtures";
 import { renderWithQueries } from "./render";
@@ -35,6 +35,26 @@ function withRoute(route: string, id = `action-${route}`): ActionResponse {
 }
 
 describe("Home this week", () => {
+  it("uses loan-specific plain wording for a pay-extra action", () => {
+    const payLoan = action({
+      payload: {
+        kind: "PAY_EXTRA_ON_LOAN",
+        amount: "5000.00",
+        reason_code: "loan_cost_above_safe_return",
+        params: {
+          advice:
+            "This loan costs more than safe money is expected to earn. Pay extra toward it.",
+        },
+      },
+    });
+
+    expect(
+      actionHowTo(payLoan, undefined, [], undefined, "INR", undefined),
+    ).toBe(
+      "This loan costs more than safe money is expected to earn. Pay extra toward it.",
+    );
+  });
+
   it("shows a positive no-action state when the API returns zero actions", async () => {
     server.use(...baseHomeHandlers([]));
     renderHome();

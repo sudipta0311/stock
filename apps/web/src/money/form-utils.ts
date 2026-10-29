@@ -46,6 +46,11 @@ export function validateAssetValues(
         errors[field.name] = "Enter a rupee amount such as 5 lakh or 50k.";
       }
     } else if (
+      field.kind === "amount" &&
+      !/^\d+(?:\.\d{1,2})?$/.test(String(value))
+    ) {
+      errors[field.name] = "Enter an amount with up to two decimal places.";
+    } else if (
       field.kind === "rate_pct" &&
       !/^\d+(?:\.\d{1,4})?$/.test(String(value))
     ) {
@@ -84,6 +89,8 @@ export function serializeAssetValues(
     }
     if (field.kind === "rupees") {
       body[field.name] = parseInr(String(raw));
+    } else if (field.kind === "amount") {
+      body[field.name] = String(raw).trim();
     } else if (field.kind === "number") {
       body[field.name] = Number(raw);
     } else if (field.kind === "list" && typeof raw === "string") {

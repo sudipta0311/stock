@@ -247,7 +247,7 @@ class UnvaluedAssetResponse(MoneyMapModel):
     id: UUID
     asset_type: str
     label: str
-    reason: Literal["price_needed", "rate_needed"]
+    reason: Literal["price_needed", "rate_needed", "fx_needed"]
 
 
 class HoldingValuationResponse(MoneyMapModel):
@@ -590,6 +590,7 @@ def refresh_networth_snapshot(
         FxRate,
         HoldingLot,
         ImportJob,
+        LoanEventRecord,
         ManualAsset,
         NetworthSnapshot,
         Profile,
@@ -607,6 +608,7 @@ def refresh_networth_snapshot(
     valued_assets: list[tuple[AnyAsset, Valuation]] = []
     valuation_by_id: dict[UUID, Valuation] = {}
     unvalued_assets: list[dict[str, Any]] = []
+    loan_positions: dict[UUID, tuple[Any, Decimal]] = {}
     prices = DbPriceProvider(session)
 
     for record in records:
@@ -614,6 +616,66 @@ def refresh_networth_snapshot(
         stored = record.valuation
         needs_refresh = record.value_as_of is None or record.value_as_of < today
         if isinstance(asset, LoanAsset):
+            from wealth.valuation.loans import LoanEvent, loan_position
+
+            if "outstanding_as_of" not in record.details:
+                saved_at = record.updated_at.date() if record.updated_at is not None else today
+                asset = asset.model_copy(
+                    update={"outstanding_as_of": MonthYear(saved_at.year, saved_at.month)}
+                )
+            event_rows = session.scalars(
+                select(LoanEventRecord)
+                .where(
+                    LoanEventRecord.user_id == user_id,
+                    LoanEventRecord.loan_id == record.id,
+                )
+                .order_by(LoanEventRecord.on_date, LoanEventRecord.created_at, LoanEventRecord.id)
+            )
+            position = loan_position(
+                asset,
+                [
+                    LoanEvent(
+                        kind=row.kind,
+                        on_date=row.on_date,
+                        amount=row.amount,
+                        rate_pct=row.rate_pct,
+                        emi=row.emi,
+                        note=row.note,
+                    )
+                    for row in event_rows
+                ],
+                today,
+            )
+            fx_rate = Decimal(1)
+            if asset.currency != "INR":
+                fx_row = session.execute(
+                    select(FxRate.rate, FxRate.as_of)
+                    .where(
+                        FxRate.pair == f"{asset.currency}/INR",
+                        FxRate.as_of <= today,
+                    )
+                    .order_by(FxRate.as_of.desc())
+                    .limit(1)
+                ).one_or_none()
+                if fx_row is None or (today - fx_row.as_of).days > 10:
+                    unvalued_assets.append(
+                        {
+                            "id": str(record.id),
+                            "asset_type": record.asset_type,
+                            "label": record.details.get("label") or record.asset_type,
+                            "reason": "fx_needed",
+                        }
+                    )
+                    continue
+                fx_rate = fx_row.rate
+            loan_positions[record.id] = (position, fx_rate)
+            asset = asset.model_copy(
+                update={
+                    "outstanding": position.outstanding * fx_rate,
+                    "emi": asset.emi * fx_rate if asset.emi is not None else None,
+                    "currency": "INR",
+                }
+            )
             valuation = _ZERO_VALUATION
         elif stored is not None and not needs_refresh:
             valuation = _valuation_from_json(stored)
@@ -769,6 +831,46 @@ def refresh_networth_snapshot(
         ),
     )
     events = _calendar_events(records, valuation_by_id, today)
+    for record in records:
+        calculated = loan_positions.get(record.id)
+        if calculated is None:
+            continue
+        position, fx_rate = calculated
+        loan = _validate_asset(dict(record.details))
+        for event_date, kind, label in (
+            (position.next_emi_date, "loan_payment", "Loan monthly payment"),
+            (
+                position.payoff_month.first_day() if position.payoff_month else None,
+                "loan_payoff",
+                "Loan payoff",
+            ),
+        ):
+            if event_date is not None and _in_window(event_date, today):
+                events.append(
+                    {
+                        "date": event_date.isoformat(),
+                        "asset_id": str(record.id),
+                        "kind": kind,
+                        "amount": _money(position.outstanding * fx_rate),
+                        "label": label,
+                    }
+                )
+        if isinstance(loan, LoanAsset) and loan.rate_type == "floating":
+            review_month = loan.start or loan.outstanding_as_of
+            review_date = date(today.year, review_month.month, 1)
+            if review_date <= today:
+                review_date = date(today.year + 1, review_month.month, 1)
+            if _in_window(review_date, today):
+                events.append(
+                    {
+                        "date": review_date.isoformat(),
+                        "asset_id": str(record.id),
+                        "kind": "loan_rate_review",
+                        "amount": None,
+                        "label": "Check your loan rate",
+                    }
+                )
+    events.sort(key=lambda event: (event["date"], event["asset_id"], event["kind"]))
 
     totals = {
         "net_worth": _money(snapshot.net_worth),

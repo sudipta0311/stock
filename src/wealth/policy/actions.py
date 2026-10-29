@@ -22,6 +22,7 @@ from wealth.schemas.common import Rupees
 PlanActionSleeve = Literal["equity_india", "equity_global", "debt", "gold", "cash"]
 ActionKind = Literal[
     "PAY_DOWN_DEBT",
+    "PAY_EXTRA_ON_LOAN",
     "BUILD_EMERGENCY_FUND",
     "BUY_LUMPSUM",
     "BUY_STP",

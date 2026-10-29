@@ -32,6 +32,7 @@ _POST_INITIAL_TABLES = {
     "realised_trades",
     "broker_cash_flows",
     "highlight_dismissals",
+    "loan_events",
 }
 _NON_USER_ID_TABLES = {
     "household_access",

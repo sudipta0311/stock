@@ -6,13 +6,22 @@
       "title": "Asset Type",
       "type": "string"
     },
+    "currency": {
+      "default": "INR",
+      "enum": [
+        "INR",
+        "DKK",
+        "EUR"
+      ],
+      "title": "Currency",
+      "type": "string"
+    },
     "emi": {
       "anyOf": [
         {
           "format": "decimal",
           "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
-          "type": "string",
-          "x-unit": "INR"
+          "type": "string"
         },
         {
           "type": "null"
@@ -20,6 +29,20 @@
       ],
       "default": null,
       "title": "Emi"
+    },
+    "emi_day": {
+      "anyOf": [
+        {
+          "maximum": 28,
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Emi Day"
     },
     "end": {
       "anyOf": [
@@ -50,6 +73,19 @@
       ],
       "default": null,
       "title": "Label"
+    },
+    "lender": {
+      "anyOf": [
+        {
+          "maxLength": 120,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Lender"
     },
     "loan_kind": {
       "enum": [
@@ -89,11 +125,28 @@
       "default": null,
       "title": "Notes"
     },
+    "original_amount": {
+      "anyOf": [
+        {
+          "format": "decimal",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Original Amount"
+    },
     "outstanding": {
       "format": "decimal",
       "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
-      "type": "string",
-      "x-unit": "INR"
+      "type": "string"
+    },
+    "outstanding_as_of": {
+      "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+      "type": "string"
     },
     "rate_pct": {
       "format": "decimal",
@@ -101,6 +154,46 @@
       "type": "string",
       "x-maximum": "60",
       "x-minimum": "0"
+    },
+    "rate_type": {
+      "anyOf": [
+        {
+          "enum": [
+            "fixed",
+            "floating"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Rate Type"
+    },
+    "start": {
+      "anyOf": [
+        {
+          "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "tax_relief": {
+      "default": "none",
+      "enum": [
+        "none",
+        "in_home_self_occupied",
+        "in_home_let_out",
+        "in_education",
+        "dk_interest_deduction"
+      ],
+      "title": "Tax Relief",
+      "type": "string"
     }
   },
   "required": [

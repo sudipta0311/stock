@@ -1,0 +1,4 @@
+version: 1
+debt_load:
+  fine_below_pct: "30"
+  attention_through_pct: "50"

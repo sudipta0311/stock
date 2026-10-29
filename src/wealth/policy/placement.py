@@ -53,6 +53,14 @@ def place_actions(
         if action.kind.startswith("SELL_") or action.kind in {"REVIEW_EXIT", "SWAP"}:
             placed.append(action)
             continue
+        if action.kind == "PAY_EXTRA_ON_LOAN":
+            member = next((item for item in members if item.member_id == action.member_id), None)
+            if member is None:
+                member = _preferred(members, available)[0]
+            _spend_household(available, member.member_id, action.amount, members)
+            placed.append(_assign(action, member))
+            continue
+
         if action.kind == "PAY_DOWN_DEBT":
             candidates = sorted(
                 members,

@@ -379,7 +379,7 @@
       "status": "gap"
     }
   ],
-  "inputs_digest": "2c3dbfd8b2a75c4f640474837ae7f0f053d5916938aec6acc0a50ec863fb6164",
+  "inputs_digest": "59b82951ccc3db48d59e0e5a49287711ae34dba1f14bd5bd15e5a4b4a7546e5c",
   "insurance_reviews": [],
   "members": [
     {
@@ -687,5 +687,6 @@
       "reason": "yield_unavailable"
     }
   ],
+  "warnings": [],
   "week": "2026-W44"
 }

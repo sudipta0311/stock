@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { axe } from "vitest-axe";
 import type { WeeklyPlan } from "../../src/planning/api";
 import { PlanPage } from "../../src/plan/PlanPage";
-import { networth, weeklyPlan } from "./fixtures";
+import { loanSummary, networth, weeklyPlan } from "./fixtures";
 import { renderWithQueries } from "./render";
 import { server } from "../msw";
 
@@ -82,6 +82,7 @@ function planHandlers(planOverrides: Partial<WeeklyPlan> = {}) {
       ]),
     ),
     http.get(/\/v1\/networth$/, () => HttpResponse.json(networth())),
+    http.get(/\/v1\/loans$/, () => HttpResponse.json(loanSummary())),
   ];
 }
 
@@ -217,5 +218,19 @@ describe("Plan page", () => {
     expect(document.body).toHaveTextContent(/Target ₹5 L/);
     expect(screen.getByText("By 2032")).toBeInTheDocument();
     expect((await axe(container)).violations).toEqual([]);
+  });
+
+  it("keeps loan totals and the recommendation inside collapsed details", async () => {
+    const user = userEvent.setup();
+    server.use(...planHandlers());
+    renderPlan();
+    await screen.findByRole("heading", { name: "Your money vs your plan" });
+    await user.click(screen.getByText("Details"));
+
+    const loans = screen.getByText("Loans").closest("details");
+    expect(loans).not.toHaveAttribute("open");
+    await user.click(screen.getByText("Loans"));
+    expect(screen.getByText("Total left:")).toBeInTheDocument();
+    expect(screen.getByText("Pay extra toward this loan.")).toBeInTheDocument();
   });
 });

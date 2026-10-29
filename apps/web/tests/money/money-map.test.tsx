@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { MemoryRouter, Route, Routes } from "react-router";
@@ -6,10 +12,15 @@ import { describe, expect, it } from "vitest";
 import { axe } from "vitest-axe";
 import { AddAssetPage } from "../../src/money/AssetFormPage";
 import { MoneyMapPage } from "../../src/money/MoneyMapPage";
-import type { AssetResponse, NetworthResponse } from "../../src/money/api";
+import type {
+  AssetResponse,
+  LoanListResponse,
+  NetworthResponse,
+} from "../../src/money/api";
 import { CHECKLIST_STORAGE_KEY } from "../../src/money/config";
 import { server } from "../msw";
 import { renderWithQueries } from "../features/render";
+import { loanSummary } from "../features/fixtures";
 import { HouseholdProvider } from "../../src/household/HouseholdContext";
 import { HouseholdControls } from "../../src/household/HouseholdControls";
 
@@ -68,7 +79,10 @@ function savedAsset(
   };
 }
 
-function baseHandlers(networthResponse = networth()) {
+function baseHandlers(
+  networthResponse = networth(),
+  loansResponse: LoanListResponse = { ...loanSummary(), loans: [] },
+) {
   return [
     http.get(/\/v1\/me$/, () =>
       HttpResponse.json({
@@ -94,6 +108,7 @@ function baseHandlers(networthResponse = networth()) {
     http.get(/\/v1\/members$/, () => HttpResponse.json([])),
     http.get(/\/v1\/households$/, () => HttpResponse.json([])),
     http.get(/\/v1\/plan$/, () => HttpResponse.json({ members: [] })),
+    http.get(/\/v1\/loans$/, () => HttpResponse.json(loansResponse)),
     http.get(/\/v1\/imports$/, () => HttpResponse.json([])),
     http.put(/\/v1\/me\/checklist$/, async ({ request }) =>
       HttpResponse.json(await request.json()),
@@ -116,6 +131,21 @@ function renderMap(initial = "/money") {
 }
 
 describe("Money Map", () => {
+  it("shows loan balances and links each row to loan details", async () => {
+    server.use(...baseHandlers(networth(), loanSummary()));
+    renderMap();
+
+    expect(await screen.findByText("Loans")).toBeInTheDocument();
+    expect(screen.getByText(/Total left/)).toHaveTextContent("per month");
+    const loanLink = screen.getByRole("link", {
+      name: /Home loan.*Sample Bank.*Ends Mar 2031/,
+    });
+    expect(loanLink).toHaveAttribute("href", "/money/loan/loan-test-1");
+    expect(
+      within(loanLink).getByLabelText("Amount repaid"),
+    ).toBeInTheDocument();
+  });
+
   it.each([
     {
       phrase: "FD 5L Demo Bank 7.1% till Mar 2027",

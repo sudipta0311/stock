@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 from typing import Annotated, Literal
 
@@ -9,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 from wealth.schemas.common import (
     Compounding,
+    CurrencyAmount,
     LiquidityClass,
     LoanRatePct,
     MonthYear,
@@ -234,10 +236,26 @@ class PropertyAsset(AssetBase):
 class LoanAsset(AssetBase):
     asset_type: Literal["loan"]
     loan_kind: Literal["home", "car", "personal", "education", "credit_card", "gold", "other"]
-    outstanding: Rupees
+    outstanding: CurrencyAmount
     rate_pct: LoanRatePct
-    emi: Rupees | None = None
+    emi: CurrencyAmount | None = None
     end: MonthYear | None = None
+    lender: str | None = Field(default=None, max_length=120)
+    currency: Literal["INR", "DKK", "EUR"] = "INR"
+    outstanding_as_of: MonthYear = Field(
+        default_factory=lambda: MonthYear(date.today().year, date.today().month)
+    )
+    emi_day: int | None = Field(default=None, ge=1, le=28)
+    rate_type: Literal["fixed", "floating"] | None = None
+    original_amount: CurrencyAmount | None = None
+    start: MonthYear | None = None
+    tax_relief: Literal[
+        "none",
+        "in_home_self_occupied",
+        "in_home_let_out",
+        "in_education",
+        "dk_interest_deduction",
+    ] = "none"
 
 
 type AnyAsset = Annotated[

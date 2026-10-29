@@ -24,6 +24,11 @@ _DANISH_KRONER_JSON_SCHEMA = {
     "format": "decimal",
     "x-unit": "DKK",
 }
+_CURRENCY_AMOUNT_JSON_SCHEMA = {
+    "type": "string",
+    "pattern": r"^(0|[1-9][0-9]*)(\.[0-9]{1,2})?$",
+    "format": "decimal",
+}
 _RATE_PCT_JSON_SCHEMA = {
     "type": "string",
     "pattern": r"^(0|[1-9][0-9]?)(\.[0-9]{1,4})?$",
@@ -136,6 +141,10 @@ def _rupees_decimal(value: Any) -> Decimal:
     return _strict_decimal(value)
 
 
+def _currency_decimal(value: Any) -> Decimal:
+    return _strict_decimal(value)
+
+
 def _at_most_two_places(value: Decimal) -> Decimal:
     if _decimal_places(value) > 2:
         raise ValueError("amount cannot have more than 2 decimal places")
@@ -180,6 +189,15 @@ Rupees = Annotated[
     PlainSerializer(_format_rupees, return_type=str, when_used="json"),
     WithJsonSchema(_RUPEES_JSON_SCHEMA, mode="validation"),
     WithJsonSchema(_RUPEES_JSON_SCHEMA, mode="serialization"),
+]
+CurrencyAmount = Annotated[
+    Decimal,
+    BeforeValidator(_currency_decimal),
+    AfterValidator(_at_most_two_places),
+    Field(ge=Decimal("0")),
+    PlainSerializer(_format_rupees, return_type=str, when_used="json"),
+    WithJsonSchema(_CURRENCY_AMOUNT_JSON_SCHEMA, mode="validation"),
+    WithJsonSchema(_CURRENCY_AMOUNT_JSON_SCHEMA, mode="serialization"),
 ]
 DanishKroner = Annotated[
     Decimal,

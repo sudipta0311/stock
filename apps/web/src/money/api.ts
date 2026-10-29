@@ -17,6 +17,11 @@ export type NetworthResponse = Schema<"NetworthResponse">;
 export type GoalResponse = Schema<"GoalResponse">;
 export type GoalWrite = Schema<"Goal">;
 export type AccountResponse = Schema<"AccountResponse">;
+export type LoanListResponse = Schema<"LoanListResponse">;
+export type LoanDetailResponse = Schema<"LoanDetailResponse">;
+export type LoanEventWrite = Schema<"LoanEventWrite">;
+export type PrepayPreviewWrite = Schema<"PrepayPreviewWrite">;
+export type PrepayPreviewResponse = Schema<"PrepayPreviewResponse">;
 
 function jsonRequest(method: string, payload: unknown): RequestInit {
   return {
@@ -106,6 +111,44 @@ export function getNetworth(
   memberId?: string | null,
 ): Promise<NetworthResponse> {
   return apiFetch(`/v1/networth${memberQuery(memberId)}`);
+}
+
+export function listLoans(): Promise<LoanListResponse> {
+  return apiFetch("/v1/loans");
+}
+
+export function getLoan(loanId: string): Promise<LoanDetailResponse> {
+  return apiFetch(`/v1/loans/${encodeURIComponent(loanId)}`);
+}
+
+export function recordLoanEvent(
+  loanId: string,
+  payload: LoanEventWrite,
+): Promise<Schema<"LoanEventResponse">> {
+  return apiFetch(
+    `/v1/loans/${encodeURIComponent(loanId)}/events`,
+    jsonRequest("POST", payload),
+  );
+}
+
+export function deleteLoanEvent(
+  loanId: string,
+  eventId: string,
+): Promise<void> {
+  return apiFetch(
+    `/v1/loans/${encodeURIComponent(loanId)}/events/${encodeURIComponent(eventId)}`,
+    { method: "DELETE" },
+  );
+}
+
+export function previewLoanPrepayment(
+  loanId: string,
+  payload: PrepayPreviewWrite,
+): Promise<PrepayPreviewResponse> {
+  return apiFetch(
+    `/v1/loans/${encodeURIComponent(loanId)}/prepay-preview`,
+    jsonRequest("POST", payload),
+  );
 }
 
 export function listGoals(): Promise<GoalResponse[]> {

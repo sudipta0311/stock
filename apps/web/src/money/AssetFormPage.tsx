@@ -274,6 +274,16 @@ function AssetForm({
   });
   const formDefinition: GeneratedAssetForm = assetForms[assetType];
   const fields = formDefinition.fields;
+  const formFields = useMemo(
+    () =>
+      fields.map((field) => ({
+        ...field,
+        required:
+          field.required ||
+          (assetType === "loan" && !initialAsset && field.name === "emi"),
+      })),
+    [assetType, fields, initialAsset],
+  );
   const baseDetails = initialAsset?.details ?? EMPTY_DETAILS;
   const defaults = useMemo(
     () =>
@@ -419,7 +429,7 @@ function AssetForm({
   useEffect(() => {
     if (!changed.current) return;
     const values = form.getValues();
-    const errors = validateAssetValues(fields, values);
+    const errors = validateAssetValues(formFields, values);
     setClientErrors(errors);
     if (Object.keys(errors).length) return;
     let body: Record<string, unknown>;
@@ -430,7 +440,7 @@ function AssetForm({
     }
     const timer = window.setTimeout(() => void saveBody(body), 600);
     return () => window.clearTimeout(timer);
-  }, [assetType, baseDetails, fields, form, revision]);
+  }, [assetType, baseDetails, fields, form, formFields, revision]);
 
   useEffect(() => {
     function handleReplay(event: Event) {
@@ -452,7 +462,7 @@ function AssetForm({
 
   function saveNow() {
     const values = form.getValues();
-    const errors = validateAssetValues(fields, values);
+    const errors = validateAssetValues(formFields, values);
     setClientErrors(errors);
     if (Object.keys(errors).length) return;
     try {
@@ -517,6 +527,40 @@ function AssetForm({
               Quick add could not fill this field.
             </p>
           ) : null}
+        </div>
+      );
+    }
+    if (field.kind === "amount") {
+      const currency = String(watched.currency ?? "INR");
+      const prefix = currency === "DKK" ? "kr" : currency === "EUR" ? "€" : "₹";
+      return (
+        <div key={field.name}>
+          <Field
+            id={id}
+            label={copy.label}
+            help={help}
+            error={error}
+            required={required}
+            prefix={prefix}
+          >
+            <input
+              {...form.register(name)}
+              id={id}
+              type="text"
+              inputMode="decimal"
+              value={String(watched[field.name] ?? "")}
+              placeholder="0.00"
+              aria-invalid={Boolean(error) || undefined}
+              className={`${baseInput} ${highlightClass}`}
+              onChange={(event) => {
+                form.setValue(name, event.currentTarget.value, {
+                  shouldDirty: true,
+                  shouldValidate: true,
+                });
+                markEdited();
+              }}
+            />
+          </Field>
         </div>
       );
     }
@@ -697,10 +741,10 @@ function AssetForm({
     );
   }
 
-  const requiredFields = fields.filter(
+  const requiredFields = formFields.filter(
     (field) => field.required && field.kind !== "hidden",
   );
-  const optionalFields = fields.filter(
+  const optionalFields = formFields.filter(
     (field) => !field.required && field.kind !== "hidden",
   );
   const valuation = savedAsset?.valuation as Record<string, unknown> | null;
@@ -811,7 +855,8 @@ function AssetForm({
                 type="button"
                 onClick={saveNow}
                 disabled={
-                  Object.keys(validateAssetValues(fields, watched)).length > 0
+                  Object.keys(validateAssetValues(formFields, watched)).length >
+                  0
                 }
               >
                 {saveState === "saved" ? (

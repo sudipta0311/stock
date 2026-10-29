@@ -12,8 +12,14 @@ import { Link, useNavigate } from "react-router";
 import { ApiError } from "../api/client";
 import { sumInr } from "../lib/money";
 import { Badge, Button, Card, EmptyState, Progress, Stat } from "../ui";
-import { getNetworth, listAssets, quickAdd, updateChecklist } from "./api";
-import type { AssetResponse, NetworthResponse } from "./api";
+import {
+  getNetworth,
+  listAssets,
+  listLoans,
+  quickAdd,
+  updateChecklist,
+} from "./api";
+import type { AssetResponse, LoanListResponse, NetworthResponse } from "./api";
 import {
   addPathForCategory,
   categoryLabel,
@@ -79,8 +85,9 @@ function sleeveForAsset(asset: AssetResponse): string {
     case "property":
     case "term_insurance":
     case "health_insurance":
-    case "loan":
       return englishCopy.household_ui.other_holdings;
+    case "loan":
+      return "Loans";
     case "fd":
     case "rd":
     case "ppf":
@@ -138,6 +145,89 @@ function maturityStatus(asset: AssetResponse): string {
   return (
     asset.valuation_note ||
     (asset.value_cached ? "Estimate" : "Value not added yet")
+  );
+}
+
+function formatNativeLoanAmount(amount: string, currency: string): string {
+  return new Intl.NumberFormat(currency === "INR" ? "en-IN" : "en-DK", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 0,
+  }).format(Number(amount));
+}
+
+function LoansGroup({
+  summary,
+  shownAmount,
+}: {
+  summary: LoanListResponse | null;
+  shownAmount(amount: string): string;
+}) {
+  if (!summary?.loans.length) return null;
+  return (
+    <Card className="grid gap-1">
+      <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-sm font-semibold text-muted-foreground">Loans</h3>
+        <p className="text-xs text-muted-foreground">
+          Total left {shownAmount(summary.remaining_inr)} ·{" "}
+          {shownAmount(summary.monthly_emis_inr)} per month
+        </p>
+      </div>
+      {summary.loans.map((loan) => {
+        const payoff = loan.payoff_month
+          ? new Intl.DateTimeFormat("en-IN", {
+              month: "short",
+              year: "numeric",
+            }).format(
+              new Date(loan.payoff_month.year, loan.payoff_month.month - 1, 1),
+            )
+          : null;
+        return (
+          <Link
+            key={loan.id}
+            to={`/money/loan/${loan.id}`}
+            className="flex min-h-16 items-center justify-between gap-3 border-t border-line py-2 hover:text-brand"
+          >
+            <span className="flex min-w-0 flex-1 items-center gap-3">
+              <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground">
+                <WalletCards aria-hidden="true" className="size-4" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <strong className="block truncate text-sm">
+                  {loan.name}
+                  {loan.lender ? ` · ${loan.lender}` : ""}
+                </strong>
+                <span className="block truncate text-xs text-muted-foreground">
+                  {loan.never_pays_off
+                    ? "Monthly payment may not cover interest"
+                    : payoff
+                      ? `Ends ${payoff}`
+                      : "End date not available"}
+                </span>
+                {loan.percent_repaid !== null ? (
+                  <Progress
+                    value={Number(loan.percent_repaid)}
+                    label="Amount repaid"
+                    quiet
+                  />
+                ) : null}
+              </span>
+            </span>
+            <span className="flex shrink-0 items-center gap-2 text-right text-sm font-semibold tabular-nums">
+              {loan.outstanding_inr
+                ? shownAmount(loan.outstanding_inr)
+                : loan.fx_missing
+                  ? "Rate needed"
+                  : formatNativeLoanAmount(loan.outstanding, loan.currency)}
+              <ChevronRight
+                aria-hidden="true"
+                className="size-4 text-muted-foreground"
+              />
+            </span>
+          </Link>
+        );
+      })}
+    </Card>
   );
 }
 
@@ -367,7 +457,11 @@ function HouseholdInsights({
           {networth.unvalued_assets.map((asset) => (
             <Link
               key={asset.id}
-              to={`/money/asset/${asset.id}`}
+              to={
+                asset.asset_type === "loan"
+                  ? `/money/loan/${asset.id}`
+                  : `/money/asset/${asset.id}`
+              }
               className="flex min-h-12 items-center justify-between border-t border-line pt-2 text-sm"
             >
               <span>
@@ -375,7 +469,9 @@ function HouseholdInsights({
                 <span className="block text-muted-foreground">
                   {asset.reason === "price_needed"
                     ? "We'll value this once today's price is in."
-                    : "Add the rate from your certificate."}
+                    : asset.reason === "fx_needed"
+                      ? "Add a current currency rate to include this loan."
+                      : "Add the rate from your certificate."}
                 </span>
               </span>
               <ArrowRight aria-hidden="true" className="size-4" />
@@ -402,6 +498,7 @@ export function MoneyMapPage() {
   const [assets, setAssets] = useState<AssetResponse[]>([]);
   const [importJobs, setImportJobs] = useState<ImportJob[]>([]);
   const [networth, setNetworth] = useState<NetworthResponse | null>(null);
+  const [loanSummary, setLoanSummary] = useState<LoanListResponse | null>(null);
   const [plan, setPlan] = useState<WeeklyPlan | null>(null);
   const [checklist, setChecklist] = useState<string[]>(readChecklist);
   const [loading, setLoading] = useState(true);
@@ -417,22 +514,28 @@ export function MoneyMapPage() {
     setOfflineSummaryOnly(false);
     setAssets([]);
     setNetworth(null);
+    setLoanSummary(null);
     setPlan(null);
     setImportJobs([]);
     const planRequest = apiPathAvailable("/v1/plan")
       ? getPlan()
       : Promise.resolve(null);
+    const loanRequest = apiPathAvailable("/v1/loans")
+      ? listLoans()
+      : Promise.resolve(null);
     Promise.allSettled([
       listAssets(activeMemberId),
       getNetworth(activeMemberId),
       planRequest,
+      loanRequest,
     ])
-      .then(([assetResult, networthResult, planResult]) => {
+      .then(([assetResult, networthResult, planResult, loanResult]) => {
         if (!active) return;
         if (networthResult.status === "rejected") throw networthResult.reason;
         const loadedNetworth = networthResult.value;
         setNetworth(loadedNetworth);
         if (planResult.status === "fulfilled") setPlan(planResult.value);
+        if (loanResult.status === "fulfilled") setLoanSummary(loanResult.value);
         if (assetResult.status === "rejected") {
           setAssets([]);
           setOfflineSummaryOnly(true);
@@ -603,6 +706,7 @@ export function MoneyMapPage() {
   const visibleGroups = useMemo(() => {
     const groups = new Map<string, AssetResponse[]>();
     for (const asset of assets) {
+      if (asset.asset_type === "loan") continue;
       const sleeve = sleeveForAsset(asset);
       groups.set(sleeve, [...(groups.get(sleeve) ?? []), asset]);
     }
@@ -782,6 +886,7 @@ export function MoneyMapPage() {
             </p>
           </Card>
         ) : null}
+        <LoansGroup summary={loanSummary} shownAmount={shownAmount} />
         {visibleGroups.length ? (
           visibleGroups.map(([sleeve, items]) => (
             <Card key={sleeve} className="grid gap-1">

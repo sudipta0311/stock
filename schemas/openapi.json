@@ -3637,19 +3637,41 @@
             "title": "Asset Type",
             "type": "string"
           },
+          "currency": {
+            "default": "INR",
+            "enum": [
+              "INR",
+              "DKK",
+              "EUR"
+            ],
+            "title": "Currency",
+            "type": "string"
+          },
           "emi": {
             "anyOf": [
               {
                 "format": "decimal",
                 "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
-                "type": "string",
-                "x-unit": "INR"
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
             "title": "Emi"
+          },
+          "emi_day": {
+            "anyOf": [
+              {
+                "maximum": 28.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emi Day"
           },
           "end": {
             "anyOf": [
@@ -3678,6 +3700,18 @@
               }
             ],
             "title": "Label"
+          },
+          "lender": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lender"
           },
           "loan_kind": {
             "enum": [
@@ -3715,12 +3749,28 @@
             ],
             "title": "Notes"
           },
+          "original_amount": {
+            "anyOf": [
+              {
+                "format": "decimal",
+                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Original Amount"
+          },
           "outstanding": {
             "format": "decimal",
             "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
             "title": "Outstanding",
-            "type": "string",
-            "x-unit": "INR"
+            "type": "string"
+          },
+          "outstanding_as_of": {
+            "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+            "type": "string"
           },
           "rate_pct": {
             "format": "decimal",
@@ -3729,6 +3779,44 @@
             "type": "string",
             "x-maximum": "60",
             "x-minimum": "0"
+          },
+          "rate_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "fixed",
+                  "floating"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Type"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tax_relief": {
+            "default": "none",
+            "enum": [
+              "none",
+              "in_home_self_occupied",
+              "in_home_let_out",
+              "in_education",
+              "dk_interest_deduction"
+            ],
+            "title": "Tax Relief",
+            "type": "string"
           }
         },
         "required": [
@@ -3738,6 +3826,701 @@
           "rate_pct"
         ],
         "title": "LoanAsset",
+        "type": "object"
+      },
+      "LoanBalancePointResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "month": {
+            "$ref": "#/components/schemas/MonthYear"
+          },
+          "outstanding": {
+            "format": "decimal",
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+            "title": "Outstanding",
+            "type": "string"
+          }
+        },
+        "required": [
+          "month",
+          "outstanding"
+        ],
+        "title": "LoanBalancePointResponse",
+        "type": "object"
+      },
+      "LoanDetailResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "advice": {
+            "title": "Advice",
+            "type": "string"
+          },
+          "advice_kind": {
+            "title": "Advice Kind",
+            "type": "string"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "emi": {
+            "anyOf": [
+              {
+                "format": "decimal",
+                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emi"
+          },
+          "emi_inr": {
+            "anyOf": [
+              {
+                "format": "decimal",
+                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+                "type": "string",
+                "x-unit": "INR"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emi Inr"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/LoanEventResponse"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "fx_missing": {
+            "title": "Fx Missing",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "interest_paid": {
+            "format": "decimal",
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+            "title": "Interest Paid",
+            "type": "string"
+          },
+          "interest_to_pay": {
+            "anyOf": [
+              {
+                "format": "decimal",
+                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interest To Pay"
+          },
+          "lender": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lender"
+          },
+          "months_left": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Months Left"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "never_pays_off": {
+            "title": "Never Pays Off",
+            "type": "boolean"
+          },
+          "next_emi_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Emi Date"
+          },
+          "outstanding": {
+            "format": "decimal",
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+            "title": "Outstanding",
+            "type": "string"
+          },
+          "outstanding_inr": {
+            "anyOf": [
+              {
+                "format": "decimal",
+                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+                "type": "string",
+                "x-unit": "INR"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outstanding Inr"
+          },
+          "payoff_month": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MonthYear"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "percent_repaid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percent Repaid"
+          },
+          "principal_paid": {
+            "format": "decimal",
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+            "title": "Principal Paid",
+            "type": "string"
+          },
+          "rate_pct": {
+            "title": "Rate Pct",
+            "type": "string"
+          },
+          "rate_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Type"
+          },
+          "reason_codes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reason Codes",
+            "type": "array"
+          },
+          "scheduled_payments": {
+            "items": {
+              "$ref": "#/components/schemas/LoanPaymentResponse"
+            },
+            "title": "Scheduled Payments",
+            "type": "array"
+          },
+          "suggested_amount_inr": {
+            "format": "decimal",
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+            "title": "Suggested Amount Inr",
+            "type": "string",
+            "x-unit": "INR"
+          },
+          "tax_relief": {
+            "title": "Tax Relief",
+            "type": "string"
+          },
+          "tax_relief_needs_review": {
+            "title": "Tax Relief Needs Review",
+            "type": "boolean"
+          },
+          "tax_source_urls": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tax Source Urls",
+            "type": "array"
+          },
+          "yearly_balances": {
+            "items": {
+              "$ref": "#/components/schemas/LoanBalancePointResponse"
+            },
+            "title": "Yearly Balances",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "lender",
+          "currency",
+          "outstanding",
+          "outstanding_inr",
+          "rate_pct",
+          "emi",
+          "emi_inr",
+          "months_left",
+          "payoff_month",
+          "percent_repaid",
+          "never_pays_off",
+          "fx_missing",
+          "rate_type",
+          "tax_relief",
+          "principal_paid",
+          "interest_paid",
+          "interest_to_pay",
+          "next_emi_date",
+          "yearly_balances",
+          "scheduled_payments",
+          "events",
+          "advice",
+          "advice_kind",
+          "suggested_amount_inr",
+          "reason_codes",
+          "tax_source_urls",
+          "tax_relief_needs_review"
+        ],
+        "title": "LoanDetailResponse",
+        "type": "object"
+      },
+      "LoanEventResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "format": "decimal",
+                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "emi": {
+            "anyOf": [
+              {
+                "format": "decimal",
+                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emi"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "on_date": {
+            "format": "date",
+            "title": "On Date",
+            "type": "string"
+          },
+          "rate_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Pct"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "on_date",
+          "amount",
+          "rate_pct",
+          "emi",
+          "note"
+        ],
+        "title": "LoanEventResponse",
+        "type": "object"
+      },
+      "LoanEventWrite": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "format": "decimal",
+                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "emi": {
+            "anyOf": [
+              {
+                "format": "decimal",
+                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emi"
+          },
+          "kind": {
+            "enum": [
+              "prepayment",
+              "rate_change",
+              "emi_change",
+              "balance_update",
+              "missed_emi",
+              "closed"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 140,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "on_date": {
+            "format": "date",
+            "title": "On Date",
+            "type": "string"
+          },
+          "rate_pct": {
+            "anyOf": [
+              {
+                "format": "decimal",
+                "pattern": "^(0|[1-9][0-9]?)(\\.[0-9]{1,4})?$",
+                "type": "string",
+                "x-maximum": "60",
+                "x-minimum": "0"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Pct"
+          }
+        },
+        "required": [
+          "kind",
+          "on_date"
+        ],
+        "title": "LoanEventWrite",
+        "type": "object"
+      },
+      "LoanListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "advice": {
+            "title": "Advice",
+            "type": "string"
+          },
+          "advice_kind": {
+            "title": "Advice Kind",
+            "type": "string"
+          },
+          "debt_load_level": {
+            "title": "Debt Load Level",
+            "type": "string"
+          },
+          "debt_load_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Debt Load Pct"
+          },
+          "loans": {
+            "items": {
+              "$ref": "#/components/schemas/LoanSummaryItem"
+            },
+            "title": "Loans",
+            "type": "array"
+          },
+          "monthly_emis_inr": {
+            "format": "decimal",
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+            "title": "Monthly Emis Inr",
+            "type": "string",
+            "x-unit": "INR"
+          },
+          "reason_codes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reason Codes",
+            "type": "array"
+          },
+          "remaining_inr": {
+            "format": "decimal",
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+            "title": "Remaining Inr",
+            "type": "string",
+            "x-unit": "INR"
+          },
+          "suggested_amount_inr": {
+            "format": "decimal",
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+            "title": "Suggested Amount Inr",
+            "type": "string",
+            "x-unit": "INR"
+          }
+        },
+        "required": [
+          "loans",
+          "remaining_inr",
+          "monthly_emis_inr",
+          "debt_load_pct",
+          "debt_load_level",
+          "advice",
+          "advice_kind",
+          "suggested_amount_inr",
+          "reason_codes"
+        ],
+        "title": "LoanListResponse",
+        "type": "object"
+      },
+      "LoanPaymentResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "format": "decimal",
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+            "title": "Amount",
+            "type": "string"
+          },
+          "interest": {
+            "format": "decimal",
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+            "title": "Interest",
+            "type": "string"
+          },
+          "on_date": {
+            "format": "date",
+            "title": "On Date",
+            "type": "string"
+          },
+          "outstanding": {
+            "format": "decimal",
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+            "title": "Outstanding",
+            "type": "string"
+          },
+          "principal": {
+            "format": "decimal",
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+            "title": "Principal",
+            "type": "string"
+          }
+        },
+        "required": [
+          "on_date",
+          "amount",
+          "principal",
+          "interest",
+          "outstanding"
+        ],
+        "title": "LoanPaymentResponse",
+        "type": "object"
+      },
+      "LoanSummaryItem": {
+        "additionalProperties": false,
+        "properties": {
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "emi": {
+            "anyOf": [
+              {
+                "format": "decimal",
+                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emi"
+          },
+          "emi_inr": {
+            "anyOf": [
+              {
+                "format": "decimal",
+                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+                "type": "string",
+                "x-unit": "INR"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emi Inr"
+          },
+          "fx_missing": {
+            "title": "Fx Missing",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "lender": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lender"
+          },
+          "months_left": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Months Left"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "never_pays_off": {
+            "title": "Never Pays Off",
+            "type": "boolean"
+          },
+          "outstanding": {
+            "format": "decimal",
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+            "title": "Outstanding",
+            "type": "string"
+          },
+          "outstanding_inr": {
+            "anyOf": [
+              {
+                "format": "decimal",
+                "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+                "type": "string",
+                "x-unit": "INR"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outstanding Inr"
+          },
+          "payoff_month": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MonthYear"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "percent_repaid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percent Repaid"
+          },
+          "rate_pct": {
+            "title": "Rate Pct",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "lender",
+          "currency",
+          "outstanding",
+          "outstanding_inr",
+          "rate_pct",
+          "emi",
+          "emi_inr",
+          "months_left",
+          "payoff_month",
+          "percent_repaid",
+          "never_pays_off",
+          "fx_missing"
+        ],
+        "title": "LoanSummaryItem",
         "type": "object"
       },
       "MaturityEvent": {
@@ -4892,6 +5675,57 @@
           "purchase"
         ],
         "title": "PostOfficeAsset",
+        "type": "object"
+      },
+      "PrepayPreviewResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "keep_emi_interest_saved": {
+            "format": "decimal",
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+            "title": "Keep Emi Interest Saved",
+            "type": "string"
+          },
+          "keep_emi_months_saved": {
+            "title": "Keep Emi Months Saved",
+            "type": "integer"
+          },
+          "keep_end_date_interest_saved": {
+            "format": "decimal",
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+            "title": "Keep End Date Interest Saved",
+            "type": "string"
+          },
+          "keep_end_date_new_emi": {
+            "format": "decimal",
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+            "title": "Keep End Date New Emi",
+            "type": "string"
+          }
+        },
+        "required": [
+          "keep_emi_months_saved",
+          "keep_emi_interest_saved",
+          "keep_end_date_new_emi",
+          "keep_end_date_interest_saved"
+        ],
+        "title": "PrepayPreviewResponse",
+        "type": "object"
+      },
+      "PrepayPreviewWrite": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "format": "decimal",
+            "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+            "title": "Amount",
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount"
+        ],
+        "title": "PrepayPreviewWrite",
         "type": "object"
       },
       "ProfileResponse": {
@@ -6246,7 +7080,8 @@
           "reason": {
             "enum": [
               "price_needed",
-              "rate_needed"
+              "rate_needed",
+              "fx_needed"
             ],
             "title": "Reason",
             "type": "string"
@@ -6487,6 +7322,14 @@
               "type": "object"
             },
             "title": "Unranked Options",
+            "type": "array"
+          },
+          "warnings": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Warnings",
             "type": "array"
           },
           "week": {
@@ -9257,6 +10100,324 @@
           }
         ],
         "summary": "Get Inbox"
+      }
+    },
+    "/v1/loans": {
+      "get": {
+        "operationId": "list_loans_v1_loans_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Household",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Household"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoanListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Loans"
+      }
+    },
+    "/v1/loans/{loan_id}": {
+      "get": {
+        "operationId": "get_loan_detail_v1_loans__loan_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "loan_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Loan Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Household",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Household"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoanDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Loan Detail"
+      }
+    },
+    "/v1/loans/{loan_id}/events": {
+      "post": {
+        "operationId": "add_event_v1_loans__loan_id__events_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "loan_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Loan Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Household",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Household"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoanEventWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoanEventResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Add Event"
+      }
+    },
+    "/v1/loans/{loan_id}/events/{event_id}": {
+      "delete": {
+        "operationId": "delete_event_v1_loans__loan_id__events__event_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "loan_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Loan Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Household",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Household"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Event"
+      }
+    },
+    "/v1/loans/{loan_id}/prepay-preview": {
+      "post": {
+        "operationId": "preview_prepayment_v1_loans__loan_id__prepay_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "loan_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Loan Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Household",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Household"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PrepayPreviewWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrepayPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Preview Prepayment"
       }
     },
     "/v1/me": {

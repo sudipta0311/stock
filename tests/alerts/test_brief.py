@@ -183,6 +183,27 @@ def test_sell_action_alone_makes_brief_status_actions() -> None:
     assert _brief(False).status == "NONE"
 
 
+def test_loan_payment_action_uses_shared_email_copy() -> None:
+    plan = json.loads(_GOLDEN_PLAN.read_text(encoding="utf-8"))
+    action = dict(plan["actions"][0])
+    action.update(
+        {
+            "kind": "PAY_EXTRA_ON_LOAN",
+            "amount": "5000.00",
+            "reason_code": "loan_cost_above_safe_return",
+            "params": {"effective_rate_pct": "8.5", "safe_return_pct": "7"},
+        }
+    )
+    plan["actions"] = [action]
+
+    brief = _brief_from_plan(plan)
+
+    assert "Pay extra on a loan" in brief.actions[0].title
+    assert brief.actions[0].why == (
+        "Its cost is above the expected after-tax return on safe money."
+    )
+
+
 def test_nri_brief_shows_two_localized_residency_notes_and_local_sleeve_name() -> None:
     plan = json.loads(_GOLDEN_PLAN.read_text(encoding="utf-8"))
     plan["residency"] = {"status": "NRI", "country": "DK", "us_person": False}

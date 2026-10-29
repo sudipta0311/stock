@@ -142,6 +142,12 @@ function actionHowTo(
   const member = person
     ? members.find((candidate) => candidate.id === person.id)
     : undefined;
+  if (textValue(payload.kind, action.kind) === "PAY_EXTRA_ON_LOAN") {
+    return textValue(
+      asRecord(payload.params).advice,
+      "Use this amount for an extra loan payment.",
+    );
+  }
   const accountType = textValue(params.account_type ?? payload.account_type);
   const rawAmount = rawActionAmount(action);
   const amount = rawAmount

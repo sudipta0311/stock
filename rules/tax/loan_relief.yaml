@@ -1,0 +1,39 @@
+version: 1
+as_of: "2026-10-29"
+rules:
+  india:
+    in_home_self_occupied:
+      old:
+        eligible: true
+        interest_cap_inr: "200000"
+        source_url: "https://www.incometax.gov.in/iec/foportal/help/individual/return-applicable-1?mobile-app=1"
+        verified: false
+      new:
+        eligible: false
+        interest_cap_inr: "0"
+        source_url: "https://www.incometax.gov.in/iec/foportal/help/new-tax-vs-old-tax-regime-faqs?mobile-app=1"
+        verified: false
+    in_home_let_out:
+      old:
+        eligible: true
+        interest_cap_inr: null
+        loss_setoff_cap_inr: "200000"
+        source_url: "https://www.incometax.gov.in/iec/foportal/help/individual/return-applicable-1?mobile-app=1"
+        verified: false
+      new:
+        eligible: true
+        interest_cap_inr: null
+        other_head_loss_setoff: false
+        source_url: "https://www.incometax.gov.in/iec/foportal/help/individual/return-applicable-1?mobile-app=1"
+        verified: false
+    in_education:
+      old:
+        eligible: true
+        interest_cap_inr: null
+        source_url: "https://www.incometax.gov.in/iec/foportal/help/individual/return-applicable-1"
+        verified: false
+      new:
+        eligible: false
+        interest_cap_inr: "0"
+        source_url: "https://www.incometax.gov.in/iec/foportal/help/new-tax-vs-old-tax-regime-faqs?mobile-app=1"
+        verified: false

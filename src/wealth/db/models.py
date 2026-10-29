@@ -340,6 +340,53 @@ class AssetHistory(UserOwned, Base):
     changed_by: Mapped[str] = mapped_column(String(16), nullable=False)
 
 
+class LoanEventRecord(UserOwned, Base):
+    __tablename__ = "loan_events"
+    __table_args__ = (
+        _tenant_identity("loan_events"),
+        ForeignKeyConstraint(
+            ["user_id", "member_id"],
+            ["household_members.user_id", "household_members.id"],
+            name="fk_loan_events_member_tenant",
+            ondelete="CASCADE",
+            deferrable=True,
+            initially="IMMEDIATE",
+        ),
+        ForeignKeyConstraint(
+            ["user_id", "loan_id"],
+            ["manual_assets.user_id", "manual_assets.id"],
+            name="fk_loan_events_loan_tenant",
+            ondelete="CASCADE",
+            deferrable=True,
+            initially="IMMEDIATE",
+        ),
+        CheckConstraint(
+            "kind IN ('prepayment', 'rate_change', 'emi_change', 'balance_update', "
+            "'missed_emi', 'closed')",
+            name="ck_loan_events_kind",
+        ),
+        CheckConstraint("amount IS NULL OR amount >= 0", name="ck_loan_events_amount_nonnegative"),
+        CheckConstraint(
+            "rate_pct IS NULL OR rate_pct BETWEEN 0 AND 60",
+            name="ck_loan_events_rate_range",
+        ),
+        CheckConstraint("emi IS NULL OR emi >= 0", name="ck_loan_events_emi_nonnegative"),
+        Index("ix_loan_events_tenant_loan_date", "user_id", "loan_id", "on_date"),
+    )
+
+    member_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    loan_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)
+    on_date: Mapped[date] = mapped_column(Date, nullable=False)
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(16, 2))
+    rate_pct: Mapped[Decimal | None] = mapped_column(Numeric(7, 4))
+    emi: Mapped[Decimal | None] = mapped_column(Numeric(16, 2))
+    note: Mapped[str | None] = mapped_column(String(140))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class AssetCashflow(UserOwned, Base):
     __tablename__ = "asset_cashflows"
     __table_args__ = (

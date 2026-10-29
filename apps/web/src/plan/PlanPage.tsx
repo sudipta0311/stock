@@ -19,8 +19,12 @@ import {
   useFeatureQuery,
 } from "../features/api";
 import { dismissHighlight, getPlan } from "../planning/api";
-import { getNetworth, listAssets, listGoals } from "../money/api";
-import type { AssetResponse, GoalResponse } from "../money/api";
+import { getNetworth, listAssets, listGoals, listLoans } from "../money/api";
+import type {
+  AssetResponse,
+  GoalResponse,
+  LoanListResponse,
+} from "../money/api";
 import type { WeeklyPlan } from "../planning/api";
 import { Card, EmptyState, Progress } from "../ui";
 import { Highlights } from "../features/Highlights";
@@ -62,6 +66,35 @@ interface AllocationRow {
 }
 
 type PlanMember = NonNullable<WeeklyPlan["members"]>[number];
+
+function LoansPlanDetails({
+  summary,
+}: {
+  summary: LoanListResponse | undefined;
+}) {
+  if (!summary?.loans.length) return null;
+  return (
+    <details className="rounded-xl border border-line p-3">
+      <summary className="min-h-10 cursor-pointer py-2 text-sm font-semibold">
+        Loans
+      </summary>
+      <div className="grid gap-2 border-t border-line pt-3 text-sm">
+        <p>
+          Total left: <MoneyValue amountInr={summary.remaining_inr} />
+        </p>
+        <p>
+          Monthly payments: <MoneyValue amountInr={summary.monthly_emis_inr} />
+        </p>
+        {summary.debt_load_pct !== null ? (
+          <p>
+            Monthly payments are {summary.debt_load_pct}% of monthly income.
+          </p>
+        ) : null}
+        <p className="text-muted-foreground">{summary.advice}</p>
+      </div>
+    </details>
+  );
+}
 
 const DISPLAY_SLEEVES: Record<string, string> = {
   equity_india: englishCopy.household_ui.indian_shares,
@@ -899,6 +932,11 @@ export function PlanPage() {
     "/v1/goals",
     listGoals,
   );
+  const loans = useFeatureQuery(
+    ["c30", "loans", selectedHouseholdId],
+    "/v1/loans",
+    listLoans,
+  );
   const networth = useFeatureQuery(
     ["c27b", "networth", selectedHouseholdId, activeMemberId],
     "/v1/networth",
@@ -957,6 +995,7 @@ export function PlanPage() {
           Details
         </summary>
         <div className="grid gap-4 border-t border-line pt-3">
+          <LoansPlanDetails summary={loans.data} />
           <SafeMoneyDetails plan={planValue} />
           <ExchangeRateNote />
           {!fxRate &&

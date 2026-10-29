@@ -1,6 +1,11 @@
 {
   "reasons": {
     "high_interest_debt_gap": "This helps reduce costly borrowing.",
+    "high_interest_debt_first": "The plan puts this costly debt first.",
+    "loan_cost_above_safe_return": "Its cost is above the expected after-tax return on safe money.",
+    "emergency_fund_below_target": "Build your emergency fund before paying extra or investing.",
+    "safe_money_return_covers_loan_cost": "This loan costs no more than safe money is expected to earn.",
+    "no_active_loans": "No active loans are saved.",
     "emergency_fund_gap": "This builds money you can reach quickly.",
     "target_gap": "This brings this part of your plan closer to its target.",
     "approved_satellite_idea": "This is a research idea that passed the plan's checks.",
@@ -102,6 +107,52 @@
         "learn_more_key": "health_cover_gap",
         "severity": "attention",
         "screens": [
+          "plan",
+          "money"
+        ]
+      },
+      "loan_debt_load_attention": {
+        "title": "Loan payments take {rate}",
+        "body": "Review your monthly payments against your income.",
+        "learn_more_key": "loan_debt_load_attention",
+        "severity": "attention",
+        "screens": [
+          "plan",
+          "money"
+        ]
+      },
+      "loan_debt_load_high": {
+        "title": "Loan payments take {rate}",
+        "body": "Your monthly payments use over half your income. Review them soon.",
+        "learn_more_key": "loan_debt_load_high",
+        "severity": "attention",
+        "needs_action_now": true,
+        "screens": [
+          "home",
+          "plan",
+          "money"
+        ]
+      },
+      "loan_high_interest_card": {
+        "title": "Clear card debt first",
+        "body": "This card costs {rate} a year. Clear it first.",
+        "learn_more_key": "loan_high_interest_card",
+        "severity": "attention",
+        "needs_action_now": true,
+        "screens": [
+          "home",
+          "plan",
+          "money"
+        ]
+      },
+      "loan_never_pays_off": {
+        "title": "Monthly payment may be too low",
+        "body": "Ask your lender for a new payment amount or schedule.",
+        "learn_more_key": "loan_never_pays_off",
+        "severity": "attention",
+        "needs_action_now": true,
+        "screens": [
+          "home",
           "plan",
           "money"
         ]
@@ -208,6 +259,10 @@
     },
     "learn_more": {
       "high_interest_debt_gap": "The suggested next step uses the debt details in your plan.",
+      "loan_debt_load_attention": "Monthly payments use 30–50% of the income you entered.",
+      "loan_debt_load_high": "Monthly payments use more than half of the income you entered.",
+      "loan_high_interest_card": "This estimate uses the card's saved rate. Check its current statement.",
+      "loan_never_pays_off": "The saved monthly payment does not cover the estimated monthly interest.",
       "emergency_fund_gap": "The plan counts only money you can reach today.",
       "term_cover_gap": "Review the cover amount and your family's needs before changing a policy.",
       "health_cover_gap": "Review the cover amount and existing benefits before changing a policy.",
@@ -583,6 +638,7 @@
       "REBALANCE_SIPS": "Change your monthly investments",
       "BUILD_EMERGENCY_FUND": "Build your emergency fund",
       "PAY_DOWN_DEBT": "Pay off costly debt",
+      "PAY_EXTRA_ON_LOAN": "Pay extra on a loan",
       "SELL_EXIT": "Exit",
       "SELL_TRIM": "Take some profit",
       "REVIEW_EXIT": "Review, likely exit",

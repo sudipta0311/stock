@@ -442,6 +442,12 @@ denmark:
     currencies: [DKK, EUR]
     yield_key: local_bank_deposit
     note_key: local_deposit_tax_review
+  interest_deduction:
+    source_url: "https://skat.dk/en-us/borger/fradrag/fradrag-for-renter"
+    verified: false
+    last_checked: "2026-10-28"
+    needs_review: true
+    scope: tax_deductible_interest_expenses_only
   fcnr_currency_fallback:
     source_url: "https://rbi.org.in/scripts/PublicationsView.aspx?id=13853"
     verified: false

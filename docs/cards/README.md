@@ -44,7 +44,7 @@ Status: ⬜ not started · 🟦 in progress · ✅ accepted · 🔁 rework · �
 | C27b | Household PWA: onboarding 'who are we planning for', per-member residency in Settings, Family/member switcher, who-acts on actions, who-holds-what, DKK+INR (supersedes C26b) | 3.1, 8 | ✅ |
 | C27c | Shared household access (core): spouse logs in with own account, both see and edit the same household (partner/viewer), invites, bring-my-data merge, RLS by household grant | 7.3, 7.4 | ✅ |
 | C29a | Invest from Denmark: curated UCITS/ABIS ETF list, Aktiesparekonto-first account order, US stocks (no US-listed ETFs), India via UCITS ETF or NRI shares, broker how-tos, EU/US prices | 4.5, 4.7, 3.4 | ✅ |
-| C30 | Loans: balances roll down monthly, record extra payments/rate changes/statement balances, payoff date and interest left, 'pay extra or invest' decided by code, EMI reminders, loan detail screen | 3, 8 | ⬜ |
+| C30 | Loans: balances roll down monthly, record extra payments/rate changes/statement balances, payoff date and interest left, 'pay extra or invest' decided by code, EMI reminders, loan detail screen | 3, 8 | ✅ |
 | C29b | Indian funds check from CAMS/KFintech CAS: sub-categories, direct vs regular, too many funds, lagging funds, SIP detection, 12-month early warning, least-tax fix | 3.3, 4, 4.10 | ✅ |
 | C28 | Simplicity pass: backend highlights (≤ 3 per screen), banned-jargon + sentence-length tests, one primary action per screen, collapsed details, 5-tap onboarding, rounded numbers | 2.3, 8 | ✅ |
 | C28b | Visual polish: type scale, spacing, app shell, highlight callouts, empty states, list rows, rounded summaries; fixes from the real-phone test | 8 | ✅ |

@@ -1,4 +1,4 @@
-// OpenAPI SHA256: 17e7d8999ae348f54f50e72245719280f0ae862f0180951293a44bdb1cafee67
+// OpenAPI SHA256: 69695690149bc028abba5f37c3ed78974c84b1bb3b83c45af7ce97952e0cfc36
 export interface paths {
     "/healthz": {
         parameters: {
@@ -517,6 +517,91 @@ export interface paths {
         get: operations["get_inbox_v1_inbox_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/loans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Loans */
+        get: operations["list_loans_v1_loans_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/loans/{loan_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Loan Detail */
+        get: operations["get_loan_detail_v1_loans__loan_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/loans/{loan_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add Event */
+        post: operations["add_event_v1_loans__loan_id__events_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/loans/{loan_id}/events/{event_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Event */
+        delete: operations["delete_event_v1_loans__loan_id__events__event_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/loans/{loan_id}/prepay-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Prepayment */
+        post: operations["preview_prepayment_v1_loans__loan_id__prepay_preview_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2142,8 +2227,16 @@ export interface components {
              * @enum {string}
              */
             asset_type: "loan";
+            /**
+             * Currency
+             * @default INR
+             * @enum {string}
+             */
+            currency: "INR" | "DKK" | "EUR";
             /** Emi */
             emi?: string | null;
+            /** Emi Day */
+            emi_day?: number | null;
             end?: string | null;
             /**
              * Joint
@@ -2152,6 +2245,8 @@ export interface components {
             joint: boolean;
             /** Label */
             label?: string | null;
+            /** Lender */
+            lender?: string | null;
             /**
              * Loan Kind
              * @enum {string}
@@ -2161,15 +2256,249 @@ export interface components {
             member_id?: string | null;
             /** Notes */
             notes?: string | null;
+            /** Original Amount */
+            original_amount?: string | null;
+            /**
+             * Outstanding
+             * Format: decimal
+             */
+            outstanding: string;
+            outstanding_as_of?: string;
+            /**
+             * Rate Pct
+             * Format: decimal
+             */
+            rate_pct: string;
+            /** Rate Type */
+            rate_type?: ("fixed" | "floating") | null;
+            start?: string | null;
+            /**
+             * Tax Relief
+             * @default none
+             * @enum {string}
+             */
+            tax_relief: "none" | "in_home_self_occupied" | "in_home_let_out" | "in_education" | "dk_interest_deduction";
+        };
+        /** LoanBalancePointResponse */
+        LoanBalancePointResponse: {
+            month: components["schemas"]["MonthYear"];
+            /**
+             * Outstanding
+             * Format: decimal
+             */
+            outstanding: string;
+        };
+        /** LoanDetailResponse */
+        LoanDetailResponse: {
+            /** Advice */
+            advice: string;
+            /** Advice Kind */
+            advice_kind: string;
+            /** Currency */
+            currency: string;
+            /** Emi */
+            emi: string | null;
+            /** Emi Inr */
+            emi_inr: string | null;
+            /** Events */
+            events: components["schemas"]["LoanEventResponse"][];
+            /** Fx Missing */
+            fx_missing: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Interest Paid
+             * Format: decimal
+             */
+            interest_paid: string;
+            /** Interest To Pay */
+            interest_to_pay: string | null;
+            /** Lender */
+            lender: string | null;
+            /** Months Left */
+            months_left: number | null;
+            /** Name */
+            name: string;
+            /** Never Pays Off */
+            never_pays_off: boolean;
+            /** Next Emi Date */
+            next_emi_date: string | null;
+            /**
+             * Outstanding
+             * Format: decimal
+             */
+            outstanding: string;
+            /** Outstanding Inr */
+            outstanding_inr: string | null;
+            payoff_month: components["schemas"]["MonthYear"] | null;
+            /** Percent Repaid */
+            percent_repaid: string | null;
+            /**
+             * Principal Paid
+             * Format: decimal
+             */
+            principal_paid: string;
+            /** Rate Pct */
+            rate_pct: string;
+            /** Rate Type */
+            rate_type: string | null;
+            /** Reason Codes */
+            reason_codes: string[];
+            /** Scheduled Payments */
+            scheduled_payments: components["schemas"]["LoanPaymentResponse"][];
+            /**
+             * Suggested Amount Inr
+             * Format: decimal
+             */
+            suggested_amount_inr: string;
+            /** Tax Relief */
+            tax_relief: string;
+            /** Tax Relief Needs Review */
+            tax_relief_needs_review: boolean;
+            /** Tax Source Urls */
+            tax_source_urls: string[];
+            /** Yearly Balances */
+            yearly_balances: components["schemas"]["LoanBalancePointResponse"][];
+        };
+        /** LoanEventResponse */
+        LoanEventResponse: {
+            /** Amount */
+            amount: string | null;
+            /** Emi */
+            emi: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Note */
+            note: string | null;
+            /**
+             * On Date
+             * Format: date
+             */
+            on_date: string;
+            /** Rate Pct */
+            rate_pct: string | null;
+        };
+        /** LoanEventWrite */
+        LoanEventWrite: {
+            /** Amount */
+            amount?: string | null;
+            /** Emi */
+            emi?: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "prepayment" | "rate_change" | "emi_change" | "balance_update" | "missed_emi" | "closed";
+            /** Note */
+            note?: string | null;
+            /**
+             * On Date
+             * Format: date
+             */
+            on_date: string;
+            /** Rate Pct */
+            rate_pct?: string | null;
+        };
+        /** LoanListResponse */
+        LoanListResponse: {
+            /** Advice */
+            advice: string;
+            /** Advice Kind */
+            advice_kind: string;
+            /** Debt Load Level */
+            debt_load_level: string;
+            /** Debt Load Pct */
+            debt_load_pct: string | null;
+            /** Loans */
+            loans: components["schemas"]["LoanSummaryItem"][];
+            /**
+             * Monthly Emis Inr
+             * Format: decimal
+             */
+            monthly_emis_inr: string;
+            /** Reason Codes */
+            reason_codes: string[];
+            /**
+             * Remaining Inr
+             * Format: decimal
+             */
+            remaining_inr: string;
+            /**
+             * Suggested Amount Inr
+             * Format: decimal
+             */
+            suggested_amount_inr: string;
+        };
+        /** LoanPaymentResponse */
+        LoanPaymentResponse: {
+            /**
+             * Amount
+             * Format: decimal
+             */
+            amount: string;
+            /**
+             * Interest
+             * Format: decimal
+             */
+            interest: string;
+            /**
+             * On Date
+             * Format: date
+             */
+            on_date: string;
             /**
              * Outstanding
              * Format: decimal
              */
             outstanding: string;
             /**
-             * Rate Pct
+             * Principal
              * Format: decimal
              */
+            principal: string;
+        };
+        /** LoanSummaryItem */
+        LoanSummaryItem: {
+            /** Currency */
+            currency: string;
+            /** Emi */
+            emi: string | null;
+            /** Emi Inr */
+            emi_inr: string | null;
+            /** Fx Missing */
+            fx_missing: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Lender */
+            lender: string | null;
+            /** Months Left */
+            months_left: number | null;
+            /** Name */
+            name: string;
+            /** Never Pays Off */
+            never_pays_off: boolean;
+            /**
+             * Outstanding
+             * Format: decimal
+             */
+            outstanding: string;
+            /** Outstanding Inr */
+            outstanding_inr: string | null;
+            payoff_month: components["schemas"]["MonthYear"] | null;
+            /** Percent Repaid */
+            percent_repaid: string | null;
+            /** Rate Pct */
             rate_pct: string;
         };
         /** MaturityEvent */
@@ -2580,6 +2909,34 @@ export interface components {
             scheme: "nsc" | "kvp" | "scss" | "mis" | "td" | "rd" | "ssy";
             /** Td Years */
             td_years?: (1 | 2 | 3 | 5) | null;
+        };
+        /** PrepayPreviewResponse */
+        PrepayPreviewResponse: {
+            /**
+             * Keep Emi Interest Saved
+             * Format: decimal
+             */
+            keep_emi_interest_saved: string;
+            /** Keep Emi Months Saved */
+            keep_emi_months_saved: number;
+            /**
+             * Keep End Date Interest Saved
+             * Format: decimal
+             */
+            keep_end_date_interest_saved: string;
+            /**
+             * Keep End Date New Emi
+             * Format: decimal
+             */
+            keep_end_date_new_emi: string;
+        };
+        /** PrepayPreviewWrite */
+        PrepayPreviewWrite: {
+            /**
+             * Amount
+             * Format: decimal
+             */
+            amount: string;
         };
         /** ProfileResponse */
         ProfileResponse: {
@@ -3048,7 +3405,7 @@ export interface components {
              * Reason
              * @enum {string}
              */
-            reason: "price_needed" | "rate_needed";
+            reason: "price_needed" | "rate_needed" | "fx_needed";
         };
         /** ValidationError */
         ValidationError: {
@@ -3161,6 +3518,10 @@ export interface components {
             };
             /** Unranked Options */
             unranked_options?: {
+                [key: string]: unknown;
+            }[];
+            /** Warnings */
+            warnings?: {
                 [key: string]: unknown;
             }[];
             /** Week */
@@ -4618,6 +4979,176 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InboxResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_loans_v1_loans_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Household"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoanListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_loan_detail_v1_loans__loan_id__get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Household"?: string | null;
+            };
+            path: {
+                loan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoanDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_event_v1_loans__loan_id__events_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Household"?: string | null;
+            };
+            path: {
+                loan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoanEventWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoanEventResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_event_v1_loans__loan_id__events__event_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Household"?: string | null;
+            };
+            path: {
+                loan_id: string;
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_prepayment_v1_loans__loan_id__prepay_preview_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Household"?: string | null;
+            };
+            path: {
+                loan_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PrepayPreviewWrite"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PrepayPreviewResponse"];
                 };
             };
             /** @description Validation Error */

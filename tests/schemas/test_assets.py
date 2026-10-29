@@ -117,6 +117,22 @@ def test_loan_has_no_sleeves_and_cash_is_instant() -> None:
     assert default_liquidity(savings) is LiquidityClass.INSTANT
 
 
+def test_legacy_loan_rows_keep_loading_with_safe_optional_defaults() -> None:
+    loan = parse_asset(
+        {
+            "asset_type": "loan",
+            "loan_kind": "home",
+            "outstanding": "3000000.00",
+            "rate_pct": "8.5",
+        }
+    )
+
+    assert loan.currency == "INR"
+    assert loan.emi is None
+    assert loan.tax_relief == "none"
+    assert loan.lender is None
+
+
 def test_nps_scheme_mix_is_validated_and_mapped_to_sleeves() -> None:
     nps = parse_asset(
         {
