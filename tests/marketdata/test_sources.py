@@ -65,6 +65,20 @@ def test_nse_bhavcopy_parser_accepts_legacy_column_names() -> None:
     ]
 
 
+def test_nse_bhavcopy_parser_reads_volume_and_traded_value() -> None:
+    rows = nse.parse_bhavcopy(
+        "TradDt,TckrSymb,ClsPric,TtlTradgVol,TtlTrfVal\n2026-10-27,SYNTH,100.50,2500,251250.00\n"
+    )
+
+    assert rows[0].volume == 2500
+    assert rows[0].traded_value == Decimal("251250.00")
+
+    turnover_lacs = nse.parse_bhavcopy(
+        "DATE1,SYMBOL,CLOSE_PRICE,TURNOVER_LACS\n27-Oct-2026,SYNTH,100.50,12.5\n"
+    )
+    assert turnover_lacs[0].traded_value == Decimal("1250000.0")
+
+
 def test_nse_fetch_skips_weekends_and_missing_holiday_archives(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

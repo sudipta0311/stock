@@ -126,11 +126,16 @@ def test_universe_parsers_keep_issuer_members_and_survivorship_label() -> None:
         "Example One Limited,Services,EXA,EQ,\n"
         "Example Two Limited,Manufacturing,EXB,EQ,\n"
         "Example Two Limited,Manufacturing,EXB,EQ,\n"
+        "Example Three Limited,N/A,EXC,EQ,\n"
     )
 
     assert [item.symbol for item in sp500.securities] == ["EXA"]
     assert sp500.as_of == date(2026, 10, 27)
-    assert [item.symbol for item in nifty500] == ["EXA", "EXB"]
+    assert sp500.securities[0].sector == "Industrials"
+    assert [item.symbol for item in nifty500] == ["EXA", "EXB", "EXC"]
+    assert nifty500[0].sector == "Services"
+    assert nifty500[0].industry == "Services"
+    assert nifty500[2].sector == nifty500[2].industry == "Unclassified"
     assert universes.SURVIVORSHIP_LABEL == "current constituents only (survivorship bias)"
     assert "ssga.com" in universes.SP500_HOLDINGS_URL
     assert "archives.nseindia.com" in universes.NIFTY500_ARCHIVE_URL

@@ -1,0 +1,23 @@
+version: 1
+governance_events:
+  - AUDITOR_RESIGNATION
+  - RESTATEMENT
+  - REGULATOR_ENFORCEMENT
+  - BANKRUPTCY
+india_categories:
+  - contains: auditor resignation
+    event_code: AUDITOR_RESIGNATION
+  - contains: restatement
+    event_code: RESTATEMENT
+  - contains: regulatory enforcement
+    event_code: REGULATOR_ENFORCEMENT
+  - contains: regulator action
+    event_code: REGULATOR_ENFORCEMENT
+  - contains: bankruptcy
+    event_code: BANKRUPTCY
+  - contains: key management personnel resignation
+    event_code: KEY_PERSON_EXIT
+  - contains: director resignation
+    event_code: KEY_PERSON_EXIT
+  - contains: impairment
+    event_code: IMPAIRMENT

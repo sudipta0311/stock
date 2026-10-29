@@ -29,6 +29,8 @@ class UniverseSecurity:
     name: str
     isin: str | None = None
     series: str | None = None
+    sector: str = "Unclassified"
+    industry: str = "Unclassified"
 
 
 @dataclass(frozen=True)
@@ -48,6 +50,12 @@ def _field(row: dict[str, Any], *names: str) -> str | None:
         if value is not None and str(value).strip():
             return str(value).strip()
     return None
+
+
+def _classification_label(value: str | None, limit: int) -> str:
+    if value is None or value.casefold() in {"-", "n/a", "na", "none", "null", "unknown"}:
+        return "Unclassified"
+    return value[:limit] or "Unclassified"
 
 
 def _parse_sp500_as_of(value: Any) -> date | None:
@@ -89,12 +97,21 @@ def parse_sp500_holdings(content: bytes) -> Sp500Holdings:
             symbol = _field(raw, "Ticker", "Symbol")
             name = _field(raw, "Name", "Security Name")
             sector = (_field(raw, "Sector") or "").casefold()
+            sector_label = _classification_label(_field(raw, "Sector"), 80)
+            industry_label = _classification_label(_field(raw, "Industry", "Industry Name"), 120)
             if not symbol or not name or sector == "unassigned":
                 continue
             symbol = symbol.upper()
             if not _TICKER_PATTERN.fullmatch(symbol):
                 continue
-            holdings.append(UniverseSecurity(symbol=symbol, name=name[:160]))
+            holdings.append(
+                UniverseSecurity(
+                    symbol=symbol,
+                    name=name[:160],
+                    sector=sector_label,
+                    industry=industry_label,
+                )
+            )
         as_of = _parse_sp500_as_of(metadata.get("holdings"))
         if as_of is None:
             raise ValueError("SPY holdings workbook has no recognized as-of date")
@@ -127,6 +144,12 @@ def parse_nifty500_csv(text: str) -> list[NseSecurity]:
         symbol = symbol.upper()
         isin_value = isin.upper() if isin and isin != "-" else None
         series_value = series.upper() if series and series != "-" else None
+        industry = _classification_label(
+            _field(row, "Industry", "Industry Name", "Basic Industry"), 120
+        )
+        sector = _classification_label(_field(row, "Sector"), 80)
+        if sector == "Unclassified" and industry != "Unclassified":
+            sector = industry[:80]
         result[symbol] = NseSecurity(
             symbol=symbol,
             name=name[:160],
@@ -135,6 +158,8 @@ def parse_nifty500_csv(text: str) -> list[NseSecurity]:
             security_type="equity",
             sleeve="equity_india",
             category="equity:india",
+            sector=sector,
+            industry=industry,
         )
     if not result:
         raise ValueError("NSE NIFTY 500 archive CSV has no constituents")

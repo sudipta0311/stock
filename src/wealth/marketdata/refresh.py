@@ -13,7 +13,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
 from wealth.db.models import HoldingLot, MarketdataRun, Security, UniverseMember
@@ -419,10 +419,18 @@ def _store_source(
         if records.sp500 is not None:
             try:
                 with session.begin_nested():
-                    security_ids = {
-                        store.upsert_us_equity_security(session, row.symbol, row.name)
-                        for row in records.sp500.securities
-                    }
+                    security_ids: set[Any] = set()
+                    for row in records.sp500.securities:
+                        security_id = store.upsert_us_equity_security(session, row.symbol, row.name)
+                        security_ids.add(security_id)
+                        session.execute(
+                            update(Security)
+                            .where(Security.id == security_id)
+                            .values(
+                                sector=row.sector or "Unclassified",
+                                industry=row.industry or "Unclassified",
+                            )
+                        )
                     membership = store.upsert_universe_members(
                         session,
                         "sp500",

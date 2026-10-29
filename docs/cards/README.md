@@ -25,7 +25,7 @@ Status: ⬜ not started · 🟦 in progress · ✅ accepted · 🔁 rework · �
 | C13b | Policy 3b: Exit Engine (exit cards, triggers, tax-aware timing) + personal stress tests | 4.9, 8.4 | ✅ |
 | C14 | Research 1: ModelRouter (Foundry, flex, budgets, JSON outputs), Dossier schema/store, LangGraph skeleton + checkpointer | 5.3, 5.6, 5.7 | ✅ |
 | C15a | Research 2a: point-in-time fundamentals (SEC EDGAR; NSE XBRL if a free stable source exists), price factors, universes (survivorship-labelled) | 6, 4.7 | ✅ |
-| C15b | Research 2b: factor Screener (no LLM, sector-neutral), filings Sentinel (8-K item rules first, nano LLM for free text), research tools, sector data | 4.7, 5.2 | ⬜ |
+| C15b | Research 2b: factor Screener (no LLM, sector-neutral), filings Sentinel (8-K item rules first, nano LLM for free text), research tools, sector data | 4.7, 5.2 | ✅ |
 | C15c | Research 2c: Analyst, Valuation (math in tools), Red Team (DeepSeek), Compliance gate, CIO sign-off → weekly Research Pack | 5.2, 5.3, 5.5 | ⬜ |
 | C15d | Research 2d: golden-set eval harness, groundedness/schema/red-team metrics, CI gate | 5.5, 10 | ⬜ |
 | C16a | Research 3a: Macro & Geopolitics agent: NSE index valuations, US Treasury yields, official RSS (PIB/RBI/USTR/Fed Register), bounded 2-source tilts with decay | 4.4, 5.2, 5.5 | ⬜ |

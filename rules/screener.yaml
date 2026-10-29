@@ -1,0 +1,6 @@
+version: 1
+max_per_market: 25
+liquidity_floor:
+  IN: "50000000"
+  US: "20000000"
+price_only_markets: []

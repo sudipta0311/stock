@@ -104,6 +104,12 @@ def _with_security_conflict(statement: Any, *, by_isin: bool, preserve_nse_secur
             "currency": excluded.currency,
             "sleeve": func.coalesce(excluded.sleeve, Security.sleeve),
             "category": func.coalesce(excluded.category, Security.category),
+            "sector": case(
+                (excluded.sector != "Unclassified", excluded.sector), else_=Security.sector
+            ),
+            "industry": case(
+                (excluded.industry != "Unclassified", excluded.industry), else_=Security.industry
+            ),
             "amfi_scheme_code": func.coalesce(excluded.amfi_scheme_code, Security.amfi_scheme_code),
             "sub_category": func.coalesce(excluded.sub_category, Security.sub_category),
             "plan_type": func.coalesce(excluded.plan_type, Security.plan_type),
@@ -144,6 +150,14 @@ def _with_security_conflict(statement: Any, *, by_isin: bool, preserve_nse_secur
                 "currency": statement.excluded.currency,
                 "sleeve": func.coalesce(statement.excluded.sleeve, Security.sleeve),
                 "category": func.coalesce(statement.excluded.category, Security.category),
+                "sector": case(
+                    (statement.excluded.sector != "Unclassified", statement.excluded.sector),
+                    else_=Security.sector,
+                ),
+                "industry": case(
+                    (statement.excluded.industry != "Unclassified", statement.excluded.industry),
+                    else_=Security.industry,
+                ),
                 "sub_category": func.coalesce(
                     statement.excluded.sub_category, Security.sub_category
                 ),
@@ -184,6 +198,8 @@ def upsert_nse_master(session: Session, records: list[NseSecurity]) -> int:
                 "category": category,
                 "nse_symbol": record.symbol,
                 "series": record.series,
+                **({"sector": record.sector} if record.sector != "Unclassified" else {}),
+                **({"industry": record.industry} if record.industry != "Unclassified" else {}),
             },
             by_isin=record.isin is not None,
         )
@@ -586,11 +602,15 @@ def upsert_eod_price(
     source: str = "NSE",
     source_url: str = "https://www.nseindia.com/all-reports",
     fetched_at: datetime | None = None,
+    volume: int | None = None,
+    traded_value: Decimal | None = None,
 ) -> None:
     values: dict[str, Any] = {
         "security_id": security_id,
         "as_of": as_of,
         "close": close,
+        "volume": volume,
+        "traded_value": traded_value,
         "source": source,
         "source_url": source_url,
     }
@@ -601,6 +621,8 @@ def upsert_eod_price(
         index_elements=[PriceEod.security_id, PriceEod.as_of],
         set_={
             "close": statement.excluded.close,
+            "volume": statement.excluded.volume,
+            "traded_value": statement.excluded.traded_value,
             "source": statement.excluded.source,
             "source_url": statement.excluded.source_url,
             "fetched_at": statement.excluded.fetched_at,
@@ -703,14 +725,17 @@ def upsert_nse_closes(
     *,
     fetched_at: datetime | None = None,
 ) -> int:
-    """Store NSE closes only for held securities and the configured index proxies."""
+    """Store NSE closes for held securities, current universes, and index proxies."""
     held = set(session.scalars(select(HoldingLot.security_id).distinct()))
     proxy_rows = session.scalars(
         select(Security.id).where(
             or_(Security.symbol.in_(_INDEX_PROXIES), Security.nse_symbol.in_(_INDEX_PROXIES))
         )
     )
-    allowed_ids = held | set(proxy_rows)
+    universe_rows = session.scalars(
+        select(UniverseMember.security_id).where(UniverseMember.removed_on.is_(None)).distinct()
+    )
+    allowed_ids = held | set(proxy_rows) | set(universe_rows)
     count = 0
     for record in records:
         if record.as_of is None:
@@ -732,6 +757,8 @@ def upsert_nse_closes(
                     security.id,
                     record.as_of,
                     record.close,
+                    volume=record.volume,
+                    traded_value=record.traded_value,
                     source_url=(
                         "https://nsearchives.nseindia.com/content/cm/"
                         f"BhavCopy_NSE_CM_0_0_0_{record.as_of:%Y%m%d}_F_0000.csv.zip"

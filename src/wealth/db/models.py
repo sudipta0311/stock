@@ -8,6 +8,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     Date,
@@ -465,6 +466,12 @@ class Security(Base):
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     sleeve: Mapped[str | None] = mapped_column(String(32))
     category: Mapped[str | None] = mapped_column(String(80))
+    sector: Mapped[str] = mapped_column(
+        String(80), nullable=False, default="Unclassified", server_default=text("'Unclassified'")
+    )
+    industry: Mapped[str] = mapped_column(
+        String(120), nullable=False, default="Unclassified", server_default=text("'Unclassified'")
+    )
     amfi_scheme_code: Mapped[str | None] = mapped_column(String(16))
     sub_category: Mapped[str | None] = mapped_column(String(80))
     plan_type: Mapped[str | None] = mapped_column(String(12))
@@ -479,6 +486,11 @@ class Security(Base):
 class PriceEod(Base):
     __tablename__ = "prices_eod"
     __table_args__ = (
+        CheckConstraint("volume IS NULL OR volume >= 0", name="ck_prices_eod_volume_non_negative"),
+        CheckConstraint(
+            "traded_value IS NULL OR traded_value >= 0",
+            name="ck_prices_eod_traded_value_non_negative",
+        ),
         Index("ix_prices_eod_as_of", "as_of"),
         Index("ix_prices_eod_security_as_of", "security_id", "as_of"),
     )
@@ -488,6 +500,8 @@ class PriceEod(Base):
     )
     as_of: Mapped[date] = mapped_column(Date, primary_key=True)
     close: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    volume: Mapped[int | None] = mapped_column(BigInteger)
+    traded_value: Mapped[Decimal | None] = mapped_column(Numeric(24, 4))
     source: Mapped[str] = mapped_column(String(40), nullable=False)
     source_url: Mapped[str] = mapped_column(Text, nullable=False)
     fetched_at: Mapped[datetime] = mapped_column(

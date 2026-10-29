@@ -34,6 +34,8 @@ class NseClose:
     as_of: date
     isin: str | None = None
     series: str | None = None
+    volume: int | None = None
+    traded_value: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -45,6 +47,8 @@ class NseSecurity:
     security_type: str
     sleeve: str | None = None
     category: str | None = None
+    sector: str = "Unclassified"
+    industry: str = "Unclassified"
 
 
 def _key(value: str) -> str:
@@ -96,12 +100,27 @@ def parse_bhavcopy(text: str, *, as_of: date | None = None) -> list[NseClose]:
             date_text = _find(raw, "date1", "traddt", "bizdt", "date")
             isin = _find(raw, "isin")
             series = _find(raw, "series", "sctysrs")
+            volume_text = _find(raw, "totaltradedquantity", "ttltradgvol", "tottrdqty")
+            traded_value_text = _find(raw, "totaltradedvalue", "ttltrfval", "tottrdval")
+            turnover_lacs_text = _find(raw, "turnoverlacs", "ttltrdvalinlacs")
             row_date = _date(date_text) if date_text else as_of
             if not symbol or not close_text or row_date is None:
                 raise ValueError("missing symbol, close or date")
             close = Decimal(close_text.replace(",", ""))
             if not close.is_finite() or close <= 0:
                 raise ValueError("invalid close")
+            volume = int(volume_text.replace(",", "")) if volume_text else None
+            if volume is not None and volume < 0:
+                raise ValueError("invalid volume")
+            traded_value = (
+                Decimal(traded_value_text.replace(",", ""))
+                if traded_value_text
+                else Decimal(turnover_lacs_text.replace(",", "")) * Decimal(100_000)
+                if turnover_lacs_text
+                else None
+            )
+            if traded_value is not None and (not traded_value.is_finite() or traded_value < 0):
+                raise ValueError("invalid traded value")
             rows.append(
                 NseClose(
                     symbol.upper(),
@@ -109,6 +128,8 @@ def parse_bhavcopy(text: str, *, as_of: date | None = None) -> list[NseClose]:
                     row_date,
                     isin.upper() if isin and isin != "-" else None,
                     series.upper() if series and series != "-" else None,
+                    volume,
+                    traded_value,
                 )
             )
         except (InvalidOperation, ValueError):
