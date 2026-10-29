@@ -588,15 +588,20 @@ def check_funds(
         )
     mix = _mix_details(values_by_bucket, target, indian_sleeve_target)
     has_holdings = bool(selected_holdings)
+    # A check without an action (e.g. "keep existing funds, review local tax") is a
+    # note, not a change; calling it "One change suggested" misled in a real walkthrough.
+    needs_change = any(check.get("action") is not None for check in ordered_checks)
     summary_key = (
         "fund_check.attention"
+        if needs_change
+        else "fund_check.note"
         if ordered_checks
         else "fund_check.good"
         if has_holdings
         else "fund_check.upload"
     )
     return FundCheckResult(
-        status="attention" if ordered_checks else "fine",
+        status="attention" if needs_change else "fine",
         summary_key=summary_key,
         checks=tuple(ordered_checks[:3]),
         actions=tuple(unique_actions[:3]),

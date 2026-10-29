@@ -83,6 +83,52 @@ describe("Indian fund status card", () => {
     }
   });
 
+  it("calls a note without an action one thing to know", async () => {
+    server.use(
+      http.get(/\/v1\/fund-check$/, () =>
+        HttpResponse.json(
+          fundCheckResponse({
+            status: "fine",
+            summary_key: "fund_check.note",
+            checks: [
+              {
+                reason_code: "dk_fund_tax_review",
+                member_id: "synthetic-member",
+                details: {},
+              },
+            ],
+          }),
+        ),
+      ),
+    );
+    renderCard();
+
+    expect(await screen.findByText("One thing to know")).toBeInTheDocument();
+    expect(screen.queryByText("One change suggested")).not.toBeInTheDocument();
+  });
+
+  it("says a share is already above its limit instead of in 0 months", async () => {
+    server.use(
+      http.get(/\/v1\/fund-check$/, () =>
+        HttpResponse.json(
+          fundCheckResponse({
+            status: "attention",
+            summary_key: "fund_check.attention",
+            early_warning: {
+              family: { bucket: "equity", months_until: 0, direction: "over" },
+            },
+          }),
+        ),
+      ),
+    );
+    renderCard();
+
+    expect(
+      await screen.findByText("Money in shares is already above its limit."),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/0 months/)).not.toBeInTheDocument();
+  });
+
   it("shows an early warning with one next step", async () => {
     server.use(
       http.get(/\/v1\/fund-check$/, () =>
@@ -125,7 +171,7 @@ describe("Indian fund status card", () => {
     expect(await screen.findByText("One change suggested")).toBeInTheDocument();
     expect(
       screen.getByText(
-        /share of small companies may pass its limit in about 5 months/,
+        /Money in small companies may pass its limit in about 5 months/,
       ),
     ).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "See why" }));

@@ -110,14 +110,20 @@ export function FundCheckCard() {
                 ? englishCopy.fund_check.upload_summary
                 : response.status === "attention"
                   ? englishCopy.fund_check.attention_summary
-                  : englishCopy.fund_check.good_summary}
+                  : response.summary_key === "fund_check.note"
+                    ? englishCopy.fund_check.note_summary
+                    : englishCopy.fund_check.good_summary}
         </p>
       </div>
       {warningBucket && warningMonths ? (
         <p className="text-base text-muted-foreground">
-          {englishCopy.fund_check.early_warning
-            .replace("{bucket}", bucketLabel(warningBucket).toLowerCase())
-            .replace("{months}", warningMonths)}
+          {(Number(warningMonths) <= 0
+            ? englishCopy.fund_check.early_warning_now
+            : englishCopy.fund_check.early_warning.replace(
+                "{months}",
+                warningMonths === "1" ? "1 month" : `${warningMonths} months`,
+              )
+          ).replace("{bucket}", bucketLabel(warningBucket).toLowerCase())}
         </p>
       ) : null}
       {hasFunds ? (

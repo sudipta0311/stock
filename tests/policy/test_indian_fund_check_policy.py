@@ -987,3 +987,20 @@ def test_fund_rebalance_reuses_cash_sip_then_tax_aware_sale_order() -> None:
     assert result.tax_estimate is not None
     assert result.tax_estimate.exemption_used == Decimal("125000.00")
     assert result.tax_estimate.total_tax == Decimal("1950.00")
+
+
+def test_a_denmark_tax_note_without_an_action_is_a_note_not_a_change() -> None:
+    held = _holding(
+        "dk-held",
+        name="Synthetic Alpha Fund Direct Plan Growth",
+        member_id="member-dk",
+        plan_type="direct",
+        ter="0.50",
+    )
+    dk = FundMember("member-dk", residency_country="DK", residency_status="NRI")
+
+    result = _check([held], references=[held], members=[dk])
+
+    assert any(item["reason_code"] == "dk_fund_tax_review" for item in result.checks)
+    assert result.actions == ()
+    assert (result.status, result.summary_key) == ("fine", "fund_check.note")

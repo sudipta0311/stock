@@ -256,8 +256,10 @@ describe("Ideas page", () => {
     const indiaScenario = screen
       .getByRole("heading", { name: "If Indian shares fall 25%" })
       .closest("article");
-    expect(indiaScenario).toHaveTextContent("Your money: -₹25,000");
-    expect(indiaScenario).toHaveTextContent("With your target plan: -₹21,000");
+    expect(indiaScenario).toHaveTextContent("Your money: down ₹25,000");
+    expect(indiaScenario).toHaveTextContent(
+      "With your target plan: down ₹21,000",
+    );
     expect(screen.getByText("What we changed and why")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Source" })).toHaveAttribute(
       "href",

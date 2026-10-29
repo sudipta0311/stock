@@ -17,6 +17,15 @@ import { getPlan, getStress } from "../planning/api";
 import type { WeeklyPlan } from "../planning/api";
 import { Card } from "../ui";
 
+/** "down ₹23.69 L" / "up ₹83,238": a bare "₹83,238" next to "-₹23.69 L" reads as a loss. */
+function changeText(total: string): string {
+  if (!total) return "—";
+  const negative = total.trim().startsWith("-");
+  const magnitude = total.trim().replace(/^[-+]/, "");
+  if (/^0+(?:\.0+)?$/.test(magnitude)) return "no change";
+  return `${negative ? "down" : "up"} ${formatInr(magnitude, "compact")}`;
+}
+
 function StressList({ stress }: { stress: Record<string, unknown> }) {
   const scenarios = Object.entries(stress);
   if (!scenarios.length)
@@ -45,12 +54,11 @@ function StressList({ stress }: { stress: Record<string, unknown> }) {
             <p className="text-sm">
               Your money:{" "}
               <strong className="tabular-nums">
-                {currentTotal ? formatInr(currentTotal, "compact") : "—"}
+                {changeText(currentTotal)}
               </strong>
             </p>
             <p className="text-sm text-muted-foreground">
-              With your target plan:{" "}
-              {targetTotal ? formatInr(targetTotal, "compact") : "—"}
+              With your target plan: {changeText(targetTotal)}
             </p>
           </article>
         );
