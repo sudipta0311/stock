@@ -237,18 +237,19 @@ export function HoldingPage() {
         <div>
           <p className="text-sm text-muted-foreground">Price as of</p>
           <p className="mt-1 text-sm">
-            {holding.price_as_of ?? "Not available"}
+            {holding.price_as_of
+              ? new Intl.DateTimeFormat("en-GB", {
+                  day: "numeric",
+                  month: "short",
+                  year: "numeric",
+                  timeZone: "UTC",
+                }).format(new Date(`${holding.price_as_of}T00:00:00Z`))
+              : "Not available"}
           </p>
         </div>
       </Card>
-      {card ? (
-        <ExitCard value={card} />
-      ) : (
-        <ComingSoon
-          title="Exit Card is coming soon"
-          description="Exit details appear when a holding has been reviewed by the plan."
-        />
-      )}
+      {/* Without a review there is nothing to show; a placeholder only adds noise. */}
+      {card ? <ExitCard value={card} /> : null}
     </div>
   );
 }

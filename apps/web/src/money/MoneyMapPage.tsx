@@ -44,7 +44,11 @@ import {
   formatHouseholdAmount,
   formatSecondaryAmount,
 } from "../household/currency";
-import { formatDkk, type DkkInrRate } from "../household/fx";
+import {
+  formatDkk,
+  formatRateToTwoDecimals,
+  type DkkInrRate,
+} from "../household/fx";
 
 const FundCheckCard = lazy(() =>
   import("./FundCheckCard").then((module) => ({
@@ -110,6 +114,19 @@ function sleeveRows(
 }
 
 const HOLDINGS_SHOWN = 8;
+
+/** "2026-10-28" → "28 Oct 2026". */
+function plainDate(isoDate: string): string {
+  const parsed = new Date(`${isoDate}T00:00:00Z`);
+  return Number.isNaN(parsed.getTime())
+    ? isoDate
+    : new Intl.DateTimeFormat("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        timeZone: "UTC",
+      }).format(parsed);
+}
 
 /** Largest first; holdings without a value go last, then by name. */
 function byValue<T extends { value?: string | null; name: string }>(
@@ -721,8 +738,8 @@ export function MoneyMapPage() {
   const fxLine =
     hasDanishMember && fxQuote
       ? englishCopy.household.fx_line
-          .replace("{rate}", fxQuote.rate)
-          .replace("{date}", fxQuote.date)
+          .replace("{rate}", formatRateToTwoDecimals(fxQuote.rate))
+          .replace("{date}", plainDate(fxQuote.date))
       : null;
 
   const completenessPct = Math.max(

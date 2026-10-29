@@ -394,7 +394,7 @@
     "access_removed": "Access to this family plan was removed. Your own plan is showing.",
     "read_only": "View only",
     "view_only_help": "You can view this family plan, but you cannot make changes.",
-    "fx_line": "At {rate} INR per DKK · rate date {date}",
+    "fx_line": "1 DKK = ₹{rate} on {date}",
     "dkk_unavailable": "DKK amounts will show when an exchange rate is available.",
     "primary_currency": "Main display currency",
     "inr": "Indian rupees (INR)",
