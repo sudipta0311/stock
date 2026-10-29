@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import math
 import os
@@ -93,6 +94,7 @@ class RunContext:
     owner_engine: Engine | None = None
     on_budget_change: Callable[[Decimal], None] | None = None
     dossier_budget: DossierBudget | None = None
+    prompt_version_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -105,6 +107,7 @@ class RouterResult:
     service_tier: str | None
     latency_ms: int
     call_id: UUID
+    tool_calls: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -117,6 +120,11 @@ class _CallResult:
     service_tier: str | None
     latency_ms: int
     call_id: UUID
+    tool_calls: tuple[dict[str, Any], ...] = ()
+
+
+# Extra completion tokens for hidden reasoning, by reasoning effort.
+_REASONING_HEADROOM = {"none": 0, "minimal": 512, "low": 1024, "medium": 2048, "high": 4096}
 
 
 class ModelRouter:
@@ -167,12 +175,16 @@ class ModelRouter:
         schema: type[SchemaT] | None,
         max_output_tokens: int,
         run_ctx: RunContext,
+        tools: Sequence[Mapping[str, Any]] | None = None,
+        tool_choice: str | Mapping[str, Any] = "auto",
     ) -> RouterResult:
         if tier not in self.config.tiers:
             raise ValueError(f"Unknown model tier: {tier}")
         if max_output_tokens < 1:
             raise ValueError("max_output_tokens must be positive")
         normalized_messages = [dict(message) for message in messages]
+        if tools and schema is not None:
+            raise ValueError("Tool calls and a response schema must use separate requests")
         self._guard_prompt(normalized_messages)
         tier_config = self.config.tiers[tier]
         use_flex = (
@@ -195,9 +207,14 @@ class ModelRouter:
                 run_ctx=run_ctx,
                 service_tier=service_tier,
                 flex=use_flex,
+                tools=tools,
+                tool_choice=tool_choice,
             )
         except BudgetExceeded:
             raise
+
+        if call.tool_calls:
+            return self._router_result(None, call)
 
         if schema is None:
             parsed = self._parse_untyped(call.raw_text)
@@ -265,6 +282,8 @@ class ModelRouter:
         run_ctx: RunContext,
         service_tier: str | None,
         flex: bool,
+        tools: Sequence[Mapping[str, Any]] | None = None,
+        tool_choice: str | Mapping[str, Any] = "auto",
     ) -> _CallResult:
         try:
             return self._request_with_retries(
@@ -277,6 +296,8 @@ class ModelRouter:
                 run_ctx=run_ctx,
                 service_tier=service_tier,
                 flex=flex,
+                tools=tools,
+                tool_choice=tool_choice,
             )
         except Exception as error:
             if schema is None or not self._is_schema_rejection(error):
@@ -292,6 +313,8 @@ class ModelRouter:
             run_ctx=run_ctx,
             service_tier=service_tier,
             flex=flex,
+            tools=None,
+            tool_choice=tool_choice,
         )
 
     def _request_with_retries(
@@ -306,6 +329,8 @@ class ModelRouter:
         run_ctx: RunContext,
         service_tier: str | None,
         flex: bool,
+        tools: Sequence[Mapping[str, Any]] | None,
+        tool_choice: str | Mapping[str, Any],
     ) -> _CallResult:
         attempts = max(1, self.config.flex.max_flex_retries) if flex else 3
         retrying = Retrying(
@@ -327,6 +352,8 @@ class ModelRouter:
                         max_output_tokens=max_output_tokens,
                         run_ctx=run_ctx,
                         service_tier=service_tier,
+                        tools=tools,
+                        tool_choice=tool_choice,
                     )
         except Exception as error:
             if flex and self.config.flex.fallback_to_default and self._is_capacity_error(error):
@@ -339,6 +366,8 @@ class ModelRouter:
                     max_output_tokens=max_output_tokens,
                     run_ctx=run_ctx,
                     service_tier="default",
+                    tools=tools,
+                    tool_choice=tool_choice,
                 )
             raise
         raise RuntimeError("Retry loop exited without a model response")
@@ -354,13 +383,23 @@ class ModelRouter:
         max_output_tokens: int,
         run_ctx: RunContext,
         service_tier: str | None,
+        tools: Sequence[Mapping[str, Any]] | None = None,
+        tool_choice: str | Mapping[str, Any] = "auto",
     ) -> _CallResult:
         prompt_json = json.dumps(messages, ensure_ascii=False, separators=(",", ":"))
         prompt_tokens = max(1, math.ceil(len(prompt_json.encode("utf-8")) / 4))
+        effort: str | None = None
+        if reasoning_effort and deployment == "gpt-6-luna":
+            # Foundry rejects function tools with a reasoning effort on chat completions
+            # for this deployment ("set reasoning_effort to 'none'"), seen in the live smoke.
+            effort = "none" if tools else reasoning_effort
+        # Hidden reasoning counts against max_completion_tokens; without headroom a short
+        # answer (a 64-token yes/no) came back empty in the live smoke.
+        completion_tokens = max_output_tokens + _REASONING_HEADROOM.get(effort or "none", 2048)
         estimate = self._estimate_cost(
             deployment,
             prompt_tokens,
-            max_output_tokens,
+            completion_tokens,
             service_tier,
         )
         if run_ctx.dossier_budget is not None:
@@ -372,21 +411,28 @@ class ModelRouter:
         request_payload: dict[str, Any] = {
             "model": deployment,
             "messages": messages,
-            "max_completion_tokens": max_output_tokens,
+            "max_completion_tokens": completion_tokens,
         }
-        if reasoning_effort and deployment == "gpt-6-luna":
-            request_payload["reasoning_effort"] = reasoning_effort
+        if effort:
+            request_payload["reasoning_effort"] = effort
         if service_tier and service_tier != "default":
             request_payload["service_tier"] = service_tier
+        if tools:
+            request_payload["tools"] = [dict(tool) for tool in tools]
+            request_payload["tool_choice"] = tool_choice
         if response_format is not None:
             request_payload["response_format"] = response_format
         started = time.perf_counter()
         safe_request = self._truncate_json(self._redact(request_payload))
         prompt_hash = hashlib.sha256(prompt_json.encode("utf-8")).hexdigest()
         try:
-            response = self.client.chat.completions.create(**request_payload)
+            response = self.client.chat.completions.create(
+                **request_payload,
+                timeout=self._request_timeout(service_tier),
+            )
             latency_ms = int((time.perf_counter() - started) * 1000)
             raw_text = self._message_text(response.choices[0].message.content)
+            tool_calls = self._tool_calls(response.choices[0].message)
             usage = self._usage_dict(response.usage)
             cost = self._actual_cost(deployment, usage, service_tier)
             response_json = self._truncate_json(self._redact(response.model_dump(mode="json")))
@@ -404,6 +450,7 @@ class ModelRouter:
                     "deployment": deployment,
                     "service_tier": service_tier,
                     "prompt_sha256": prompt_hash,
+                    "prompt_version_sha256": run_ctx.prompt_version_sha256 or prompt_hash,
                     "request_json": safe_request,
                     "response_json": {"error_code": error_code},
                     "usage": None,
@@ -428,6 +475,7 @@ class ModelRouter:
                 "deployment": deployment,
                 "service_tier": service_tier,
                 "prompt_sha256": prompt_hash,
+                "prompt_version_sha256": run_ctx.prompt_version_sha256 or prompt_hash,
                 "request_json": safe_request,
                 "response_json": response_json,
                 "usage": usage,
@@ -448,6 +496,7 @@ class ModelRouter:
             service_tier=service_tier,
             latency_ms=latency_ms,
             call_id=call_id,
+            tool_calls=tool_calls,
         )
 
     def _write_audit(self, run_ctx: RunContext, row: dict[str, Any]) -> None:
@@ -465,10 +514,12 @@ class ModelRouter:
                 text(
                     "INSERT INTO llm_calls "
                     "(id, run_id, dossier_id, agent, tier, deployment, service_tier, "
-                    "prompt_sha256, request_json, response_json, usage, cost_usd, latency_ms, "
+                    "prompt_sha256, prompt_version_sha256, request_json, response_json, usage, "
+                    "cost_usd, latency_ms, "
                     "status, error_code) VALUES "
                     "(:id, :run_id, :dossier_id, :agent, :tier, :deployment, :service_tier, "
-                    ":prompt_sha256, CAST(:request_json AS jsonb), CAST(:response_json AS jsonb), "
+                    ":prompt_sha256, :prompt_version_sha256, CAST(:request_json AS jsonb), "
+                    "CAST(:response_json AS jsonb), "
                     "CAST(:usage AS jsonb), :cost_usd, :latency_ms, :status, :error_code)"
                 ),
                 {
@@ -651,7 +702,37 @@ class ModelRouter:
             service_tier=call.service_tier,
             latency_ms=call.latency_ms,
             call_id=call.call_id,
+            tool_calls=call.tool_calls,
         )
+
+    def _request_timeout(self, service_tier: str | None) -> httpx.Timeout:
+        flex = service_tier == "flex"
+        read_timeout = self.config.flex_read_timeout_s if flex else self.config.read_timeout_s
+        return httpx.Timeout(
+            connect=self.config.connect_timeout_s,
+            read=read_timeout,
+            write=self.config.read_timeout_s,
+            pool=self.config.connect_timeout_s,
+        )
+
+    @staticmethod
+    def _tool_calls(message: Any) -> tuple[dict[str, Any], ...]:
+        calls: list[dict[str, Any]] = []
+        for call in getattr(message, "tool_calls", None) or ():
+            function = getattr(call, "function", None)
+            if function is None:
+                continue
+            calls.append(
+                {
+                    "id": str(getattr(call, "id", "")),
+                    "type": "function",
+                    "function": {
+                        "name": str(getattr(function, "name", "")),
+                        "arguments": str(getattr(function, "arguments", "{}")),
+                    },
+                }
+            )
+        return tuple(calls)
 
 
 @dataclass
@@ -674,8 +755,10 @@ class FakeRouter:
         schema: type[SchemaT] | None,
         max_output_tokens: int,
         run_ctx: RunContext,
+        tools: Sequence[Mapping[str, Any]] | None = None,
+        tool_choice: str | Mapping[str, Any] = "auto",
     ) -> RouterResult:
-        del messages, max_output_tokens
+        del max_output_tokens, tool_choice
         if run_ctx.budget.calls >= run_ctx.budget.max_calls:
             raise BudgetExceeded("Model call limit reached")
         if run_ctx.budget.spent_usd + self.cost_per_call > run_ctx.budget.max_usd:
@@ -693,8 +776,36 @@ class FakeRouter:
         if run_ctx.on_budget_change is not None:
             run_ctx.on_budget_change(run_ctx.budget.spent_usd)
         fixture = self.fixtures.get(tier, {})
+        if isinstance(fixture, list):
+            fixture = fixture.pop(0) if fixture else {}
         if callable(fixture):
-            fixture = fixture(self.calls)
+            available = (self.calls, tier, list(messages), schema, tools, run_ctx)
+            try:
+                parameters = inspect.signature(fixture).parameters.values()
+                positional = [
+                    item
+                    for item in parameters
+                    if item.kind
+                    in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+                ]
+            except (TypeError, ValueError):
+                fixture = fixture(self.calls)
+            else:
+                fixture = fixture(*available[: len(positional)])
+        if tools and isinstance(fixture, dict) and "tool_calls" in fixture:
+            tool_calls = tuple(fixture["tool_calls"])
+            raw_text = str(fixture.get("content", ""))
+            return RouterResult(
+                parsed=None,
+                raw_text=raw_text,
+                usage={"input_tokens": 0, "output_tokens": 0, "cached_input_tokens": 0},
+                cost_usd=cost,
+                model=tier,
+                service_tier=None,
+                latency_ms=0,
+                call_id=uuid4(),
+                tool_calls=tool_calls,
+            )
         parsed = schema.model_validate(fixture) if schema is not None else fixture
         raw_text = json.dumps(
             parsed.model_dump(mode="json") if isinstance(parsed, BaseModel) else parsed,

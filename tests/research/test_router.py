@@ -10,6 +10,7 @@ import pytest
 from openai import APIStatusError
 from pydantic import BaseModel
 
+from wealth.research.config import ModelConfig
 from wealth.research.dossier import DossierBudget
 from wealth.research.router import (
     BudgetExceeded,
@@ -98,8 +99,90 @@ def test_json_schema_success_uses_chat_completions_and_validates(
     assert bodies[0]["response_format"]["type"] == "json_schema"
     assert bodies[0]["response_format"]["json_schema"]["strict"] is True
     assert bodies[0]["model"] == "gpt-6-luna"
-    assert bodies[0]["max_completion_tokens"] == 32
+    # 32 visible tokens plus headroom for the nano tier's hidden "low" reasoning.
+    assert bodies[0]["max_completion_tokens"] == 32 + 1024
     assert bodies[0]["service_tier"] == "flex"
+
+
+def test_tool_call_response_is_returned_for_the_allowlisted_agent_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body.append(_post_body(request))
+        response = _completion("")
+        response["choices"][0]["message"] = {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "synthetic-call",
+                    "type": "function",
+                    "function": {
+                        "name": "factor_snapshot",
+                        "arguments": '{"security_id":"synthetic"}',
+                    },
+                }
+            ],
+        }
+        response["choices"][0]["finish_reason"] = "tool_calls"
+        return httpx.Response(200, json=response)
+
+    router = _router(handler, monkeypatch, [])
+    result = router.complete(
+        "mini",
+        [{"role": "user", "content": "Research this synthetic company."}],
+        schema=None,
+        max_output_tokens=80,
+        run_ctx=_context(),
+        tools=[
+            {
+                "type": "function",
+                "function": {
+                    "name": "factor_snapshot",
+                    "parameters": {"type": "object", "properties": {}, "required": []},
+                },
+            }
+        ],
+    )
+
+    assert result.tool_calls[0]["function"]["name"] == "factor_snapshot"
+    assert body[0]["tool_choice"] == "auto"
+    assert body[0]["tools"][0]["function"]["name"] == "factor_snapshot"
+    # Foundry rejects function tools with a reasoning effort for gpt-6-luna (live smoke).
+    assert body[0]["reasoning_effort"] == "none"
+
+
+def test_flex_requests_use_the_configured_long_read_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    timeouts: list[dict[str, Any]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        timeouts.append(request.extensions["timeout"])
+        return httpx.Response(200, json=_completion('{"value":"ok"}'))
+
+    router = _router(
+        handler,
+        monkeypatch,
+        [],
+    )
+    config = ModelConfig.load()
+
+    assert config.flex_read_timeout_s == 900
+    assert router._request_timeout("flex").read == 900
+    assert router._request_timeout(None).read == 120
+    for mode in ("weekly", "interactive"):
+        router.complete(
+            "nano",
+            [{"role": "user", "content": "Check synthetic evidence."}],
+            schema=Reply,
+            max_output_tokens=32,
+            run_ctx=_context(mode=mode),
+        )
+    assert timeouts[0]["read"] == 900
+    assert timeouts[1]["read"] == 120
 
 
 def test_rejected_json_schema_falls_back_to_json_object(
@@ -377,3 +460,24 @@ def test_audit_rows_never_contain_the_environment_api_key(
     assert os.environ["FOUNDRY_API_KEY"] not in serialized_rows
     assert "headers" not in serialized_rows
     assert "api-key" not in serialized_rows
+
+
+def test_audit_rows_store_the_prompt_version_hash(monkeypatch: pytest.MonkeyPatch) -> None:
+    rows: list[dict[str, Any]] = []
+    router = _router(
+        lambda _request: httpx.Response(200, json=_completion('{"value":"ok"}')),
+        monkeypatch,
+        rows,
+    )
+    context = _context()
+    context.prompt_version_sha256 = "a" * 64
+
+    router.complete(
+        "mini",
+        [{"role": "user", "content": "Review synthetic evidence."}],
+        schema=Reply,
+        max_output_tokens=32,
+        run_ctx=context,
+    )
+
+    assert rows[0]["prompt_version_sha256"] == "a" * 64

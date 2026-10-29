@@ -8,4 +8,4 @@ prices_usd_per_1m:
   gpt-6-luna: {input: "0.10", output: "0.50", cached_input: "0.01", flex_factor: "0.5"}
   deepseek-v4-flash: {input: "0.15", output: "0.31"}
 flex: {enabled_for_modes: [weekly], max_flex_retries: 3, fallback_to_default: true}
-timeouts_s: {connect: 10, read: 120}
+timeouts_s: {connect: 10, read: 120, flex_read: 900}

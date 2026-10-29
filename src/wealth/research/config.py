@@ -40,6 +40,7 @@ class ModelConfig:
     flex: FlexConfig
     connect_timeout_s: float
     read_timeout_s: float
+    flex_read_timeout_s: float = 900
 
     @classmethod
     def load(cls, path: Path | None = None) -> ModelConfig:
@@ -81,4 +82,5 @@ class ModelConfig:
             ),
             connect_timeout_s=float(timeouts["connect"]),
             read_timeout_s=float(timeouts["read"]),
+            flex_read_timeout_s=float(timeouts.get("flex_read", 900)),
         )

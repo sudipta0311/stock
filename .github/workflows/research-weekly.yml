@@ -15,8 +15,7 @@ concurrency:
 
 jobs:
   research:
-    # Off until the real agents land (C15c): the C14 runner is plumbing only. Turn on by
-    # setting the repository variable RESEARCH_ENABLED to "true".
+    # Kept off until the reviewer completes the live smoke and enables the repository variable.
     if: vars.RESEARCH_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -39,20 +38,10 @@ jobs:
       - name: Start the weekly run
         if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 0 * * 6'
         run: |
-          if python -c "import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('wealth.research.run') else 78)"; then
-            python -m wealth.research.run start --budget-usd "$RESEARCH_BUDGET_USD"
-          else
-            result=$?
-            if [ "$result" -ne 78 ]; then exit "$result"; fi
-            echo "::notice::The weekly research runner is not available yet; skipping."
-          fi
-      - name: Continue the latest weekly run
+          WEEK=$(date -u +%G-W%V)
+          python -m wealth.research.run start --week "$WEEK" --mode weekly --budget-usd "$RESEARCH_BUDGET_USD"
+      - name: Continue the open weekly run
         if: github.event_name == 'schedule' && github.event.schedule != '0 0 * * 6'
         run: |
-          if python -c "import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('wealth.research.run') else 78)"; then
-            python -m wealth.research.run continue --budget-usd "$RESEARCH_BUDGET_USD"
-          else
-            result=$?
-            if [ "$result" -ne 78 ]; then exit "$result"; fi
-            echo "::notice::The weekly research runner is not available yet; skipping."
-          fi
+          WEEK=$(date -u +%G-W%V)
+          python -m wealth.research.run continue --week "$WEEK"

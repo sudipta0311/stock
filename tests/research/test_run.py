@@ -9,7 +9,7 @@ import pytest
 from langgraph.checkpoint.memory import MemorySaver
 
 from wealth.research import run
-from wealth.research.router import FakeRouter
+from wealth.research.errors import BudgetExceeded
 
 
 def test_cli_returns_exit_code_two_when_the_run_budget_is_exceeded(
@@ -39,6 +39,7 @@ def test_cli_returns_exit_code_two_when_the_run_budget_is_exceeded(
     monkeypatch.setattr(run, "_owner_url", lambda: "postgresql+psycopg://localhost/wealth")
     monkeypatch.setattr(run, "make_engine", lambda _url: FakeEngine())
     monkeypatch.setattr(run, "create_run", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(run, "get_open_run_for_week", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         run,
         "get_run",
@@ -53,11 +54,13 @@ def test_cli_returns_exit_code_two_when_the_run_budget_is_exceeded(
     )
     monkeypatch.setattr(run, "update_run", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(run, "PostgresSaver", FakePostgresSaver)
-    monkeypatch.setattr(
-        run,
-        "ModelRouter",
-        lambda **_kwargs: FakeRouter(cost_per_call=Decimal("0.02")),
-    )
+    monkeypatch.setattr(run, "run_screener", lambda *_args, **_kwargs: {"security_ids": []})
+    monkeypatch.setattr(run, "load_shortlist_candidates", lambda *_args, **_kwargs: [])
+
+    def exhaust_budget(**_kwargs):
+        raise BudgetExceeded("synthetic budget exhaustion")
+
+    monkeypatch.setattr(run, "_graph_run", exhaust_budget)
 
     exit_code = run._run_start(Namespace(week="2026-W45", mode="weekly", budget_usd="0.01"))
     result = json.loads(capsys.readouterr().out)

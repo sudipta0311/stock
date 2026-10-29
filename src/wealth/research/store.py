@@ -80,6 +80,28 @@ def get_run(engine: Engine, run_id: UUID) -> dict[str, Any] | None:
     return dict(row) if row is not None else None
 
 
+def get_open_run_for_week(engine: Engine, week: str) -> dict[str, Any] | None:
+    """Return the newest resumable weekly run without exposing other run data."""
+    with system_session(engine) as session:
+        row = (
+            session.execute(
+                text(
+                    "SELECT run_id, week, mode, stage, status, budget_usd, spent_usd, "
+                    "started_at, finished_at, "
+                    "(SELECT count(*) FROM llm_calls WHERE llm_calls.run_id = "
+                    "research_runs.run_id) AS calls "
+                    "FROM research_runs WHERE week = :week AND mode = 'weekly' "
+                    "AND status IN ('running', 'waiting') "
+                    "ORDER BY started_at DESC LIMIT 1"
+                ),
+                {"week": week},
+            )
+            .mappings()
+            .one_or_none()
+        )
+    return dict(row) if row is not None else None
+
+
 def save_dossier(engine: Engine, dossier: Dossier, *, security_id: UUID | None = None) -> None:
     payload = json.dumps(dossier.model_dump(mode="json", by_alias=True), ensure_ascii=False)
     with system_session(engine) as session:
@@ -111,3 +133,17 @@ def load_dossier(engine: Engine, dossier_id: str) -> Dossier | None:
     if isinstance(payload, str):
         return Dossier.model_validate_json(payload)
     return Dossier.model_validate(payload)
+
+
+def save_research_pack(engine: Engine, week: str, pack: dict[str, Any]) -> None:
+    """Freeze the weekly pack in the existing one-row-per-week shared table."""
+    payload = json.dumps(pack, ensure_ascii=False, separators=(",", ":"), default=str)
+    with system_session(engine) as session:
+        session.execute(
+            text(
+                "INSERT INTO research_packs (week, pack) "
+                "VALUES (:week, CAST(:pack AS jsonb)) "
+                "ON CONFLICT (week) DO UPDATE SET pack = EXCLUDED.pack, created_at = now()"
+            ),
+            {"week": week, "pack": payload},
+        )

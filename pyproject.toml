@@ -54,7 +54,7 @@ dev = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-wealth = ["alerts/templates/*.j2"]
+wealth = ["alerts/templates/*.j2", "research/prompts/*.md"]
 
 [tool.ruff]
 line-length = 100

@@ -10,6 +10,8 @@ from typing import Any
 import yaml
 
 _BANNED_TERMS_PATH = Path(__file__).resolve().parents[3] / "copy" / "banned_terms.yaml"
+_WORD_PATTERN = re.compile(r"[\w]+(?:[’'-][\w]+)*", flags=re.UNICODE)
+_SENTENCE_BREAK = re.compile(r"(?<=[.!?])\s+")
 
 
 @lru_cache(maxsize=1)
@@ -33,3 +35,13 @@ def find_banned_terms(value: str) -> list[str]:
         if re.search(rf"(?<!\w){re.escape(term)}(?!\w)", value, flags=re.IGNORECASE):
             matches.append(term)
     return matches
+
+
+def word_count(sentence: str) -> int:
+    """Count words with the same rule used by the shared copy checks."""
+    return len(_WORD_PATTERN.findall(sentence))
+
+
+def sentence_word_counts(value: str) -> tuple[int, ...]:
+    """Return word counts for each sentence in a short copy block."""
+    return tuple(word_count(sentence) for sentence in _SENTENCE_BREAK.split(value) if sentence)

@@ -84,3 +84,20 @@ def test_grounding_normalizes_indian_and_international_grouping() -> None:
     dossier = _dossier(claims=[_fact_claim("Coverage reached 1,23,456.00")])
     failures = validate_grounding(dossier, {"tool-1": {"coverage": "123,456"}})
     assert failures == []
+
+
+def test_grounding_accepts_periods_named_in_the_cited_field_names() -> None:
+    dossier = _dossier(
+        claims=[_fact_claim("The 12-1 momentum is 14.0% and 1-year volatility is 24.5%.")]
+    )
+    failures = validate_grounding(
+        dossier, {"tool-1": {"momentum_12_1_pct": "14.0", "volatility_1y_pct": "24.5"}}
+    )
+    assert failures == []
+
+
+def test_grounding_still_rejects_a_value_only_present_as_a_period() -> None:
+    dossier = _dossier(claims=[_fact_claim("Momentum reached 24.5% over the year.")])
+    failures = validate_grounding(dossier, {"tool-1": {"momentum_12_1_pct": "14.0"}})
+    assert len(failures) == 1
+    assert "24.5" in failures[0]

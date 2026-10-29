@@ -28,7 +28,10 @@ from wealth.marketdata.sources.nse_announcements import (
     NSE_ANNOUNCEMENTS_API_URL,
     NseAnnouncementsClient,
 )
+from wealth.research.factors import fundamental_factors
 from wealth.research.router import RunContext
+from wealth.research.rules import ResearchRules
+from wealth.research.valuation import calculate_valuation_stats
 
 _MAX_RESULT_BYTES = 50 * 1024
 _AMFI_URL = "https://www.amfiindia.com/"
@@ -80,11 +83,16 @@ class ToolRegistry:
             self.register("edgar_filings", self._edgar_filings_tool)
             self.register("edgar_filing_text", self._edgar_filing_text_tool)
             self.register("nse_announcements", self._nse_announcements)
+            self.register("valuation_stats", self._valuation_stats)
 
     def register(self, name: str, function: ToolFunction) -> None:
         if not name or name in self._tools:
             raise ValueError("Tool names must be non-empty and unique")
         self._tools[name] = function
+
+    @property
+    def registered_names(self) -> frozenset[str]:
+        return frozenset(self._tools)
 
     def close(self) -> None:
         """Close optional source sessions held open for rate limits and exchange cookies."""
@@ -374,6 +382,108 @@ class ToolRegistry:
             "dist_from_200dma": factors.dist_from_200dma,
         }
         return result, rows[-1].source_url if rows else None
+
+    def _valuation_stats(self, args: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
+        if self.owner_engine is None:
+            raise RuntimeError("Valuation tools require the owner database connection")
+        security_id = UUID(str(args["security_id"]))
+        as_of = self._as_of(args)
+        rules = ResearchRules.load()
+        with system_session(self.owner_engine) as session:
+            security = session.get(Security, security_id)
+            if security is None or security.market not in {"IN", "US"}:
+                raise ValueError("Valuation supports shortlisted India and US equities")
+            peers = list(
+                session.scalars(
+                    select(Security).where(
+                        Security.market == security.market,
+                        Security.sector == security.sector,
+                        Security.security_type == "equity",
+                    )
+                )
+            )
+            if (security.sector or "").casefold() == "unclassified":
+                peers = [security]
+            peer_ids = [peer.id for peer in peers]
+            cutoff = as_of - timedelta(days=3 * 366 + 35)
+            price_rows = list(
+                session.execute(
+                    select(
+                        PriceEod.security_id,
+                        PriceEod.as_of,
+                        PriceEod.close,
+                        PriceEod.source_url,
+                    )
+                    .where(
+                        PriceEod.security_id.in_(peer_ids),
+                        PriceEod.as_of >= cutoff,
+                        PriceEod.as_of <= as_of,
+                    )
+                    .order_by(PriceEod.security_id, PriceEod.as_of)
+                )
+            )
+            fact_rows = list(
+                session.scalars(
+                    select(FundamentalPIT).where(
+                        FundamentalPIT.security_id.in_(peer_ids),
+                        FundamentalPIT.metric.in_(
+                            ("eps_diluted", "operating_cash_flow", "capex", "shares_outstanding")
+                        ),
+                        FundamentalPIT.period_end <= as_of,
+                        FundamentalPIT.known_at <= datetime.combine(as_of, time.max, tzinfo=UTC),
+                    )
+                )
+            )
+
+        prices_by_security: dict[UUID, list[Any]] = {}
+        for row in price_rows:
+            prices_by_security.setdefault(row.security_id, []).append(row)
+        facts_by_security: dict[UUID, list[FundamentalPIT]] = {}
+        for row in fact_rows:
+            facts_by_security.setdefault(row.security_id, []).append(row)
+        current_prices: dict[UUID, Decimal] = {}
+        for peer in peers:
+            rows = prices_by_security.get(peer.id, [])
+            if rows and (as_of - rows[-1].as_of).days <= 20:
+                current_prices[peer.id] = rows[-1].close
+
+        security_price = current_prices.get(security.id)
+        own_facts = facts_by_security.get(security.id, [])
+        own_factors = fundamental_factors(own_facts, as_of=as_of, price=security_price)
+        peer_yields: list[Decimal] = []
+        for peer in peers:
+            peer_price = current_prices.get(peer.id)
+            if peer_price is None:
+                continue
+            peer_factors = fundamental_factors(
+                facts_by_security.get(peer.id, []), as_of=as_of, price=peer_price
+            )
+            if peer_factors.earnings_yield is not None:
+                peer_yields.append(peer_factors.earnings_yield)
+
+        monthly_prices: dict[tuple[int, int], tuple[date, Decimal]] = {}
+        for row in prices_by_security.get(security.id, []):
+            monthly_prices[(row.as_of.year, row.as_of.month)] = (row.as_of, row.close)
+        historical_pe: list[Decimal] = []
+        for on, close in monthly_prices.values():
+            historical_factors = fundamental_factors(own_facts, as_of=on, price=close)
+            if (
+                historical_factors.earnings_yield is not None
+                and historical_factors.earnings_yield > 0
+            ):
+                historical_pe.append(Decimal(1) / historical_factors.earnings_yield)
+
+        stats = calculate_valuation_stats(
+            security_id=str(security.id),
+            market=security.market,
+            price=security_price,
+            factors=own_factors,
+            sector_earnings_yields=peer_yields,
+            historical_pe=historical_pe,
+            rules=rules,
+        )
+        own_prices = prices_by_security.get(security.id, [])
+        return stats.model_dump(mode="json"), own_prices[-1].source_url if own_prices else None
 
     def _sector_peers(self, args: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
         if self.owner_engine is None:

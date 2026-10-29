@@ -67,11 +67,20 @@ class Handoff(BaseModel):
     budget_remaining_tokens: int = Field(ge=0)
 
 
+class CitedReason(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(max_length=300)
+    evidence: list[str] = Field(default_factory=list)
+
+
 class RedTeamVerdict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    strongest_bear_case: str
-    falsifier: str
+    strongest_bear_case: str = ""
+    falsifier: str = ""
+    downgrade: Literal["NONE", "WATCH", "VETO"] = "NONE"
+    reasons: list[CitedReason] = Field(default_factory=list)
 
 
 class Verdicts(BaseModel):
@@ -115,8 +124,20 @@ class Dossier(BaseModel):
     stage: Stage = Stage.QUEUED
     handoff: Handoff | None = None
     claims: list[Claim] = Field(default_factory=list)
+    analyst_claim_ids: list[str] = Field(default_factory=list)
+    valuation_claim_ids: list[str] = Field(default_factory=list)
+    drivers: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
     geo_exposure: GeoExposure | None = None
     verdicts: Verdicts = Field(default_factory=Verdicts)
+    valuation_stats: dict[str, Any] | None = None
+    valuation_explanation: str | None = None
+    valuation_evidence_ids: list[str] = Field(default_factory=list)
+    valuation_percentile: Decimal | None = Field(default=None, ge=0, le=100)
+    compliance_failures: list[str] = Field(default_factory=list)
+    red_team_flags: list[str] = Field(default_factory=list)
+    status: Literal["APPROVED", "PENDING", "VETOED", "UNRESOLVED"] = "PENDING"
+    status_reason: str | None = None
     open_questions: list[str] = Field(default_factory=list)
     confidence: Decimal = Field(default=Decimal("0.5"), ge=0, le=1)
     trace_id: str | None = None
@@ -230,7 +251,11 @@ def validate_grounding(dossier: Dossier, tool_calls: Any) -> list[str]:
         claim_numbers = _numbers(claim.text)
         evidence_numbers: set[str] = set()
         for identifier in cited_ids:
-            evidence_numbers.update(_numbers(_json_text(_result_payload(calls[identifier]))))
+            evidence_text = _json_text(_result_payload(calls[identifier]))
+            evidence_numbers.update(_numbers(evidence_text))
+            # Field names carry periods ("momentum_12_1_pct", "volatility_1y_pct") that
+            # the model rightly writes as "12-1 momentum" or "1-year volatility".
+            evidence_numbers.update(_numbers(re.sub(r"[_]|(?<=\d)y\b", " ", evidence_text)))
         unsupported = sorted(claim_numbers - evidence_numbers, key=Decimal)
         if unsupported:
             failures.append(f"{claim.id}: unsupported numbers {', '.join(unsupported)}")

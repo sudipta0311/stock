@@ -22,7 +22,7 @@ def test_checkpoint_resumes_after_screen_in_a_fresh_process(
 ) -> None:
     database_url = migrated_database.owner_engine.url.render_as_string(hide_password=False)
     checkpoint_url = _checkpointer_url(database_url)
-    run_id = f"c14-{uuid4()}"
+    run_id = f"c15c-{uuid4()}"
     config = {"configurable": {"thread_id": run_id}}
     context = RunContext(budget=RunBudget(max_usd=Decimal("1"), max_calls=100))
 
@@ -58,8 +58,11 @@ def test_checkpoint_resumes_after_screen_in_a_fresh_process(
         "    saver.setup()\n"
         "    graph = build_research_graph(FakeRouter(), run_ctx=context, checkpointer=saver)\n"
         "    state = graph.invoke(None, {'configurable': {'thread_id': thread_id}})\n"
-        "assert state['stage'] == 'APPROVED'\n"
-        "assert state['status'] == 'completed'\n"
+        "    assert state['stage'] == 'RED_TEAM_DONE'\n"
+        "    assert state['status'] == 'waiting'\n"
+        "    state = graph.invoke(None, {'configurable': {'thread_id': thread_id}})\n"
+        "    assert state['stage'] == 'PACKED'\n"
+        "    assert state['status'] == 'completed'\n"
     )
     result = subprocess.run(
         [sys.executable, "-c", code],
