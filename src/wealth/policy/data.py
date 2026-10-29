@@ -7,9 +7,10 @@ from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from wealth.core.dates import fy_start
 from wealth.db.models import (
     Goal as GoalRow,
 )
@@ -18,6 +19,7 @@ from wealth.db.models import (
     HouseholdMember,
     ManualAsset,
     Profile,
+    RealisedTrade,
     ResearchPackRecord,
     Security,
 )
@@ -211,6 +213,7 @@ def _member_profiles(
     profile: Profile | None,
     financial_context: FinancialContext,
     fallback_investing: InvestingPrefs,
+    as_of: date,
 ) -> tuple[MemberProfile, ...]:
     from wealth.db.repo import ensure_self_household_member
 
@@ -232,6 +235,14 @@ def _member_profiles(
             stored_tax.setdefault("employment_type", financial_context.employment_type)
             if not stored_investing:
                 stored_investing = fallback_investing.model_dump(mode="json")
+        tax = MemberTax.model_validate(stored_tax)
+        realised_ltcg, realised_stcg = _realised_equity_gains(session, user_id, row.id, as_of)
+        tax = tax.model_copy(
+            update={
+                "fy_realised_equity_ltcg": max(tax.fy_realised_equity_ltcg, realised_ltcg),
+                "fy_realised_equity_stcg": max(tax.fy_realised_equity_stcg, realised_stcg),
+            }
+        )
         members.append(
             MemberProfile(
                 id=str(row.id),
@@ -239,13 +250,30 @@ def _member_profiles(
                 relationship=row.relationship,  # type: ignore[arg-type]
                 is_self=row.is_self,
                 residency=residency_from_stored(row.residency),
-                tax=MemberTax.model_validate(stored_tax),
+                tax=tax,
                 investing=InvestingPrefs.model_validate(stored_investing),
-                realised_equity_ltcg=MemberTax.model_validate(stored_tax).fy_realised_equity_ltcg,
-                realised_equity_stcg=MemberTax.model_validate(stored_tax).fy_realised_equity_stcg,
+                realised_equity_ltcg=tax.fy_realised_equity_ltcg,
+                realised_equity_stcg=tax.fy_realised_equity_stcg,
             )
         )
     return tuple(members)
+
+
+def _realised_equity_gains(
+    session: Session, user_id: UUID, member_id: UUID, as_of: date
+) -> tuple[Decimal, Decimal]:
+    rows = session.execute(
+        select(RealisedTrade.holding_period, func.sum(RealisedTrade.gain))
+        .where(
+            RealisedTrade.user_id == user_id,
+            RealisedTrade.member_id == member_id,
+            RealisedTrade.trade_date >= fy_start(as_of),
+            RealisedTrade.trade_date <= as_of,
+        )
+        .group_by(RealisedTrade.holding_period)
+    )
+    totals = {period: max(Decimal(0), amount or Decimal(0)) for period, amount in rows}
+    return totals.get("LT", Decimal(0)), totals.get("ST", Decimal(0))
 
 
 def required_fx_currencies(
@@ -290,7 +318,7 @@ def load_policy_inputs(
         if profile is not None
         else InvestingPrefs()
     )
-    members = _member_profiles(session, user_id, profile, context, investing)
+    members = _member_profiles(session, user_id, profile, context, investing, as_of)
     self_member = next(member for member in members if member.is_self)
     prices = DbPriceProvider(session)
     valued_assets, notes = _manual_assets(session, user_id, as_of, prices)
@@ -327,10 +355,13 @@ def load_policy_inputs(
         valued_assets=valued_assets,
         holdings=holdings,
         investing=self_member.investing,
-        realised_trades_this_fy=RealisedTradesThisFy(),
+        realised_trades_this_fy=RealisedTradesThisFy(
+            equity_ltcg=self_member.realised_equity_ltcg,
+            equity_stcg=self_member.realised_equity_stcg,
+        ),
         members=members,
         deployment_mode=deployment_mode,
-        notes=tuple(notes + ["realised_trades_source_unavailable"]),
+        notes=tuple(notes),
     )
     market = MarketContext(
         fx_rates=fx_rates,

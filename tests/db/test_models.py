@@ -26,6 +26,8 @@ _POST_INITIAL_TABLES = {
     "weekly_plans",
     "research_packs",
     "alerts_log",
+    "import_templates",
+    "realised_trades",
 }
 _NON_USER_ID_TABLES = {"household_access", "household_invites"}
 

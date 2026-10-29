@@ -8,6 +8,6 @@ export type ImportFeatureSupport = {
 };
 
 export const importFeatureSupport: ImportFeatureSupport = {
-  broker: false,
-  mapping: false,
+  broker: true,
+  mapping: true,
 };

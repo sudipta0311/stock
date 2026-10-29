@@ -9,6 +9,7 @@ export type ImportDetail = Schema<"ImportDetailResponse">;
 export type ImportItem = Schema<"ImportItemResponse">;
 export type ImportUpload = Schema<"ImportUploadResponse">;
 export type ImportConfirmation = Schema<"ImportConfirmationResponse">;
+export type ImportMappingRequest = Schema<"ImportMappingRequest">;
 
 export type ImportFormat = "nsdl_cas" | "cams_kfin_cas" | "broker_statement";
 export type ImportItemUpdate = {
@@ -35,12 +36,26 @@ export function uploadImport(
   password: string,
   docType: ImportFormat,
   signal?: AbortSignal,
+  selection?: { accountId?: string; memberId?: string },
 ): Promise<ImportUpload> {
   const body = new FormData();
   body.append("file", file, file.name);
   body.append("doc_type", docType);
   if (password) body.append("password", password);
+  if (selection?.accountId) body.append("account_id", selection.accountId);
+  else if (selection?.memberId) body.append("member_id", selection.memberId);
   return apiFetch("/v1/imports", { method: "POST", body, signal });
+}
+
+export function mapImportColumns(
+  jobId: string,
+  payload: ImportMappingRequest,
+): Promise<ImportDetail> {
+  return apiFetch(`/v1/imports/${encodeURIComponent(jobId)}/mapping`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
 }
 
 export function getImport(jobId: string): Promise<ImportDetail> {

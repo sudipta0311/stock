@@ -252,13 +252,13 @@ describe("statement import review", () => {
     expect(screen.getByText("Duplicate · 1")).toBeInTheDocument();
     expect(screen.getByText("Unknown · 1")).toBeInTheDocument();
     expect(screen.getByText("Already up to date")).toBeInTheDocument();
-    expect(importFeatureSupport.mapping).toBe(false);
+    expect(importFeatureSupport.mapping).toBe(true);
     expect(
       screen.queryByText("Column mapping is available for this API."),
     ).not.toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText("Kind"), "mf");
-    await user.selectOptions(screen.getByLabelText("Sleeve"), "gold");
+    await user.selectOptions(screen.getByLabelText("Category"), "gold");
     await user.click(screen.getByRole("button", { name: "Save decision" }));
 
     await waitFor(() =>
@@ -307,6 +307,108 @@ describe("statement import review", () => {
     expect(
       await screen.findByText("This import is already confirmed"),
     ).toBeInTheDocument();
+  });
+
+  it("requires an explicit choice when holdings and trade history differ", async () => {
+    const user = userEvent.setup();
+    const mismatch = item({
+      id: "item-mismatch",
+      action: "quantity_mismatch",
+      status: "quantity_mismatch",
+      sleeve: null,
+      diff: { current: "20.00", tradebook: "18.00" },
+    });
+    server.use(
+      http.get(`/v1/imports/${jobId}`, () =>
+        HttpResponse.json(
+          reviewDetail({
+            source: "broker",
+            items: [mismatch],
+            counts: { new: 0, changed: 1, duplicate: 0, unknown: 0 },
+          }),
+        ),
+      ),
+      http.patch(
+        `/v1/imports/${jobId}/items/${mismatch.id}`,
+        async ({ request }) => {
+          const body = (await request.json()) as { status: string };
+          return HttpResponse.json({ ...mismatch, status: body.status });
+        },
+      ),
+      http.post(`/v1/imports/${jobId}/confirm`, () =>
+        HttpResponse.json({
+          job_id: jobId,
+          status: "confirmed",
+          counts: {},
+          net_worth: "10000.00",
+        }),
+      ),
+    );
+    renderReview();
+
+    const confirm = await screen.findByRole("button", {
+      name: "Confirm import (0 items)",
+    });
+    expect(confirm).toBeDisabled();
+    await user.click(screen.getByLabelText("Keep current holdings"));
+    await waitFor(() => expect(confirm).toBeEnabled());
+    await user.click(confirm);
+    expect(await screen.findByText("Nothing changed")).toBeInTheDocument();
+  });
+
+  it("maps an unfamiliar file and returns to the review", async () => {
+    const user = userEvent.setup();
+    const mapped = reviewDetail({
+      source: "broker",
+      items: [item({ id: "mapped-item", action: "new" })],
+      counts: { new: 1, changed: 0, duplicate: 0, unknown: 0 },
+    });
+    let mappingBody: Record<string, unknown> | null = null;
+    server.use(
+      http.get(`/v1/imports/${jobId}`, () =>
+        HttpResponse.json(
+          reviewDetail({
+            source: "broker",
+            status: "needs_mapping",
+            items: [],
+            counts: { new: 0, changed: 0, duplicate: 0, unknown: 0 },
+            headers: ["ticker", "units", "buy price", "venue", "security id"],
+            samples: [["xxxxx", "99", "999.99", "xxx", "xx"]],
+            suggested_mapping: {
+              symbol: "ticker",
+              quantity: "units",
+              avg_price: "buy price",
+              exchange: "venue",
+            },
+          }),
+        ),
+      ),
+      http.post(`/v1/imports/${jobId}/mapping`, async ({ request }) => {
+        mappingBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(mapped);
+      }),
+    );
+    renderReview();
+
+    await screen.findByRole("heading", { name: "Match the file columns" });
+    await user.selectOptions(
+      screen.getByLabelText("Security code"),
+      "security id",
+    );
+    await user.click(screen.getByRole("button", { name: "Use these columns" }));
+
+    await screen.findByRole("heading", { name: "Review your import" });
+    expect(mappingBody).toMatchObject({
+      kind: "holdings",
+      columns: {
+        isin: "security id",
+        symbol: "ticker",
+        quantity: "units",
+        avg_price: "buy price",
+        exchange: "venue",
+      },
+      save_as: "My broker format",
+    });
   });
 
   it("asks before discarding and deletes the import", async () => {

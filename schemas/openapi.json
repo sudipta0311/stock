@@ -2133,6 +2133,18 @@
       "ImportDetailResponse": {
         "additionalProperties": false,
         "properties": {
+          "account_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Id"
+          },
           "confirmed_at": {
             "anyOf": [
               {
@@ -2172,6 +2184,20 @@
             ],
             "title": "Error Code"
           },
+          "headers": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headers"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -2184,13 +2210,36 @@
             "title": "Items",
             "type": "array"
           },
+          "member_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Member Id"
+          },
+          "samples": {
+            "items": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Samples",
+            "type": "array"
+          },
           "source": {
             "anyOf": [
               {
                 "enum": [
                   "nsdl",
                   "cdsl",
-                  "cams_kfin"
+                  "cams_kfin",
+                  "broker"
                 ],
                 "type": "string"
               },
@@ -2215,12 +2264,27 @@
           "status": {
             "enum": [
               "ready",
+              "needs_mapping",
               "confirmed",
               "failed",
               "discarded"
             ],
             "title": "Status",
             "type": "string"
+          },
+          "suggested_mapping": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Suggested Mapping",
+            "type": "object"
           }
         },
         "required": [
@@ -2251,6 +2315,17 @@
               }
             ],
             "title": "Account Ref"
+          },
+          "action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action"
           },
           "diff": {
             "anyOf": [
@@ -2300,6 +2375,17 @@
             "title": "Quantity",
             "type": "string"
           },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
           "sleeve": {
             "anyOf": [
               {
@@ -2325,6 +2411,17 @@
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Symbol"
           }
         },
         "required": [
@@ -2346,6 +2443,18 @@
       "ImportJobResponse": {
         "additionalProperties": false,
         "properties": {
+          "account_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Id"
+          },
           "confirmed_at": {
             "anyOf": [
               {
@@ -2390,13 +2499,26 @@
             "title": "Id",
             "type": "string"
           },
+          "member_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Member Id"
+          },
           "source": {
             "anyOf": [
               {
                 "enum": [
                   "nsdl",
                   "cdsl",
-                  "cams_kfin"
+                  "cams_kfin",
+                  "broker"
                 ],
                 "type": "string"
               },
@@ -2421,6 +2543,7 @@
           "status": {
             "enum": [
               "ready",
+              "needs_mapping",
               "confirmed",
               "failed",
               "discarded"
@@ -2443,6 +2566,43 @@
         "title": "ImportJobResponse",
         "type": "object"
       },
+      "ImportMappingRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "columns": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Columns",
+            "type": "object"
+          },
+          "kind": {
+            "enum": [
+              "holdings",
+              "tradebook"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "save_as": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Save As"
+          }
+        },
+        "required": [
+          "kind",
+          "columns"
+        ],
+        "title": "ImportMappingRequest",
+        "type": "object"
+      },
       "ImportUploadResponse": {
         "additionalProperties": false,
         "properties": {
@@ -2462,18 +2622,29 @@
             "enum": [
               "nsdl",
               "cdsl",
-              "cams_kfin"
+              "cams_kfin",
+              "broker"
             ],
             "title": "Source",
             "type": "string"
           },
           "statement_date": {
-            "format": "date",
-            "title": "Statement Date",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Statement Date"
           },
           "status": {
-            "const": "ready",
+            "enum": [
+              "ready",
+              "needs_mapping"
+            ],
             "title": "Status",
             "type": "string"
           },
@@ -8070,12 +8241,20 @@
             "multipart/form-data": {
               "schema": {
                 "properties": {
+                  "account_id": {
+                    "format": "uuid",
+                    "type": "string"
+                  },
                   "doc_type": {
                     "maxLength": 32,
                     "type": "string"
                   },
                   "file": {
                     "format": "binary",
+                    "type": "string"
+                  },
+                  "member_id": {
+                    "format": "uuid",
                     "type": "string"
                   },
                   "password": {
@@ -8364,6 +8543,77 @@
           }
         ],
         "summary": "Patch Import Item"
+      }
+    },
+    "/v1/imports/{job_id}/mapping": {
+      "post": {
+        "operationId": "map_import_columns_v1_imports__job_id__mapping_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Household",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Household"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportMappingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Map Import Columns"
       }
     },
     "/v1/inbox": {

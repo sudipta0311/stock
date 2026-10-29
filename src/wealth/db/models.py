@@ -552,6 +552,9 @@ class HoldingLot(UserOwned, Base):
     statement_value: Mapped[Decimal | None] = mapped_column(Numeric(16, 2))
     statement_date: Mapped[date | None] = mapped_column(Date)
     import_job_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
+    trade_ids: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
     __table_args__ += (
         CheckConstraint("source IN ('cas', 'broker', 'manual')", name="ck_holdings_lots_source"),
         CheckConstraint(
@@ -644,12 +647,28 @@ class ImportJob(UserOwned, Base):
     __table_args__ = (
         _tenant_identity("import_jobs"),
         CheckConstraint(
-            "status IN ('ready', 'confirmed', 'failed', 'discarded')",
+            "status IN ('ready', 'needs_mapping', 'confirmed', 'failed', 'discarded')",
             name="ck_import_jobs_status",
         ),
         CheckConstraint(
-            "source IS NULL OR source IN ('nsdl', 'cdsl', 'cams_kfin')",
+            "source IS NULL OR source IN ('nsdl', 'cdsl', 'cams_kfin', 'broker')",
             name="ck_import_jobs_source",
+        ),
+        ForeignKeyConstraint(
+            ["user_id", "member_id"],
+            ["household_members.user_id", "household_members.id"],
+            name="fk_import_jobs_member_tenant",
+            ondelete="CASCADE",
+            deferrable=True,
+            initially="IMMEDIATE",
+        ),
+        ForeignKeyConstraint(
+            ["user_id", "account_id"],
+            ["accounts.user_id", "accounts.id"],
+            name="fk_import_jobs_account_tenant",
+            ondelete="SET NULL (account_id)",
+            deferrable=True,
+            initially="IMMEDIATE",
         ),
     )
 
@@ -663,6 +682,8 @@ class ImportJob(UserOwned, Base):
     )
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     parse_report: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    account_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
+    member_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
     file_deleted_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -694,7 +715,8 @@ class ImportItem(UserOwned, Base):
             ondelete="RESTRICT",
         ),
         CheckConstraint(
-            "status IN ('new', 'changed', 'duplicate', 'unknown', 'accepted', 'rejected')",
+            "status IN ('new', 'changed', 'duplicate', 'unknown', 'accepted', 'rejected', "
+            "'enrich', 'replace_with_lots', 'quantity_mismatch')",
             name="ck_import_items_status",
         ),
     )
@@ -702,11 +724,95 @@ class ImportItem(UserOwned, Base):
     job_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
     item_kind: Mapped[str] = mapped_column(String(32), nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="new")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="new")
     match_lot_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
     match_security_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
     diff: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     user_override: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+
+
+class ImportTemplate(UserOwned, Base):
+    __tablename__ = "import_templates"
+    __table_args__ = (
+        _tenant_identity("import_templates"),
+        UniqueConstraint(
+            "user_id", "kind", "header_fingerprint", name="uq_import_templates_household_header"
+        ),
+        CheckConstraint("kind IN ('holdings', 'tradebook')", name="ck_import_templates_kind"),
+        CheckConstraint(
+            "header_fingerprint ~ '^[0-9a-f]{64}$'",
+            name="ck_import_templates_fingerprint",
+        ),
+    )
+
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    header_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    header_names: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    columns: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class RealisedTrade(UserOwned, Base):
+    __tablename__ = "realised_trades"
+    __table_args__ = (
+        _tenant_identity("realised_trades"),
+        ForeignKeyConstraint(
+            ["user_id", "member_id"],
+            ["household_members.user_id", "household_members.id"],
+            name="fk_realised_trades_member_tenant",
+            ondelete="CASCADE",
+            deferrable=True,
+            initially="IMMEDIATE",
+        ),
+        ForeignKeyConstraint(
+            ["user_id", "account_id"],
+            ["accounts.user_id", "accounts.id"],
+            name="fk_realised_trades_account_tenant",
+            ondelete="SET NULL (account_id)",
+            deferrable=True,
+            initially="IMMEDIATE",
+        ),
+        ForeignKeyConstraint(
+            ["user_id", "import_job_id"],
+            ["import_jobs.user_id", "import_jobs.id"],
+            name="fk_realised_trades_import_job_tenant",
+            ondelete="CASCADE",
+            deferrable=True,
+            initially="IMMEDIATE",
+        ),
+        ForeignKeyConstraint(
+            ["security_id"],
+            ["securities.id"],
+            name="fk_realised_trades_security",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("quantity > 0", name="ck_realised_trades_quantity_positive"),
+        CheckConstraint("holding_period IN ('LT', 'ST')", name="ck_realised_trades_holding_period"),
+        Index(
+            "ix_realised_trades_household_member_date_period",
+            "user_id",
+            "member_id",
+            "trade_date",
+            "holding_period",
+        ),
+    )
+
+    member_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    account_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
+    import_job_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    security_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    trade_date: Mapped[date] = mapped_column(Date, nullable=False)
+    acquired_on: Mapped[date] = mapped_column(Date, nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    cost_per_unit: Mapped[Decimal] = mapped_column(Numeric(16, 4), nullable=False)
+    sale_price: Mapped[Decimal] = mapped_column(Numeric(16, 4), nullable=False)
+    gain: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    holding_period: Mapped[str] = mapped_column(String(2), nullable=False)
+    trade_id: Mapped[str | None] = mapped_column(String(80))
+    source_broker: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
 class NetworthSnapshot(UserOwned, Base):

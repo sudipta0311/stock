@@ -1,4 +1,4 @@
-// OpenAPI SHA256: 3eb64f16559379a5ae86b772f1eeb7dc8d7280925cdeb93f334877c15d005df6
+// OpenAPI SHA256: 07a098bac19168296c1b2f59a2970c197d1ac61880ce3464577c4ddecd1f3f63
 export interface paths {
     "/healthz": {
         parameters: {
@@ -453,6 +453,23 @@ export interface paths {
         head?: never;
         /** Patch Import Item */
         patch: operations["patch_import_item_v1_imports__job_id__items__item_id__patch"];
+        trace?: never;
+    };
+    "/v1/imports/{job_id}/mapping": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Map Import Columns */
+        post: operations["map_import_columns_v1_imports__job_id__mapping_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/inbox": {
@@ -1508,6 +1525,8 @@ export interface components {
         };
         /** ImportDetailResponse */
         ImportDetailResponse: {
+            /** Account Id */
+            account_id?: string | null;
             /** Confirmed At */
             confirmed_at: string | null;
             /** Counts */
@@ -1523,6 +1542,8 @@ export interface components {
             doc_type: string;
             /** Error Code */
             error_code: string | null;
+            /** Headers */
+            headers?: string[] | null;
             /**
              * Id
              * Format: uuid
@@ -1530,20 +1551,30 @@ export interface components {
             id: string;
             /** Items */
             items: components["schemas"]["ImportItemResponse"][];
+            /** Member Id */
+            member_id?: string | null;
+            /** Samples */
+            samples?: string[][];
             /** Source */
-            source: ("nsdl" | "cdsl" | "cams_kfin") | null;
+            source: ("nsdl" | "cdsl" | "cams_kfin" | "broker") | null;
             /** Statement Date */
             statement_date: string | null;
             /**
              * Status
              * @enum {string}
              */
-            status: "ready" | "confirmed" | "failed" | "discarded";
+            status: "ready" | "needs_mapping" | "confirmed" | "failed" | "discarded";
+            /** Suggested Mapping */
+            suggested_mapping?: {
+                [key: string]: string | null;
+            };
         };
         /** ImportItemResponse */
         ImportItemResponse: {
             /** Account Ref */
             account_ref: string | null;
+            /** Action */
+            action?: string | null;
             /** Diff */
             diff: {
                 [key: string]: unknown;
@@ -1565,15 +1596,21 @@ export interface components {
             name: string;
             /** Quantity */
             quantity: string;
+            /** Reason */
+            reason?: string | null;
             /** Sleeve */
             sleeve: string | null;
             /** Statement Value */
             statement_value: string | null;
             /** Status */
             status: string;
+            /** Symbol */
+            symbol?: string | null;
         };
         /** ImportJobResponse */
         ImportJobResponse: {
+            /** Account Id */
+            account_id?: string | null;
             /** Confirmed At */
             confirmed_at: string | null;
             /** Counts */
@@ -1594,15 +1631,31 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** Member Id */
+            member_id?: string | null;
             /** Source */
-            source: ("nsdl" | "cdsl" | "cams_kfin") | null;
+            source: ("nsdl" | "cdsl" | "cams_kfin" | "broker") | null;
             /** Statement Date */
             statement_date: string | null;
             /**
              * Status
              * @enum {string}
              */
-            status: "ready" | "confirmed" | "failed" | "discarded";
+            status: "ready" | "needs_mapping" | "confirmed" | "failed" | "discarded";
+        };
+        /** ImportMappingRequest */
+        ImportMappingRequest: {
+            /** Columns */
+            columns: {
+                [key: string]: string;
+            };
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "holdings" | "tradebook";
+            /** Save As */
+            save_as?: string | null;
         };
         /** ImportUploadResponse */
         ImportUploadResponse: {
@@ -1619,17 +1672,14 @@ export interface components {
              * Source
              * @enum {string}
              */
-            source: "nsdl" | "cdsl" | "cams_kfin";
-            /**
-             * Statement Date
-             * Format: date
-             */
-            statement_date: string;
+            source: "nsdl" | "cdsl" | "cams_kfin" | "broker";
+            /** Statement Date */
+            statement_date: string | null;
             /**
              * Status
-             * @constant
+             * @enum {string}
              */
-            status: "ready";
+            status: "ready" | "needs_mapping";
             /** Warnings */
             warnings: string[];
         };
@@ -4074,9 +4124,13 @@ export interface operations {
         requestBody: {
             content: {
                 "multipart/form-data": {
+                    /** Format: uuid */
+                    account_id?: string;
                     doc_type?: string;
                     /** Format: binary */
                     file: string;
+                    /** Format: uuid */
+                    member_id?: string;
                     password?: string;
                 };
             };
@@ -4220,6 +4274,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ImportItemResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    map_import_columns_v1_imports__job_id__mapping_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Household"?: string | null;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportMappingRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportDetailResponse"];
                 };
             };
             /** @description Validation Error */

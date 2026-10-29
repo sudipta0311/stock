@@ -25,6 +25,7 @@ api = [
     "pywebpush>=2.0",
 ]
 importer = [
+    "openpyxl>=3.1",
     "pypdf>=6.1",
     "httpx>=0.28",
 ]

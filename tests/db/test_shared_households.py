@@ -35,6 +35,7 @@ from wealth.db.models import (
     HouseholdMember,
     ImportItem,
     ImportJob,
+    ImportTemplate,
     ManualAsset,
     Profile,
     PushSubscription,
@@ -742,6 +743,34 @@ def test_bring_my_data_moves_rows_to_linked_member_and_preserves_login_data(
         job = ImportJob(user_id=partner_id, doc_type="cas", status="ready")
         session.add(job)
         session.flush()
+        session.add_all(
+            [
+                ImportTemplate(
+                    user_id=owner_id,
+                    name="Owner mapping",
+                    kind="holdings",
+                    header_fingerprint="a" * 64,
+                    header_names=["quantity", "symbol"],
+                    columns={"quantity": "Quantity", "symbol": "Symbol"},
+                ),
+                ImportTemplate(
+                    user_id=partner_id,
+                    name="Partner duplicate",
+                    kind="holdings",
+                    header_fingerprint="a" * 64,
+                    header_names=["quantity", "symbol"],
+                    columns={"quantity": "Qty", "symbol": "Ticker"},
+                ),
+                ImportTemplate(
+                    user_id=partner_id,
+                    name="Partner unique",
+                    kind="tradebook",
+                    header_fingerprint="b" * 64,
+                    header_names=["quantity", "symbol", "trade date"],
+                    columns={"quantity": "Units", "symbol": "Ticker", "trade_date": "Date"},
+                ),
+            ]
+        )
         security = Security(
             market="IN",
             symbol=f"SYN{uuid4().hex[:8]}",
@@ -820,6 +849,7 @@ def test_bring_my_data_moves_rows_to_linked_member_and_preserves_login_data(
     assert body["merge_counts"]["import_items"] == 1
     assert body["merge_counts"]["fund_transactions"] == 2
     assert body["merge_counts"]["fund_lagging_checks"] == 1
+    assert body["merge_counts"]["import_templates"] == 1
     assert {"residency", "tax", "investing"} <= set(body["overwritten_fields"])
     assert invite["member_id"] == str(linked_member_id)
 
@@ -838,6 +868,18 @@ def test_bring_my_data_moves_rows_to_linked_member_and_preserves_login_data(
         moved_checks = session.scalars(
             select(FundLaggingCheck).where(FundLaggingCheck.user_id == owner_id)
         ).all()
+        moved_templates = session.scalars(
+            select(ImportTemplate).where(ImportTemplate.user_id == owner_id)
+        ).all()
+        assert {row.name for row in moved_templates} == {"Owner mapping", "Partner unique"}
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(ImportTemplate)
+                .where(ImportTemplate.user_id == partner_id)
+            )
+            == 0
+        )
         assert [row.member_id for row in moved_checks] == [linked_member_id]
         assert (
             session.scalar(

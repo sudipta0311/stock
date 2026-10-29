@@ -12,9 +12,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from wealth.core.dates import fy_start
 from wealth.db.models import (
     FundLaggingCheck,
     FundTransaction,
@@ -23,6 +24,7 @@ from wealth.db.models import (
     NavDaily,
     NavMonthly,
     Profile,
+    RealisedTrade,
     Security,
 )
 from wealth.db.models import (
@@ -117,7 +119,9 @@ def _member_rows(
     owner_id: UUID,
     profile: Profile | None,
     plan: Mapping[str, Any],
+    today: date | None = None,
 ) -> tuple[list[FundMember], dict[str, HouseholdMember]]:
+    today = today or date.today()
     rows = list(
         session.scalars(
             select(HouseholdMember)
@@ -147,6 +151,29 @@ def _member_rows(
             tax_values.setdefault("tax_slab_pct", profile.tax_slab_pct)
             tax_values.setdefault("surcharge_pct", "0")
         tax = MemberTax.model_validate(tax_values)
+        realised_rows = session.execute(
+            select(RealisedTrade.holding_period, func.sum(RealisedTrade.gain))
+            .where(
+                RealisedTrade.user_id == owner_id,
+                RealisedTrade.member_id == row.id,
+                RealisedTrade.trade_date >= fy_start(today),
+                RealisedTrade.trade_date <= today,
+            )
+            .group_by(RealisedTrade.holding_period)
+        )
+        realised = {
+            period: max(Decimal(0), amount or Decimal(0)) for period, amount in realised_rows
+        }
+        tax = tax.model_copy(
+            update={
+                "fy_realised_equity_ltcg": max(
+                    tax.fy_realised_equity_ltcg, realised.get("LT", Decimal(0))
+                ),
+                "fy_realised_equity_stcg": max(
+                    tax.fy_realised_equity_stcg, realised.get("ST", Decimal(0))
+                ),
+            }
+        )
         spouse = next(
             (
                 candidate
@@ -231,7 +258,7 @@ def _build_inputs(
         .limit(1)
     )
     plan = plan_row.plan if plan_row is not None and isinstance(plan_row.plan, dict) else {}
-    member_rows, _ = _member_rows(session, owner_id, profile, plan)
+    member_rows, _ = _member_rows(session, owner_id, profile, plan, today)
     lots = list(
         session.scalars(
             select(HoldingLot)

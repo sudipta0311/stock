@@ -9,12 +9,13 @@ from collections import Counter
 from collections.abc import Callable
 from datetime import UTC, date, datetime
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
+from pathlib import Path
 from typing import Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import delete, select, text, update
 from sqlalchemy.orm import Session
 from starlette.datastructures import FormData, UploadFile
@@ -26,7 +27,7 @@ from wealth.importer.models import ParsedHolding, ParsedStatement
 
 MAX_UPLOAD_MB = 10
 PARSE_TIMEOUT_SECONDS = 20
-_MAX_MULTIPART_FIELDS = 2
+_MAX_MULTIPART_FIELDS = 5
 _MAX_FIELD_BYTES = 4096
 _PARSE_SEMAPHORE = threading.BoundedSemaphore(1)
 _ISIN = re.compile(r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$")
@@ -39,9 +40,9 @@ class ImportApiModel(BaseModel):
 
 class ImportUploadResponse(ImportApiModel):
     job_id: UUID
-    status: Literal["ready"]
-    source: Literal["nsdl", "cdsl", "cams_kfin"]
-    statement_date: date
+    status: Literal["ready", "needs_mapping"]
+    source: Literal["nsdl", "cdsl", "cams_kfin", "broker"]
+    statement_date: date | None
     counts: dict[str, int]
     warnings: list[str]
 
@@ -68,6 +69,7 @@ class ImportItemResponse(ImportApiModel):
     id: UUID
     kind: str
     isin: str
+    symbol: str | None = None
     name: str
     quantity: str
     statement_value: str | None
@@ -76,15 +78,19 @@ class ImportItemResponse(ImportApiModel):
     status: str
     diff: dict[str, Any] | None
     match: dict[str, UUID | None]
+    reason: str | None = None
+    action: str | None = None
 
 
 class ImportJobResponse(ImportApiModel):
     id: UUID
     doc_type: str
-    status: Literal["ready", "confirmed", "failed", "discarded"]
+    status: Literal["ready", "needs_mapping", "confirmed", "failed", "discarded"]
     error_code: str | None
-    source: Literal["nsdl", "cdsl", "cams_kfin"] | None
+    source: Literal["nsdl", "cdsl", "cams_kfin", "broker"] | None
     statement_date: date | None
+    account_id: UUID | None = None
+    member_id: UUID | None = None
     counts: dict[str, int]
     created_at: datetime
     confirmed_at: datetime | None
@@ -92,6 +98,15 @@ class ImportJobResponse(ImportApiModel):
 
 class ImportDetailResponse(ImportJobResponse):
     items: list[ImportItemResponse]
+    headers: list[str] | None = None
+    samples: list[list[str]] = Field(default_factory=list)
+    suggested_mapping: dict[str, str | None] = Field(default_factory=dict)
+
+
+class ImportMappingRequest(ImportApiModel):
+    kind: Literal["holdings", "tradebook"]
+    columns: dict[str, str]
+    save_as: str | None = None
 
 
 class ImportConfirmationResponse(ImportApiModel):
@@ -102,10 +117,6 @@ class ImportConfirmationResponse(ImportApiModel):
 
 
 class _UploadTooLarge(Exception):
-    pass
-
-
-class _NotPdf(Exception):
     pass
 
 
@@ -128,7 +139,7 @@ class _InMemoryMultipartParser(MultiPartParser):
     async def parse(self) -> FormData:
         try:
             return await super().parse()
-        except (_NotPdf, _UploadTooLarge):
+        except _UploadTooLarge:
             for file_object in self._files_to_close_on_error:
                 file_object.close()
             raise
@@ -145,8 +156,6 @@ class _InMemoryMultipartParser(MultiPartParser):
                 raise _UploadTooLarge
             if len(self._file_prefix) < 4:
                 self._file_prefix.extend(data[start : min(end, start + 4 - len(self._file_prefix))])
-                if len(self._file_prefix) == 4 and self._file_prefix != b"%PDF":
-                    raise _NotPdf
             self._file_bytes_seen += size
         super().on_part_data(data, start, end)
 
@@ -179,8 +188,28 @@ def _parse_serialized(data: bytes, password: str | None, max_mb: int) -> ParsedS
         return parse_cas(data, password, max_mb=max_mb)
 
 
+def _parse_broker_serialized(data: bytes, filename: str) -> tuple[list[str], list[dict[str, Any]]]:
+    from wealth.api.broker_imports import parse_broker_upload
+
+    with _PARSE_SEMAPHORE:
+        return parse_broker_upload(data, filename)
+
+
 def _decimal_string(value: Decimal) -> str:
     return format(value, "f")
+
+
+def _looks_like_text_csv(data: bytes) -> bool:
+    if not data or data.startswith(b"PK") or b"\x00" in data:
+        return False
+    try:
+        decoded = data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        try:
+            decoded = data.decode("cp1252")
+        except UnicodeDecodeError:
+            return False
+    return all(character in "\t\n\r\f" or ord(character) >= 32 for character in decoded)
 
 
 def _money_value(holding: ParsedHolding) -> Decimal | None:
@@ -214,18 +243,30 @@ def _holding_payload(
 def _get_item_response(item: Any) -> dict[str, Any]:
     payload = item.payload
     override = item.user_override or {}
+    statement_value = payload.get("statement_value")
+    if statement_value is None and payload.get("last_price") is not None:
+        try:
+            value = Decimal(str(payload["quantity"])) * Decimal(str(payload["last_price"]))
+            statement_value = _decimal_string(
+                value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            )
+        except (InvalidOperation, KeyError, TypeError, ValueError):
+            statement_value = None
     return {
         "id": item.id,
         "kind": override.get("kind", item.item_kind),
-        "isin": payload["isin"],
-        "name": payload["name"],
-        "quantity": payload["quantity"],
-        "statement_value": payload.get("statement_value"),
+        "isin": payload.get("isin") or "",
+        "symbol": payload.get("symbol"),
+        "name": payload.get("name") or payload.get("symbol") or "Unknown security",
+        "quantity": str(payload.get("quantity", "0")),
+        "statement_value": statement_value,
         "account_ref": payload.get("account_ref"),
         "sleeve": override.get("sleeve", payload.get("sleeve")),
         "status": item.status,
         "diff": item.diff,
         "match": {"lot_id": item.match_lot_id, "security_id": item.match_security_id},
+        "reason": payload.get("reason"),
+        "action": payload.get("merge_status"),
     }
 
 
@@ -361,6 +402,8 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                                 "file": {"type": "string", "format": "binary"},
                                 "password": {"type": "string"},
                                 "doc_type": {"type": "string", "maxLength": 32},
+                                "account_id": {"type": "string", "format": "uuid"},
+                                "member_id": {"type": "string", "format": "uuid"},
                             },
                         }
                     }
@@ -368,7 +411,11 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             }
         },
     )
-    async def upload_import(request: Request, user: Any = auth_dependency) -> Any:
+    async def upload_import(
+        request: Request,
+        today: date = today_dependency,
+        user: Any = auth_dependency,
+    ) -> Any:
         max_mb = getattr(request.app.state.settings, "max_upload_mb", MAX_UPLOAD_MB)
         max_bytes = max_mb * 1024 * 1024
         form: FormData | None = None
@@ -385,8 +432,6 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                 "too_large",
                 f"The PDF exceeds the {max_bytes // (1024 * 1024)} MB upload limit.",
             )
-        except _NotPdf:
-            return _problem(request, 415, "not_a_pdf", "The uploaded file is not a PDF.")
         except (MultiPartException, ValueError):
             return _problem(request, 422, "invalid_upload", "The multipart upload is invalid.")
 
@@ -394,12 +439,18 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             file = form.get("file") if form is not None else None
             password_value = form.get("password") if form is not None else None
             doc_type_value = form.get("doc_type") if form is not None else None
+            account_id_value = form.get("account_id") if form is not None else None
+            member_id_value = form.get("member_id") if form is not None else None
             if not isinstance(file, UploadFile):
-                return _problem(request, 422, "invalid_upload", "A PDF file is required.")
+                return _problem(request, 422, "invalid_upload", "A statement file is required.")
             if password_value is not None and not isinstance(password_value, str):
                 return _problem(request, 422, "invalid_upload", "The password field is invalid.")
             if doc_type_value is not None and not isinstance(doc_type_value, str):
                 return _problem(request, 422, "invalid_upload", "The document type is invalid.")
+            if account_id_value is not None and not isinstance(account_id_value, str):
+                return _problem(request, 422, "invalid_upload", "The account selection is invalid.")
+            if member_id_value is not None and not isinstance(member_id_value, str):
+                return _problem(request, 422, "invalid_upload", "The member selection is invalid.")
             doc_type = (doc_type_value or "cas")[:32]
             if doc_type_value is not None and len(doc_type_value) > 32:
                 return _problem(request, 422, "invalid_upload", "The document type is too long.")
@@ -408,8 +459,148 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             if form is not None:
                 await form.close()
 
-        if len(data) < 4 or not data.startswith(b"%PDF"):
-            return _problem(request, 415, "not_a_pdf", "The uploaded file is not a PDF.")
+        filename = file.filename or ""
+        suffix = Path(filename).suffix.casefold()
+        is_pdf = suffix == ".pdf" and data.startswith(b"%PDF")
+        is_xlsx = suffix == ".xlsx" and data.startswith(b"PK")
+        is_csv = suffix == ".csv" and _looks_like_text_csv(data)
+        if not (is_pdf or is_xlsx or is_csv):
+            return _problem(
+                request,
+                415,
+                "unsupported_format" if suffix in {".csv", ".xlsx"} else "not_a_pdf",
+                "Choose a PDF, CSV, or XLSX file that matches its file type.",
+            )
+
+        if is_csv or is_xlsx:
+            from wealth.api.broker_imports import (
+                available_templates,
+                find_layout,
+                header_names,
+                keep_pending_rows,
+                mapping_suggestions,
+                masked_samples,
+                stage_broker_items,
+            )
+            from wealth.db.models import Account, HouseholdMember
+            from wealth.db.repo import acting_household_member
+
+            try:
+                headers, rows = await asyncio.wait_for(
+                    asyncio.to_thread(_parse_broker_serialized, data, filename),
+                    timeout=PARSE_TIMEOUT_SECONDS,
+                )
+            except TimeoutError:
+                _record_failed_job(
+                    user.session, user.household_owner_id, "broker_statement", "parse_timeout"
+                )
+                return _problem(
+                    request,
+                    504,
+                    "parse_timeout",
+                    "The statement took too long to read. Please try a smaller file.",
+                )
+            except ValueError:
+                return _problem(
+                    request,
+                    422,
+                    "invalid_broker_file",
+                    "The CSV or XLSX file could not be read.",
+                )
+
+            try:
+                selected_member_id = UUID(member_id_value) if member_id_value else None
+                selected_account_id = UUID(account_id_value) if account_id_value else None
+            except ValueError:
+                return _problem(request, 422, "invalid_selection", "Choose a valid account owner.")
+            account = None
+            if selected_account_id is not None:
+                account = user.session.scalar(
+                    select(Account).where(
+                        Account.user_id == user.household_owner_id,
+                        Account.id == selected_account_id,
+                    )
+                )
+                if account is None:
+                    return _problem(request, 404, "account_not_found", "The account was not found.")
+                if selected_member_id is not None and selected_member_id != account.member_id:
+                    return _problem(
+                        request,
+                        422,
+                        "account_owner_mismatch",
+                        "Choose the owner linked to this account.",
+                    )
+                selected_member_id = account.member_id
+            elif selected_member_id is not None:
+                member_exists = user.session.scalar(
+                    select(HouseholdMember.id).where(
+                        HouseholdMember.user_id == user.household_owner_id,
+                        HouseholdMember.id == selected_member_id,
+                    )
+                )
+                if member_exists is None:
+                    return _problem(
+                        request,
+                        404,
+                        "member_not_found",
+                        "The selected household member was not found.",
+                    )
+            else:
+                selected_member_id = acting_household_member(
+                    user.session, user.user_id, user.household_owner_id
+                ).id
+
+            templates = available_templates(user.session, user.household_owner_id)
+            layout = find_layout(headers, templates)
+            now = datetime.now(UTC)
+            job = ImportJob(
+                user_id=user.household_owner_id,
+                doc_type="broker_statement",
+                status="ready" if layout else "needs_mapping",
+                source="broker",
+                statement_date=today,
+                member_id=selected_member_id,
+                account_id=selected_account_id,
+                counts={},
+                parse_report={"warnings": []},
+                file_deleted_at=now,
+            )
+            user.session.add(job)
+            user.session.flush()
+            if layout is None:
+                display_headers = header_names(headers)
+                mapping = mapping_suggestions(headers)
+                job.parse_report = {
+                    "headers": display_headers,
+                    "samples": masked_samples(headers, rows),
+                    "suggested_mapping": mapping,
+                    "warnings": [],
+                }
+                job.counts = {"new": 0, "changed": 0, "duplicate": 0, "unknown": 0}
+                keep_pending_rows(job.id, headers, rows)
+                user.session.flush()
+                return ImportUploadResponse(
+                    job_id=job.id,
+                    status="needs_mapping",
+                    source="broker",
+                    statement_date=job.statement_date,
+                    counts=job.counts,
+                    warnings=[],
+                )
+            counts = stage_broker_items(
+                user.session, user.household_owner_id, job, headers, rows, layout
+            )
+            job.counts = counts
+            user.session.flush()
+            report = dict(job.parse_report or {})
+            return ImportUploadResponse(
+                job_id=job.id,
+                status="ready",
+                source="broker",
+                statement_date=job.statement_date,
+                counts=counts,
+                warnings=list(report.get("warnings", [])),
+            )
 
         try:
             parsed = await asyncio.wait_for(
@@ -477,7 +668,120 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             .where(ImportItem.user_id == user.household_owner_id, ImportItem.job_id == job.id)
             .order_by(ImportItem.id)
         )
-        return {**_job_response(job), "items": [_get_item_response(item) for item in items]}
+        report = job.parse_report or {}
+        return {
+            **_job_response(job),
+            "items": [_get_item_response(item) for item in items],
+            "headers": report.get("headers"),
+            "samples": report.get("samples", []),
+            "suggested_mapping": report.get("suggested_mapping", {}),
+        }
+
+    @router.post("/v1/imports/{job_id}/mapping", response_model=ImportDetailResponse)
+    def map_import_columns(
+        job_id: UUID,
+        payload: ImportMappingRequest,
+        request: Request,
+        user: Any = auth_dependency,
+    ) -> Any:
+        from wealth.api.broker_imports import (
+            peek_pending_rows,
+            persist_template,
+            stage_broker_items,
+            take_pending_rows,
+            template_layout,
+            valid_template_mapping,
+        )
+
+        job = user.session.scalar(
+            select(ImportJob)
+            .where(
+                ImportJob.user_id == user.household_owner_id,
+                ImportJob.id == job_id,
+            )
+            .with_for_update()
+        )
+        if job is None:
+            return _problem(request, 404, "not_found", "The import was not found.")
+        if job.status != "needs_mapping":
+            return _problem(
+                request, 409, "mapping_not_needed", "This import no longer needs a mapping."
+            )
+        pending = peek_pending_rows(job.id)
+        if pending is None:
+            return _problem(
+                request,
+                409,
+                "mapping_expired",
+                "This file is no longer available. Upload it again to continue.",
+            )
+        headers, rows = pending
+        allowed = (
+            {"isin", "symbol", "name", "quantity", "avg_price", "last_price", "exchange"}
+            if payload.kind == "holdings"
+            else {
+                "isin",
+                "symbol",
+                "trade_date",
+                "trade_type",
+                "quantity",
+                "price",
+                "exchange",
+                "order_id",
+                "trade_id",
+            }
+        )
+        if (
+            not payload.columns
+            or set(payload.columns) - allowed
+            or not valid_template_mapping(payload.kind, payload.columns, headers)
+        ):
+            return _problem(
+                request, 422, "invalid_mapping", "Choose a valid column for each field."
+            )
+        if payload.save_as is not None and (
+            not payload.save_as.strip() or len(payload.save_as) > 80
+        ):
+            return _problem(
+                request, 422, "invalid_mapping_name", "Use a short name for this format."
+            )
+
+        if payload.save_as:
+            persist_template(
+                user.session,
+                user.household_owner_id,
+                name=payload.save_as.strip(),
+                kind=payload.kind,
+                headers=headers,
+                columns=payload.columns,
+            )
+        layout = template_layout(
+            payload.kind,
+            payload.columns,
+            broker=payload.save_as.strip() if payload.save_as else "mapped",
+        )
+        job.counts = stage_broker_items(
+            user.session, user.household_owner_id, job, headers, rows, layout
+        )
+        if payload.save_as:
+            job.parse_report = {
+                **(job.parse_report or {}),
+                "template_name": payload.save_as.strip(),
+            }
+        take_pending_rows(job.id)
+        user.session.flush()
+        items = user.session.scalars(
+            select(ImportItem)
+            .where(ImportItem.user_id == user.household_owner_id, ImportItem.job_id == job.id)
+            .order_by(ImportItem.id)
+        )
+        return {
+            **_job_response(job),
+            "items": [_get_item_response(item) for item in items],
+            "headers": (job.parse_report or {}).get("headers"),
+            "samples": (job.parse_report or {}).get("samples", []),
+            "suggested_mapping": (job.parse_report or {}).get("suggested_mapping", {}),
+        }
 
     @router.patch("/v1/imports/{job_id}/items/{item_id}", response_model=ImportItemResponse)
     async def patch_import_item(
@@ -512,6 +816,13 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             return _problem(request, 422, "invalid_item_update", "The item update is invalid.")
 
         if patch.override is not None:
+            if job.source == "broker":
+                return _problem(
+                    request,
+                    422,
+                    "invalid_override",
+                    "This share could not be matched to a security.",
+                )
             if classify_holding(
                 _parsed_holding(item.payload),
                 _amfi_category(user.session, item.payload.get("isin", "")),
@@ -556,6 +867,42 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                 .order_by(ImportItem.id)
             )
         )
+        if job.source == "broker":
+            if any(item.status == "quantity_mismatch" for item in items):
+                return _problem(
+                    request,
+                    409,
+                    "quantity_choice_required",
+                    "Choose which holdings to keep for every quantity difference.",
+                )
+            from wealth.api.broker_imports import confirm_broker_items
+
+            applied = Counter(
+                confirm_broker_items(user.session, user.household_owner_id, job, items)
+            )
+            job.status = "confirmed"
+            job.confirmed_at = datetime.now(UTC)
+            user.session.add(
+                AuditLog(
+                    user_id=user.household_owner_id,
+                    actor=str(user.user_id),
+                    actor_user_id=user.user_id,
+                    action="broker_import_confirmed",
+                    detail={
+                        **dict(applied),
+                        "skipped": max(0, len(items) - sum(applied.values())),
+                    },
+                )
+            )
+            from wealth.api.money_map import refresh_networth_snapshot
+
+            totals = refresh_networth_snapshot(user.session, user.household_owner_id, today)
+            return {
+                "job_id": job.id,
+                "status": job.status,
+                "counts": dict(applied),
+                "net_worth": totals["net_worth"],
+            }
         applied = Counter()
         from wealth.db.repo import acting_household_member
 
@@ -657,6 +1004,10 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                 "already_confirmed",
                 "A confirmed import cannot be discarded.",
             )
+        if job.source == "broker":
+            from wealth.api.broker_imports import discard_pending_rows
+
+            discard_pending_rows(job.id)
         user.session.execute(
             delete(ImportItem).where(
                 ImportItem.user_id == user.household_owner_id,
@@ -682,6 +1033,8 @@ def _job_response(job: Any) -> dict[str, Any]:
         "error_code": job.error_code,
         "source": job.source,
         "statement_date": job.statement_date,
+        "account_id": job.account_id,
+        "member_id": job.member_id,
         "counts": job.counts,
         "created_at": job.created_at,
         "confirmed_at": job.confirmed_at,

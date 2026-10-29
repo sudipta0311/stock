@@ -26,6 +26,7 @@ export const API_PATHS = [
   "/v1/imports/{job_id}",
   "/v1/imports/{job_id}/confirm",
   "/v1/imports/{job_id}/items/{item_id}",
+  "/v1/imports/{job_id}/mapping",
   "/v1/inbox",
   "/v1/me",
   "/v1/me/checklist",

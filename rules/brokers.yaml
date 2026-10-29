@@ -1,0 +1,81 @@
+layouts:
+  - broker: zerodha
+    kind: holdings
+    fingerprint: [symbol, qty, average price, exchange]
+    columns:
+      isin: [isin, isin code]
+      symbol: [symbol, trading symbol]
+      name: [instrument, company name]
+      quantity: [qty, quantity]
+      avg_price: [average price, avg price, avg cost]
+      last_price: [last price, ltp]
+      exchange: [exchange]
+    verified: true
+    source_note: "Legacy broker parser aliases for symbol, quantity, and average cost; exchange identifies this layout."
+  - broker: zerodha
+    kind: tradebook
+    fingerprint: [trade date, trade type, symbol, qty, price, trade id]
+    columns:
+      isin: [isin, isin code]
+      symbol: [symbol, trading symbol]
+      trade_date: [trade date, date]
+      trade_type: [trade type, type, action]
+      quantity: [qty, quantity]
+      price: [price, trade price]
+      exchange: [exchange]
+      order_id: [order id]
+      trade_id: [trade id, trade no, trade number]
+    verified: true
+    source_note: "Legacy broker parser trade identity aliases adapted to the canonical tradebook fields."
+  - broker: groww
+    kind: holdings
+    fingerprint: [stock name, quantity, average price, invested amount]
+    columns:
+      isin: [isin, isin code]
+      symbol: [symbol, ticker]
+      name: [stock name, company name, security name]
+      quantity: [quantity, qty]
+      avg_price: [average price, avg price, average cost]
+      last_price: [current price, last price, ltp]
+      exchange: [exchange]
+    verified: true
+    source_note: "Legacy broker parser company-name, quantity, and average-cost aliases."
+  - broker: icici_direct
+    kind: holdings
+    fingerprint: [security name, quantity, buy price, current price]
+    columns:
+      isin: [isin, isin code]
+      symbol: [symbol, scrip]
+      name: [security name, company name]
+      quantity: [quantity, qty]
+      avg_price: [buy price, average price, avg price]
+      last_price: [current price, last price]
+      exchange: [exchange]
+    verified: true
+    source_note: "Legacy broker parser security-name, quantity, buy-price, and current-price aliases."
+  - broker: angel_one
+    kind: holdings
+    fingerprint: [trading symbol, quantity, average price, exchange]
+    columns:
+      isin: [isin, isin code]
+      symbol: [trading symbol, symbol]
+      name: [instrument, company name]
+      quantity: [quantity, qty]
+      avg_price: [average price, avg price]
+      last_price: [last price, ltp]
+      exchange: [exchange]
+    verified: false
+    source_note: "Unverified adapter scaffold using only aliases recognized by the legacy parser."
+  - broker: upstox
+    kind: holdings
+    fingerprint: [instrument, quantity, average price, exchange]
+    columns:
+      isin: [isin, isin code]
+      symbol: [symbol, trading symbol]
+      name: [instrument, company name]
+      quantity: [quantity, qty]
+      avg_price: [average price, avg price, avg cost]
+      last_price: [last price, ltp]
+      exchange: [exchange]
+    verified: false
+    source_note: "Unverified adapter scaffold using only aliases recognized by the legacy parser."

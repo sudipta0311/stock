@@ -108,6 +108,9 @@ def test_member_residency_uses_current_household_plan_before_stored_profile() ->
         def scalars(self, _statement: object) -> list[HouseholdMember]:
             return [row]
 
+        def execute(self, _statement: object) -> list[tuple[str, None]]:
+            return []
+
     members, _rows = fund_check_api._member_rows(
         Session(),
         owner_id,

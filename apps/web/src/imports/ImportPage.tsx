@@ -11,14 +11,23 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { ApiError } from "../api/client";
 import { formatInr } from "../lib/money";
 import { Badge, Button, Card, Sheet } from "../ui";
+import { useHousehold } from "../household/HouseholdContext";
+import { listAccounts } from "../money/api";
+import type { AccountResponse } from "../money/api";
 import {
   confirmImport,
   discardImport,
   getImport,
+  mapImportColumns,
   patchImportItem,
   uploadImport,
 } from "./api";
-import type { ImportDetail, ImportFormat, ImportItem } from "./api";
+import type {
+  ImportDetail,
+  ImportFormat,
+  ImportItem,
+  ImportMappingRequest,
+} from "./api";
 import { importFeatureSupport } from "./features";
 import {
   categoryForItem,
@@ -54,8 +63,8 @@ const sourceCopy: Record<
     note: englishCopy.fund_check.cams_summary_note,
   },
   broker_statement: {
-    title: "Broker statement (CSV/XLSX)",
-    help: "Export your holdings or tradebook from your broker's reports or portfolio page.",
+    title: englishCopy.imports.broker_title,
+    help: englishCopy.imports.broker_help,
   },
 };
 
@@ -71,6 +80,8 @@ function sourceLabel(source: string | null): string {
       return "CDSL CAS";
     case "cams_kfin":
       return "CAMS / KFintech CAS";
+    case "broker":
+      return englishCopy.imports.broker_source_label;
     default:
       return "Statement import";
   }
@@ -88,11 +99,13 @@ function displayDate(value: string | null): string {
 }
 
 function initialSelection(item: ImportItem): boolean {
-  return ["new", "changed", "accepted"].includes(item.status);
+  return ["new", "changed", "accepted", "enrich", "replace_with_lots"].includes(
+    item.status,
+  );
 }
 
 function readableSleeve(sleeve: string | null): string {
-  if (!sleeve) return "Needs a sleeve";
+  if (!sleeve) return englishCopy.imports.category_needs_choice;
   const labels: Record<string, string> = {
     equity_india: "Equity India",
     equity_global: "Equity Global",
@@ -109,6 +122,10 @@ export function ImportPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [format, setFormat] = useState<ImportFormat>("nsdl_cas");
+  const { members, meMemberId, memberLabel } = useHousehold();
+  const [accounts, setAccounts] = useState<AccountResponse[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState("");
+  const [selectedMemberId, setSelectedMemberId] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [password, setPassword] = useState("");
   const [problem, setProblem] = useState<{
@@ -126,6 +143,25 @@ export function ImportPage() {
   const busy = progress.phase !== "idle";
   const inFlight =
     progress.phase === "uploading" || progress.phase === "reading";
+
+  useEffect(() => {
+    if (meMemberId && !selectedMemberId) setSelectedMemberId(meMemberId);
+  }, [meMemberId, selectedMemberId]);
+
+  useEffect(() => {
+    if (format !== "broker_statement") return;
+    let active = true;
+    void listAccounts()
+      .then((rows) => {
+        if (active) setAccounts(rows);
+      })
+      .catch(() => {
+        if (active) setAccounts([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [format]);
 
   useEffect(() => {
     const onWaking = (event: Event) => {
@@ -214,6 +250,14 @@ export function ImportPage() {
       oneTimePassword,
       format,
       controller.signal,
+      format === "broker_statement"
+        ? {
+            accountId: selectedAccountId || undefined,
+            memberId: selectedAccountId
+              ? undefined
+              : selectedMemberId || undefined,
+          }
+        : undefined,
     );
     oneTimePassword = "";
     try {
@@ -330,35 +374,92 @@ export function ImportPage() {
               className="min-h-12 w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm file:mr-3 file:min-h-8 file:rounded-lg file:border-0 file:bg-muted file:px-3 file:font-semibold"
             />
             <span className="font-normal text-muted-foreground">
-              PDF up to 10 MB{file ? ` · ${file.name}` : ""}
+              {format === "broker_statement"
+                ? englishCopy.imports.broker_upload_hint
+                : "PDF up to 10 MB"}
+              {file ? ` · ${file.name}` : ""}
             </span>
           </label>
 
-          <label
-            className="grid gap-1.5 text-sm font-medium"
-            htmlFor="statement-password"
-          >
-            Statement password{" "}
-            <span className="font-normal text-muted-foreground">
-              (if required)
-            </span>
-            <input
-              id="statement-password"
-              type="password"
-              autoComplete="off"
-              value={password}
-              onChange={(event) => setPassword(event.currentTarget.value)}
-              disabled={busy}
-              className="min-h-12 w-full rounded-xl border border-line bg-surface px-3 text-base outline-none focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/30"
-              aria-describedby="statement-password-help"
-            />
-            <span
-              id="statement-password-help"
-              className="font-normal text-muted-foreground"
+          {format === "broker_statement" ? (
+            <>
+              <label
+                className="grid gap-1.5 text-sm font-medium"
+                htmlFor="broker-account"
+              >
+                {englishCopy.imports.broker_account_label}
+                <select
+                  id="broker-account"
+                  value={selectedAccountId}
+                  onChange={(event) =>
+                    setSelectedAccountId(event.currentTarget.value)
+                  }
+                  disabled={busy}
+                  className="min-h-12 rounded-xl border border-line bg-surface px-3 text-base"
+                >
+                  <option value="">
+                    {englishCopy.imports.broker_no_account}
+                  </option>
+                  {accounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.institution} · {account.account_type}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {!selectedAccountId ? (
+                <label
+                  className="grid gap-1.5 text-sm font-medium"
+                  htmlFor="broker-member"
+                >
+                  {englishCopy.imports.broker_member_label}
+                  <select
+                    id="broker-member"
+                    value={selectedMemberId || meMemberId || ""}
+                    onChange={(event) =>
+                      setSelectedMemberId(event.currentTarget.value)
+                    }
+                    disabled={busy || members.length === 0}
+                    className="min-h-12 rounded-xl border border-line bg-surface px-3 text-base"
+                  >
+                    {members.map((member) => (
+                      <option key={member.id} value={member.id}>
+                        {memberLabel(member)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+            </>
+          ) : null}
+
+          {format !== "broker_statement" ? (
+            <label
+              className="grid gap-1.5 text-sm font-medium"
+              htmlFor="statement-password"
             >
-              For NSDL CAS this is usually your PAN in capitals.
-            </span>
-          </label>
+              Statement password{" "}
+              <span className="font-normal text-muted-foreground">
+                (if required)
+              </span>
+              <input
+                id="statement-password"
+                type="password"
+                autoComplete="off"
+                value={password}
+                onChange={(event) => setPassword(event.currentTarget.value)}
+                disabled={busy}
+                className="min-h-12 w-full rounded-xl border border-line bg-surface px-3 text-base outline-none focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/30"
+                aria-describedby="statement-password-help"
+              />
+              <span
+                id="statement-password-help"
+                className="font-normal text-muted-foreground"
+              >
+                {englishCopy.imports.holdings_password_help}
+              </span>
+            </label>
+          ) : null}
 
           {problem ? (
             <div
@@ -474,6 +575,18 @@ function ItemToggle({
   onChange(checked: boolean): void;
 }) {
   const id = `include-${item.id}`;
+  const actionNote =
+    item.action === "enrich"
+      ? englishCopy.imports.item_enrich
+      : item.action === "replace_with_lots"
+        ? englishCopy.imports.item_replace_with_lots
+        : item.action === "quantity_mismatch"
+          ? item.status === "accepted"
+            ? englishCopy.imports.use_tradebook
+            : item.status === "rejected"
+              ? englishCopy.imports.keep_statement
+              : englishCopy.imports.item_quantity_mismatch
+          : null;
   return (
     <label
       htmlFor={id}
@@ -495,9 +608,66 @@ function ItemToggle({
             ? formatValue(item.statement_value)
             : "Value not provided"}
         </span>
+        {actionNote ? (
+          <span className="block text-xs text-muted-foreground">
+            {actionNote}
+          </span>
+        ) : null}
       </span>
-      <Badge>{readableSleeve(item.sleeve)}</Badge>
+      <Badge>
+        {item.action
+          ? englishCopy.imports.broker_security_label
+          : readableSleeve(item.sleeve)}
+      </Badge>
     </label>
+  );
+}
+
+function TradebookMismatchChoice({
+  item,
+  disabled,
+  onChange,
+}: {
+  item: ImportItem;
+  disabled: boolean;
+  onChange(useTradebook: boolean): void;
+}) {
+  const choice =
+    item.status === "accepted"
+      ? "tradebook"
+      : item.status === "rejected"
+        ? "current"
+        : "";
+  return (
+    <fieldset className="grid gap-2 border-t border-line pt-3 text-sm">
+      <legend className="font-medium">
+        {englishCopy.imports.quantity_choice_label}
+      </legend>
+      <label className="flex min-h-10 items-center gap-2">
+        <input
+          type="radio"
+          name={`quantity-choice-${item.id}`}
+          value="current"
+          checked={choice === "current"}
+          disabled={disabled}
+          onChange={() => onChange(false)}
+          className="size-4 accent-brand"
+        />
+        {englishCopy.imports.keep_statement}
+      </label>
+      <label className="flex min-h-10 items-center gap-2">
+        <input
+          type="radio"
+          name={`quantity-choice-${item.id}`}
+          value="tradebook"
+          checked={choice === "tradebook"}
+          disabled={disabled}
+          onChange={() => onChange(true)}
+          className="size-4 accent-brand"
+        />
+        {englishCopy.imports.use_tradebook}
+      </label>
+    </fieldset>
   );
 }
 
@@ -525,6 +695,7 @@ export function ImportReviewPage() {
   const [saving, setSaving] = useState(false);
   const [discardOpen, setDiscardOpen] = useState(false);
   const [confirmedCount, setConfirmedCount] = useState<number | null>(null);
+  const [alreadyConfirmed, setAlreadyConfirmed] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -533,7 +704,10 @@ export function ImportReviewPage() {
       .then((loaded) => {
         if (!active) return;
         setDetail(loaded);
-        if (loaded.status === "confirmed") markValueMoment();
+        if (loaded.status === "confirmed") {
+          setAlreadyConfirmed(true);
+          markValueMoment();
+        }
         setCategoryById(
           Object.fromEntries(
             loaded.items.map((item) => [item.id, categoryForItem(item)]),
@@ -591,6 +765,12 @@ export function ImportReviewPage() {
       Object.entries(selectedById).filter(([, selected]) => selected).length,
     [selectedById],
   );
+  const canConfirm =
+    selectedCount > 0 ||
+    grouped.changed.some(
+      (item) =>
+        item.action === "quantity_mismatch" && item.status === "rejected",
+    );
 
   async function updateStatus(item: ImportItem, accepted: boolean) {
     if (!detail) return;
@@ -685,15 +865,17 @@ export function ImportReviewPage() {
   }
 
   async function confirm() {
-    if (!detail || selectedCount === 0) return;
+    if (!detail || !canConfirm) return;
     setSaving(true);
     setPageError("");
     try {
       const result = await confirmImport(detail.id);
-      setConfirmedCount(sumImportCounts(result.counts) || selectedCount);
+      setAlreadyConfirmed(false);
+      setConfirmedCount(sumImportCounts(result.counts));
       markValueMoment();
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
+        setAlreadyConfirmed(true);
         setConfirmedCount(0);
       } else {
         setPageError("We couldn't confirm this import. Please try again.");
@@ -729,8 +911,35 @@ export function ImportReviewPage() {
   }
   if (!detail) return null;
 
-  if (confirmedCount !== null || detail.status === "confirmed") {
+  if (detail.status === "needs_mapping") {
+    return (
+      <BrokerMappingPanel
+        detail={detail}
+        onMapped={(mapped) => {
+          setDetail(mapped);
+          setCategoryById(
+            Object.fromEntries(
+              mapped.items.map((item) => [item.id, categoryForItem(item)]),
+            ),
+          );
+          setSelectedById(
+            Object.fromEntries(
+              mapped.items.map((item) => [item.id, initialSelection(item)]),
+            ),
+          );
+        }}
+      />
+    );
+  }
+
+  if (
+    alreadyConfirmed ||
+    confirmedCount !== null ||
+    detail.status === "confirmed"
+  ) {
     const added = confirmedCount ?? 0;
+    const wasAlreadyConfirmed =
+      alreadyConfirmed || detail.status === "confirmed";
     return (
       <Card className="grid gap-3 text-center">
         <CheckCircle2
@@ -738,13 +947,17 @@ export function ImportReviewPage() {
           className="mx-auto size-10 text-success-foreground"
         />
         <h2 className="text-xl font-semibold">
-          {added > 0
-            ? `Added ${added} holdings · Net worth updated`
-            : "This import is already confirmed"}
+          {wasAlreadyConfirmed
+            ? "This import is already confirmed"
+            : added > 0
+              ? `Added ${added} holdings · Net worth updated`
+              : englishCopy.imports.confirmed_zero_title}
         </h2>
         {added === 0 ? (
           <p className="text-sm text-muted-foreground">
-            Your Money Map already includes this statement.
+            {wasAlreadyConfirmed
+              ? "Your Money Map already includes this statement."
+              : englishCopy.imports.confirmed_zero_description}
           </p>
         ) : null}
         <Link
@@ -865,12 +1078,33 @@ export function ImportReviewPage() {
           {grouped.changed.length ? (
             grouped.changed.map((item) => (
               <div key={item.id} className="grid gap-1">
-                <ItemToggle
-                  item={item}
-                  checked={selectedById[item.id] ?? false}
-                  disabled={saving}
-                  onChange={(checked) => void updateStatus(item, checked)}
-                />
+                {item.action === "quantity_mismatch" ? (
+                  <>
+                    <div className="flex items-center gap-3 border-t border-line pt-2 text-sm">
+                      <span className="min-w-0 flex-1">
+                        <strong className="block truncate">{item.name}</strong>
+                        <span className="block text-xs text-muted-foreground">
+                          {item.quantity} units
+                        </span>
+                      </span>
+                      <Badge>{englishCopy.imports.broker_security_label}</Badge>
+                    </div>
+                    <TradebookMismatchChoice
+                      item={item}
+                      disabled={saving}
+                      onChange={(useTradebook) =>
+                        void updateStatus(item, useTradebook)
+                      }
+                    />
+                  </>
+                ) : (
+                  <ItemToggle
+                    item={item}
+                    checked={selectedById[item.id] ?? false}
+                    disabled={saving}
+                    onChange={(checked) => void updateStatus(item, checked)}
+                  />
+                )}
                 <p className="pl-8 text-xs text-muted-foreground">
                   Quantity: {quantityChange(item)} ·{" "}
                   {maskAccountReference(item.account_ref)}
@@ -925,7 +1159,9 @@ export function ImportReviewPage() {
               Unknown · {counts.unknown}
             </h3>
             <p className="mt-1 text-sm text-muted-foreground">
-              Choose a kind and sleeve, or leave it out of this import.
+              {detail.source === "broker"
+                ? englishCopy.imports.mapping_unknown_help
+                : "Choose the holding type, or leave it out of this import."}
             </p>
           </div>
           {grouped.unknown.length ? (
@@ -944,73 +1180,90 @@ export function ImportReviewPage() {
                     · {maskAccountReference(item.account_ref)}
                   </p>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <label
-                    className="grid gap-1 text-xs font-medium"
-                    htmlFor={`kind-${item.id}`}
-                  >
-                    Kind
-                    <select
-                      id={`kind-${item.id}`}
-                      value={kindById[item.id] ?? "equity"}
-                      onChange={(event) => {
-                        const value = event.currentTarget.value;
-                        setKindById((current) => ({
-                          ...current,
-                          [item.id]: value,
-                        }));
-                      }}
-                      className="min-h-12 rounded-xl border border-line bg-surface px-2 text-sm"
+                {detail.source === "broker" ? (
+                  <p className="text-sm text-muted-foreground">
+                    {englishCopy.imports.mapping_unknown_heading}
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2">
+                    <label
+                      className="grid gap-1 text-xs font-medium"
+                      htmlFor={`kind-${item.id}`}
                     >
-                      {kindOptions.map(([value, label]) => (
-                        <option key={value} value={value}>
-                          {label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label
-                    className="grid gap-1 text-xs font-medium"
-                    htmlFor={`sleeve-${item.id}`}
-                  >
-                    Sleeve
-                    <select
-                      id={`sleeve-${item.id}`}
-                      value={sleeveById[item.id] ?? "equity_india"}
-                      onChange={(event) => {
-                        const value = event.currentTarget.value;
-                        setSleeveById((current) => ({
-                          ...current,
-                          [item.id]: value,
-                        }));
-                      }}
-                      className="min-h-12 rounded-xl border border-line bg-surface px-2 text-sm"
+                      Kind
+                      <select
+                        id={`kind-${item.id}`}
+                        value={kindById[item.id] ?? "equity"}
+                        onChange={(event) => {
+                          const value = event.currentTarget.value;
+                          setKindById((current) => ({
+                            ...current,
+                            [item.id]: value,
+                          }));
+                        }}
+                        className="min-h-12 rounded-xl border border-line bg-surface px-2 text-sm"
+                      >
+                        {kindOptions.map(([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label
+                      className="grid gap-1 text-xs font-medium"
+                      htmlFor={`sleeve-${item.id}`}
                     >
-                      {sleeveOptions.map(([value, label]) => (
-                        <option key={value} value={value}>
-                          {label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    type="button"
-                    disabled={saving}
-                    onClick={() => void acceptUnknown(item)}
-                  >
-                    Save decision
-                  </Button>
+                      {englishCopy.imports.category_label}
+                      <select
+                        id={`sleeve-${item.id}`}
+                        value={sleeveById[item.id] ?? "equity_india"}
+                        onChange={(event) => {
+                          const value = event.currentTarget.value;
+                          setSleeveById((current) => ({
+                            ...current,
+                            [item.id]: value,
+                          }));
+                        }}
+                        className="min-h-12 rounded-xl border border-line bg-surface px-2 text-sm"
+                      >
+                        {sleeveOptions.map(([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                )}
+                {detail.source === "broker" ? (
                   <Button
                     type="button"
                     variant="secondary"
                     disabled={saving}
                     onClick={() => void updateStatus(item, false)}
                   >
-                    Reject
+                    {englishCopy.imports.mapping_leave_out}
                   </Button>
-                </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      type="button"
+                      disabled={saving}
+                      onClick={() => void acceptUnknown(item)}
+                    >
+                      Save decision
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={saving}
+                      onClick={() => void updateStatus(item, false)}
+                    >
+                      Reject
+                    </Button>
+                  </div>
+                )}
               </div>
             ))
           ) : (
@@ -1020,12 +1273,6 @@ export function ImportReviewPage() {
           )}
         </Card>
       </section>
-
-      {importFeatureSupport.mapping ? (
-        <Card className="text-sm">
-          Column mapping is available for this API.
-        </Card>
-      ) : null}
 
       <div className="fixed inset-x-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-20 mx-auto max-w-3xl border-t border-line bg-surface/95 p-3 shadow-lg backdrop-blur">
         <div className="flex gap-2">
@@ -1041,7 +1288,7 @@ export function ImportReviewPage() {
           <Button
             type="button"
             className="flex-1"
-            disabled={saving || selectedCount === 0}
+            disabled={saving || !canConfirm}
             loading={saving}
             onClick={() => void confirm()}
           >
@@ -1075,5 +1322,204 @@ export function ImportReviewPage() {
         </div>
       </Sheet>
     </div>
+  );
+}
+
+const HOLDINGS_FIELDS = [
+  ["isin", "mapping_security_code"],
+  ["symbol", "mapping_symbol"],
+  ["name", "mapping_name"],
+  ["quantity", "mapping_quantity"],
+  ["avg_price", "mapping_average_price"],
+  ["last_price", "mapping_last_price"],
+  ["exchange", "mapping_exchange"],
+] as const;
+
+const TRADEBOOK_FIELDS = [
+  ["isin", "mapping_security_code"],
+  ["symbol", "mapping_symbol"],
+  ["trade_date", "mapping_trade_date"],
+  ["trade_type", "mapping_trade_type"],
+  ["quantity", "mapping_quantity"],
+  ["price", "mapping_price"],
+  ["exchange", "mapping_exchange"],
+  ["order_id", "mapping_order_id"],
+  ["trade_id", "mapping_trade_id"],
+] as const;
+
+function BrokerMappingPanel({
+  detail,
+  onMapped,
+}: {
+  detail: ImportDetail;
+  onMapped(mapped: ImportDetail): void;
+}) {
+  const [kind, setKind] = useState<"holdings" | "tradebook">("holdings");
+  const [columns, setColumns] = useState<Record<string, string>>({});
+  const [saveAs, setSaveAs] = useState(
+    englishCopy.imports.mapping_save_as_default,
+  );
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setColumns(
+      Object.fromEntries(
+        Object.entries(detail.suggested_mapping ?? {}).filter(
+          (entry): entry is [string, string] => typeof entry[1] === "string",
+        ),
+      ),
+    );
+  }, [detail]);
+
+  const fields = kind === "holdings" ? HOLDINGS_FIELDS : TRADEBOOK_FIELDS;
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    const request: ImportMappingRequest = {
+      kind,
+      columns: Object.fromEntries(
+        Object.entries(columns).filter(
+          ([, header]) => header.trim().length > 0,
+        ),
+      ),
+      save_as: saveAs.trim() || null,
+    };
+    try {
+      onMapped(await mapImportColumns(detail.id, request));
+    } catch {
+      setError(englishCopy.imports.mapping_error);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Card className="grid gap-4">
+      <div>
+        <h2 className="text-xl font-semibold">
+          {englishCopy.imports.mapping_title}
+        </h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {englishCopy.imports.mapping_intro}
+        </p>
+      </div>
+      <p className="text-sm text-muted-foreground">
+        {englishCopy.imports.mapping_preview_note}
+      </p>
+      <label
+        className="grid gap-1.5 text-sm font-medium"
+        htmlFor="mapping-kind"
+      >
+        {englishCopy.imports.mapping_kind_label}
+        <select
+          id="mapping-kind"
+          value={kind}
+          onChange={(event) => {
+            setKind(event.currentTarget.value as "holdings" | "tradebook");
+            setColumns({});
+          }}
+          className="min-h-12 rounded-xl border border-line bg-surface px-3 text-base"
+        >
+          <option value="holdings">
+            {englishCopy.imports.mapping_holdings}
+          </option>
+          <option value="tradebook">
+            {englishCopy.imports.mapping_tradebook}
+          </option>
+        </select>
+      </label>
+      <details className="rounded-xl border border-line p-3 text-sm">
+        <summary className="min-h-10 cursor-pointer font-medium">
+          {englishCopy.imports.mapping_preview_rows}
+        </summary>
+        <div className="overflow-x-auto pt-2">
+          <table className="min-w-full text-left text-xs">
+            <thead>
+              <tr>
+                {(detail.headers ?? []).map((header, index) => (
+                  <th
+                    key={`${header}-${index}`}
+                    className="px-2 py-1 font-semibold"
+                  >
+                    {header}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {(detail.samples ?? []).map((sample, rowIndex) => (
+                <tr key={rowIndex}>
+                  {sample.map((value, index) => (
+                    <td key={`${rowIndex}-${index}`} className="px-2 py-1">
+                      {value}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </details>
+      <form className="grid gap-3" onSubmit={(event) => void submit(event)}>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {fields.map(([field, labelKey]) => (
+            <label
+              key={field}
+              className="grid gap-1.5 text-sm font-medium"
+              htmlFor={`mapping-${field}`}
+            >
+              {englishCopy.imports[labelKey]}
+              <select
+                id={`mapping-${field}`}
+                value={columns[field] ?? ""}
+                onChange={(event) => {
+                  const selectedHeader = event.currentTarget.value;
+                  setColumns((current) => {
+                    const next = { ...current };
+                    if (selectedHeader) next[field] = selectedHeader;
+                    else delete next[field];
+                    return next;
+                  });
+                }}
+                className="min-h-12 rounded-xl border border-line bg-surface px-3 text-base"
+              >
+                <option value="">
+                  {englishCopy.imports.mapping_skip_column}
+                </option>
+                {(detail.headers ?? []).map((header, index) => (
+                  <option key={`${header}-${index}`} value={header}>
+                    {header}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ))}
+        </div>
+        <label
+          className="grid gap-1.5 text-sm font-medium"
+          htmlFor="mapping-save-as"
+        >
+          {englishCopy.imports.mapping_save_as}
+          <input
+            id="mapping-save-as"
+            value={saveAs}
+            onChange={(event) => setSaveAs(event.currentTarget.value)}
+            maxLength={80}
+            className="min-h-12 rounded-xl border border-line bg-surface px-3 text-base"
+          />
+        </label>
+        {error ? (
+          <p role="alert" className="text-sm text-danger-foreground">
+            {error}
+          </p>
+        ) : null}
+        <Button type="submit" loading={saving} disabled={saving}>
+          {englishCopy.imports.mapping_submit}
+        </Button>
+      </form>
+    </Card>
   );
 }

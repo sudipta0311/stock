@@ -16,6 +16,7 @@ export type MemberResponse = Schema<"MemberResponse">;
 export type NetworthResponse = Schema<"NetworthResponse">;
 export type GoalResponse = Schema<"GoalResponse">;
 export type GoalWrite = Schema<"Goal">;
+export type AccountResponse = Schema<"AccountResponse">;
 
 function jsonRequest(method: string, payload: unknown): RequestInit {
   return {
@@ -89,6 +90,10 @@ export function quickAdd(text: string): Promise<QuickAddResponse> {
 
 export function listMembers(): Promise<MemberResponse[]> {
   return apiFetch("/v1/members");
+}
+
+export function listAccounts(): Promise<AccountResponse[]> {
+  return apiFetch("/v1/accounts");
 }
 
 export function createMember(

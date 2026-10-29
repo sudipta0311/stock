@@ -92,7 +92,16 @@ export function errorCode(error: unknown): string {
 
 export function categoryForItem(item: ImportItem): ImportCategory {
   if (item.status === "duplicate") return "duplicate";
-  if (item.status === "changed" || (item.status === "accepted" && item.diff))
+  if (
+    item.status === "changed" ||
+    item.status === "enrich" ||
+    item.status === "replace_with_lots" ||
+    item.status === "quantity_mismatch" ||
+    item.action === "enrich" ||
+    item.action === "replace_with_lots" ||
+    item.action === "quantity_mismatch" ||
+    (item.status === "accepted" && item.diff)
+  )
     return "changed";
   if (item.status === "unknown" || (!item.sleeve && item.status === "accepted"))
     return "unknown";
@@ -133,6 +142,10 @@ export function maskAccountReference(value: string | null): string {
 
 export function quantityChange(item: ImportItem): string {
   const diff = item.diff;
+  const current = diff?.current;
+  const tradebook = diff?.tradebook;
+  if (current !== undefined || tradebook !== undefined)
+    return `${String(current ?? "Current quantity")} → ${String(tradebook ?? item.quantity)}`;
   const textValue = (...keys: string[]): string | undefined => {
     for (const key of keys) {
       const value = diff?.[key];
