@@ -60,7 +60,40 @@ def _upsert_security(
     by_isin: bool,
     preserve_nse_security: bool = False,
 ) -> UUID:
-    statement = pg_insert(Security).values(id=uuid4(), **values)
+    statement = _with_security_conflict(
+        pg_insert(Security).values(id=uuid4(), **values),
+        by_isin=by_isin,
+        preserve_nse_security=preserve_nse_security,
+    )
+    security_id = session.scalar(statement.returning(Security.id))
+    if security_id is None:
+        raise RuntimeError("security upsert returned no identifier")
+    return security_id if isinstance(security_id, UUID) else UUID(str(security_id))
+
+
+def _upsert_securities_batch(
+    session: Session,
+    rows: list[dict[str, Any]],
+    *,
+    by_isin: bool,
+    preserve_nse_security: bool = False,
+    batch_size: int = 1000,
+) -> None:
+    """Upsert many securities with one round trip per batch instead of one per row.
+
+    The daily AMFI file has ~18,000 share classes; per-row upserts from a GitHub runner
+    to Neon took longer than the job's 30-minute limit.
+    """
+    statement = _with_security_conflict(
+        pg_insert(Security), by_isin=by_isin, preserve_nse_security=preserve_nse_security
+    )
+    for start in range(0, len(rows), batch_size):
+        session.execute(
+            statement, [{"id": uuid4(), **row} for row in rows[start : start + batch_size]]
+        )
+
+
+def _with_security_conflict(statement: Any, *, by_isin: bool, preserve_nse_security: bool) -> Any:
     if by_isin:
         excluded = statement.excluded
         update_values: dict[str, Any] = {
@@ -123,10 +156,7 @@ def _upsert_security(
                 "series": func.coalesce(statement.excluded.series, Security.series),
             },
         )
-    security_id = session.scalar(statement.returning(Security.id))
-    if security_id is None:
-        raise RuntimeError("security upsert returned no identifier")
-    return security_id if isinstance(security_id, UUID) else UUID(str(security_id))
+    return statement
 
 
 def upsert_nse_master(session: Session, records: list[NseSecurity]) -> int:
@@ -372,29 +402,37 @@ def upsert_amfi_master(session: Session, records: list[AmfiNav]) -> int:
         for index, isin in enumerate(isins):
             variants[(record.scheme_code, isin)] = (record, "G" if index == 0 else "R")
 
+    # Keyed by each batch's conflict target, so one batch never updates a row twice.
+    isin_rows: dict[str, dict[str, Any]] = {}
+    symbol_rows: dict[str, dict[str, Any]] = {}
     for (scheme_code, isin), (record, variant) in variants.items():
-        symbol = f"AMFI-{scheme_code}-{variant}" if isin else f"AMFI-{scheme_code}"
-        _upsert_security(
-            session,
-            {
-                "market": "IN",
-                "symbol": symbol[:32],
-                "isin": isin,
-                "name": record.name[:160],
-                "security_type": "mf",
-                "currency": "INR",
-                "sleeve": record.sleeve,
-                "category": record.category,
-                "sub_category": record.sub_category,
-                "plan_type": record.plan_type,
-                "option": record.option_type,
-                "amfi_scheme_code": scheme_code,
-                "nse_symbol": None,
-                "series": None,
-            },
-            by_isin=isin is not None,
-            preserve_nse_security=True,
-        )
+        symbol = (f"AMFI-{scheme_code}-{variant}" if isin else f"AMFI-{scheme_code}")[:32]
+        row = {
+            "market": "IN",
+            "symbol": symbol,
+            "isin": isin,
+            "name": record.name[:160],
+            "security_type": "mf",
+            "currency": "INR",
+            "sleeve": record.sleeve,
+            "category": record.category,
+            "sub_category": record.sub_category,
+            "plan_type": record.plan_type,
+            "option": record.option_type,
+            "amfi_scheme_code": scheme_code,
+            "nse_symbol": None,
+            "series": None,
+        }
+        if isin is None:
+            symbol_rows[symbol] = row
+        else:
+            isin_rows[isin] = row
+    _upsert_securities_batch(
+        session, list(isin_rows.values()), by_isin=True, preserve_nse_security=True
+    )
+    _upsert_securities_batch(
+        session, list(symbol_rows.values()), by_isin=False, preserve_nse_security=True
+    )
     return len(variants)
 
 
@@ -704,20 +742,6 @@ def upsert_nse_closes(
     return count
 
 
-def securities_for_amfi_nav(session: Session, record: AmfiNav) -> list[UUID]:
-    """Return the share-class security IDs represented by one AMFI NAV row."""
-    identifiers = [
-        identifier for identifier in (record.isin_primary, record.isin_reinvestment) if identifier
-    ]
-    query = select(Security.id).where(
-        or_(
-            Security.amfi_scheme_code == record.scheme_code,
-            Security.isin.in_(identifiers) if identifiers else Security.isin.is_(None),
-        )
-    )
-    return list(dict.fromkeys(session.scalars(query)))
-
-
 def upsert_amfi_navs(
     session: Session,
     records: list[AmfiNav],
@@ -725,12 +749,31 @@ def upsert_amfi_navs(
     fetched_at: datetime | None = None,
 ) -> int:
     """Store NAV rows only for securities represented in current user holdings."""
-    held_ids = set(session.scalars(select(HoldingLot.security_id).distinct()))
+    # Match in memory against the few held securities: one query instead of one per NAV
+    # row. A row without an ISIN matches by scheme code only, never by "ISIN is null".
+    held = session.execute(
+        select(Security.id, Security.isin, Security.amfi_scheme_code).where(
+            Security.id.in_(select(HoldingLot.security_id).distinct())
+        )
+    ).all()
+    held_by_isin = {isin: security_id for security_id, isin, _code in held if isin}
+    held_by_code: dict[str, list[UUID]] = {}
+    for security_id, _isin, code in held:
+        if code:
+            held_by_code.setdefault(code, []).append(security_id)
     count = 0
     seen: set[tuple[UUID, date]] = set()
     for record in records:
-        for security_id in securities_for_amfi_nav(session, record):
-            if security_id not in held_ids or (security_id, record.as_of) in seen:
+        matches = [
+            *held_by_code.get(record.scheme_code, []),
+            *(
+                held_by_isin[isin]
+                for isin in (record.isin_primary, record.isin_reinvestment)
+                if isin and isin in held_by_isin
+            ),
+        ]
+        for security_id in dict.fromkeys(matches):
+            if (security_id, record.as_of) in seen:
                 continue
             upsert_nav(session, security_id, record.as_of, record.nav, fetched_at=fetched_at)
             seen.add((security_id, record.as_of))

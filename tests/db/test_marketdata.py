@@ -215,6 +215,54 @@ def test_amfi_schemes_without_isin_upsert_by_market_symbol_repeatedly(
     assert count == 1
 
 
+def test_amfi_nav_without_isin_only_reaches_its_own_held_scheme(
+    migrated_database: MigratedDatabase,
+) -> None:
+    on = date(2026, 10, 28)
+    scheme = AmfiNav(
+        scheme_code="999778",
+        isin_primary=None,
+        isin_reinvestment=None,
+        name="Synthetic No-ISIN Fund",
+        plan="Direct Plan",
+        option="Growth",
+        nav=Decimal("12.3400"),
+        as_of=on,
+        category="mf:debt",
+        sleeve="debt",
+    )
+    other = _security("SYNTHETIC-NOISIN-SHARE")
+    user = User(email=f"amfi-nav-{uuid4()}@example.test", auth_subject=str(uuid4()))
+    with Session(migrated_database.owner_engine) as session, session.begin():
+        store.upsert_amfi_master(session, [scheme])
+        fund = session.scalar(select(Security).where(Security.symbol == "AMFI-999778"))
+        assert fund is not None
+        session.add_all([other, user])
+        session.flush()
+        for security in (fund, other):
+            session.add(
+                HoldingLot(
+                    user_id=user.id,
+                    security_id=security.id,
+                    quantity=Decimal("1"),
+                    source="manual",
+                )
+            )
+        session.flush()
+        stored = store.upsert_amfi_navs(session, [scheme])
+        fund_navs = session.scalar(
+            select(func.count()).select_from(NavDaily).where(NavDaily.security_id == fund.id)
+        )
+        other_navs = session.scalar(
+            select(func.count()).select_from(NavDaily).where(NavDaily.security_id == other.id)
+        )
+
+    assert stored == 1
+    assert fund_navs == 1
+    # Before the fix a no-ISIN NAV matched every held security whose ISIN is null.
+    assert other_navs == 0
+
+
 def test_prune_keeps_recent_held_proxy_and_index_member_prices_only(
     migrated_database: MigratedDatabase,
 ) -> None:
