@@ -978,11 +978,14 @@ export function PlanPage() {
         meMemberId,
       )
     : members.find((member) => member.id === activeMemberId)?.display_name;
+  // Statement imports land in holdings, not in the manual assets list.
   const noAssets =
     assets.supported &&
     !assets.isPending &&
     !assets.error &&
-    (assets.data?.length ?? 0) === 0;
+    (assets.data?.length ?? 0) === 0 &&
+    !networth.isPending &&
+    (networth.data?.holdings?.length ?? 0) === 0;
 
   if (!plan.supported || isMissingFeature(plan.error))
     return <ComingSoon title="Your plan is coming soon" />;

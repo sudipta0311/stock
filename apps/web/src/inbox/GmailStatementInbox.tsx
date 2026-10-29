@@ -169,7 +169,8 @@ export function GmailStatementInbox() {
             ? "A saved password didn’t work. Enter it to continue."
             : item.error_code === "parse_timeout"
               ? "This statement took too long to read. Try again."
-              : item.error_code === "unreadable"
+              : item.error_code === "unreadable" &&
+                  item.status === "needs_password"
                 ? "We couldn’t read this statement before. Try again, or upload it in Money."
                 : "";
         return (

@@ -157,10 +157,8 @@ function exitCardFor(
 
 export function HoldingPage() {
   const { id = "" } = useParams();
-  const networth = useFeatureQuery(
-    ["c22", "networth"],
-    "/v1/networth",
-    getNetworth,
+  const networth = useFeatureQuery(["c22", "networth"], "/v1/networth", () =>
+    getNetworth(),
   );
   const plan = useFeatureQuery(["c22", "plan"], "/v1/plan", getPlan);
   if (

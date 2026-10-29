@@ -124,6 +124,44 @@ describe("Plan page", () => {
     expect(screen.queryByText(/may be subject to estate tax/i)).toBeNull();
   });
 
+  it("shows the plan for money that came only from a statement", async () => {
+    server.use(
+      ...planHandlers(),
+      http.get(/\/v1\/assets$/, () => HttpResponse.json([])),
+      http.get(/\/v1\/networth$/, () =>
+        HttpResponse.json(
+          networth({
+            holdings: [
+              {
+                currency: "INR",
+                fx_as_of: null,
+                fx_missing: false,
+                name: "Synthetic Flexi Cap Fund",
+                price_as_of: "2026-10-28",
+                price_source: "amfi",
+                quantity: "100",
+                security_id: "security-test-1",
+                security_type: "mf",
+                status: "priced",
+                symbol: "SYNTHETIC",
+                value: "10000.00",
+                value_usd: null,
+              },
+            ],
+          }),
+        ),
+      ),
+    );
+    renderPlan();
+
+    expect(
+      await screen.findByRole("heading", { name: "Your money vs your plan" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Add what you have to see your plan"),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows the missing year-start account value as one Denmark note", async () => {
     const user = userEvent.setup();
     server.use(

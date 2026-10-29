@@ -11,9 +11,11 @@ import { server } from "../msw";
 
 describe("holding Exit Card", () => {
   it("shows the holding, trigger rows, tax estimate, and plain-language action", async () => {
+    const networthQueries: string[] = [];
     server.use(
-      http.get(/\/v1\/networth$/, () =>
-        HttpResponse.json(
+      http.get(/\/v1\/networth$/, ({ request }) => {
+        networthQueries.push(new URL(request.url).search);
+        return HttpResponse.json(
           networth({
             holdings: [
               {
@@ -33,8 +35,8 @@ describe("holding Exit Card", () => {
               },
             ],
           }),
-        ),
-      ),
+        );
+      }),
       http.get(/\/v1\/plan$/, () =>
         HttpResponse.json(
           weeklyPlan({
@@ -86,6 +88,8 @@ describe("holding Exit Card", () => {
     expect(
       await screen.findByRole("heading", { name: "Demo Company" }),
     ).toBeInTheDocument();
+    // The household view, never a stray "member_id=[object Object]" filter.
+    expect(networthQueries.every((query) => query === "")).toBe(true);
     expect(screen.getByText(/DEMO/).parentElement).toHaveTextContent(
       "10 shares",
     );

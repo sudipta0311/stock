@@ -104,61 +104,67 @@ export function FundSipFineTune() {
         </p>
       </div>
       {rows.length ? (
-        <ul className="grid gap-3">
-          {rows.map((row) => (
-            <li
-              className="grid gap-2 rounded-xl border border-line p-3"
-              key={`${row.memberId}:${row.securityId}`}
-            >
-              <label
-                className="text-sm font-medium"
-                htmlFor={`fund-sip-${row.securityId}`}
+        // One row per fund is long with a real statement, so it starts folded.
+        <details className="group">
+          <summary className="min-h-12 cursor-pointer py-3 text-sm font-semibold text-brand">
+            Show {rows.length} {rows.length === 1 ? "fund" : "funds"}
+          </summary>
+          <ul className="grid gap-3">
+            {rows.map((row) => (
+              <li
+                className="grid gap-2 rounded-xl border border-line p-3"
+                key={`${row.memberId}:${row.securityId}`}
               >
-                {row.name}
-              </label>
-              <div className="flex flex-wrap items-end gap-2">
-                <div className="grid gap-1">
-                  <span className="text-xs text-muted-foreground">
-                    {englishCopy.fund_check.monthly_amount}
-                  </span>
-                  <div className="relative">
-                    <span
-                      aria-hidden="true"
-                      className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm font-medium text-muted-foreground"
-                    >
-                      ₹
-                    </span>
-                    <input
-                      className="min-h-12 w-40 rounded-lg border border-line bg-background pl-9 pr-3 text-sm tabular-nums"
-                      id={`fund-sip-${row.securityId}`}
-                      inputMode="decimal"
-                      min="0"
-                      onChange={(event) =>
-                        setDrafts((current) => ({
-                          ...current,
-                          [row.securityId]: event.target.value,
-                        }))
-                      }
-                      step="0.01"
-                      type="number"
-                      value={drafts[row.securityId] ?? row.current}
-                      disabled={isViewer}
-                    />
-                  </div>
-                </div>
-                <Button
-                  disabled={isViewer}
-                  loading={saving === row.securityId}
-                  onClick={() => void save(row)}
-                  type="button"
-                  variant="secondary"
+                <label
+                  className="text-sm font-medium"
+                  htmlFor={`fund-sip-${row.securityId}`}
                 >
-                  {englishCopy.fund_check.settings_save}
-                </Button>
-              </div>
-            </li>
-          ))}
-        </ul>
+                  {row.name}
+                </label>
+                <div className="flex flex-wrap items-end gap-2">
+                  <div className="grid gap-1">
+                    <span className="text-xs text-muted-foreground">
+                      {englishCopy.fund_check.monthly_amount}
+                    </span>
+                    <div className="relative">
+                      <span
+                        aria-hidden="true"
+                        className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm font-medium text-muted-foreground"
+                      >
+                        ₹
+                      </span>
+                      <input
+                        className="min-h-12 w-40 rounded-lg border border-line bg-background pl-9 pr-3 text-sm tabular-nums"
+                        id={`fund-sip-${row.securityId}`}
+                        inputMode="decimal"
+                        min="0"
+                        onChange={(event) =>
+                          setDrafts((current) => ({
+                            ...current,
+                            [row.securityId]: event.target.value,
+                          }))
+                        }
+                        step="0.01"
+                        type="number"
+                        value={drafts[row.securityId] ?? row.current}
+                        disabled={isViewer}
+                      />
+                    </div>
+                  </div>
+                  <Button
+                    disabled={isViewer}
+                    loading={saving === row.securityId}
+                    onClick={() => void save(row)}
+                    type="button"
+                    variant="secondary"
+                  >
+                    {englishCopy.fund_check.settings_save}
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </details>
       ) : (
         <p className="text-sm text-muted-foreground">
           {englishCopy.fund_check.settings_empty}

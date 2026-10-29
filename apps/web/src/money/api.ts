@@ -31,8 +31,12 @@ function jsonRequest(method: string, payload: unknown): RequestInit {
   };
 }
 
-function memberQuery(memberId?: string | null): string {
-  return memberId ? `?member_id=${encodeURIComponent(memberId)}` : "";
+function memberQuery(memberId?: unknown): string {
+  // A query library passes its own context object when a loader is handed over
+  // directly; only a real id may become a filter.
+  return typeof memberId === "string" && memberId
+    ? `?member_id=${encodeURIComponent(memberId)}`
+    : "";
 }
 
 export function getMe(): Promise<MeResponse> {
