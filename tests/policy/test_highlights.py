@@ -166,7 +166,7 @@ def test_missing_yield_keeps_instrument_code_out_of_dismissal_fingerprint() -> N
 
     assert result[0].context == {"instrument_code": "po_td_5y"}
     assert result[0].body == (
-        "We don't have today's rate for this option. Check it with the bank or post office first."
+        "Today's rate for this option isn't known yet. Check it before you add money."
     )
     assert fingerprint is not None
     assert highlight_fingerprint(changed_instrument, "missing_yield", _COPY) == fingerprint

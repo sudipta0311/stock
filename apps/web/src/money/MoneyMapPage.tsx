@@ -99,11 +99,28 @@ function sleeveRows(
       pct: row.pct + Number(sleeve.pct),
     });
   }
-  return [...rows].map(([label, row]) => ({
-    label,
-    amount: fromMinorUnits(row.minor),
-    pct: row.pct,
-  }));
+  // An empty kind ("Gold ₹0 · 0%") says nothing, so it isn't listed.
+  return [...rows]
+    .filter(([, row]) => row.minor !== 0n)
+    .map(([label, row]) => ({
+      label,
+      amount: fromMinorUnits(row.minor),
+      pct: row.pct,
+    }));
+}
+
+const HOLDINGS_SHOWN = 8;
+
+/** Largest first; holdings without a value go last, then by name. */
+function byValue<T extends { value?: string | null; name: string }>(
+  holdings: readonly T[],
+): T[] {
+  return [...holdings].sort((a, b) => {
+    const left = a.value ? toMinorUnits(a.value) : -1n;
+    const right = b.value ? toMinorUnits(b.value) : -1n;
+    if (left !== right) return right > left ? 1 : -1;
+    return a.name.localeCompare(b.name);
+  });
 }
 
 function sleeveForAsset(asset: AssetResponse): string {
@@ -573,6 +590,7 @@ export function MoneyMapPage() {
     fxRate,
   } = useHousehold();
   const [assets, setAssets] = useState<AssetResponse[]>([]);
+  const [showAllHoldings, setShowAllHoldings] = useState(false);
   const [importJobs, setImportJobs] = useState<ImportJob[]>([]);
   const [networth, setNetworth] = useState<NetworthResponse | null>(null);
   const [loanSummary, setLoanSummary] = useState<LoanListResponse | null>(null);
@@ -1059,46 +1077,59 @@ export function MoneyMapPage() {
             <Badge>{networth.holdings.length} holdings</Badge>
           </div>
           <Card className="grid gap-2">
-            {networth.holdings.map((holding) => (
-              <Link
-                key={holding.security_id}
-                to={`/money/holding/${holding.security_id}`}
-                className="flex min-h-16 items-center justify-between gap-3 border-t border-line py-2 first:border-0 first:pt-0 hover:text-brand"
-              >
-                <span className="flex min-w-0 flex-1 items-center gap-3">
-                  <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground">
-                    <Building2 aria-hidden="true" className="size-4" />
-                  </span>
-                  <span className="min-w-0">
-                    <strong className="block truncate text-sm">
-                      <span data-security>{holding.name}</span>
-                    </strong>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      <span data-security>{holding.symbol}</span> ·{" "}
-                      {quantityLabel(holding.quantity, holding.security_type)}
+            {byValue(networth.holdings)
+              .slice(0, showAllHoldings ? undefined : HOLDINGS_SHOWN)
+              .map((holding) => (
+                <Link
+                  key={holding.security_id}
+                  to={`/money/holding/${holding.security_id}`}
+                  className="flex min-h-16 items-center justify-between gap-3 border-t border-line py-2 first:border-0 first:pt-0 hover:text-brand"
+                >
+                  <span className="flex min-w-0 flex-1 items-center gap-3">
+                    <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground">
+                      <Building2 aria-hidden="true" className="size-4" />
+                    </span>
+                    <span className="min-w-0">
+                      <strong className="block truncate text-sm">
+                        <span data-security>{holding.name}</span>
+                      </strong>
+                      <span className="block truncate text-xs text-muted-foreground">
+                        <span data-security>{holding.symbol}</span> ·{" "}
+                        {quantityLabel(holding.quantity, holding.security_type)}
+                      </span>
                     </span>
                   </span>
-                </span>
-                <span className="flex shrink-0 items-center gap-2 text-right text-sm font-semibold tabular-nums">
-                  <span>
-                    {holding.value ? (
-                      <AmountLabel
-                        amount={holding.value}
-                        primaryCurrency={primaryCurrency}
-                        fxQuote={fxQuote}
-                        showSecondary={hasDanishMember}
-                      />
-                    ) : (
-                      "Not available"
-                    )}
+                  <span className="flex shrink-0 items-center gap-2 text-right text-sm font-semibold tabular-nums">
+                    <span>
+                      {holding.value ? (
+                        <AmountLabel
+                          amount={holding.value}
+                          primaryCurrency={primaryCurrency}
+                          fxQuote={fxQuote}
+                          showSecondary={hasDanishMember}
+                        />
+                      ) : (
+                        "Not available"
+                      )}
+                    </span>
+                    <ChevronRight
+                      aria-hidden="true"
+                      className="size-4 text-muted-foreground"
+                    />
                   </span>
-                  <ChevronRight
-                    aria-hidden="true"
-                    className="size-4 text-muted-foreground"
-                  />
-                </span>
-              </Link>
-            ))}
+                </Link>
+              ))}
+            {networth.holdings.length > HOLDINGS_SHOWN ? (
+              <Button
+                variant="secondary"
+                aria-expanded={showAllHoldings}
+                onClick={() => setShowAllHoldings((shown) => !shown)}
+              >
+                {showAllHoldings
+                  ? "Show fewer"
+                  : `Show all ${networth.holdings.length}`}
+              </Button>
+            ) : null}
           </Card>
         </section>
       ) : null}

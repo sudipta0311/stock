@@ -11,7 +11,7 @@ describe("policy highlights", () => {
             key: "missing_yield",
             screen: "plan",
             title: "Check today's rate",
-            body: "We don't have today's rate for this option. Check it with the bank or post office first.",
+            body: "Today's rate for this option isn't known yet. Check it before you add money.",
             learn_more_key: "missing_yield",
             severity: "info",
             context: { instrument_code: "po_td_5y" },
@@ -22,7 +22,7 @@ describe("policy highlights", () => {
 
     expect(
       screen.getByText(
-        "We don't have today's rate for five-year post office time deposit. Check it with the bank or post office first.",
+        "Today's five-year post office time deposit rate isn't known yet. Check it before you add money.",
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/po_td_5y/)).not.toBeInTheDocument();
@@ -36,7 +36,7 @@ describe("policy highlights", () => {
             key: "missing_yield",
             screen: "plan",
             title: "Check today's rate",
-            body: "We don't have today's rate for this option. Check it with the bank or post office first.",
+            body: "Today's rate for this option isn't known yet. Check it before you add money.",
             learn_more_key: "missing_yield",
             severity: "info",
           },
@@ -46,7 +46,7 @@ describe("policy highlights", () => {
 
     expect(
       screen.getByText(
-        "We don't have today's rate for this option. Check it with the bank or post office first.",
+        "Today's rate for this option isn't known yet. Check it before you add money.",
       ),
     ).toBeInTheDocument();
   });

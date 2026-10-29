@@ -249,3 +249,21 @@ def test_a_cdsl_statement_read_by_casparser_asks_to_check_values(
 
     assert parsed.source == "cdsl"
     assert "cdsl_beta_verify_values" in parsed.warnings
+
+
+def test_a_folio_row_named_after_the_statement_period_gets_its_fund_name_by_isin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    statement = _nsdl()
+    folio_account = statement.accounts[1]
+    period_named = folio_account.mutual_funds[0].model_copy(
+        update={"name": "APR-26 TO SEP-26", "isin": "INF879O01027"}
+    )
+    statement.accounts[1] = folio_account.model_copy(update={"mutual_funds": [period_named]})
+    _use(monkeypatch, statement)
+
+    parsed = parse_cas(b"%PDF-synthetic", "synthetic-password")
+
+    names = {holding.isin: holding.name for holding in parsed.holdings}
+    # Public scheme name from casparser's bundled ISIN list.
+    assert names["INF879O01027"] == "PARAG PARIKH FLEXI CAP FUND - DIRECT PLAN GROWTH"

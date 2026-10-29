@@ -1457,6 +1457,26 @@
         "title": "FundSipOverride",
         "type": "object"
       },
+      "FxRateResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "rate": {
+            "title": "Rate",
+            "type": "string"
+          }
+        },
+        "required": [
+          "date",
+          "rate"
+        ],
+        "title": "FxRateResponse",
+        "type": "object"
+      },
       "Goal": {
         "additionalProperties": false,
         "properties": {
@@ -9235,6 +9255,60 @@
           }
         ],
         "summary": "Put Sip Override"
+      }
+    },
+    "/v1/fx/dkk-inr": {
+      "get": {
+        "operationId": "get_dkk_inr_rate_v1_fx_dkk_inr_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Household",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Household"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FxRateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No recent DKK/INR rate is stored."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Dkk Inr Rate"
       }
     },
     "/v1/goals": {

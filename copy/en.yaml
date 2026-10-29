@@ -63,7 +63,7 @@ reasons:
 highlights:
   dismiss: "Hide"
   why: "Why?"
-  missing_yield_named_body: "We don't have today's rate for {name}. Check it with the bank or post office first."
+  missing_yield_named_body: "Today's {name} rate isn't known yet. Check it before you add money."
   instrument_names:
     arbitrage_fund: "arbitrage fund"
     bank_fd: "bank fixed deposit"
@@ -179,7 +179,7 @@ highlights:
       screens: [plan, ideas]
     missing_yield:
       title: "Check today's rate"
-      body: "We don't have today's rate for this option. Check it with the bank or post office first."
+      body: "Today's rate for this option isn't known yet. Check it before you add money."
       learn_more_key: missing_yield
       severity: info
       screens: [plan, money]

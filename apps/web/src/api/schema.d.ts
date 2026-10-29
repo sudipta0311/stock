@@ -1,4 +1,4 @@
-// OpenAPI SHA256: 0525132c37cc749f7e5ce09b3c8cd97318ecb776c262a9175f2171a0b81871ae
+// OpenAPI SHA256: d183b6acc286314d4dc1e0511a7cd08b735c786462ab13833be6edff4b22d5cf
 export interface paths {
     "/healthz": {
         parameters: {
@@ -288,6 +288,23 @@ export interface paths {
         get?: never;
         /** Put Sip Override */
         put: operations["put_sip_override_v1_fund_check_sips__security_id__put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/fx/dkk-inr": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Dkk Inr Rate */
+        get: operations["get_dkk_inr_rate_v1_fx_dkk_inr_get"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -1577,6 +1594,16 @@ export interface components {
             member_id: string;
             /** Monthly Amount Inr */
             monthly_amount_inr: number | string;
+        };
+        /** FxRateResponse */
+        FxRateResponse: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Rate */
+            rate: string;
         };
         /** Goal */
         Goal: {
@@ -4664,6 +4691,44 @@ export interface operations {
                         [key: string]: string;
                     };
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_dkk_inr_rate_v1_fx_dkk_inr_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Household"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FxRateResponse"];
+                };
+            };
+            /** @description No recent DKK/INR rate is stored. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

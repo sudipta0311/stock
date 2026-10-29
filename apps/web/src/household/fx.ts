@@ -1,31 +1,24 @@
+import { apiFetch } from "../api/client";
+
 export interface DkkInrRate {
   date: string;
   rate: string;
 }
 
-const FRANKFURTER_RATE_URL = "https://api.frankfurter.dev/v2/rate/dkk/inr";
-
+/** The ECB DKK/INR rate the server stores; the CSP lets the app call only its API. */
 export async function getDkkInrRate(): Promise<DkkInrRate> {
-  const response = await fetch(FRANKFURTER_RATE_URL, {
-    headers: { Accept: "application/json" },
-  });
-  if (!response.ok)
-    throw new Error("The reference exchange rate is unavailable.");
-  const payload: unknown = await response.json();
-  if (typeof payload !== "object" || payload === null) {
-    throw new Error("The reference exchange rate is unavailable.");
-  }
-  const body = payload as Record<string, unknown>;
-  const rate = body.rate;
+  const body = await apiFetch<{ date?: unknown; rate?: unknown }>(
+    "/v1/fx/dkk-inr",
+  );
   if (
     typeof body.date !== "string" ||
-    (typeof rate !== "number" && typeof rate !== "string") ||
+    typeof body.rate !== "string" ||
     !/^\d{4}-\d{2}-\d{2}$/.test(body.date) ||
-    !/^\d+(?:\.\d+)?$/.test(String(rate))
+    !/^\d+(?:\.\d+)?$/.test(body.rate)
   ) {
     throw new Error("The reference exchange rate is unavailable.");
   }
-  return { date: body.date, rate: String(rate) };
+  return { date: body.date, rate: body.rate };
 }
 
 function scaledDecimal(value: string, scale: number): bigint | null {

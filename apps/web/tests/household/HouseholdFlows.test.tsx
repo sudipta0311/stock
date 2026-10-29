@@ -215,9 +215,9 @@ function householdHandlers({
     }),
     http.get(/\/v1\/goals$/, () => HttpResponse.json([])),
     http.get(/\/v1\/imports$/, () => HttpResponse.json([])),
-    http.get("https://api.frankfurter.dev/v2/rate/dkk/inr", () => {
+    http.get(/\/v1\/fx\/dkk-inr$/, () => {
       onFxRequest?.();
-      return HttpResponse.json({ date: "2026-10-28", rate: 20 });
+      return HttpResponse.json({ date: "2026-10-28", rate: "20" });
     }),
   ];
 }

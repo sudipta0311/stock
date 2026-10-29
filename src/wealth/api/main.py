@@ -712,6 +712,9 @@ def create_app(settings: "Settings | None" = None) -> FastAPI:
     from wealth.api.money_map import build_router
 
     application.include_router(build_router(authenticated_user))
+    from wealth.api.fx import build_router as build_fx_router
+
+    application.include_router(build_fx_router(authenticated_user))
     from wealth.api.loans import build_router as build_loans_router
 
     application.include_router(build_loans_router(authenticated_user))

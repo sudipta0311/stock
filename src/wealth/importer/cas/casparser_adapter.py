@@ -42,6 +42,9 @@ _TRANSACTION_KINDS: dict[str, TransactionKind] = {
 }
 # pdfium is not thread-safe, and parsing runs in a worker thread per request.
 _PDFIUM_LOCK = threading.Lock()
+# Real NSDL folio rows can come back named after the statement period ("APR-26 TO
+# SEP-26"); the fund is then found by ISIN, or its type would be guessed from the period.
+_PERIOD_NAME = re.compile(r"^[A-Z]{3}-\d{2,4}\s+TO\s+[A-Z]{3}-\d{2,4}$", re.I)
 
 
 class CasparserFailed(Exception):
@@ -212,7 +215,7 @@ def _add_holding(
         ParsedHolding(
             kind=kind,
             isin=isin,
-            name=(name or isin).strip() or isin,
+            name=_holding_name(name, isin),
             quantity=quantity,
             market_value=_paise(value),
             price=abs(price) if price is not None else None,
@@ -222,6 +225,30 @@ def _add_holding(
             registrar=registrar,
         )
     )
+
+
+def _holding_name(name: str | None, isin: str) -> str:
+    cleaned = re.sub(r"\s+", " ", name or "").strip()
+    if cleaned and not _PERIOD_NAME.match(cleaned) and re.search(r"[A-Za-z]{3}", cleaned):
+        return cleaned
+    return _isin_database_name(isin) or cleaned or isin
+
+
+def _isin_database_name(isin: str) -> str | None:
+    """Fund name from casparser's bundled ISIN list (read-only, no network)."""
+    try:
+        from casparser_isin import MFISINDb
+
+        database = MFISINDb()
+        database.initialize()
+        try:
+            rows = database.direct_isin_lookup(isin)
+        finally:
+            database.close()
+    except Exception:
+        return None
+    name = rows[0].get("name") if rows else None
+    return re.sub(r"\s+", " ", name).strip() if isinstance(name, str) and name.strip() else None
 
 
 def _transaction(isin: str, row: Any, account_ref: str | None) -> ParsedTransaction | None:

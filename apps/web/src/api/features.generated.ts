@@ -17,6 +17,7 @@ export const API_PATHS = [
   "/v1/email/unsubscribe",
   "/v1/fund-check",
   "/v1/fund-check/sips/{security_id}",
+  "/v1/fx/dkk-inr",
   "/v1/goals",
   "/v1/goals/{goal_id}",
   "/v1/highlights/dismissals",

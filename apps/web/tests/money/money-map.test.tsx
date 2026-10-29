@@ -166,7 +166,7 @@ describe("Money Map", () => {
     };
     server.use(
       http.get(/\/v1\/members$/, () => HttpResponse.json([member])),
-      http.get("https://api.frankfurter.dev/v2/rate/dkk/inr", () =>
+      http.get(/\/v1\/fx\/dkk-inr$/, () =>
         HttpResponse.json({ date: "2026-10-28", rate: "12.5" }),
       ),
       http.post(/\/v1\/assets$/, async ({ request }) => {
@@ -420,8 +420,9 @@ describe("Money Map", () => {
           by_sleeve: [
             { sleeve: "debt", amount: "600000.00", pct: "46.88" },
             { sleeve: "cash", amount: "100000.00", pct: "9.87" },
-            { sleeve: "real_estate", amount: "0.00", pct: "0.00" },
-            { sleeve: "other", amount: "0.00", pct: "0.00" },
+            { sleeve: "real_estate", amount: "200000.00", pct: "18.75" },
+            { sleeve: "other", amount: "50000.00", pct: "4.69" },
+            { sleeve: "gold", amount: "0.00", pct: "0.00" },
           ],
           maturity_calendar: [
             {
@@ -442,6 +443,10 @@ describe("Money Map", () => {
     expect(screen.queryByText(/real_estate/)).not.toBeInTheDocument();
     expect(screen.getByText("Cash")).toBeInTheDocument();
     expect(screen.getAllByText("Other holdings")).toHaveLength(1);
+    // Kinds with nothing in them aren't listed.
+    const split = screen.getByRole("heading", { name: "Split by type" })
+      .parentElement as HTMLElement;
+    expect(within(split).queryByText("Gold")).not.toBeInTheDocument();
     expect(screen.getByText(/· 47%/)).toBeInTheDocument();
     expect(screen.queryByText(/46\.88/)).not.toBeInTheDocument();
   });
