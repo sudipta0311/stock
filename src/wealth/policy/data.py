@@ -61,10 +61,16 @@ _MANUAL_PRICES_PATH = Path(__file__).resolve().parents[3] / "rules" / "manual_pr
 
 def _financial_context(profile: Profile | None) -> FinancialContext:
     stored = dict(profile.financial_context or {}) if profile is not None else {}
-    stored.setdefault("monthly_expenses", "0")
-    stored.setdefault("dependants", 0)
-    stored.setdefault("employment_type", "salaried")
-    stored.setdefault("income_stability", "medium")
+    # Skipped onboarding questions are saved as nulls, so default on None as well as absence.
+    defaults: dict[str, object] = {
+        "monthly_expenses": "0",
+        "dependants": 0,
+        "employment_type": "salaried",
+        "income_stability": "medium",
+    }
+    for key, default in defaults.items():
+        if stored.get(key) is None:
+            stored[key] = default
     if stored.get("city_tier") is None and profile is not None:
         stored["city_tier"] = profile.city_tier
     if stored.get("tax_regime") is None and profile is not None:

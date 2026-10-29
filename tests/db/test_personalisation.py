@@ -259,6 +259,20 @@ def test_plan_loads_fx_for_member_residency_without_a_matching_goal(
     assert {"USD/INR", "DKK/INR", "EUR/INR"} <= set(requested_pairs)
 
 
+def test_plan_uses_defaults_when_onboarding_skipped_the_optional_questions(
+    api_client: tuple[TestClient, str, object],
+) -> None:
+    client, secret, _application = api_client
+    headers, _subject = _auth(secret, "skipped-optional-questions")
+    # The short onboarding path saves only the tax regime; every optional answer is null.
+    saved = client.put("/v1/me/profile", headers=headers, json={"tax_regime": "new"})
+    assert saved.status_code == 200
+
+    plan = client.get("/v1/plan", headers=headers)
+
+    assert plan.status_code == 200
+
+
 def test_get_plan_loads_legacy_stored_null_residency_country(
     api_client: tuple[TestClient, str, object],
     migrated_database: MigratedDatabase,
