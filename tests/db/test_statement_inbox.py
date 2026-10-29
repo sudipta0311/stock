@@ -286,7 +286,7 @@ def test_another_households_upload_key_cannot_reach_this_household(
     assert first_key != second_key
 
 
-def test_unreadable_pdf_is_removed_and_falls_back_to_manual_upload(
+def test_unreadable_pdf_is_kept_for_another_try_and_points_to_manual_upload(
     inbox_client: tuple[TestClient, str, str, MigratedDatabase],
 ) -> None:
     client, secret, _password_key, _database = inbox_client
@@ -308,8 +308,14 @@ def test_unreadable_pdf_is_removed_and_falls_back_to_manual_upload(
     assert processed.json()["code"] == "unreadable"
     assert "uploading it in Money" in processed.json()["detail"]
     item = client.get("/v1/statement-inbox/items", headers=owner_headers).json()["items"][0]
-    assert item["status"] == "unreadable"
+    assert item["status"] == "needs_password"
     assert item["error_code"] == "unreadable"
+    retried = client.post(
+        f"/v1/statement-inbox/items/{item_id}/process",
+        headers=owner_headers,
+        json={"password": "synthetic-password", "remember": False},
+    )
+    assert retried.json()["code"] == "unreadable"
     assert client.get("/v1/imports", headers=owner_headers).status_code == 200
     assert client.get("/v1/imports", headers=owner_headers).json() == []
 

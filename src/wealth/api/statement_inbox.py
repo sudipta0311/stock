@@ -229,9 +229,9 @@ async def _process_item(
             raise _StatementProcessingFailure(
                 422, "wrong_password", "That password didn't work. Please try again."
             ) from None
-        item.status = "unreadable"
+        # Keep the PDF (the 30-day cleanup still removes it): a reader fix can then
+        # open it on the next try, and Gmail won't send the same statement again.
         item.error_code = "unreadable"
-        item.pdf_data = None
         session.flush()
         raise _StatementProcessingFailure(
             422, "unreadable", "We couldn't read this file. Try uploading it in Money."

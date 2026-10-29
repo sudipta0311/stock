@@ -28,6 +28,7 @@ api = [
 importer = [
     "openpyxl>=3.1",
     "pypdf>=6.1",
+    "casparser>=1.4.1",
     "httpx>=0.28",
 ]
 research = [

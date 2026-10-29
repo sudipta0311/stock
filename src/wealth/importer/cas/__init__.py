@@ -7,6 +7,7 @@ import os
 from typing import Literal
 
 from wealth.importer.cas.cams_kfin import parse_cams_kfin
+from wealth.importer.cas.casparser_adapter import CasparserFailed, parse_with_casparser
 from wealth.importer.cas.cdsl import parse_cdsl
 from wealth.importer.cas.common import ParseError, clean_lines
 from wealth.importer.cas.nsdl import parse_nsdl
@@ -81,6 +82,11 @@ def parse_cas(data: bytes, password: str | None, *, max_mb: int = 10) -> ParsedS
         raise ParseError("not_a_pdf")
     if len(data) > max_mb * 1024 * 1024:
         raise ParseError("too_large")
+
+    try:
+        return parse_with_casparser(data, password)
+    except CasparserFailed:
+        pass  # The line parsers below still read our own and simpler statement layouts.
 
     lines = pdf_text(data, password)
     cas_type = detect_cas_type(lines)
