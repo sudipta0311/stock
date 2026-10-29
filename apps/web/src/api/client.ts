@@ -34,7 +34,8 @@ export class ApiError extends Error implements ApiProblem {
 }
 
 const RETRYABLE_STATUS = new Set([502, 503, 504]);
-const MAX_RETRY_MS = 60_000;
+// Render's free host can take over a minute to wake after 15 idle minutes.
+const MAX_RETRY_MS = 150_000;
 const MAX_BACKOFF_MS = 15_000;
 export const SELECTED_HOUSEHOLD_STORAGE_KEY = "wealth.household.selected";
 

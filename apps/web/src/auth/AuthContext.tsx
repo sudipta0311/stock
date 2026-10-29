@@ -27,6 +27,7 @@ import {
   refreshAuthSession,
   scheduleProactiveRefresh,
 } from "./session";
+import { nudgeApi, waitForApi } from "./warmup";
 
 type AuthMode = "oidc" | "dev";
 type AuthState = "loading" | "anonymous" | "authenticated";
@@ -37,6 +38,8 @@ interface AuthContextValue {
   state: AuthState;
   hasProfile: boolean | null;
   configurationError: string | null;
+  /** A saved sign-in exists, but the server didn't answer in time. */
+  serverUnreachable: boolean;
   refreshProfile(): Promise<void>;
   loginWithDevToken(token: string): void;
   loginWithOidc(): Promise<void>;
@@ -50,6 +53,13 @@ interface AuthContextValue {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+export class ServerUnreachableError extends Error {
+  constructor() {
+    super("The server didn't answer in time.");
+    this.name = "ServerUnreachableError";
+  }
+}
 const PROFILE_STATUS_KEY = "wealth.auth.has-profile";
 export const AUTH_RETURN_PATH_KEY = "wealth.auth.return-path";
 export const AUTH_NOTICE_STORAGE_KEY = "wealth.auth.notice";
@@ -66,6 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [configurationError, setConfigurationError] = useState<string | null>(
     null,
   );
+  const [serverUnreachable, setServerUnreachable] = useState(false);
 
   const verifyProfile = useCallback(async () => {
     try {
@@ -115,9 +126,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (mode === "oidc") {
         if (getRefreshToken()) {
           try {
+            if (!(await waitForApi())) throw new Error("API unreachable");
             token = (await refreshAuthSession())?.access_token ?? null;
           } catch {
             // Keep the refresh token for the next attempt when the API is unavailable.
+            if (active && getRefreshToken()) setServerUnreachable(true);
           }
         }
         if (
@@ -211,6 +224,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const loginWithOidc = useCallback(async () => {
+    // Start waking the API now, so it is ready when Google sends the person back.
+    nudgeApi();
     const { getOidcUserManager } = await import("./oidc");
     await (await getOidcUserManager()).signinRedirect();
   }, []);
@@ -218,6 +233,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const completeOidcLogin = useCallback(async () => {
     const { getOidcUserManager } = await import("./oidc");
     const manager = await getOidcUserManager();
+    // The one-time Google code can't be retried, so exchange it only once the API answers.
+    if (!(await waitForApi())) throw new ServerUnreachableError();
     const user = await manager.signinRedirectCallback();
     const token = user.access_token || user.id_token;
     if (!token) throw new Error("Google sign-in returned no app token.");
@@ -237,6 +254,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAuthToken(token);
     }
     await manager.removeUser();
+    setServerUnreachable(false);
     setState("authenticated");
     setHasProfile(null);
     await verifyProfile();
@@ -313,6 +331,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       state,
       hasProfile,
       configurationError,
+      serverUnreachable,
       refreshProfile: verifyProfile,
       loginWithDevToken,
       loginWithOidc,
@@ -324,6 +343,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       state,
       hasProfile,
       configurationError,
+      serverUnreachable,
       verifyProfile,
       loginWithDevToken,
       loginWithOidc,

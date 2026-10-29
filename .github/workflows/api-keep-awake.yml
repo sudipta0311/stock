@@ -1,0 +1,27 @@
+name: Keep the API awake
+
+# Render's free web service sleeps after 15 minutes without requests and then takes
+# over a minute to wake, which made sign-in time out. A ping every 10 minutes keeps it
+# up; one always-on service fits in the free plan's 750 instance hours a month.
+# /healthz doesn't touch the database, so Neon still suspends when nobody uses the app.
+on:
+  schedule:
+    - cron: "4-59/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: api-keep-awake
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Ping the API health check
+        env:
+          API_URL: ${{ vars.API_URL || 'https://wealth-api-84le.onrender.com' }}
+        run: curl --fail --silent --show-error --max-time 100 --retry 2 --retry-delay 10 --output /dev/null "$API_URL/healthz"

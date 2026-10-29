@@ -116,12 +116,14 @@ def _workflow_issues(root: Path, workflow: Path, document: Any) -> list[str]:
         if not isinstance(job, dict) or not str(job.get("timeout-minutes", "")).isdigit():
             issues.append(f"{relative}: job {name} needs timeout-minutes")
 
-    if not re.search(r"python-version:\s*['\"]?3\.12['\"]?", raw):
-        issues.append(f"{relative}: Python 3.12 setup is required")
-    if not re.search(r"cache:\s*pip\b", raw):
-        issues.append(f"{relative}: setup-python must cache pip")
-    if not re.search(r"pip install", raw):
-        issues.append(f"{relative}: a pip install step is required")
+    # Workflows that only call a URL (the keep-awake ping) need no Python.
+    if re.search(r"\bpython\b(?!-version)", raw):
+        if not re.search(r"python-version:\s*['\"]?3\.12['\"]?", raw):
+            issues.append(f"{relative}: Python 3.12 setup is required")
+        if not re.search(r"cache:\s*pip\b", raw):
+            issues.append(f"{relative}: setup-python must cache pip")
+        if not re.search(r"pip install", raw):
+            issues.append(f"{relative}: a pip install step is required")
 
     triggers = document.get("on", {})
     if isinstance(triggers, dict):

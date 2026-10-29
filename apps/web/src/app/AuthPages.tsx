@@ -5,8 +5,10 @@ import { Button, Card } from "../ui";
 import {
   AUTH_NOTICE_STORAGE_KEY,
   AUTH_RETURN_PATH_KEY,
+  ServerUnreachableError,
   useAuth,
 } from "../auth/AuthContext";
+import { nudgeApi } from "../auth/warmup";
 
 function consumeReturnPath(fallback: string): string {
   try {
@@ -40,10 +42,13 @@ export function LoginPage() {
     configurationError,
     loginWithDevToken,
     loginWithOidc,
+    serverUnreachable,
   } = useAuth();
   const [token, setToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [notice] = useState(consumeLoginNotice);
+  // The free server sleeps when unused; start waking it while the person reads this page.
+  useEffect(() => nudgeApi(), []);
   if (state === "loading")
     return (
       <main className="grid min-h-screen place-items-center p-5">
@@ -132,7 +137,23 @@ export function LoginPage() {
           </form>
         ) : (
           <div className="grid gap-3">
+            {serverUnreachable ? (
+              <>
+                <p role="alert" className="text-sm text-danger-foreground">
+                  <AlertCircle
+                    aria-hidden="true"
+                    className="mr-1.5 inline size-4 align-text-bottom"
+                  />
+                  We couldn't reach the server. Check your connection, then try
+                  again.
+                </p>
+                <Button onClick={() => window.location.reload()}>
+                  Try again
+                </Button>
+              </>
+            ) : null}
             <Button
+              variant={serverUnreachable ? "secondary" : undefined}
               onClick={() =>
                 void loginWithOidc().catch((reason: unknown) =>
                   setError(
@@ -174,9 +195,11 @@ export function AuthCallbackPage() {
       .catch((reason: unknown) => {
         if (active)
           setError(
-            reason instanceof Error
-              ? reason.message
-              : "Sign-in could not be completed.",
+            reason instanceof ServerUnreachableError
+              ? "We couldn't reach the server. Please sign in again in a minute."
+              : reason instanceof Error
+                ? reason.message
+                : "Sign-in could not be completed.",
           );
       });
     return () => {
@@ -197,6 +220,14 @@ export function AuthCallbackPage() {
         ) : null}
         {error ?? "Completing secure sign-in…"}
       </p>
+      {error ? (
+        <Link
+          className="min-h-12 text-center text-sm underline underline-offset-4"
+          to="/login"
+        >
+          Back to sign in
+        </Link>
+      ) : null}
     </main>
   );
 }
