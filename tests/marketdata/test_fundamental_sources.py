@@ -114,6 +114,8 @@ def test_universe_parsers_keep_issuer_members_and_survivorship_label() -> None:
     sheet.append(["Name", "Ticker", "Identifier", "SEDOL", "Weight", "Sector"])
     sheet.append(["Example One Corp", "EXA", "123456789", "ABC1234", 1.0, "Industrials"])
     sheet.append(["Cash Position", "USD", "CASH", "", 0.0, "Unassigned"])
+    sheet.append(["Other Payable", "-", "-", "", 0.0, "-"])
+    sheet.append(["Placeholder Line", "2602335D", "", "", 0.0, "Industrials"])
     import io
 
     stream = io.BytesIO()

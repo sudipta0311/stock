@@ -20,7 +20,8 @@ NIFTY500_ARCHIVE_URL = "https://archives.nseindia.com/content/indices/ind_nifty5
 SP500_SOURCE = "SSGA_SPY_HOLDINGS"
 NIFTY500_SOURCE = "NSE_NIFTY500_ARCHIVE"
 SURVIVORSHIP_LABEL = "current constituents only (survivorship bias)"
-_TICKER_PATTERN = re.compile(r"^[A-Z0-9.-]{1,15}$")
+# US tickers start with a letter; SPY's workbook also lists "-" and numeric placeholder codes.
+_TICKER_PATTERN = re.compile(r"^[A-Z][A-Z0-9.-]{0,14}$")
 
 
 @dataclass(frozen=True)
