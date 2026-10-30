@@ -866,7 +866,11 @@ export function MoneyMapPage() {
       />
       <Card className="grid gap-4">
         {loading || !totals ? (
-          <div className="grid gap-3" aria-label="Loading your net worth">
+          <div
+            className="grid gap-3"
+            role="status"
+            aria-label="Loading your net worth"
+          >
             <div className="h-5 w-32 animate-pulse rounded bg-muted" />
             <div className="h-9 w-48 animate-pulse rounded bg-muted" />
             <div className="h-4 w-full animate-pulse rounded bg-muted" />

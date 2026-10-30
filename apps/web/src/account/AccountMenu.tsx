@@ -34,7 +34,9 @@ export function AccountMenu() {
     <>
       <button
         type="button"
-        aria-label={`Account menu for ${name}`}
+        // The name starts with what the button shows (initials, first name) so voice
+        // control users can say what they see (WCAG 2.5.3, Label in Name).
+        aria-label={`${nameInitials(name)} ${firstName}, account menu for ${name}`}
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen(true)}

@@ -4,7 +4,9 @@ from pathlib import Path
 
 import yaml
 from scripts.check_deploy_config import (
+    _e2e_dev_auth_issue,
     _non_editable_project_install,
+    _render_issues,
     _secret_like_yaml,
     _valid_cron,
     _workflow_issues,
@@ -67,3 +69,31 @@ def test_project_installs_must_be_editable_so_rule_files_resolve() -> None:
     assert _non_editable_project_install('pip install --no-cache-dir ".[api,importer]"')
     assert not _non_editable_project_install('pip install --no-cache-dir -e ".[api,importer]"')
     assert not _non_editable_project_install("python -m pip install --upgrade pip")
+
+
+def test_deploy_config_rejects_the_e2e_dev_auth_switch(tmp_path: Path) -> None:
+    render_config = "envVars:\n  - key: VITE_E2E_DEV_AUTH\n    value: true\n"
+    deploy_workflow = "env:\n  VITE_E2E_DEV_AUTH: 'true'\n"
+
+    assert _e2e_dev_auth_issue(render_config, "render.yaml") is not None
+    assert _e2e_dev_auth_issue(deploy_workflow, ".github/workflows/deploy.yml") is not None
+    assert _e2e_dev_auth_issue("env:\n  VITE_AUTH_MODE: oidc\n", "render.yaml") is None
+
+    render_path = tmp_path / "render.yaml"
+    render_path.write_text("services: []\n" + render_config, encoding="utf-8")
+    assert any("e2e dev-token auth switch" in issue for issue in _render_issues(tmp_path))
+
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    workflow = workflows / "deploy.yml"
+    workflow.write_text(
+        "name: deploy\non:\n  push:\npermissions:\n  contents: read\n"
+        "concurrency:\n  group: deploy\njobs:\n  deploy:\n    timeout-minutes: 5\n"
+        + deploy_workflow,
+        encoding="utf-8",
+    )
+    document = yaml.load(workflow.read_text("utf-8"), Loader=yaml.BaseLoader)
+    assert any(
+        "e2e dev-token auth switch" in issue
+        for issue in _workflow_issues(tmp_path, workflow, document)
+    )

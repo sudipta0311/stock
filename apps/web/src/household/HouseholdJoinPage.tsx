@@ -67,10 +67,7 @@ export function HouseholdJoinPage() {
       <Card className="grid gap-4">
         <div>
           <h1 className="text-xl font-semibold">
-            {englishCopy.household.join_title.replace(
-              "{role}",
-              englishCopy.household.role_partner,
-            )}
+            {englishCopy.household.join_title}
           </h1>
           <p className="mt-2 text-sm text-muted-foreground">
             {englishCopy.household.join_description}

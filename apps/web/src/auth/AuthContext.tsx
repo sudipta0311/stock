@@ -28,6 +28,7 @@ import {
   scheduleProactiveRefresh,
 } from "./session";
 import { nudgeApi, waitForApi } from "./warmup";
+import { developmentTokenSignInAllowed } from "./dev-auth";
 
 type AuthMode = "oidc" | "dev";
 type AuthState = "loading" | "anonymous" | "authenticated";
@@ -63,6 +64,30 @@ export class ServerUnreachableError extends Error {
 const PROFILE_STATUS_KEY = "wealth.auth.has-profile";
 export const AUTH_RETURN_PATH_KEY = "wealth.auth.return-path";
 export const AUTH_NOTICE_STORAGE_KEY = "wealth.auth.notice";
+const E2E_DEV_TOKEN_KEY = "wealth.e2e.dev-token";
+
+function e2eDevAuthEnabled(): boolean {
+  return import.meta.env.VITE_E2E_DEV_AUTH === "true";
+}
+
+function e2eDevToken(): string | null {
+  if (!e2eDevAuthEnabled()) return null;
+  try {
+    return window.sessionStorage.getItem(E2E_DEV_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function saveE2eDevToken(token: string | null): void {
+  if (!e2eDevAuthEnabled()) return;
+  try {
+    if (token) window.sessionStorage.setItem(E2E_DEV_TOKEN_KEY, token);
+    else window.sessionStorage.removeItem(E2E_DEV_TOKEN_KEY);
+  } catch {
+    // A new page load can start over when session storage is unavailable.
+  }
+}
 
 function configuredAuthMode(): AuthMode {
   return import.meta.env.VITE_AUTH_MODE === "dev" ? "dev" : "oidc";
@@ -102,6 +127,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const acceptToken = useCallback(
     (token: string) => {
+      saveE2eDevToken(token);
       setAuthToken(token);
       setState("authenticated");
       setHasProfile(null);
@@ -111,7 +137,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   useEffect(() => {
-    if (mode === "dev" && import.meta.env.PROD) {
+    if (
+      mode === "dev" &&
+      !developmentTokenSignInAllowed(
+        mode,
+        import.meta.env.PROD,
+        e2eDevAuthEnabled(),
+      )
+    ) {
       setConfigurationError(
         "Development token sign-in is disabled in production builds.",
       );
@@ -122,7 +155,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     let active = true;
     void (async () => {
-      let token = mode === "dev" ? getAuthToken() : null;
+      let token = mode === "dev" ? (getAuthToken() ?? e2eDevToken()) : null;
       if (mode === "oidc") {
         if (getRefreshToken()) {
           try {
@@ -183,6 +216,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     function expireSession() {
       queryClient.clear();
       cancelProactiveRefresh();
+      saveE2eDevToken(null);
       clearAuthToken();
       setHasProfile(null);
       setState("anonymous");
@@ -204,7 +238,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const loginWithDevToken = useCallback(
     (token: string) => {
-      if (mode !== "dev" || import.meta.env.PROD) {
+      if (
+        !developmentTokenSignInAllowed(
+          mode,
+          import.meta.env.PROD,
+          e2eDevAuthEnabled(),
+        )
+      ) {
         setConfigurationError(
           "Development token sign-in is only available in local development.",
         );

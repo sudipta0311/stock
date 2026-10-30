@@ -329,6 +329,14 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             text("SELECT set_config('app.household_owner', :owner_id, true)"),
             {"owner_id": str(owner_id)},
         )
+        # A viewer can't add data to the family plan, and the merge refuses one. The join
+        # page offers "bring my data" to anyone with a profile, which made every viewer
+        # join fail; viewers simply join without merging.
+        role = user.session.scalar(
+            text("SELECT app_household_role(:owner_id)"), {"owner_id": owner_id}
+        )
+        if role == "viewer":
+            return HouseholdJoinResponse(owner_id=owner_id)
         try:
             result = user.session.scalar(
                 text("SELECT app_merge_into_household(:owner_id)"), {"owner_id": owner_id}

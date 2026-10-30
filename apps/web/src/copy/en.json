@@ -415,7 +415,7 @@
     "done_by": "Done by {name}",
     "action_for": "For {name}",
     "action_for_you": "For you",
-    "join_title": "Join this family plan as {role}",
+    "join_title": "Join this family plan",
     "join_generic_title": "Join this family plan",
     "join_owner": "Join {name}'s family plan as {role}",
     "join_description": "You were invited to share a family plan.",

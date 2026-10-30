@@ -452,8 +452,18 @@ export function OnboardingPage() {
     setDraft((current) => ({ ...current, ...patch }));
   }
 
+  // Home opens single steps ("Add a goal") with a return path; finishing one goes back
+  // there instead of walking on through the rest of setup.
+  const returnTo = (location.state as { returnTo?: unknown } | null)?.returnTo;
+  const returnPath =
+    typeof returnTo === "string" && returnTo.startsWith("/") ? returnTo : null;
+
   function moveTo(nextStep: OnboardingStep) {
     setPageError("");
+    if (returnPath) {
+      navigate(returnPath);
+      return;
+    }
     updateDraft({ step: nextStep });
     navigate(`/onboarding/${nextStep}`);
   }
@@ -668,7 +678,15 @@ export function OnboardingPage() {
       className="mx-auto grid min-h-screen w-full max-w-xl content-start gap-4 px-4 py-6 sm:content-center sm:py-10"
     >
       <Card className="grid gap-5">
-        {step !== "welcome" && step !== "done" ? (
+        {returnPath ? (
+          <Link
+            to={returnPath}
+            className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-muted-foreground"
+          >
+            <ArrowLeft aria-hidden="true" className="size-4" />
+            Home
+          </Link>
+        ) : step !== "welcome" && step !== "done" ? (
           <Link
             to={`/onboarding/${STEPS[STEPS.indexOf(step) - 1]}`}
             className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-muted-foreground"

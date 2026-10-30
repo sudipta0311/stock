@@ -20,6 +20,7 @@ _INLINE_SECRET_PATTERNS = (
 _LONG_SECRET_VALUE = re.compile(r"^[A-Za-z0-9+/=_-]{32,}$")
 _MODULE_REFERENCE = re.compile(r"\bwealth(?:\.[A-Za-z_][A-Za-z0-9_]*)+\b")
 _MODULE_GUARD = re.compile(r"find_spec\(\s*['\"](wealth(?:\.[A-Za-z_][A-Za-z0-9_]*)+)['\"]\s*\)")
+_E2E_DEV_AUTH_REFERENCE = re.compile(r"\bVITE_E2E_DEV_AUTH\b")
 _REQUIRED_WORKFLOWS = {
     "alerts-weekly.yml",
     "ci.yml",
@@ -101,10 +102,19 @@ def _non_editable_project_install(command: str) -> bool:
     )
 
 
+def _e2e_dev_auth_issue(raw: str, relative: str) -> str | None:
+    if _E2E_DEV_AUTH_REFERENCE.search(raw):
+        return f"{relative}: the e2e dev-token auth switch must not appear in deploy config"
+    return None
+
+
 def _workflow_issues(root: Path, workflow: Path, document: Any) -> list[str]:
     relative = workflow.relative_to(root).as_posix()
     issues: list[str] = []
     raw = workflow.read_text(encoding="utf-8")
+    e2e_auth_issue = _e2e_dev_auth_issue(raw, relative)
+    if e2e_auth_issue:
+        issues.append(e2e_auth_issue)
     if not isinstance(document, dict):
         return [f"{relative}: YAML could not be parsed"]
 
@@ -164,6 +174,9 @@ def _render_issues(root: Path) -> list[str]:
     if not isinstance(document, dict):
         return [f"{relative}: YAML could not be parsed"]
     issues: list[str] = []
+    e2e_auth_issue = _e2e_dev_auth_issue(path.read_text(encoding="utf-8"), relative)
+    if e2e_auth_issue:
+        issues.append(e2e_auth_issue)
     if _secret_like_yaml(document):
         issues.append(f"{relative}: a value matches a secret pattern")
 

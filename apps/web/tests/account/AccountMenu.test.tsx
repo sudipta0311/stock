@@ -70,7 +70,7 @@ it("passes axe checks in light and dark themes", async () => {
       expect(document.documentElement).toHaveAttribute("data-theme", theme),
     );
     await user.click(
-      screen.getByRole("button", { name: "Account menu for Morgan Sample" }),
+      screen.getByRole("button", { name: /account menu for Morgan Sample/i }),
     );
     await screen.findByRole("dialog");
     expect((await axe(document.body)).violations).toEqual([]);
@@ -87,7 +87,7 @@ it("shows account details and confirms a device-only sign-out", async () => {
   );
 
   const trigger = screen.getByRole("button", {
-    name: "Account menu for Morgan Sample",
+    name: /account menu for Morgan Sample/i,
   });
   expect(trigger).toHaveTextContent("MS");
   expect(trigger).toHaveTextContent("Morgan");
@@ -134,7 +134,7 @@ it("keeps device alerts enabled unless the person asks to turn them off", async 
     </MemoryRouter>,
   );
   await user.click(
-    screen.getByRole("button", { name: "Account menu for Morgan Sample" }),
+    screen.getByRole("button", { name: /account menu for Morgan Sample/i }),
   );
   await user.click(await screen.findByRole("button", { name: "Sign out" }));
   expect(

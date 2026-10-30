@@ -6,6 +6,7 @@ import { Badge, Button, Card, Checkbox, Field, Select, Sheet } from "../ui";
 import englishCopy from "../copy/en.json";
 import { ApiError, apiFetch } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { clearAuthToken } from "../auth/token";
 import {
   clearAllDeviceData,
   clearSnapshotCache,
@@ -574,9 +575,16 @@ export function SettingsPage() {
     setDeleteMessage("");
     try {
       await apiFetch<void>("/v1/me", { method: "DELETE" });
+      // The account is gone: nothing may reach the API with its token again.
+      await queryClient.cancelQueries();
+      clearAuthToken();
       await clearAllDeviceData();
       setDeleteOpen(false);
-      await logout({ notice: false, preserveTourHistory: false });
+      await logout({
+        notice: false,
+        preserveTourHistory: false,
+        serverRevoked: true,
+      });
     } catch {
       setDeleteMessage(englishCopy.settings.privacy.delete_error);
     } finally {

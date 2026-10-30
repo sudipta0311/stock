@@ -343,3 +343,23 @@ def test_refresh_lookup_is_narrow_scoped_and_sessions_are_login_rls_rows(
             ).first()
             is None
         )
+
+
+def test_a_request_after_deleting_the_account_does_not_recreate_the_user(
+    api_client: tuple[TestClient, str, MigratedDatabase, dict[str, tuple[str, str]]],
+) -> None:
+    client, _secret, database, accounts = api_client
+    login = _login(client, "owner")
+    subject, _email = accounts["owner"]
+
+    assert client.delete("/v1/me", headers=_bearer(login["access_token"])).status_code == 204
+    # A request still in flight carries the old, unexpired access token.
+    late = client.get("/v1/me", headers=_bearer(login["access_token"]))
+
+    assert late.status_code == 401
+    with database.owner_engine.connect() as connection:
+        remaining = connection.execute(
+            text("SELECT count(*) FROM users WHERE auth_subject = :subject"),
+            {"subject": subject},
+        ).scalar_one()
+    assert remaining == 0

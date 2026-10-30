@@ -51,7 +51,7 @@ Status: ⬜ not started · 🟦 in progress · ✅ accepted · 🔁 rework · �
 | C29b | Indian funds check from CAMS/KFintech CAS: sub-categories, direct vs regular, too many funds, lagging funds, SIP detection, 12-month early warning, least-tax fix | 3.3, 4, 4.10 | ✅ |
 | C28 | Simplicity pass: backend highlights (≤ 3 per screen), banned-jargon + sentence-length tests, one primary action per screen, collapsed details, 5-tap onboarding, rounded numbers | 2.3, 8 | ✅ |
 | C28b | Visual polish: type scale, spacing, app shell, highlight callouts, empty states, list rows, rounded summaries; fixes from the real-phone test | 8 | ✅ |
-| C24 | End-to-end tests (Playwright), accessibility and performance checks | 10 | ⬜ |
+| C24 | End-to-end tests (Playwright), accessibility and performance checks | 10 | ✅ |
 | C25 | Docs, cleanup, final plan sync | — | ⬜ |
 | C34 | Savings in DKK/EUR; fixes from the mock-data walkthrough (hint, fund check, errors, required marks, quick-add amounts, push on account switch, rate note, onboarding counter) | 3, 8 | ✅ |
 

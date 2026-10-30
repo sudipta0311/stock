@@ -137,6 +137,18 @@ def resolve_user(
     return user_id if isinstance(user_id, UUID) else UUID(str(user_id))
 
 
+def session_user(engine: Engine, session_id: UUID, auth_subject: str) -> UUID | None:
+    """The user behind a live app session, or None; never creates a user."""
+    statement = text("SELECT app_session_user(:session_id, :auth_subject)")
+    with engine.begin() as connection:
+        user_id = connection.scalar(
+            statement, {"session_id": session_id, "auth_subject": auth_subject}
+        )
+    if user_id is None:
+        return None
+    return user_id if isinstance(user_id, UUID) else UUID(str(user_id))
+
+
 @contextmanager
 def user_session(
     engine: Engine, user_id: UUID, household_owner_id: UUID | None = None

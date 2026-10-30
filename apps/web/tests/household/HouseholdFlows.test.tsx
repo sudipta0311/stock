@@ -509,10 +509,7 @@ describe("household screens", () => {
     );
     expect(
       await screen.findByRole("heading", {
-        name: englishCopy.household.join_title.replace(
-          "{role}",
-          englishCopy.household.role_partner,
-        ),
+        name: englishCopy.household.join_title,
       }),
     ).toBeInTheDocument();
     expect(

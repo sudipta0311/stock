@@ -420,10 +420,23 @@ def create_app(settings: "Settings | None" = None) -> FastAPI:
         from sqlalchemy.exc import SQLAlchemyError
 
         from wealth.db.models import AuthSession
-        from wealth.db.session import resolve_user, user_session
+        from wealth.db.session import resolve_user, session_user, user_session
 
         try:
-            user_id = resolve_user(engine, claims.subject, claims.email, claims.name)
+            if claims.session_id is not None:
+                # App sessions are issued only to existing users. Looking them up (never
+                # creating) stops a request in flight after "Delete my account" from
+                # recreating the deleted user's row.
+                session_user_id = session_user(engine, claims.session_id, claims.subject)
+                if session_user_id is None:
+                    raise HTTPException(
+                        status_code=401,
+                        detail="The sign-in session has expired.",
+                        headers={"WWW-Authenticate": "Bearer"},
+                    )
+                user_id = session_user_id
+            else:
+                user_id = resolve_user(engine, claims.subject, claims.email, claims.name)
             if household_header is None:
                 household_owner_id = user_id
             else:

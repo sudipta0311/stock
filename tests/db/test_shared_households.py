@@ -979,3 +979,29 @@ def test_every_member_foreign_key_is_deferrable_for_household_merge(
             )
         ).scalars()
         assert sorted(immediate) == []
+
+
+def test_a_viewer_with_their_own_data_can_join_and_keeps_it_out_of_the_family_plan(
+    api_client: tuple[TestClient, str, MigratedDatabase],
+) -> None:
+    client, secret, _database = api_client
+    owner_headers, _owner_subject, _owner_email, owner_id = _login(client, secret, "owner")
+    viewer_headers, _viewer_subject, viewer_email, _viewer_id = _login(client, secret, "viewer")
+    # Finishing setup gives anyone a profile, so the join page offers "bring my data".
+    assert (
+        client.put(
+            "/v1/me/residency", headers=viewer_headers, json={"status": "RI", "country": "IN"}
+        ).status_code
+        == 200
+    )
+    _invite, token = _make_invite(client, owner_headers, viewer_email, role="viewer")
+
+    joined = client.post(
+        "/v1/households/join",
+        headers=viewer_headers,
+        json={"token": token, "bring_my_data": True},
+    )
+
+    assert joined.status_code == 200, joined.text
+    assert not joined.json()["merge_counts"]
+    assert client.get("/v1/assets", headers=_household(viewer_headers, owner_id)).status_code == 200

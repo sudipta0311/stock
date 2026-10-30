@@ -364,7 +364,9 @@ export function TileToggle({
         >
           <span className="block text-sm font-semibold">{option.label}</span>
           {option.description ? (
-            <span className="mt-1 block text-xs text-muted-foreground">
+            <span
+              className={`mt-1 block text-xs ${value === option.value ? "text-foreground" : "text-muted-foreground"}`}
+            >
               {option.description}
             </span>
           ) : null}

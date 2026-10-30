@@ -546,18 +546,21 @@ export function HomePage() {
             <Link
               className="min-h-10 text-sm font-medium text-brand"
               to="/onboarding/risk"
+              state={{ returnTo: "/" }}
             >
               Choose your comfort with ups and downs
             </Link>
             <Link
               className="min-h-10 text-sm font-medium text-brand"
               to="/onboarding/goals"
+              state={{ returnTo: "/" }}
             >
               Add a goal
             </Link>
             <Link
               className="min-h-10 text-sm font-medium text-brand"
               to="/onboarding/consent"
+              state={{ returnTo: "/" }}
             >
               Choose email updates
             </Link>
