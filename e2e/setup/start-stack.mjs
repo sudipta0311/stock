@@ -185,8 +185,9 @@ async function buildWeb(apiOrigin) {
     VITE_AUTH_MODE: "dev",
     VITE_E2E_DEV_AUTH: "true",
     PYTHONDONTWRITEBYTECODE: "1",
-    SANDBOX_BUILD: process.env.SANDBOX_BUILD ?? "1",
   });
+  // Standard (minified) build unless a restricted sandbox sets SANDBOX_BUILD itself;
+  // the load-speed test must measure what users download.
   const build = spawnQuiet(
     process.execPath,
     [join(webRoot, "scripts", "build.mjs")],
@@ -273,10 +274,12 @@ export default async function globalSetup() {
     );
     await waitForHttp(webOrigin, preview);
     return stopStack;
-  } catch {
+  } catch (error) {
     await stopStack();
+    // Startup errors are this file's own messages (no URLs or secrets); name the failed step.
+    const step = error instanceof Error ? ` (${error.message})` : "";
     throw new Error(
-      "The local e2e stack could not start. Check TEST_DATABASE_URL and the installed Python and Node dependencies.",
+      `The local e2e stack could not start${step}. Check TEST_DATABASE_URL and the installed Python and Node dependencies.`,
     );
   }
 }

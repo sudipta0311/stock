@@ -61,6 +61,8 @@ test("short household setup reaches the first plan in five setup taps", async ({
     page.getByRole("heading", { name: "How do you feel about risk?" }),
   ).toBeVisible();
   const questions = page.getByRole("group");
+  // The questions load after the heading; counting earlier finds none.
+  await expect(questions.first()).toBeVisible();
   for (let index = 0; index < (await questions.count()); index += 1) {
     await questions.nth(index).getByRole("button").first().click();
   }
