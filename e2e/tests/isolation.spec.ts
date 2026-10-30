@@ -19,7 +19,10 @@ test("another account sees no assets and cannot open a saved item", async ({
   await completeFixedDeposit(page);
   // In the setup flow the next step finishes setup; the saved item opens from Money.
   await page.getByRole("button", { name: "Finish Money Map setup" }).click();
-  await page.getByRole("link", { name: /Synthetic Bank/ }).first().click();
+  await page
+    .getByRole("link", { name: /Synthetic Bank/ })
+    .first()
+    .click();
   await expect(page).toHaveURL(/\/money\/asset\//);
   const ownerAssetPath = new URL(page.url()).pathname;
 

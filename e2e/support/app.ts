@@ -101,6 +101,16 @@ export async function guardLocalNetwork(
   };
 }
 
+// A wide row makes a phone lay the page out wider than its screen, so scrollWidth still
+// equals innerWidth; compare the layout width with the visible width instead.
+export async function expectFitsScreen(page: Page): Promise<void> {
+  const [layoutWidth, screenWidth] = await page.evaluate(() => [
+    window.innerWidth,
+    Math.round(window.visualViewport?.width ?? window.innerWidth),
+  ]);
+  expect(layoutWidth, "page is wider than the screen").toBe(screenWidth);
+}
+
 export async function gotoApp(page: Page, path: string): Promise<void> {
   await page.goto(appUrl(path));
 }

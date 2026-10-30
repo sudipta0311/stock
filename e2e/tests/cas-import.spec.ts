@@ -1,5 +1,6 @@
 import {
   expect,
+  expectFitsScreen,
   startReadyAccount,
   test,
   uploadSyntheticCas,
@@ -29,6 +30,7 @@ test("CAS password feedback, review, and confirmation update Money", async ({
   const startedAt = Date.now();
   await uploadSyntheticCas(page);
   await expect(page.getByText(/^New \d+$/)).toBeVisible();
+  await expectFitsScreen(page);
   await page.getByRole("button", { name: /Confirm import \(/ }).click();
   await expect(
     page.getByRole("heading", {
@@ -39,6 +41,7 @@ test("CAS password feedback, review, and confirmation update Money", async ({
   expect(elapsedMs).toBeLessThan(120_000);
   await page.getByRole("link", { name: "Go to Money" }).click();
   await expect(page.getByText("Synthetic Tools Limited")).toBeVisible();
+  await expectFitsScreen(page);
   await writeReport("cas-import", testInfo.project.name, {
     elapsedMs,
     targetMs: 120_000,

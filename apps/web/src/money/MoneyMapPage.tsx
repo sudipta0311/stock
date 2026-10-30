@@ -298,7 +298,7 @@ function LoansGroup({
             to={`/money/loan/${loan.id}`}
             className="flex min-h-16 items-center justify-between gap-3 border-t border-line py-2 hover:text-brand"
           >
-            <span className="flex min-w-0 flex-1 items-center gap-3">
+            <span className="flex w-0 min-w-0 flex-1 items-center gap-3">
               <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground">
                 <WalletCards aria-hidden="true" className="size-4" />
               </span>
@@ -1026,7 +1026,7 @@ export function MoneyMapPage() {
                   to={`/money/asset/${asset.id}`}
                   className="flex min-h-16 items-center justify-between gap-3 border-t border-line py-2 hover:text-brand"
                 >
-                  <span className="flex min-w-0 flex-1 items-center gap-3">
+                  <span className="flex w-0 min-w-0 flex-1 items-center gap-3">
                     <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground">
                       <Building2 aria-hidden="true" className="size-4" />
                     </span>
@@ -1106,7 +1106,7 @@ export function MoneyMapPage() {
                   to={`/money/holding/${holding.security_id}`}
                   className="flex min-h-16 items-center justify-between gap-3 border-t border-line py-2 first:border-0 first:pt-0 hover:text-brand"
                 >
-                  <span className="flex min-w-0 flex-1 items-center gap-3">
+                  <span className="flex w-0 min-w-0 flex-1 items-center gap-3">
                     <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground">
                       <Building2 aria-hidden="true" className="size-4" />
                     </span>

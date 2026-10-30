@@ -648,7 +648,7 @@ function ItemToggle({
         onChange={(event) => onChange(event.currentTarget.checked)}
         className="size-5 accent-brand"
       />
-      <span className="min-w-0 flex-1">
+      <span className="w-0 min-w-0 flex-1">
         <strong className="block truncate" data-security>
           {item.name}
         </strong>
@@ -1206,7 +1206,7 @@ export function ImportReviewPage() {
                 {item.action === "quantity_mismatch" ? (
                   <>
                     <div className="flex items-center gap-3 border-t border-line pt-2 text-sm">
-                      <span className="min-w-0 flex-1">
+                      <span className="w-0 min-w-0 flex-1">
                         <strong className="block truncate" data-security>
                           {item.name}
                         </strong>
