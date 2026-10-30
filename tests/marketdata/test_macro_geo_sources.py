@@ -32,6 +32,7 @@ def test_nse_index_archive_parser_reads_four_supported_indices() -> None:
     ]
     assert rows[0].pe.as_tuple().digits == (2, 2, 1, 0)
     assert rows[0].as_of == date(2026, 10, 29)
+    assert rows[0].close == Decimal("25100")
     assert all(row.source == "NSE" for row in rows)
 
 

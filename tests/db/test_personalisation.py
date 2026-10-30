@@ -13,13 +13,21 @@ import pytest
 from alembic import command
 from fastapi.testclient import TestClient
 from sqlalchemy import func, inspect, select, text, update
+from sqlalchemy.orm import Session
 
 from conftest import MigratedDatabase
 from wealth.api.main import create_app
 from wealth.api.money_map import get_today
 from wealth.api.settings import Settings
 from wealth.db import session as db_session
-from wealth.db.models import Action, AuditLog, HighlightDismissal, HouseholdMember, User
+from wealth.db.models import (
+    Action,
+    AuditLog,
+    HighlightDismissal,
+    HouseholdMember,
+    ResearchPackRecord,
+    User,
+)
 from wealth.db.models import WeeklyPlan as WeeklyPlanRow
 from wealth.db.session import user_session
 from wealth.policy.personalise import WeeklyPlan
@@ -70,6 +78,52 @@ def _user_id(database: MigratedDatabase, subject: str) -> UUID:
         result = connection.scalar(select(User.id).where(User.auth_subject == subject))
     assert result is not None
     return result
+
+
+def test_research_ideas_reads_selector_and_track_record_from_existing_pack(
+    api_client: tuple[TestClient, str, object],
+    migrated_database: MigratedDatabase,
+) -> None:
+    client, secret, _application = api_client
+    headers, _subject = _auth(secret, "c16b-pack-reader")
+    pack = ResearchPackRecord(
+        week=_WEEK,
+        pack={
+            "ideas": [],
+            "core_picks": {
+                "in_nifty50": [
+                    {
+                        "category_label": "India large companies",
+                        "symbol": "SYNTH",
+                        "name": "Synthetic large-company fund",
+                        "metrics": {"expense_ratio_pct": None},
+                        "reason_codes": ["ter_unavailable"],
+                    }
+                ]
+            },
+            "inav_premium_pct": {"in_nifty50": None},
+            "track_record": {
+                "markets": {
+                    "IN": {
+                        "status": "available",
+                        "summary": "Research ideas since 2026-10-01: +1.0% vs Nifty 50.",
+                    }
+                }
+            },
+            "cio_agenda": {"week": _WEEK},
+            "amc_international_suspended": None,
+        },
+    )
+    with Session(migrated_database.owner_engine) as session, session.begin():
+        session.add(pack)
+
+    response = client.get("/v1/research/ideas", params={"week": _WEEK}, headers=headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ideas"] == []
+    assert payload["core_picks"]["in_nifty50"][0]["symbol"] == "SYNTH"
+    assert payload["track_record"]["markets"]["IN"]["status"] == "available"
 
 
 def test_investing_preferences_validate_and_round_trip(

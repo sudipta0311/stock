@@ -1,4 +1,4 @@
-// OpenAPI SHA256: d183b6acc286314d4dc1e0511a7cd08b735c786462ab13833be6edff4b22d5cf
+// OpenAPI SHA256: 471f0f1f2e34fab68b978e4a37a70ee26c7c85f7005e6084865860ff20254ea8
 export interface paths {
     "/healthz": {
         parameters: {
@@ -3355,8 +3355,20 @@ export interface components {
         };
         /** ResearchIdeasResponse */
         ResearchIdeasResponse: {
+            /** Amc International Suspended */
+            amc_international_suspended?: boolean | null;
+            /** Core Picks */
+            core_picks?: {
+                [key: string]: {
+                    [key: string]: unknown;
+                }[];
+            };
             /** Ideas */
             ideas: components["schemas"]["ResearchIdeaSummary"][];
+            /** Track Record */
+            track_record?: {
+                [key: string]: unknown;
+            } | null;
             /** Week */
             week: string;
         };

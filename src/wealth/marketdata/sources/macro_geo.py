@@ -61,6 +61,7 @@ class IndexValuationObservation:
     div_yield: Decimal | None
     source: str
     source_url: str
+    close: Decimal | None = None
 
 
 @dataclass(frozen=True)
@@ -193,6 +194,20 @@ def parse_nse_index_valuations(
             continue
         if as_of_max is not None and as_of > as_of_max:
             continue
+        close_field = next(
+            (
+                field_names[key]
+                for key in (
+                    "closingindexvalue",
+                    "closingindex",
+                    "closeindexvalue",
+                    "closeindex",
+                )
+                if key in field_names
+            ),
+            None,
+        )
+        close = _parse_decimal(row.get(close_field or ""))
         observation = IndexValuationObservation(
             index_name=index_name,
             as_of=as_of,
@@ -201,6 +216,7 @@ def parse_nse_index_valuations(
             div_yield=_parse_decimal(row.get(field_names["divyield"])),
             source="NSE",
             source_url=source_url,
+            close=close if close is not None and close > 0 else None,
         )
         observations[(index_name, as_of)] = observation
     if not observations:

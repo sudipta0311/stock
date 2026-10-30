@@ -1,0 +1,76 @@
+version: 1
+# A core pick tracks its index plainly: no lock-in (ELSS), no factor or active variant.
+# Read by the selector and by market data, which keeps price and NAV history for the
+# candidates (Indian ETFs, and direct growth funds matching a category below).
+not_plain_trackers:
+  - elss
+  - tax saver
+  - equal weight
+  - top 50
+  - top 20
+  - top 10
+  - value 20
+  - momentum
+  - low vol
+  - quality
+  - alpha
+  - shariah
+  - enhanced
+  - dividend opportunities
+categories:
+  - id: in_nifty50
+    label: India large companies
+    market: IN
+    security_types: [etf, mf]
+    index_name: NIFTY 50
+    include_any: [nifty 50, nifty50]
+    exclude_any: [next 50, nifty next]
+  - id: in_nifty_next50
+    label: India next 50 companies
+    market: IN
+    security_types: [etf, mf]
+    index_name: NIFTY NEXT 50
+    include_any: [nifty next 50, nifty next50, junior bees]
+    exclude_any: []
+  - id: in_midcap150
+    label: India mid-sized companies
+    market: IN
+    security_types: [etf, mf]
+    index_name: NIFTY MIDCAP 150
+    include_any: [nifty midcap 150, nifty mid cap 150, midcap 150]
+    exclude_any: []
+  - id: in_gold
+    label: Gold
+    market: IN
+    security_types: [etf, mf]
+    index_name: null
+    include_any: [gold]
+    exclude_any: [golden]
+  - id: in_liquid
+    label: Short-term cash funds
+    market: IN
+    security_types: [etf, mf]
+    index_name: null
+    include_any: [liquid fund, liquid bees, liquid etf, overnight fund]
+    exclude_any: []
+  - id: global_sp500
+    label: U.S. 500 largest companies
+    market: IN
+    security_types: [etf, mf]
+    index_name: null
+    include_any: [s&p 500, s&p500, sp 500, sp500]
+    exclude_any: []
+  - id: global_nasdaq100
+    label: U.S. 100 large technology companies
+    market: IN
+    security_types: [etf, mf]
+    index_name: null
+    include_any: [nasdaq 100, nasdaq100]
+    exclude_any: []
+  - id: global_all_world
+    label: Global all-company funds
+    market: IN
+    security_types: [etf, mf]
+    index_name: null
+    include_any: [all world, all-world, all country, acwi, world index]
+    exclude_any: []

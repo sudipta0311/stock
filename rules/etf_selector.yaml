@@ -1,0 +1,12 @@
+version: 1
+history_days: 90
+minimum_history_days: 20
+liquidity_floor_inr: "5000000"
+liquidity_full_score_inr: "500000000"
+premium_disqualify_pct: "1.0"
+weights:
+  liquidity: "30"
+  premium: "25"
+  tracking_difference: "25"
+  expense_ratio: "15"
+  assets: "5"

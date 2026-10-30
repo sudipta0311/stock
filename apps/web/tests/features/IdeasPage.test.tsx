@@ -69,6 +69,58 @@ describe("Ideas page", () => {
     expect((await axe(container)).violations).toEqual([]);
   });
 
+  it("keeps selector details closed and explains fund terms when opened", async () => {
+    const user = userEvent.setup();
+    server.use(...ideaHandlers());
+    server.use(
+      http.get(/\/v1\/research\/ideas$/, () =>
+        HttpResponse.json({
+          week: "2026-W44",
+          ideas: [],
+          core_picks: {
+            in_nifty50: [
+              {
+                category_label: "India large companies",
+                symbol: "SYNTH",
+                name: "Synthetic ETF fund",
+                rank: 1,
+                metrics: { expense_ratio_pct: null },
+                reason_codes: ["ter_unavailable"],
+              },
+            ],
+          },
+          track_record: {
+            markets: {
+              IN: {
+                status: "available",
+                summary: "Research ideas since 2026-10-01: +1.0% vs Nifty 50.",
+              },
+            },
+          },
+        }),
+      ),
+    );
+    const { container } = renderWithQueries(
+      <MemoryRouter>
+        <IdeasPage />
+      </MemoryRouter>,
+    );
+
+    const moreResearch = await screen.findByText("More research");
+    expect(screen.queryByText("How past ideas did")).not.toBeVisible();
+    expect(screen.getByText("Review your plan")).toBeVisible();
+    expect(container.querySelectorAll('[data-primary="true"]')).toHaveLength(1);
+
+    await user.click(moreResearch);
+    expect(screen.getByText("How past ideas did")).toBeVisible();
+    expect(screen.getByText("Funds to compare")).toBeVisible();
+    await user.click(screen.getByText("Funds to compare"));
+    expect(screen.getByText("India large companies")).toBeVisible();
+    expect(screen.getByText("Synthetic ETF fund")).toBeVisible();
+    expect(screen.getByRole("button", { name: "What's this?" })).toBeVisible();
+    expect((await axe(container)).violations).toEqual([]);
+  });
+
   it("shows a sourced Denmark buy line with details closed by default", async () => {
     server.use(
       ...ideaHandlers(

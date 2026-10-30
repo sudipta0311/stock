@@ -40,11 +40,17 @@ _POST_INITIAL_TABLES = {
     "statement_inbox_keys",
     "statement_inbox_items",
     "statement_saved_passwords",
+    "rule_change_proposals",
+    "paper_positions",
+    "track_record",
 }
 _NON_USER_ID_TABLES = {
     "household_access",
     "household_invites",
     "highlight_dismissals",
+    "rule_change_proposals",
+    "paper_positions",
+    "track_record",
 }
 
 

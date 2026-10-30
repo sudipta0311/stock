@@ -6420,12 +6420,46 @@
       "ResearchIdeasResponse": {
         "additionalProperties": false,
         "properties": {
+          "amc_international_suspended": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amc International Suspended"
+          },
+          "core_picks": {
+            "additionalProperties": {
+              "items": {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "title": "Core Picks",
+            "type": "object"
+          },
           "ideas": {
             "items": {
               "$ref": "#/components/schemas/ResearchIdeaSummary"
             },
             "title": "Ideas",
             "type": "array"
+          },
+          "track_record": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Track Record"
           },
           "week": {
             "title": "Week",

@@ -9,6 +9,7 @@ from uuid import UUID
 from langgraph.graph import END, StateGraph
 
 from wealth.policy.actions import SatelliteIdea
+from wealth.research.agenda import build_cio_agenda
 from wealth.research.agents import (
     ResearchTeam,
     dossier_compliance_failures,
@@ -21,12 +22,16 @@ from wealth.research.dossier import (
     hand_back_to_analysis,
 )
 from wealth.research.errors import BudgetExceeded, SchemaError
+from wealth.research.etf_selector import select_core_picks
 from wealth.research.router import FakeRouter, ModelRouter, RunBudget, RunContext
 from wealth.research.rules import ResearchRules
+from wealth.research.scorekeeper import run_scorekeeper
 from wealth.research.store import (
+    load_latest_prior_pack,
     load_prior_geo_tilts,
     save_dossier,
     save_macro_geo_pack,
+    save_pack_fields,
     save_research_pack,
 )
 from wealth.research.tools import ToolRegistry
@@ -40,6 +45,8 @@ class ResearchState(TypedDict, total=False):
     dossiers: list[dict[str, Any]]
     tool_results_by_dossier: dict[str, dict[str, dict[str, Any]]]
     pack: dict[str, Any]
+    cio_agenda: dict[str, Any]
+    idea_outcomes: list[dict[str, Any]]
     summary: str
     budget: dict[str, Any]
     stage: str
@@ -193,15 +200,48 @@ def build_research_graph(
     source_shortlist = shortlist or []
     builder: StateGraph[ResearchState] = StateGraph(ResearchState)
 
-    def plan_node(_state: ResearchState) -> dict[str, Any]:
-        return {"stage": "QUEUED", "status": "running", "budget": _budget_snapshot(context.budget)}
+    def plan_node(state: ResearchState) -> dict[str, Any]:
+        week = str(state.get("week", ""))
+        previous = load_latest_prior_pack(owner_engine, week) if owner_engine is not None else None
+        previous_pack = previous[1] if previous is not None else {}
+        track_record = previous_pack.get("track_record", {})
+        checklist = track_record.get("checklist", []) if isinstance(track_record, dict) else []
+        macro = previous_pack.get("macro", {})
+        raw_notes = macro.get("regime_notes", []) if isinstance(macro, dict) else []
+        regime_notes = [
+            str(item.get("text", ""))
+            for item in raw_notes
+            if isinstance(item, dict) and item.get("text")
+        ]
+        agenda = build_cio_agenda(
+            week=week,
+            rules=selected_rules,
+            run_ctx=context,
+            router=router if owner_engine is not None else None,
+            scorekeeper_checklist=[str(item) for item in checklist[:3]],
+            regime_notes=regime_notes[:4],
+        )
+        return {
+            "cio_agenda": agenda,
+            "stage": "QUEUED",
+            "status": "running",
+            "budget": _budget_snapshot(context.budget),
+        }
 
     def screen_node(state: ResearchState) -> dict[str, Any]:
         incoming = state.get("shortlist", source_shortlist)
         selected: list[dict[str, Any]] = []
         seen: set[str] = set()
-        for raw_candidate in incoming[: selected_rules.max_dossiers_per_run]:
+        market_counts = {market: 0 for market in ("IN", "US")}
+        limits = state.get("cio_agenda", {}).get("market_limits", {})
+        for raw_candidate in incoming:
+            if len(selected) >= selected_rules.max_dossiers_per_run:
+                break
             candidate = dict(raw_candidate)
+            market = str(candidate.get("market", ""))
+            market_limit = limits.get(market, {}).get("max_dossiers", 0)
+            if market not in market_counts or market_counts[market] >= market_limit:
+                continue
             dossier_id = str(candidate.get("dossier_id", ""))
             if not dossier_id or dossier_id in seen:
                 continue
@@ -210,6 +250,7 @@ def build_research_graph(
             dossier = _make_dossier(candidate, selected_rules)
             candidate["dossier"] = _serialise_dossier(dossier)
             selected.append(candidate)
+            market_counts[market] += 1
             _save_if_configured(owner_engine, dossier, candidate)
         evidence = {
             candidate["dossier_id"]: dict(candidate.get("tool_results", {}))
@@ -513,7 +554,27 @@ def build_research_graph(
         if not approved_ids <= shortlist_ids:
             raise RuntimeError("Approved ideas must be a subset of the screener shortlist")
         ideas: list[dict[str, Any]] = []
+        idea_outcomes: list[dict[str, Any]] = []
         for dossier in dossiers:
+            candidate = candidates.get(dossier.dossier_id, {})
+            red_team = dossier.verdicts.red_team
+            idea_outcomes.append(
+                {
+                    "dossier_id": dossier.dossier_id,
+                    "security_id": dossier.security.id,
+                    "market": dossier.security.market,
+                    "symbol": str(candidate.get("symbol", dossier.dossier_id.rsplit("/", 1)[-1])),
+                    "status": dossier.status,
+                    "confidence": (
+                        "HIGH"
+                        if dossier.confidence >= Decimal("0.8")
+                        else "MEDIUM"
+                        if dossier.confidence >= Decimal("0.5")
+                        else "LOW"
+                    ),
+                    "red_team_falsifier": red_team.falsifier if red_team is not None else None,
+                }
+            )
             if dossier.dossier_id not in approved_ids:
                 continue
             candidate = candidates[dossier.dossier_id]
@@ -547,9 +608,11 @@ def build_research_graph(
         }
         pack = {
             "ideas": ideas,
+            "idea_outcomes": idea_outcomes,
             "summary": str(state.get("summary", "No ideas passed the checks this week.")),
             "run_id": run_id,
             "markets": markets,
+            "cio_agenda": state.get("cio_agenda", {}),
         }
         if owner_engine is not None:
             save_research_pack(owner_engine, week, pack)
@@ -596,6 +659,25 @@ def build_research_graph(
             macro_fields = macro_result.pack_fields()
             save_macro_geo_pack(owner_engine, week, macro_fields)
             pack.update(macro_fields)
+            selector_fields = select_core_picks(
+                owner_engine,
+                as_of=macro_date,
+                router=router,
+                run_ctx=context,
+            )
+            save_pack_fields(owner_engine, week, selector_fields)
+            pack.update(selector_fields)
+            score_result = run_scorekeeper(
+                owner_engine,
+                week=week,
+                idea_outcomes=idea_outcomes,
+                dossiers=[_serialise_dossier(item) for item in dossiers],
+                router=router,
+                run_ctx=context,
+            )
+            score_fields = {"track_record": score_result["track_record"]}
+            save_pack_fields(owner_engine, week, score_fields)
+            pack.update(score_fields)
         return {
             "pack": pack,
             "dossiers": [_serialise_dossier(item) for item in dossiers],

@@ -39,6 +39,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch' || github.event.schedule == '0 0 * * 6'
         run: |
           WEEK=$(date -u +%G-W%V)
+          python -m wealth.research.watchers --week "$WEEK"
           python -m wealth.research.run start --week "$WEEK" --mode weekly --budget-usd "$RESEARCH_BUDGET_USD"
       - name: Continue the open weekly run
         if: github.event_name == 'schedule' && github.event.schedule != '0 0 * * 6'

@@ -22,7 +22,11 @@ import {
   getPlan,
   getResearchIdeas,
 } from "../planning/api";
-import type { ActionResponse, WeeklyPlan } from "../planning/api";
+import type {
+  ActionResponse,
+  ResearchIdeasResponse,
+  WeeklyPlan,
+} from "../planning/api";
 import { Badge, Card, EmptyState, Term } from "../ui";
 import englishCopy from "../copy/en.json";
 import { Highlights } from "../features/Highlights";
@@ -341,9 +345,9 @@ function actionPayload(action: ActionResponse): Record<string, unknown> {
 }
 
 function categoryName(category: string, sleeve: string): string {
-  if (category === "in_core_index") return "Nifty 50 index fund";
+  if (category === "in_core_index") return "Indian large-company fund";
   if (category === "in_international_index_fund")
-    return "S&P 500 index fund (in INR)";
+    return "U.S. large-company fund in rupees";
   const label = instrumentLabel(category);
   return category ? label : `${instrumentLabel(sleeve)} category`;
 }
@@ -404,13 +408,13 @@ function CorePicksCard({
   plan?: WeeklyPlan;
 }) {
   const picks = corePicks(actions, plan);
+  const copy = englishCopy.ideas;
   return (
     <Card className="grid gap-3">
       <div>
-        <h2 className="text-base font-semibold">Core picks for you</h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Categories from this week’s plan, with no product promotion.
-        </p>
+        <h2 className="text-base font-semibold">
+          {copy.plan_categories_title}
+        </h2>
       </div>
       {picks.length ? (
         <ul className="grid gap-2">
@@ -428,10 +432,82 @@ function CorePicksCard({
         </ul>
       ) : (
         <p className="text-sm text-muted-foreground">
-          Your core categories will appear when there is a planned action.
+          {copy.plan_categories_empty}
         </p>
       )}
     </Card>
+  );
+}
+
+function SelectorFundName({ name }: { name: string }) {
+  if (/\b(?:ETF|iNAV|tracking difference)\b/i.test(name)) {
+    return (
+      <Term
+        explanation={englishCopy.ideas.fund_term_help}
+        prompt={englishCopy.ideas.term_prompt}
+      >
+        {name}
+      </Term>
+    );
+  }
+  return name;
+}
+
+function SelectorFunds({ research }: { research?: ResearchIdeasResponse }) {
+  const categories = Object.entries(asRecord(research?.core_picks)).flatMap(
+    ([category, rawPicks]) => {
+      const picks = asArray(rawPicks).slice(0, 2).map(asRecord);
+      return picks.length ? [{ category, picks }] : [];
+    },
+  );
+  if (!categories.length) return null;
+  return (
+    <details className="rounded-xl border border-line px-3">
+      <summary className="min-h-12 cursor-pointer py-3 text-sm font-semibold">
+        {englishCopy.ideas.funds_title}
+      </summary>
+      <div className="grid gap-3 pb-3">
+        {categories.map(({ category, picks }) => (
+          <section key={category} className="grid gap-1">
+            <h3 className="text-sm font-medium">
+              {textValue(picks[0]?.category_label, category)}
+            </h3>
+            <ul className="grid gap-1 text-sm text-muted-foreground">
+              {picks.map((pick, index) => (
+                <li key={`${category}-${index}`}>
+                  <SelectorFundName
+                    name={textValue(pick.name, "Fund name unavailable")}
+                  />
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function TrackRecord({ research }: { research?: ResearchIdeasResponse }) {
+  const track = asRecord(research?.track_record);
+  const markets = asRecord(track.markets);
+  const summaries = Object.values(markets)
+    .map(asRecord)
+    .filter((market) => market.status === "available")
+    .map((market) => textValue(market.summary))
+    .filter(Boolean);
+  if (!summaries.length) return null;
+  return (
+    <section aria-labelledby="track-record-title" className="grid gap-1">
+      <h3 id="track-record-title" className="text-sm font-semibold">
+        {englishCopy.ideas.track_record_title}
+      </h3>
+      {summaries.slice(0, 2).map((summary) => (
+        <p key={summary} className="text-sm text-muted-foreground">
+          {summary}
+        </p>
+      ))}
+    </section>
   );
 }
 
@@ -559,10 +635,12 @@ export function IdeasPage() {
       >
         Review your plan
       </Link>
-      <details>
+      <details className="grid gap-4">
         <summary className="min-h-12 cursor-pointer py-3 text-sm font-semibold">
-          More ideas
+          {englishCopy.ideas.details_title}
         </summary>
+        <TrackRecord research={research.data} />
+        <SelectorFunds research={research.data} />
         <ResearchCard
           ideas={asArray(research.data?.ideas)}
           actions={actions.data}

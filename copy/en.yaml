@@ -600,6 +600,15 @@ labels:
     gold: "Gold"
     cash: "Cash"
   unknown_code: "Details will be available when we know more."
+ideas:
+  plan_categories_title: "Categories in your plan"
+  plan_categories_empty: "Your plan categories will appear when a step is ready."
+  details_title: "More research"
+  track_record_title: "How past ideas did"
+  funds_title: "Funds to compare"
+  funds_intro: "These options passed the available checks. Missing details did not add to their scores."
+  fund_term_help: "A fund groups many investments. Check its details before choosing."
+  term_prompt: "What's this?"
 settings:
   title: "Settings"
   family:

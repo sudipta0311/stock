@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
+import yaml
 from sqlalchemy import case, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
@@ -42,6 +45,46 @@ if TYPE_CHECKING:
     from wealth.marketdata.sources.nse import NseClose, NseSecurity
 
 _INDEX_PROXIES = ("NIFTYBEES", "JUNIORBEES", "GOLDBEES")
+_ETF_CATEGORIES_PATH = Path(__file__).resolve().parents[3] / "rules" / "etf_categories.yaml"
+
+
+def _normalised(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.casefold()).strip()
+
+
+def core_candidate_ids(session: Session) -> set[UUID]:
+    """Indian ETFs and direct growth funds the core-pick selector can compare.
+
+    Their daily prices and NAVs are kept like held securities: without that history the
+    selector has no liquidity, premium or tracking figures and can make no pick.
+    """
+    rules = yaml.safe_load(_ETF_CATEGORIES_PATH.read_text(encoding="utf-8"))
+    excluded = [_normalised(term) for term in rules.get("not_plain_trackers", [])]
+    include = [
+        _normalised(term)
+        for category in rules.get("categories", [])
+        if category.get("market") == "IN"
+        for term in category.get("include_any", [])
+    ]
+    rows = session.execute(
+        select(
+            Security.id, Security.name, Security.security_type, Security.plan_type, Security.option
+        ).where(Security.market == "IN", Security.security_type.in_(("etf", "mf")))
+    ).all()
+    candidates: set[UUID] = set()
+    for security_id, name, security_type, plan_type, option in rows:
+        text = _normalised(name or "")
+        if any(term in text for term in excluded):
+            continue
+        if security_type == "etf" or (
+            (plan_type or "").casefold() == "direct"
+            and (option or "").casefold() != "idcw"
+            and any(term in text for term in include)
+        ):
+            candidates.add(security_id)
+    return candidates
+
+
 _PERCENTILE_PRECISION = Decimal("0.01")
 
 
@@ -696,6 +739,7 @@ def upsert_index_valuations(session: Session, records: list[IndexValuationObserv
                 "pe": item.pe,
                 "pb": item.pb,
                 "div_yield": item.div_yield,
+                "close": item.close,
                 "source": item.source,
                 "source_url": item.source_url,
             }
@@ -708,6 +752,7 @@ def upsert_index_valuations(session: Session, records: list[IndexValuationObserv
             "pe": statement.excluded.pe,
             "pb": statement.excluded.pb,
             "div_yield": statement.excluded.div_yield,
+            "close": statement.excluded.close,
             "source": statement.excluded.source,
             "source_url": statement.excluded.source_url,
         },
@@ -977,7 +1022,7 @@ def upsert_nse_closes(
     universe_rows = session.scalars(
         select(UniverseMember.security_id).where(UniverseMember.removed_on.is_(None)).distinct()
     )
-    allowed_ids = held | set(proxy_rows) | set(universe_rows)
+    allowed_ids = held | set(proxy_rows) | set(universe_rows) | core_candidate_ids(session)
     count = 0
     for record in records:
         if record.as_of is None:
@@ -1017,12 +1062,13 @@ def upsert_amfi_navs(
     *,
     fetched_at: datetime | None = None,
 ) -> int:
-    """Store NAV rows only for securities represented in current user holdings."""
-    # Match in memory against the few held securities: one query instead of one per NAV
-    # row. A row without an ISIN matches by scheme code only, never by "ISIN is null".
+    """Store NAV rows for held securities and the core-pick candidates."""
+    # Match in memory against those securities: one query instead of one per NAV row.
+    # A row without an ISIN matches by scheme code only, never by "ISIN is null".
+    held_ids = set(session.scalars(select(HoldingLot.security_id).distinct()))
     held = session.execute(
         select(Security.id, Security.isin, Security.amfi_scheme_code).where(
-            Security.id.in_(select(HoldingLot.security_id).distinct())
+            Security.id.in_(held_ids | core_candidate_ids(session))
         )
     ).all()
     held_by_isin = {isin: security_id for security_id, isin, _code in held if isin}
@@ -1134,7 +1180,7 @@ def prune(session: Session, on: date, *, retention_days: int = 400) -> dict[str,
             select(UniverseMember.security_id).where(UniverseMember.removed_on.is_(None)).distinct()
         )
     )
-    keep_ids = held_ids | proxy_ids | universe_ids
+    keep_ids = held_ids | proxy_ids | universe_ids | core_candidate_ids(session)
     price_delete = delete(PriceEod).where(PriceEod.as_of < cutoff)
     nav_delete = delete(NavDaily).where(NavDaily.as_of < cutoff)
     if keep_ids:

@@ -573,6 +573,11 @@ class IndexValuation(Base):
             "AND div_yield < 'Infinity'::numeric)",
             name="ck_index_valuations_div_yield_finite",
         ),
+        CheckConstraint(
+            "close IS NULL OR (close > 0 AND close > '-Infinity'::numeric "
+            "AND close < 'Infinity'::numeric)",
+            name="ck_index_valuations_close_positive_finite",
+        ),
     )
 
     index_name: Mapped[str] = mapped_column(String(48), primary_key=True)
@@ -580,6 +585,7 @@ class IndexValuation(Base):
     pe: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
     pb: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
     div_yield: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
+    close: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
     source: Mapped[str] = mapped_column(String(40), nullable=False)
     source_url: Mapped[str] = mapped_column(Text, nullable=False)
 
@@ -1156,6 +1162,121 @@ class ResearchPackRecord(Base):
 
     week: Mapped[str] = mapped_column(String(8), primary_key=True)
     pack: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class RuleChangeProposal(Base):
+    """Owner-reviewed changes proposed by the official-source watchers."""
+
+    __tablename__ = "rule_change_proposals"
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('small_savings_rate', 'epf_rate', 'rulebook')",
+            name="ck_rule_change_proposals_kind",
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'approved', 'rejected')",
+            name="ck_rule_change_proposals_status",
+        ),
+        Index("ix_rule_change_proposals_status_created", "status", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    path: Mapped[str] = mapped_column(String(256), nullable=False)
+    current_value: Mapped[Any | None] = mapped_column(JSONB)
+    proposed_value: Mapped[Any | None] = mapped_column(JSONB)
+    evidence: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="pending")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decided_by: Mapped[str | None] = mapped_column(String(120))
+
+
+class PaperPosition(Base):
+    """Owner-written, synthetic positions used to evaluate approved research ideas."""
+
+    __tablename__ = "paper_positions"
+    __table_args__ = (
+        UniqueConstraint("week", "dossier_id", name="uq_paper_positions_week_dossier"),
+        CheckConstraint("market IN ('IN', 'US')", name="ck_paper_positions_market"),
+        CheckConstraint("currency IN ('INR', 'USD')", name="ck_paper_positions_currency"),
+        CheckConstraint("status IN ('open', 'closed')", name="ck_paper_positions_status"),
+        CheckConstraint(
+            "benchmark_status IN ('available', 'benchmark_unavailable')",
+            name="ck_paper_positions_benchmark_status",
+        ),
+        CheckConstraint("notional > 0", name="ck_paper_positions_notional_positive"),
+        CheckConstraint("entry_price > 0", name="ck_paper_positions_entry_price_positive"),
+        Index("ix_paper_positions_market_week", "market", "week"),
+        Index("ix_paper_positions_status", "status"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    week: Mapped[str] = mapped_column(String(8), nullable=False)
+    market: Mapped[str] = mapped_column(String(2), nullable=False)
+    dossier_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    security_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("securities.id", ondelete="SET NULL")
+    )
+    symbol: Mapped[str] = mapped_column(String(32), nullable=False)
+    confidence: Mapped[str] = mapped_column(String(8), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    notional: Mapped[Decimal] = mapped_column(Numeric(20, 4), nullable=False)
+    entry_date: Mapped[date] = mapped_column(Date, nullable=False)
+    entry_price: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    benchmark_symbol: Mapped[str | None] = mapped_column(String(32))
+    benchmark_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    benchmark_entry_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
+    benchmark_entry_date: Mapped[date | None] = mapped_column(Date)
+    current_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
+    benchmark_current_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
+    return_pct: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    benchmark_return_pct: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    excess_return_pct: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="open")
+    exit_date: Mapped[date | None] = mapped_column(Date)
+    exit_reason: Mapped[str | None] = mapped_column(String(24))
+    red_team_falsifiers: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class TrackRecord(Base):
+    """Weekly, market-level snapshot of the paper portfolio against its benchmark."""
+
+    __tablename__ = "track_record"
+    __table_args__ = (
+        CheckConstraint("market IN ('IN', 'US')", name="ck_track_record_market"),
+        CheckConstraint("ideas_count >= 0", name="ck_track_record_ideas_non_negative"),
+        CheckConstraint(
+            "ahead_count >= 0 AND ahead_count <= ideas_count",
+            name="ck_track_record_ahead_count",
+        ),
+        CheckConstraint(
+            "avg_excess_return_pct IS NULL OR "
+            "(avg_excess_return_pct > '-Infinity'::numeric "
+            "AND avg_excess_return_pct < 'Infinity'::numeric)",
+            name="ck_track_record_excess_finite",
+        ),
+    )
+
+    week: Mapped[str] = mapped_column(String(8), primary_key=True)
+    market: Mapped[str] = mapped_column(String(2), primary_key=True)
+    ideas_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    ahead_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    avg_excess_return_pct: Mapped[Decimal | None] = mapped_column(Numeric(12, 6))
+    details: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

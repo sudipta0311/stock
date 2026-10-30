@@ -85,6 +85,9 @@ class ResearchIdeaSummary(ApiModel):
 class ResearchIdeasResponse(ApiModel):
     week: str
     ideas: list[ResearchIdeaSummary]
+    core_picks: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
+    track_record: dict[str, Any] | None = None
+    amc_international_suspended: bool | None = None
 
 
 def current_week(on: date) -> str:
@@ -393,6 +396,25 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                     confidence=idea.confidence,
                 )
             )
-        return ResearchIdeasResponse(week=selected_week, ideas=ideas)
+        raw_picks = record.pack.get("core_picks", {})
+        core_picks = (
+            {
+                str(category): [item for item in items if isinstance(item, dict)]
+                for category, items in raw_picks.items()
+                if isinstance(category, str) and isinstance(items, list)
+            }
+            if isinstance(raw_picks, dict)
+            else {}
+        )
+        raw_track_record = record.pack.get("track_record")
+        track_record = raw_track_record if isinstance(raw_track_record, dict) else None
+        suspended = record.pack.get("amc_international_suspended")
+        return ResearchIdeasResponse(
+            week=selected_week,
+            ideas=ideas,
+            core_picks=core_picks,
+            track_record=track_record,
+            amc_international_suspended=suspended if isinstance(suspended, bool) else None,
+        )
 
     return router

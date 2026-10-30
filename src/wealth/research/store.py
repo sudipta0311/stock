@@ -151,6 +151,11 @@ def save_research_pack(engine: Engine, week: str, pack: dict[str, Any]) -> None:
 
 def save_macro_geo_pack(engine: Engine, week: str, fields: dict[str, Any]) -> None:
     """Merge macro results into the existing weekly JSONB Research Pack row."""
+    save_pack_fields(engine, week, fields)
+
+
+def save_pack_fields(engine: Engine, week: str, fields: dict[str, Any]) -> None:
+    """Merge additional top-level fields into the existing weekly JSONB pack."""
     payload = json.dumps(fields, ensure_ascii=False, separators=(",", ":"), default=str)
     with system_session(engine) as session:
         session.execute(
@@ -162,6 +167,35 @@ def save_macro_geo_pack(engine: Engine, week: str, fields: dict[str, Any]) -> No
             ),
             {"week": week, "pack": payload},
         )
+
+
+def load_research_pack(engine: Engine, week: str) -> dict[str, Any] | None:
+    """Return a weekly pack as a JSON mapping without exposing its ORM row."""
+    with system_session(engine) as session:
+        payload = session.scalar(
+            text("SELECT pack FROM research_packs WHERE week = :week"), {"week": week}
+        )
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    return payload if isinstance(payload, dict) else None
+
+
+def load_latest_prior_pack(engine: Engine, before_week: str) -> tuple[str, dict[str, Any]] | None:
+    """Load the latest earlier weekly pack for bounded agenda context."""
+    with system_session(engine) as session:
+        row = session.execute(
+            text(
+                "SELECT week, pack FROM research_packs "
+                "WHERE week < :week ORDER BY week DESC LIMIT 1"
+            ),
+            {"week": before_week},
+        ).one_or_none()
+    if row is None:
+        return None
+    payload = row.pack
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    return (str(row.week), payload) if isinstance(payload, dict) else None
 
 
 def load_prior_geo_tilts(engine: Engine, before_week: str) -> Any | None:
