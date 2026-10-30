@@ -147,3 +147,39 @@ def save_research_pack(engine: Engine, week: str, pack: dict[str, Any]) -> None:
             ),
             {"week": week, "pack": payload},
         )
+
+
+def save_macro_geo_pack(engine: Engine, week: str, fields: dict[str, Any]) -> None:
+    """Merge macro results into the existing weekly JSONB Research Pack row."""
+    payload = json.dumps(fields, ensure_ascii=False, separators=(",", ":"), default=str)
+    with system_session(engine) as session:
+        session.execute(
+            text(
+                "INSERT INTO research_packs (week, pack) "
+                "VALUES (:week, CAST(:pack AS jsonb)) "
+                "ON CONFLICT (week) DO UPDATE SET "
+                "pack = research_packs.pack || EXCLUDED.pack, created_at = now()"
+            ),
+            {"week": week, "pack": payload},
+        )
+
+
+def load_prior_geo_tilts(engine: Engine, before_week: str) -> Any | None:
+    """Load the latest valid prior weekly tilt without importing research into policy code."""
+    from wealth.policy.global_split import GeoTilts
+
+    with system_session(engine) as session:
+        payload = session.scalar(
+            text(
+                "SELECT pack -> 'geo_tilts' FROM research_packs "
+                "WHERE week < :week AND pack ? 'geo_tilts' "
+                "ORDER BY week DESC LIMIT 1"
+            ),
+            {"week": before_week},
+        )
+    if payload is None:
+        return None
+    try:
+        return GeoTilts.model_validate(payload)
+    except (TypeError, ValueError):
+        return None

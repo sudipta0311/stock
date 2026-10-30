@@ -29,7 +29,7 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install --no-cache-dir -e ".[api,importer]"
       - name: Refresh daily reference data
-        run: python -m wealth.marketdata.refresh --only master,nse,amfi,fx,gold --prune
+        run: python -m wealth.marketdata.refresh --only master,nse,amfi,fx,gold,index_pe,ust,feeds --prune
       - name: Refresh SEC data on Saturdays when configured
         run: |
           if [ "$(date -u +%u)" != "6" ] || [ -z "$SEC_USER_AGENT" ]; then

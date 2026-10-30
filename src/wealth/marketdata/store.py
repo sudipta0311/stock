@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
-from decimal import Decimal
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, time, timedelta
+from decimal import ROUND_HALF_UP, Decimal
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
@@ -12,10 +13,13 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from wealth.db.models import (
+    FeedItem,
     FundamentalPIT,
     FxRate,
     GoldPrice,
     HoldingLot,
+    IndexValuation,
+    MacroSeries,
     NavDaily,
     NavMonthly,
     PriceEod,
@@ -30,9 +34,29 @@ if TYPE_CHECKING:
     from wealth.marketdata.sources.fred import FxObservation
     from wealth.marketdata.sources.fundamentals import FundamentalObservation
     from wealth.marketdata.sources.ibja import GoldObservation
+    from wealth.marketdata.sources.macro_geo import (
+        FeedItemObservation,
+        IndexValuationObservation,
+        MacroSeriesObservation,
+    )
     from wealth.marketdata.sources.nse import NseClose, NseSecurity
 
 _INDEX_PROXIES = ("NIFTYBEES", "JUNIORBEES", "GOLDBEES")
+_PERCENTILE_PRECISION = Decimal("0.01")
+
+
+@dataclass(frozen=True)
+class IndexValuationPercentile:
+    index_name: str
+    as_of: date
+    pe: Decimal | None
+    percentile: Decimal | None
+    history_label: str
+    history_count: int
+    source: str
+    source_url: str
+    pb: Decimal | None = None
+    div_yield: Decimal | None = None
 
 
 def _month_end(year: int, month: int) -> date:
@@ -658,6 +682,224 @@ def upsert_nav(
         },
     )
     session.execute(statement)
+
+
+def upsert_index_valuations(session: Session, records: list[IndexValuationObservation]) -> int:
+    """Upsert the daily P/E, P/B, and dividend-yield values for supported indices."""
+    if not records:
+        return 0
+    statement = pg_insert(IndexValuation).values(
+        [
+            {
+                "index_name": item.index_name,
+                "as_of": item.as_of,
+                "pe": item.pe,
+                "pb": item.pb,
+                "div_yield": item.div_yield,
+                "source": item.source,
+                "source_url": item.source_url,
+            }
+            for item in records
+        ]
+    )
+    statement = statement.on_conflict_do_update(
+        index_elements=[IndexValuation.index_name, IndexValuation.as_of],
+        set_={
+            "pe": statement.excluded.pe,
+            "pb": statement.excluded.pb,
+            "div_yield": statement.excluded.div_yield,
+            "source": statement.excluded.source,
+            "source_url": statement.excluded.source_url,
+        },
+    )
+    session.execute(statement)
+    return len(records)
+
+
+def upsert_macro_series(session: Session, records: list[MacroSeriesObservation]) -> int:
+    """Upsert dated values from compact public macro series."""
+    if not records:
+        return 0
+    statement = pg_insert(MacroSeries).values(
+        [
+            {
+                "series": item.series,
+                "as_of": item.as_of,
+                "value": item.value,
+                "source": item.source,
+                "source_url": item.source_url,
+            }
+            for item in records
+        ]
+    )
+    statement = statement.on_conflict_do_update(
+        index_elements=[MacroSeries.series, MacroSeries.as_of],
+        set_={
+            "value": statement.excluded.value,
+            "source": statement.excluded.source,
+            "source_url": statement.excluded.source_url,
+        },
+    )
+    session.execute(statement)
+    return len(records)
+
+
+def upsert_feed_items(session: Session, records: list[FeedItemObservation]) -> int:
+    """Upsert short official-feed summaries without fetching linked pages."""
+    if not records:
+        return 0
+    statement = pg_insert(FeedItem).values(
+        [
+            {
+                "source": item.source,
+                "guid": item.guid,
+                "title": item.title,
+                "url": item.url,
+                "published_at": item.published_at,
+                "summary": item.summary,
+                "fetched_at": item.fetched_at,
+            }
+            for item in records
+        ]
+    )
+    statement = statement.on_conflict_do_update(
+        index_elements=[FeedItem.source, FeedItem.guid],
+        set_={
+            "title": statement.excluded.title,
+            "url": statement.excluded.url,
+            "published_at": statement.excluded.published_at,
+            "summary": statement.excluded.summary,
+            "fetched_at": statement.excluded.fetched_at,
+        },
+    )
+    session.execute(statement)
+    return len(records)
+
+
+def prune_feed_items(session: Session, on: date, *, retention_days: int = 60) -> int:
+    """Delete feed evidence once its publication or fetch date is older than 60 days."""
+    cutoff = datetime.combine(on - timedelta(days=retention_days), time.min, tzinfo=UTC)
+    statement = delete(FeedItem).where(
+        func.coalesce(FeedItem.published_at, FeedItem.fetched_at) < cutoff
+    )
+    return session.execute(statement).rowcount or 0
+
+
+def prune_index_valuations(session: Session, on: date, *, retention_days: int = 1826) -> int:
+    """Keep five years of daily index history for useful but bounded percentiles."""
+    cutoff = on - timedelta(days=retention_days)
+    result = session.execute(delete(IndexValuation).where(IndexValuation.as_of < cutoff))
+    return result.rowcount or 0
+
+
+def prune_macro_series(session: Session, on: date, *, retention_days: int = 400) -> int:
+    """Keep only the recent Treasury observations used by macro trend tools."""
+    cutoff = on - timedelta(days=retention_days)
+    result = session.execute(delete(MacroSeries).where(MacroSeries.as_of < cutoff))
+    return result.rowcount or 0
+
+
+def latest_index_valuation_percentile(
+    session: Session,
+    index_name: str,
+    on: date,
+) -> IndexValuationPercentile | None:
+    """Return the latest P/E and its percentile against earlier stored observations."""
+    rows = list(
+        session.scalars(
+            select(IndexValuation)
+            .where(IndexValuation.index_name == index_name, IndexValuation.as_of <= on)
+            .order_by(IndexValuation.as_of)
+        )
+    )
+    if not rows:
+        return None
+    latest = rows[-1]
+    history = [row for row in rows if row.pe is not None]
+    prior_values = [row.pe for row in rows[:-1] if row.pe is not None]
+    if latest.pe is None:
+        percentile = None
+    elif not prior_values:
+        percentile = Decimal("50.00")
+    else:
+        rank = sum(value <= latest.pe for value in prior_values)
+        percentile = (Decimal(rank) * Decimal(100) / Decimal(len(prior_values))).quantize(
+            _PERCENTILE_PRECISION, rounding=ROUND_HALF_UP
+        )
+    first_as_of = history[0].as_of if history else latest.as_of
+    history_label = (
+        "short_history" if (latest.as_of - first_as_of).days < 365 * 3 else "long_history"
+    )
+    return IndexValuationPercentile(
+        index_name=latest.index_name,
+        as_of=latest.as_of,
+        pe=latest.pe,
+        percentile=percentile,
+        history_label=history_label,
+        history_count=len(history),
+        source=latest.source,
+        source_url=latest.source_url,
+        pb=latest.pb,
+        div_yield=latest.div_yield,
+    )
+
+
+def macro_series_history(
+    session: Session,
+    series: str,
+    on: date,
+    *,
+    days: int = 120,
+) -> list[MacroSeries]:
+    """Read a bounded point-in-time window from a shared macro series."""
+    bounded_days = max(1, min(days, 400))
+    return list(
+        session.scalars(
+            select(MacroSeries)
+            .where(
+                MacroSeries.series == series,
+                MacroSeries.as_of >= on - timedelta(days=bounded_days),
+                MacroSeries.as_of <= on,
+            )
+            .order_by(MacroSeries.as_of)
+        )
+    )
+
+
+def search_feed_items(
+    session: Session,
+    query: str,
+    on: date,
+    *,
+    days: int = 30,
+    sources: list[str] | None = None,
+    limit: int = 16,
+) -> list[FeedItem]:
+    """Search bounded recent titles and summaries from the official feed cache."""
+    bounded_days = max(1, min(days, 365))
+    start_at = datetime.combine(on - timedelta(days=bounded_days), time.min, tzinfo=UTC)
+    end_at = datetime.combine(on + timedelta(days=1), time.min, tzinfo=UTC)
+    published = func.coalesce(FeedItem.published_at, FeedItem.fetched_at)
+    statement = select(FeedItem).where(published >= start_at, published < end_at)
+    if sources:
+        statement = statement.where(FeedItem.source.in_(sources))
+    terms = [term for term in query.casefold().split() if len(term) > 1][:8]
+    if terms:
+        statement = statement.where(
+            or_(
+                *(
+                    or_(FeedItem.title.ilike(f"%{term}%"), FeedItem.summary.ilike(f"%{term}%"))
+                    for term in terms
+                )
+            )
+        )
+    return list(
+        session.scalars(
+            statement.order_by(published.desc(), FeedItem.source, FeedItem.guid).limit(
+                max(1, min(limit, 30))
+            )
+        )
+    )
 
 
 def upsert_fx_rate(

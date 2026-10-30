@@ -557,6 +557,75 @@ class FxRate(Base):
     )
 
 
+class IndexValuation(Base):
+    __tablename__ = "index_valuations"
+    __table_args__ = (
+        CheckConstraint(
+            "pe IS NULL OR (pe > '-Infinity'::numeric AND pe < 'Infinity'::numeric)",
+            name="ck_index_valuations_pe_finite",
+        ),
+        CheckConstraint(
+            "pb IS NULL OR (pb > '-Infinity'::numeric AND pb < 'Infinity'::numeric)",
+            name="ck_index_valuations_pb_finite",
+        ),
+        CheckConstraint(
+            "div_yield IS NULL OR (div_yield > '-Infinity'::numeric "
+            "AND div_yield < 'Infinity'::numeric)",
+            name="ck_index_valuations_div_yield_finite",
+        ),
+    )
+
+    index_name: Mapped[str] = mapped_column(String(48), primary_key=True)
+    as_of: Mapped[date] = mapped_column(Date, primary_key=True)
+    pe: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
+    pb: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
+    div_yield: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
+    source: Mapped[str] = mapped_column(String(40), nullable=False)
+    source_url: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class MacroSeries(Base):
+    __tablename__ = "macro_series"
+    __table_args__ = (
+        CheckConstraint(
+            "value > '-Infinity'::numeric AND value < 'Infinity'::numeric",
+            name="ck_macro_series_value_finite",
+        ),
+    )
+
+    series: Mapped[str] = mapped_column(String(40), primary_key=True)
+    as_of: Mapped[date] = mapped_column(Date, primary_key=True)
+    value: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    source: Mapped[str] = mapped_column(String(40), nullable=False)
+    source_url: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class FeedItem(Base):
+    __tablename__ = "feed_items"
+    __table_args__ = (
+        CheckConstraint(
+            "source IN ('pib', 'rbi', 'ustr', 'federal_register')",
+            name="ck_feed_items_source",
+        ),
+        CheckConstraint("octet_length(title) <= 1024", name="ck_feed_items_title_bytes"),
+        CheckConstraint("octet_length(guid) <= 512", name="ck_feed_items_guid_bytes"),
+        CheckConstraint("octet_length(url) <= 2048", name="ck_feed_items_url_bytes"),
+        CheckConstraint("octet_length(summary) <= 1024", name="ck_feed_items_summary_bytes"),
+        Index("ix_feed_items_published_at", "published_at"),
+        Index("ix_feed_items_source_published_at", "source", "published_at"),
+    )
+
+    source: Mapped[str] = mapped_column(String(32), primary_key=True)
+    guid: Mapped[str] = mapped_column(String(512), primary_key=True)
+    title: Mapped[str] = mapped_column(String(1024), nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    summary: Mapped[str] = mapped_column(String(1024), nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class GoldPrice(Base):
     __tablename__ = "gold_prices"
     __table_args__ = (Index("ix_gold_prices_as_of", "as_of"),)

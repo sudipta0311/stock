@@ -3,19 +3,32 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 
 import httpx
 
-USER_AGENT = "Mozilla/5.0 (compatible; WealthCopilotMarketData/1.0)"
+USER_AGENT = "WealthCopilotMarketData/1.0"
 HEADERS = {"User-Agent": USER_AGENT, "Accept": "text/csv,text/plain,text/html,*/*"}
 
 
-def get(url: str, *, timeout: float = 30.0, retries: int = 3) -> httpx.Response:
-    """Fetch a public source with a browser-like user agent and bounded backoff."""
+def get(
+    url: str,
+    *,
+    timeout: float = 30.0,
+    retries: int = 3,
+    headers: Mapping[str, str] | None = None,
+) -> httpx.Response:
+    """Fetch a public source with a descriptive user agent and bounded backoff."""
     last_error: Exception | None = None
+    request_headers = {**HEADERS, **(headers or {})}
     for attempt in range(retries):
         try:
-            response = httpx.get(url, headers=HEADERS, timeout=timeout, follow_redirects=True)
+            response = httpx.get(
+                url,
+                headers=request_headers,
+                timeout=timeout,
+                follow_redirects=True,
+            )
             if response.status_code >= 500 and attempt + 1 < retries:
                 time.sleep(0.25 * (2**attempt))
                 continue

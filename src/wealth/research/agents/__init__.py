@@ -30,13 +30,14 @@ from wealth.research.router import FakeRouter, ModelRouter, RunContext
 from wealth.research.rules import ResearchRules
 from wealth.research.tools import EVIDENCE_SYSTEM_PROMPT, ToolRegistry, ToolResult, evidence_message
 
-_PROMPT_DIR = Path(__file__).with_name("prompts")
+_PROMPT_DIR = Path(__file__).resolve().parents[1] / "prompts"
 _PROMPT_FILES = {
     "analyst": "analyst.md",
     "valuation": "valuation.md",
     "red_team": "red_team.md",
     "compliance": "compliance.md",
     "cio": "cio.md",
+    "macro_geo": "macro_geo.md",
 }
 _PROHIBITED_LANGUAGE = (
     re.compile(r"\bguarantee(?:d|s)?\b", re.IGNORECASE),

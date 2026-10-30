@@ -23,7 +23,12 @@ from wealth.research.dossier import (
 from wealth.research.errors import BudgetExceeded, SchemaError
 from wealth.research.router import FakeRouter, ModelRouter, RunBudget, RunContext
 from wealth.research.rules import ResearchRules
-from wealth.research.store import save_dossier, save_research_pack
+from wealth.research.store import (
+    load_prior_geo_tilts,
+    save_dossier,
+    save_macro_geo_pack,
+    save_research_pack,
+)
 from wealth.research.tools import ToolRegistry
 
 
@@ -548,6 +553,49 @@ def build_research_graph(
         }
         if owner_engine is not None:
             save_research_pack(owner_engine, week, pack)
+            from datetime import date
+
+            from wealth.research.agents.macro_geo import (
+                MacroGeoAgent,
+                register_macro_geo_tools,
+            )
+
+            macro_date = (
+                date.fromisocalendar(int(week[:4]), int(week[-2:]), 5)
+                if "-W" in week
+                else date.today()
+            )
+            remaining_usd = max(Decimal(0), context.budget.max_usd - context.budget.spent_usd)
+            macro_budget = RunBudget(
+                max_usd=min(selected_rules.macro_max_usd, remaining_usd),
+                max_calls=9,
+            )
+            macro_context = RunContext(
+                budget=macro_budget,
+                run_id=context.run_id,
+                mode="weekly",
+                owner_engine=owner_engine,
+            )
+            macro_tools = ToolRegistry(owner_engine)
+            try:
+                macro_toolbox = register_macro_geo_tools(macro_tools, owner_engine, macro_date)
+                macro_result = MacroGeoAgent(
+                    router,
+                    macro_tools,
+                    macro_context,
+                    as_of=macro_date,
+                    week=week,
+                    toolbox=macro_toolbox,
+                ).run(previous=load_prior_geo_tilts(owner_engine, week))
+            finally:
+                macro_tools.close()
+            context.budget.spent_usd += macro_budget.spent_usd
+            context.budget.calls += macro_budget.calls
+            if context.on_budget_change is not None:
+                context.on_budget_change(context.budget.spent_usd)
+            macro_fields = macro_result.pack_fields()
+            save_macro_geo_pack(owner_engine, week, macro_fields)
+            pack.update(macro_fields)
         return {
             "pack": pack,
             "dossiers": [_serialise_dossier(item) for item in dossiers],

@@ -19,6 +19,9 @@ _SHARED_MARKET_TABLES = {
     "sentinel_events",
     "fundamentals_pit",
     "universe_members",
+    "index_valuations",
+    "macro_series",
+    "feed_items",
 }
 _POST_INITIAL_TABLES = {
     "fund_lagging_checks",

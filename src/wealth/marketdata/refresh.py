@@ -27,6 +27,7 @@ from wealth.marketdata.sources import (
     edgar,
     fred,
     ibja,
+    macro_geo,
     manual,
     nse,
     nse_fundamentals,
@@ -40,6 +41,13 @@ from wealth.marketdata.sources.edgar import EdgarCompany
 from wealth.marketdata.sources.fred import FxObservation
 from wealth.marketdata.sources.fundamentals import FundamentalObservation
 from wealth.marketdata.sources.ibja import GoldObservation
+from wealth.marketdata.sources.macro_geo import (
+    FeedBatch,
+    FeedItemObservation,
+    IndexValuationObservation,
+    MacroSeriesBatch,
+    MacroSeriesObservation,
+)
 from wealth.marketdata.sources.nse import NseClose, NseSecurity
 from wealth.marketdata.sources.nse_fundamentals import NseIntegratedClient
 from wealth.marketdata.sources.universes import Sp500Holdings
@@ -56,6 +64,9 @@ _SOURCES = (
     "universes",
     "edgar",
     "nse_fundamentals",
+    "index_pe",
+    "ust",
+    "feeds",
 )
 _RETENTION_DAYS = 400
 _MAX_ABROAD_QUOTES_PER_DAY = 24
@@ -368,6 +379,9 @@ def _default_fetchers(
         "universes": _fetch_universes,
         "edgar": lambda: _fetch_edgar(session, on, symbols),
         "nse_fundamentals": lambda: _fetch_nse_fundamentals(session, on, symbols),
+        "index_pe": lambda: macro_geo.fetch_nse_index_valuations(on),
+        "ust": lambda: macro_geo.fetch_treasury_yields(on),
+        "feeds": lambda: macro_geo.fetch_official_feeds(on),
     }
 
 
@@ -518,6 +532,38 @@ def _store_source(
         for item in selected:
             store.upsert_fx_rate(session, item, source=item.source, fetched_at=fetched_at)
         return {"fx_rates": len(selected)}
+    if source == "index_pe":
+        if not isinstance(records, list) or any(
+            not isinstance(item, IndexValuationObservation) for item in records
+        ):
+            raise TypeError("NSE index-valuation adapter returned invalid rows")
+        return {"index_valuations": store.upsert_index_valuations(session, records)}
+    if source == "ust":
+        if not isinstance(records, MacroSeriesBatch) or any(
+            not isinstance(item, MacroSeriesObservation) for item in records.observations
+        ):
+            raise TypeError("Treasury adapter returned invalid rows")
+        count = store.upsert_macro_series(session, records.observations)
+        return SourceBatchResult(
+            {
+                "macro_series": count,
+                "series": len({item.series for item in records.observations}),
+            },
+            dict(records.errors),
+        )
+    if source == "feeds":
+        if not isinstance(records, FeedBatch) or any(
+            not isinstance(item, FeedItemObservation) for item in records.items
+        ):
+            raise TypeError("Official-feed adapter returned invalid rows")
+        count = store.upsert_feed_items(session, records.items)
+        source_counts: dict[str, int] = {}
+        for item in records.items:
+            source_counts[item.source] = source_counts.get(item.source, 0) + 1
+        return SourceBatchResult(
+            {"feed_items": count, "sources": source_counts},
+            dict(records.errors),
+        )
     if source == "gold":
         if not isinstance(records, GoldObservation):
             raise TypeError("IBJA adapter returned no parseable gold rate")
@@ -600,6 +646,30 @@ def run_refresh(
     except Exception as error:
         errors["fundamentals_pit_retention"] = type(error).__name__
 
+    try:
+        with session.begin_nested():
+            feed_items_pruned = store.prune_feed_items(
+                session,
+                on,
+                retention_days=macro_geo.FEED_RETENTION_DAYS,
+            )
+        if feed_items_pruned:
+            counts["feed_items_pruned"] = feed_items_pruned
+    except Exception as error:
+        errors["feed_items_retention"] = type(error).__name__
+
+    for retention_name, prune in (
+        ("index_valuations_retention", store.prune_index_valuations),
+        ("macro_series_retention", store.prune_macro_series),
+    ):
+        try:
+            with session.begin_nested():
+                deleted = prune(session, on)
+            if deleted:
+                counts[f"{retention_name.removesuffix('_retention')}_pruned"] = deleted
+        except Exception as error:
+            errors[retention_name] = type(error).__name__
+
     for source in selected_sources:
         fetcher = effective_fetchers.get(source)
         if fetcher is None:
@@ -668,6 +738,21 @@ def run_refresh(
                 source in {"edgar", "nse_fundamentals"}
                 and isinstance(counts.get(source), dict)
                 and counts[source].get("symbols", 0) > 0
+            )
+            or (
+                source == "index_pe"
+                and isinstance(counts.get(source), dict)
+                and counts[source].get("index_valuations", 0) > 0
+            )
+            or (
+                source == "ust"
+                and isinstance(counts.get(source), dict)
+                and counts[source].get("macro_series", 0) > 0
+            )
+            or (
+                source == "feeds"
+                and isinstance(counts.get(source), dict)
+                and counts[source].get("feed_items", 0) > 0
             )
             or (
                 source == "universes"

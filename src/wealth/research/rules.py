@@ -22,6 +22,7 @@ class ResearchRules:
     expensive_pe_percentile_min: Decimal
     cheap_earnings_yield_vs_sector: Decimal
     expensive_earnings_yield_vs_sector: Decimal
+    macro_max_usd: Decimal = Decimal("0.05")
 
     @classmethod
     def load(cls, path: Path | None = None) -> ResearchRules:
@@ -44,11 +45,14 @@ class ResearchRules:
             expensive_earnings_yield_vs_sector=Decimal(
                 str(valuation["expensive_earnings_yield_vs_sector"])
             ),
+            macro_max_usd=Decimal(str(raw.get("macro_max_usd", "0.05"))),
         )
         if result.max_dossiers_per_run < 0 or result.max_ideas_per_market < 0:
             raise ValueError("Research shortlist limits must not be negative")
         if result.max_usd_per_dossier < 0:
             raise ValueError("Research dossier budget must not be negative")
+        if not result.macro_max_usd.is_finite() or result.macro_max_usd < 0:
+            raise ValueError("Macro research budget must be finite and non-negative")
         if not {"IN", "US"} <= set(result.discount_rate_pct):
             raise ValueError("Research discount rates are required for India and US")
         return result

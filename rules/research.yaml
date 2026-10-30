@@ -2,6 +2,7 @@ version: 1
 max_dossiers_per_run: 20
 max_usd_per_dossier: "0.05"
 max_ideas_per_market: 5
+macro_max_usd: "0.05"
 discount_rate_pct:
   IN: "12"
   US: "9"

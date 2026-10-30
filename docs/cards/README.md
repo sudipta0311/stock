@@ -28,7 +28,7 @@ Status: ⬜ not started · 🟦 in progress · ✅ accepted · 🔁 rework · �
 | C15b | Research 2b: factor Screener (no LLM, sector-neutral), filings Sentinel (8-K item rules first, nano LLM for free text), research tools, sector data | 4.7, 5.2 | ✅ |
 | C15c | Research 2c: Analyst, Valuation (math in tools), Red Team (DeepSeek), Compliance gate, CIO sign-off → weekly Research Pack | 5.2, 5.3, 5.5 | ✅ |
 | C15d | Research 2d: golden-set eval harness, groundedness/schema/red-team metrics, CI gate | 5.5, 10 | ✅ |
-| C16a | Research 3a: Macro & Geopolitics agent: NSE index valuations, US Treasury yields, official RSS (PIB/RBI/USTR/Fed Register), bounded 2-source tilts with decay | 4.4, 5.2, 5.5 | ⬜ |
+| C16a | Research 3a: Macro & Geopolitics agent: NSE index valuations, US Treasury yields, official RSS (PIB/RBI/USTR/Fed Register), bounded 2-source tilts with decay | 4.4, 5.2, 5.5 | ✅ |
 | C16b | Research 3b: ETF/index-fund selector, Rates/Rulebook watchers + human approval queue, Scorekeeper (paper portfolio, track record, calibration), CIO agenda | 4.7, 5.2, 5.8 | ⬜ |
 | C17a | Alerts 1: investing prefs, Personaliser (weekly per-user plan → actions, pure code), weekly job, /v1/plan, /v1/actions, /v1/research/ideas | 4, 5.4 | ✅ |
 | C17b | Alerts 2: weekly brief (templated, no LLM numbers), HTML+text email via HTTP provider, web push, daily reminders, urgent alerts, consent/unsubscribe, Inbox API | 9 | ✅ |

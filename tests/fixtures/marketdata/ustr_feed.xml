@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Synthetic trade office feed</title>
+  <entry><id>ustr-sample-1</id><title>Trade notice archive item</title>
+    <link rel="alternate" href="https://ustr.gov/sample/1" />
+    <link rel="self" href="https://ustr.gov/archive/feed" />
+    <updated>2009-02-03T12:00:00Z</updated>
+    <summary>Archived item retained as a parser fixture.</summary>
+  </entry>
+</feed>

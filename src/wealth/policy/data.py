@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -424,6 +424,28 @@ def _research_pack(session: Session, week: str) -> ResearchPack | None:
     return ResearchPack(week=week, ideas=ideas, geo_tilts=tilts)
 
 
+def _research_index_percentiles(session: Session, week: str) -> dict[str, Decimal]:
+    """Read stored official index P/E percentiles for deterministic policy rules."""
+    row = session.get(ResearchPackRecord, week)
+    if row is None or not isinstance(row.pack, dict):
+        return {}
+    raw_values = row.pack.get("index_valuation_percentiles")
+    if not isinstance(raw_values, dict):
+        return {}
+    percentiles: dict[str, Decimal] = {}
+    for market in ("IN", "US"):
+        raw = raw_values.get(market)
+        if raw is None:
+            continue
+        try:
+            value = Decimal(str(raw))
+        except (InvalidOperation, ValueError, TypeError):
+            continue
+        if value.is_finite() and Decimal(0) <= value <= Decimal(100):
+            percentiles[market] = value
+    return percentiles
+
+
 def _member_profiles(
     session: Session,
     user_id: UUID,
@@ -688,7 +710,7 @@ def load_policy_inputs(
     market = MarketContext(
         fx_rates=fx_rates,
         debt_yields=yields,
-        index_valuation_percentiles={},
+        index_valuation_percentiles=_research_index_percentiles(session, week),
         gold_price_per_gram=gold,
         yield_table_as_of=yield_as_of,
         yield_table_verified=yields_verified,
