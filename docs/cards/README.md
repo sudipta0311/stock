@@ -52,24 +52,38 @@ Status: ⬜ not started · 🟦 in progress · ✅ accepted · 🔁 rework · �
 | C28 | Simplicity pass: backend highlights (≤ 3 per screen), banned-jargon + sentence-length tests, one primary action per screen, collapsed details, 5-tap onboarding, rounded numbers | 2.3, 8 | ✅ |
 | C28b | Visual polish: type scale, spacing, app shell, highlight callouts, empty states, list rows, rounded summaries; fixes from the real-phone test | 8 | ✅ |
 | C24 | End-to-end tests (Playwright), accessibility and performance checks | 10 | ✅ |
-| C25 | Docs, cleanup, final plan sync | — | ⬜ |
+| C25 | Docs, cleanup, final plan sync | — | ✅ |
 | C34 | Savings in DKK/EUR; fixes from the mock-data walkthrough (hint, fund check, errors, required marks, quick-add amounts, push on account switch, rate note, onboarding counter) | 3, 8 | ✅ |
 
-## Follow-ups noted during review
-- (Deploy prep, reviewer) Migration 0002 was edited for managed Postgres. It no longer names SUPERUSER/REPLICATION in ALTER ROLE (it verifies them instead) and only REVOKEs an owner membership that exists. The end state is identical, so existing databases are unaffected. Neon `wealth` (owner's Frankfurt project) is migrated to 0011. → C18 adds a non-superuser CI owner so this class of bug is caught.
-- (C27c review) `DELETE /v1/households/leave` by the owner returns 404 instead of 409 (owner leave returns 404). The request is refused either way; the PWA (C27b) must not show Leave to owners. → C27b
-- (C18 review, picked up by C32) The Google-exchange rate limiter keys on `request.client.host`, and uvicorn runs with `--forwarded-allow-ips '*'`, so a caller can vary `X-Forwarded-For` to dodge it. That is low risk (a code still needs a real Google sign-in), but key on the right-most hop Render adds, or trust only Render's proxy range. Also run `render blueprints validate` when the Render CLI is available. → C25
-- (C27c review) `wealth_app` has UPDATE/DELETE on `audit_log`. Make the household audit append-only: revoke UPDATE/DELETE from `wealth_app` and check that account deletion cascades still work (FK cascades run as the table owner). → C25
-- (C27c review) The audit trigger skips rows when the session setting `app.household_deleting_user` equals the tenant. Any session can set it, so it's an audit bypass if the API is ever compromised. Replace it with a check that needs no session setting (cascades run after the users row is gone, so the existing NOT EXISTS users check may be enough), with a test. → C25
-- C04: EPF accrual uses actual/365 days; EPFO credits interest on monthly running balances at rate/1200 (~0.02% difference). Align in C25.
-- (C14 review) Flex model calls can queue for minutes; the router uses one 120 s read timeout for every tier. Give Flex calls a longer read timeout (for example 15 minutes) before the weekly run depends on them. → C15c
-- (C15a review) US price factors have no bulk source: Alpha Vantage's free tier allows 25 calls a day, far short of the S&P 500. Find a free daily-close source whose terms allow this use, or score US names on fundamentals only and say so. → C15b
-- (Deploy) `research-weekly.yml` is gated by the repository variable `RESEARCH_ENABLED` (off). C15c must align the workflow with the C14 CLI (`start --week … --mode weekly`, `continue --run-id …`), then set the variable. → C15c
-- C03: post-office TD rates per tenure are empty (India Post page shows only a range); historical small-savings periods not yet loaded. Rates watcher (C16) + human approval.
-- C05: residual risk accepted: SQL that can call set_config(app.user_id) with another user's UUID would read that tenant. Mitigated by parameterised SQLAlchemy only; owner-role escalation is closed (API logs in as wealth_api).
-- C07: manual assets needing a market price (gold physical/ETF/SGB) store valuation=null and silently drop out of /v1/networth. Add per-asset `valuation_status` and networth `unvalued_assets` (do in C08b); wire PriceProvider from market data in C10.
-- GitHub history rewritten and force-pushed 2026-10-28 (user-approved). Old commits 40375c0 (main), 6bf7538 (streamlit-multi-agent), 4065438 (codex/streamlit-cloud-ready) are still served by SHA until GitHub Support purges cached views.
-- C20: API has no GET for the Money Map checklist (PWA keeps it locally) and no consent endpoints yet (C17b). Add GET checklist to C17b.
-- C26a: FX refresh fails as a whole if one ECB currency request times out (seen once); fetch all currencies in one ECB multi-series request (D.INR+DKK+USD+...EUR) and isolate per-currency failures. Do in C25.
+## Follow-ups and review outcomes
 
-**Run order for the remaining cards:** C27a → C27c → C23 → C27b → **C18 (moved up: first deploy so the owner can try it)** → C29b → C09 → C09b → C29a → C28 → C28b → C30 → C31 → C32 → C33 → C14 → C15a–d → C16a/b → C24 → C25. Each later card ships through the same deploy. C29b (Indian funds) needs only the existing CAMS parser. C29a (Denmark buying) needs C09b's Danish broker imports. C28 (simplicity) runs after every screen exists. C24 (e2e) checks the simplified flows.
+### Closed with regression evidence
+
+| Review item | Outcome and evidence |
+|---|---|
+| Managed-Postgres migration role checks | Closed. `tests/db/test_rls.py::test_migrations_preserve_an_enabled_api_role_login` protects the API login during migration. |
+| Household owners must not see Leave | Closed. `apps/web/tests/settings/SettingsPage.test.tsx::shows four simple groups, keeps plan details closed, and passes the accessibility scan` checks the owner view. |
+| Google sign-in rate-limit proxy key | Closed. `tests/api/test_google_auth.py::test_google_exchange_uses_render_rightmost_forwarded_hop_for_rate_limit` checks Render's right-most forwarded hop. |
+| Household audit bypass and append-only log | Closed (migration 0026). `tests/db/test_shared_households.py::test_household_audit_cannot_be_suppressed_with_a_session_setting` and `test_audit_log_is_append_only_and_account_deletion_cascades` cover the trigger and cascade behavior. The old setting never took effect (set inside a function with its own SET clause, so reverted on return), which made a partner's account deletion fail when they had hidden a note in another family plan; `test_a_partner_can_delete_their_account_with_notes_hidden_in_the_family_plan`. |
+| EPF monthly interest | Closed. `tests/valuation/test_asset_engines.py::test_epf_uses_epfo_monthly_running_balance_interest` checks the hand-computed FY example and that a month counts only once it has ended. |
+| Long Flex response timeout | Closed. `tests/research/test_router.py::test_flex_requests_use_the_configured_long_read_timeout` covers the weekly read timeout. |
+| US bulk daily-price source | Re-evaluated and closed for v1. The screener uses fundamentals-only coverage; `tests/research/test_screener.py::test_us_fundamentals_only_requires_quality_and_value_groups` protects it. |
+| Weekly research workflow and CLI | Closed for code. `tests/research/test_run.py::test_cli_matches_scheduled_workflow_week_selectors` checks the workflow's supported start and continue selectors. `RESEARCH_ENABLED` stays off until the owner completes a live smoke run. |
+| Manual assets without a price | Closed. `tests/db/test_money_map_api.py::test_member_account_asset_goal_and_quick_add_endpoints` checks `valuation_status` and the net-worth unvalued-assets list. |
+| Checklist and consent endpoints | Closed. `tests/db/test_alerts_delivery.py::test_consent_defaults_off_and_checklist_is_available_on_me` checks both endpoints and household isolation. |
+| ECB failure isolation | Closed. `tests/marketdata/test_sources.py::test_ecb_multi_request_failure_isolated_by_currency` checks that one currency failure does not discard the others. |
+| Dev-token account recreation after deletion | Documented in the README. `tests/db/test_auth_sessions.py::test_a_request_after_deleting_the_account_does_not_recreate_the_user` protects production app-session tokens; dev tokens remain a local/e2e-only caveat. |
+
+### Still open or owner-run
+
+- **Post Office rates (C03):** tenure-specific Post Office TD rates and older small-savings periods still need authoritative reference data.
+- **RLS `app.user_id` risk (C05):** SQL able to call `set_config` with another tenant UUID could cross tenants. Parameterised SQLAlchemy use and the restricted `wealth_api` role mitigate this; `tests/db/test_rls.py::test_api_role_bootstrap_and_reset_role_remain_tenant_scoped` is regression evidence. Keep this risk visible.
+- **GitHub history cache:** ask GitHub Support to purge the old commit views after the approved history rewrite.
+- **Render CLI validation:** `render blueprints validate` could not run because the Render CLI is unavailable in this environment. The repository deployment checker remains the local check.
+- **Home load speed:** authenticated Home LCP is 3.8 s under 4x CPU and slow 4G (3,804 ms after C25's runtime split and early Home requests; 3,880 ms before). The target stays 2.5 s; `e2e/tests/performance.spec.ts` is tagged `@performance` and runs non-blocking in CI. Next step: profile the sign-in refresh before the first data request.
+- **npm low findings:** `npm audit --omit=dev` reports four low-severity transitive findings through `vite-plugin-pwa`/Workbox. No high or critical findings were reported. npm's forced fix downgrades the PWA plugin across a breaking boundary, so retain the current stack and revisit when a compatible upstream fix is available.
+- **Weekly research activation:** the live Foundry smoke run and live eval passed on 2026-10-30. Set the `RESEARCH_ENABLED` repository variable once migrations 0024–0026 are live. US company scores also need the `SEC_USER_AGENT` secret (SEC EDGAR asks for a contact line).
+
+`legacy/` stays, read-only. No code or test imports it; only `.gitignore`, the Ruff exclude in `pyproject.toml`, `AGENTS.md`, `README.md` and card docs name the directory. Deleting it (it stays in git history) is the owner's call.
+
+All implementation cards are accepted; C26b was superseded by C27b. The remaining items above are data work, accepted risk, environment limitations, or owner-run launch steps.

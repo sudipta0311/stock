@@ -134,6 +134,18 @@ export default defineConfig(({ mode }) => {
       manifest: true,
       sourcemap: false,
       target: "es2022",
+      rolldownOptions: {
+        output: {
+          codeSplitting: {
+            groups: [
+              {
+                name: "app-runtime",
+                test: /node_modules[\\/](?:react|react-dom|scheduler|react-router|@tanstack[\\/]react-query)[\\/]/,
+              },
+            ],
+          },
+        },
+      },
       ...(sandboxBuild ? { minify: false } : {}),
     },
     ...(sandboxBuild ? { esbuild: false, oxc: false } : {}),

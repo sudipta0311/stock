@@ -22,7 +22,7 @@ You are implementing the redesign described in `docs/UPGRADE_PLAN.md`. Work arri
 - One Python package `wealth` in `src/wealth/` (src layout), `requires-python >= 3.12`. The local dev interpreter is Python 3.14.
 - Subpackages: `core` (money/dates/ids helpers), `schemas` (Pydantic v2 models), `valuation` (deterministic asset formulas), `rates` (scheme-rate reference data loader), `policy` (Policy Engine), `importer` (CAS/broker parsers, staging, de-dup), `db` (SQLAlchemy 2 models, sessions, RLS, Alembic), `api` (FastAPI), `marketdata`, `research` (LangGraph agents + ModelRouter), `alerts` (weekly brief, email, push, reminders).
 - Versioned rule data lives in `rules/*.yaml` (allocation, exits, routes, tax, schemes). Exported JSON Schemas live in `schemas/`.
-- The PWA lives in `apps/web/` (Next.js static export). It's added by later cards.
+- The PWA lives in `apps/web/` (Vite + React static export).
 - Optional-dependency extras keep the Render API slim: `api`, `importer`, `research`, `dev`. The API must never import `wealth.research`.
 - **Money math:** use `decimal.Decimal` for all amounts, rates and money results. Never use float for money. Round to paise (2 dp) with `ROUND_HALF_UP` only at presentation or explicitly-specified boundaries. Rates are percentages as Decimal (e.g., `Decimal("7.10")`).
 - **Agents research; code decides money.** No LLM output may set an amount, weight, rate, tax figure or date. LLM code is only in `wealth.research` and `wealth.alerts` (copy writing), always behind the `ModelRouter` interface.

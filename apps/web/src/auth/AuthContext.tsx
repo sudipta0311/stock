@@ -8,7 +8,7 @@ import {
 } from "react";
 import type { ReactNode } from "react";
 import type { components } from "../api/schema";
-import { apiFetch } from "../api/client";
+import { apiFetch, getSelectedHouseholdId } from "../api/client";
 import { queryClient } from "../api/query-client";
 import {
   clearAuthToken,
@@ -66,6 +66,48 @@ export const AUTH_RETURN_PATH_KEY = "wealth.auth.return-path";
 export const AUTH_NOTICE_STORAGE_KEY = "wealth.auth.notice";
 const E2E_DEV_TOKEN_KEY = "wealth.e2e.dev-token";
 
+function readCachedProfileStatus(): boolean | null {
+  try {
+    const cachedProfile = window.sessionStorage.getItem(PROFILE_STATUS_KEY);
+    return cachedProfile === null ? null : cachedProfile === "true";
+  } catch {
+    return null;
+  }
+}
+
+function warmHomeQueries(): void {
+  if (window.location.pathname !== "/") return;
+  let activeMemberId: string | undefined;
+  try {
+    const selectedMemberId =
+      window.sessionStorage.getItem("wealth.household.member-filter") ??
+      "family";
+    activeMemberId =
+      selectedMemberId === "family" ? undefined : selectedMemberId;
+  } catch {
+    activeMemberId = undefined;
+  }
+  const selectedHouseholdId = getSelectedHouseholdId();
+  const networthPath = activeMemberId
+    ? `/v1/networth?member_id=${encodeURIComponent(activeMemberId)}`
+    : "/v1/networth";
+
+  void Promise.all([
+    queryClient.prefetchQuery({
+      queryKey: ["c27b", "networth", selectedHouseholdId, activeMemberId],
+      queryFn: () => apiFetch(networthPath),
+    }),
+    queryClient.prefetchQuery({
+      queryKey: ["c27b", "plan", selectedHouseholdId, activeMemberId],
+      queryFn: () => apiFetch("/v1/plan"),
+    }),
+    queryClient.prefetchQuery({
+      queryKey: ["c27b", "actions", selectedHouseholdId],
+      queryFn: () => apiFetch("/v1/actions"),
+    }),
+  ]);
+}
+
 function e2eDevAuthEnabled(): boolean {
   return import.meta.env.VITE_E2E_DEV_AUTH === "true";
 }
@@ -105,9 +147,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const verifyProfile = useCallback(async () => {
     try {
-      const me = await apiFetch<MeResponse>("/v1/me");
+      const selectedHouseholdId = getSelectedHouseholdId();
+      const me = await queryClient.fetchQuery({
+        queryKey: ["household-context", "me", selectedHouseholdId],
+        queryFn: () => apiFetch<MeResponse>("/v1/me"),
+        staleTime: 0,
+        // apiFetch already waits for a waking server; a 401 must sign out at once.
+        retry: false,
+      });
       const ready = me.profile !== null;
       setHasProfile(ready);
+      if (ready) warmHomeQueries();
       try {
         window.sessionStorage.setItem(PROFILE_STATUS_KEY, String(ready));
       } catch {
@@ -130,7 +180,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       saveE2eDevToken(token);
       setAuthToken(token);
       setState("authenticated");
-      setHasProfile(null);
+      const cachedProfile = readCachedProfileStatus();
+      setHasProfile(cachedProfile);
+      if (cachedProfile) warmHomeQueries();
       void verifyProfile();
     },
     [verifyProfile],
@@ -199,12 +251,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAuthToken(token);
       scheduleProactiveRefresh();
       setState("authenticated");
-      try {
-        const cachedProfile = window.sessionStorage.getItem(PROFILE_STATUS_KEY);
-        setHasProfile(cachedProfile === null ? null : cachedProfile === "true");
-      } catch {
-        setHasProfile(null);
-      }
+      const cachedProfile = readCachedProfileStatus();
+      setHasProfile(cachedProfile);
+      if (cachedProfile) warmHomeQueries();
       await verifyProfile();
     })().finally(() => completeAuthBootstrap());
     return () => {

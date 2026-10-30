@@ -29,6 +29,7 @@ from wealth.db.models import (
     Consent,
     FundLaggingCheck,
     FundTransaction,
+    HighlightDismissal,
     HoldingLot,
     HouseholdAccess,
     HouseholdInvite,
@@ -443,6 +444,129 @@ def test_owner_self_member_cannot_be_invited_or_accepted_as_a_grantee(
         json={"token": forged_token, "bring_my_data": False},
     )
     assert _problem_code(forged_acceptance) == (400, "invalid_invite", "invalid_invite")
+
+
+def test_household_audit_cannot_be_suppressed_with_a_session_setting(
+    api_client: tuple[TestClient, str, MigratedDatabase],
+) -> None:
+    client, secret, database = api_client
+    owner_headers, _owner_subject, _owner_email, owner_id = _login(client, secret, "audit-owner")
+    _partner_headers, _partner_subject, _partner_email, partner_id = _login(
+        client, secret, "audit-partner"
+    )
+    member_id = UUID(client.get("/v1/members", headers=owner_headers).json()[0]["id"])
+
+    with system_session(database.owner_engine) as session:
+        session.add(Profile(user_id=owner_id))
+        session.add(
+            HouseholdAccess(
+                owner_user_id=owner_id,
+                grantee_user_id=partner_id,
+                member_id=member_id,
+                role="partner",
+            )
+        )
+
+    with user_session(database.api_engine, partner_id, owner_id) as session:
+        session.execute(
+            text("SELECT set_config('app.household_deleting_user', :tenant_id, true)"),
+            {"tenant_id": str(owner_id)},
+        )
+        session.execute(update(Profile).where(Profile.user_id == owner_id).values(language="da"))
+
+    with system_session(database.owner_engine) as session:
+        audit_count = session.scalar(
+            select(func.count())
+            .select_from(AuditLog)
+            .where(
+                AuditLog.user_id == owner_id,
+                AuditLog.actor_user_id == partner_id,
+                AuditLog.action == "household_row_update",
+            )
+        )
+    assert audit_count == 1
+
+
+def test_audit_log_is_append_only_and_account_deletion_cascades(
+    api_client: tuple[TestClient, str, MigratedDatabase],
+) -> None:
+    client, secret, database = api_client
+    owner_headers, _subject, _email, owner_id = _login(client, secret, "audit-delete-owner")
+    with system_session(database.owner_engine) as session:
+        session.add(
+            AuditLog(
+                user_id=owner_id,
+                actor="synthetic-test",
+                action="synthetic_test_event",
+                detail={"source": "regression"},
+            )
+        )
+
+    for statement in (
+        "UPDATE audit_log SET action = 'changed' WHERE user_id = :user_id",
+        "DELETE FROM audit_log WHERE user_id = :user_id",
+    ):
+        with database.api_engine.connect() as connection:
+            transaction = connection.begin()
+            try:
+                connection.execute(text("SET LOCAL ROLE wealth_app"))
+                with pytest.raises(DBAPIError):
+                    connection.execute(text(statement), {"user_id": str(owner_id)})
+            finally:
+                transaction.rollback()
+
+    deleted = client.delete("/v1/me", headers=owner_headers)
+    assert deleted.status_code == 204
+    with database.owner_engine.connect() as connection:
+        remaining_audit = connection.execute(
+            text("SELECT count(*) FROM audit_log WHERE user_id = :user_id"),
+            {"user_id": str(owner_id)},
+        ).scalar_one()
+    assert remaining_audit == 0
+
+
+def test_a_partner_can_delete_their_account_with_notes_hidden_in_the_family_plan(
+    api_client: tuple[TestClient, str, MigratedDatabase],
+) -> None:
+    client, secret, database = api_client
+    owner_headers, _owner_subject, _owner_email, owner_id = _login(client, secret, "notes-owner")
+    partner_headers, _partner_subject, _partner_email, partner_id = _login(
+        client, secret, "notes-partner"
+    )
+    member_id = UUID(client.get("/v1/members", headers=owner_headers).json()[0]["id"])
+    with system_session(database.owner_engine) as session:
+        session.add(
+            HouseholdAccess(
+                owner_user_id=owner_id,
+                grantee_user_id=partner_id,
+                member_id=member_id,
+                role="partner",
+            )
+        )
+        session.flush()
+        session.add(
+            HighlightDismissal(
+                login_user_id=partner_id,
+                household_owner_id=owner_id,
+                highlight_key="synthetic_notice",
+                fingerprint="0" * 24,
+            )
+        )
+
+    # Signed in to their own space, so the family plan's note goes by cascade.
+    deleted = client.delete("/v1/me", headers=partner_headers)
+    assert deleted.status_code == 204, deleted.text
+    with database.owner_engine.connect() as connection:
+        remaining = connection.scalar(
+            select(func.count())
+            .select_from(HighlightDismissal)
+            .where(HighlightDismissal.login_user_id == partner_id)
+        )
+        partner_rows = connection.scalar(
+            select(func.count()).select_from(AuditLog).where(AuditLog.actor_user_id == partner_id)
+        )
+    assert remaining == 0
+    assert partner_rows == 0
 
 
 def test_member_cannot_be_linked_to_two_logins_or_pending_invites(

@@ -30,7 +30,7 @@ function response(status: number, body = ""): FakeResponse {
 
 function makeHarness(
   fetchImpl: () => FakeResponse,
-  senders: string[] = ["statements@camsonline.com"],
+  senders: string[] = ["synthetic-1@example.test"],
 ) {
   const searches: string[] = [];
   const logs: string[] = [];
@@ -207,9 +207,9 @@ describe("Gmail statement helper", () => {
     const harness = makeHarness(
       () => response(202),
       [
-        "donotreply@camsonline.com",
-        "donotreply@camsonline.com",
-        "ecas@cdslstatement.com",
+        "synthetic-2@example.test",
+        "synthetic-2@example.test",
+        "synthetic-3@example.test",
       ],
     );
 

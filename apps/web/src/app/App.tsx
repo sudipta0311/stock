@@ -7,6 +7,10 @@ import { RouteGuard } from "./RouteGuard";
 import { WakeIndicator } from "./WakeIndicator";
 import { Button, Card } from "../ui";
 
+if (window.location.pathname === "/") {
+  void import("../home/HomePage").catch(() => undefined);
+}
+
 const OfflineWriteSync = lazy(() =>
   import("../money/OfflineWriteSync").then((module) => ({
     default: module.OfflineWriteSync,

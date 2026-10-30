@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from argparse import Namespace
 from decimal import Decimal
+from pathlib import Path
 from uuid import UUID
 
 import pytest
@@ -10,6 +11,25 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from wealth.research import run
 from wealth.research.errors import BudgetExceeded
+
+
+def test_cli_matches_scheduled_workflow_week_selectors() -> None:
+    parser = run.build_parser()
+    start = parser.parse_args(["start", "--week", "2026-W45", "--mode", "weekly"])
+    continue_by_week = parser.parse_args(["continue", "--week", "2026-W45"])
+    continue_by_run_id = parser.parse_args(
+        ["continue", "--run-id", "00000000-0000-0000-0000-000000000045"]
+    )
+    workflow = (
+        Path(__file__).resolve().parents[2] / ".github" / "workflows" / "research-weekly.yml"
+    ).read_text(encoding="utf-8")
+
+    assert start.command == "start" and start.week == "2026-W45" and start.mode == "weekly"
+    assert continue_by_week.command == "continue" and continue_by_week.week == "2026-W45"
+    assert continue_by_run_id.command == "continue" and continue_by_run_id.run_id is not None
+    assert 'start --week "$WEEK" --mode weekly' in workflow
+    assert 'continue --week "$WEEK"' in workflow
+    assert "vars.RESEARCH_ENABLED == 'true'" in workflow
 
 
 def test_cli_returns_exit_code_two_when_the_run_budget_is_exceeded(

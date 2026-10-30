@@ -1,9 +1,28 @@
 # Upgrade Plan: From "Stock LangGraph Platform" to an Indian Investor's Global Wealth Copilot
 
-> **Status:** Proposal, no code changed  
+> **Status:** Implemented through cards C01–C34; see `docs/cards/README.md` for accepted work and remaining owner actions.
 > **Reviewed:** `github.com/sudipta0311/stock` @ `40375c0` (main, 2026-10-25)  
 > **Version:** v2.1 (2026-10-27): adds Render free-tier hosting  
 > **Scope:** Full product + architecture redesign. The current README rules are **not** treated as constraints; every rule below is derived fresh from first principles.
+
+## What changed during implementation
+
+The implementation cards deliver the v1 scope, with these decisions recorded here:
+
+- The PWA uses Vite, React, TypeScript, and a static export instead of Next.js.
+- Azure AI Foundry routes nano, mini, and strong work to `gpt-6-luna` with low, medium, and high reasoning effort. Weekly calls may use Flex; Red Team uses `deepseek-v4-flash`. Configured prices per million tokens are $0.10 input, $0.50 output, and $0.01 cached input for `gpt-6-luna`; $0.15 input and $0.31 output for `deepseek-v4-flash`. The price table lives in `rules/models.yaml`.
+- FX uses ECB's multi-series reference data, with per-currency failure handling and a fallback source. India mutual-fund NAV loads from the AMFI portal host first.
+- User-entered and statement-derived non-market holdings share the `manual_assets` table with typed asset details.
+- The API connects through the restricted `wealth_api` login. A SECURITY DEFINER bootstrap function establishes request context without giving the API owner credentials.
+- CDSL parsing is behind the `CDSL_PARSER_BETA` flag. India company fundamentals come from NSE Integrated Filing XBRL; US coverage is fundamentals-only until a suitable bulk daily-price source is available.
+- Weekly email copy uses reviewed templates; no LLM writes user email copy or determines money figures.
+- `SANDBOX_BUILD=1` is only a local workaround for restricted build sandboxes. CI and deployment use the standard Vite build.
+- Research tilts require independent evidence, stay within policy limits, and decay when current evidence does not reconfirm them.
+- The Denmark guide prioritises an Aktiesparekonto, lists ABIS/UCITS funds, permits US-listed shares, and excludes US-listed ETFs. The India fund check flags fund overlap, direct-versus-regular plans, lagging funds, and a 12-month early warning.
+- The PWA follows the simplicity rules: plain language, one main action, short highlights, collapsed details, and household-aware views for shared access.
+- EPF interest follows the monthly running-balance method and is credited at financial-year end. Household access supports owner, partner, and viewer roles with database-enforced isolation.
+
+The remaining sections describe the original proposal and its historical context; implementation choices above and accepted cards take precedence where they differ.
 
 ### What changed in v2
 

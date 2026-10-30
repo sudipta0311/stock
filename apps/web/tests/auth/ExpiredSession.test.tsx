@@ -6,6 +6,7 @@ import { AuthProvider } from "../../src/auth/AuthContext";
 import { LoginPage } from "../../src/app/AuthPages";
 import { RouteGuard } from "../../src/app/RouteGuard";
 import { clearAuthToken, setAuthToken } from "../../src/auth/token";
+import { queryClient } from "../../src/api/query-client";
 
 function response(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -16,7 +17,9 @@ function response(body: unknown, status = 200): Response {
 
 beforeEach(() => {
   window.sessionStorage.clear();
+  window.history.replaceState({}, "", "/");
   clearAuthToken();
+  queryClient.clear();
   vi.stubEnv("VITE_AUTH_MODE", "dev");
 });
 
@@ -37,6 +40,7 @@ it("returns to the same screen after an expired session is renewed", async () =>
       }),
     );
   vi.stubGlobal("fetch", fetchMock);
+  window.history.replaceState({}, "", "/money");
 
   const user = userEvent.setup();
   render(
@@ -68,6 +72,51 @@ it("returns to the same screen after an expired session is renewed", async () =>
   await user.click(screen.getByRole("button", { name: "Continue" }));
   expect(await screen.findByText("Money screen")).toBeInTheDocument();
   await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+});
+
+it("starts Home requests while a saved profile check is still pending", async () => {
+  setAuthToken("synthetic-saved-token");
+  window.sessionStorage.setItem("wealth.auth.has-profile", "true");
+
+  let finishProfileCheck!: (value: Response) => void;
+  const pendingProfileCheck = new Promise<Response>((resolve) => {
+    finishProfileCheck = resolve;
+  });
+  const paths: string[] = [];
+  const fetchMock = vi.fn<typeof fetch>(async (input) => {
+    const path = new URL(String(input)).pathname;
+    paths.push(path);
+    if (path === "/v1/me") return pendingProfileCheck;
+    return response({});
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(
+    <MemoryRouter initialEntries={["/"]}>
+      <AuthProvider>
+        <p>Home</p>
+      </AuthProvider>
+    </MemoryRouter>,
+  );
+
+  await waitFor(() => {
+    expect(paths).toContain("/v1/me");
+    expect(paths).toContain("/v1/networth");
+    expect(paths).toContain("/v1/plan");
+    expect(paths).toContain("/v1/actions");
+  });
+  expect(paths.indexOf("/v1/networth")).toBeLessThan(paths.indexOf("/v1/me"));
+
+  finishProfileCheck(
+    response({
+      id: "synthetic-user",
+      display_name: "Synthetic User",
+      email: "synthetic@example.test",
+      household_owner_id: "synthetic-household",
+      profile: {},
+    }),
+  );
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
 });
 
 it("shows the signed-out notice once on the login screen", async () => {

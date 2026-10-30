@@ -5,7 +5,13 @@ from pathlib import Path
 import pytest
 
 from wealth.core.dates import MonthYear
-from wealth.rates.reference import RateBook, RateUnavailable, load_rates
+from wealth.rates.reference import (
+    EpfRatePeriod,
+    EpfReference,
+    RateBook,
+    RateUnavailable,
+    load_rates,
+)
 from wealth.schemas.assets import ASSET_MODELS, TraditionalPolicyAsset, parse_asset
 from wealth.schemas.common import AssetType, ValuationMethod
 from wealth.valuation import (
@@ -91,9 +97,43 @@ def test_epf_credits_contributions_and_uses_latest_rate_when_fy_rate_missing(
     )
     valued = value_asset(asset, date(2025, 3, 31), rates=rates)
     assert valued.value_today > valued.principal_so_far
-    assert valued.principal_so_far == Decimal("127500.00")
+    assert valued.principal_so_far == Decimal("130000.00")
     missing_rate = value_asset(asset, date(2026, 7, 1), rates=rates)
     assert "using latest available rate from FY 2024-25" in missing_rate.notes
+
+
+def test_epf_uses_epfo_monthly_running_balance_interest(rates: RateBook) -> None:
+    asset = _asset(
+        "epf",
+        balance="1000000",
+        monthly_employee="13670",
+        balance_as_of="2024-04",
+    )
+
+    epf_rates = rates.model_copy(
+        update={
+            "epf": EpfReference(
+                periods=(
+                    EpfRatePeriod(
+                        fy="2024-25",
+                        rate_pct=Decimal("8.25"),
+                        source_url="https://example.invalid/fake/epf-example",
+                        verified=False,
+                    ),
+                )
+            )
+        }
+    )
+    valued = value_asset(asset, date(2025, 3, 31), rates=epf_rates)
+
+    assert valued.principal_so_far == Decimal("1164040.00")
+    assert valued.accrued_interest == Decimal("88702.76")
+
+    # Mid-May only April has ended: 10,00,000 × 8.25 / 1200 = 6,875.00.
+    for as_of in (date(2024, 4, 30), date(2024, 5, 15)):
+        part_year = value_asset(asset, as_of, rates=epf_rates)
+        assert part_year.principal_so_far == Decimal("1013670.00")
+        assert part_year.accrued_interest == Decimal("6875.00")
 
 
 def test_scss_accrual_resets_on_quarterly_payout_date(rates: RateBook) -> None:
@@ -192,7 +232,8 @@ def test_floating_rates_fall_back_to_the_latest_period_and_locked_nsc_does_not()
 def test_epf_uses_latest_declared_fy_rate_and_raises_without_prior_data() -> None:
     asset = _asset("epf", balance="100000", balance_as_of="2026-04")
     result = value_asset(asset, date(2027, 1, 15))
-    expected_interest = Decimal("100000") * Decimal("0.0825") * Decimal(289) / Decimal(365)
+    # 15 Jan: April to December have ended; January has not.
+    expected_interest = Decimal("100000") * Decimal("0.0825") * Decimal(9) / Decimal(12)
     assert result.value_today == Decimal("100000.00") + expected_interest.quantize(Decimal("0.01"))
     assert "using latest available rate from FY 2024-25" in result.notes
 

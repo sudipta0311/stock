@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, localcontext
 
 from wealth.core.dates import MonthYear, add_months, financial_year, fy_end, fy_start
@@ -201,6 +201,12 @@ def value_epf(
     rates: RateBook | None = None,
     assumed_start: date | None = None,
 ) -> Valuation:
+    """Apply EPFO's monthly running-balance formula and credit interest each 31 March.
+
+    For FY 2024-25, an opening balance of ₹10,00,000 earns ₹82,500 at 8.25%.
+    Twelve ₹13,670 contributions earn for 11 down to 0 months, adding
+    ₹13,670 × 66 × 8.25 / 1200 = ₹6,202.76, for total FY interest of ₹88,702.76.
+    """
     balance_start, notes = _balance_start(asset.balance_as_of, assumed_start)
     if balance_start is None or as_of <= balance_start:
         return _result(
@@ -224,6 +230,7 @@ def value_epf(
         context.prec = 40
         principal = asset.balance
         accrued = Decimal(0)
+        contributions_so_far = Decimal(0)
         cursor = fy_start(balance_start)
         while cursor <= as_of:
             end_of_fy = fy_end(cursor)
@@ -247,28 +254,39 @@ def value_epf(
             if not selected.verified:
                 notes += ("EPF rate from reference table (unverified)",)
 
+            first_month = max(
+                date(segment_start.year, segment_start.month, 1),
+                date(balance_start.year, balance_start.month, 1),
+            )
+            # EPFO credits interest on month-end balances, so a month counts once it ends.
+            last_month = date(segment_end.year, segment_end.month, 1)
+            if add_months(last_month, 1) - timedelta(days=1) != segment_end:
+                last_month = add_months(last_month, -1)
+            month_count = max(
+                0,
+                (last_month.year - first_month.year) * 12
+                + last_month.month
+                - first_month.month
+                + 1,
+            )
             contribution_dates: list[date] = []
-            month = add_months(balance_start.replace(day=1), 1)
-            while month < segment_start:
-                month = add_months(month, 1)
-            while month <= segment_end:
+            month = first_month
+            for _ in range(month_count):
                 contribution_dates.append(month)
                 month = add_months(month, 1)
+
             contributions = monthly_contribution * len(contribution_dates)
-            accrued += (
-                principal
-                * annual_rate
-                * Decimal((segment_end - segment_start).days)
-                / _DAYS_PER_YEAR
-            )
+            monthly_rate = annual_rate / Decimal(12)
+            accrued += principal * monthly_rate * Decimal(month_count)
             for contribution_date in contribution_dates:
-                accrued += (
-                    monthly_contribution
-                    * annual_rate
-                    * Decimal((segment_end - contribution_date).days)
-                    / _DAYS_PER_YEAR
+                months_earned = (
+                    (last_month.year - contribution_date.year) * 12
+                    + last_month.month
+                    - contribution_date.month
                 )
+                accrued += monthly_contribution * monthly_rate * Decimal(months_earned)
             principal += contributions
+            contributions_so_far += contributions
             if segment_end == end_of_fy:
                 principal += accrued
                 accrued = Decimal(0)
@@ -277,7 +295,7 @@ def value_epf(
             principal + accrued,
             None,
             None,
-            asset.balance + monthly_contribution * _months_after(balance_start, as_of),
+            asset.balance + contributions_so_far,
             notes,
         )
 
