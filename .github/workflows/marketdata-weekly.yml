@@ -1,0 +1,47 @@
+name: Weekly company data
+
+on:
+  # Friday evening, so the Saturday research run screens this week's lists and results.
+  schedule:
+    - cron: "0 19 * * 5"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: marketdata-weekly
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      OWNER_DATABASE_URL: ${{ secrets.OWNER_DATABASE_URL }}
+      SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install --no-cache-dir -e ".[api,importer]"
+      - name: Refresh stock lists and company results
+        # Each source commits on its own, so US results land even if the NSE part is slow.
+        # A few companies without usable filings make a source "partial"; only "failed" stops the job.
+        run: |
+          failed=0
+          for source in universes edgar nse_fundamentals; do
+            python -m wealth.marketdata.refresh --only "$source" > "refresh-$source.json" || true
+            cat "refresh-$source.json"
+            status=$(jq -r '.status' "refresh-$source.json" 2>/dev/null || true)
+            case "${status:-failed}" in
+              succeeded) ;;
+              partial) echo "::warning::$source refreshed with some gaps." ;;
+              *) echo "::error::$source refresh failed."; failed=1 ;;
+            esac
+          done
+          exit "$failed"

@@ -28,6 +28,7 @@ _REQUIRED_WORKFLOWS = {
     "marketdata-abroad.yml",
     "marketdata-daily.yml",
     "marketdata-monthly.yml",
+    "marketdata-weekly.yml",
     "policy-weekly.yml",
     "research-weekly.yml",
     "sentinel-daily.yml",

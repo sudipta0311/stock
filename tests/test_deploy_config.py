@@ -97,3 +97,29 @@ def test_deploy_config_rejects_the_e2e_dev_auth_switch(tmp_path: Path) -> None:
         "e2e dev-token auth switch" in issue
         for issue in _workflow_issues(tmp_path, workflow, document)
     )
+
+
+def test_weekly_company_data_loads_stock_lists_before_results_and_before_research() -> None:
+    # The Saturday screener only ranks stocks on these lists, scored on these results.
+    from wealth.marketdata.refresh import _SOURCES
+
+    workflows = Path(__file__).resolve().parents[1] / ".github" / "workflows"
+
+    def load(name: str) -> dict:
+        return yaml.load((workflows / name).read_text("utf-8"), Loader=yaml.BaseLoader)
+
+    weekly = load("marketdata-weekly.yml")
+    research = load("research-weekly.yml")
+    script = next(
+        step["run"]
+        for step in weekly["jobs"]["refresh"]["steps"]
+        if "wealth.marketdata.refresh" in step.get("run", "")
+    )
+    loop = next(line for line in script.splitlines() if line.strip().startswith("for source in"))
+    sources = loop.split(" in ", 1)[1].removesuffix("; do").split()
+
+    assert sources == ["universes", "edgar", "nse_fundamentals"]
+    assert set(sources) <= set(_SOURCES)
+    assert weekly["on"]["schedule"][0]["cron"] == "0 19 * * 5"
+    assert research["on"]["schedule"][0]["cron"] == "0 0 * * 6"
+    assert weekly["jobs"]["refresh"]["env"]["SEC_USER_AGENT"] == "${{ secrets.SEC_USER_AGENT }}"

@@ -28,7 +28,7 @@
 
 5. **Set up email and push.** Verify your email domain with SPF, DKIM, and DMARC. Check the provider’s free sending limit. Generate push keys in a terminal with `python -m wealth.alerts.push --generate-vapid`. Put the public key in Render `VITE_VAPID_PUBLIC_KEY` and GitHub `VAPID_PUBLIC_KEY`; put the private key only in GitHub `VAPID_PRIVATE_KEY`.
 
-6. **Run the first checks.** Open `https://wealth-api.onrender.com/healthz?deep=1`. Sign in and finish setup. Upload an account statement (CAS). Run `marketdata-daily` and `policy-weekly` from **Actions**. Set GitHub `EMAIL_PROVIDER` to `dry_run` and run `alerts-weekly` once. Restore your email provider before sending real emails.
+6. **Run the first checks.** Open `https://wealth-api.onrender.com/healthz?deep=1`. Sign in and finish setup. Upload an account statement (CAS). Run `marketdata-daily`, `marketdata-weekly` and `policy-weekly` from **Actions**. Set GitHub `EMAIL_PROVIDER` to `dry_run` and run `alerts-weekly` once. Restore your email provider before sending real emails.
 
 7. **Check privacy before inviting anyone.** Keep the API and database in EU regions. Accept the data agreements from Render, Neon, and the email provider. Azure AI Foundry (`stockllm`, East US) receives market facts only. The CI guard `test_research_model_calls_do_not_read_personal_records_or_prompt_fields` blocks personal record fields in research model calls. The PWA notice must explain why data is used, the legal basis, how long it is kept, service providers, and access, correction, export, and deletion rights. Email must be opt-in. Device storage is for app functions only; do not add tracking cookies. Replace the breach-contact placeholder before launch.
 
