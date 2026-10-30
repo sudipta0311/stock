@@ -109,6 +109,27 @@ def classify_amfi_section(section: str) -> AmfiCategory | None:
     return None
 
 
+# AMFI files many overseas funds under Indian sections ("Equity Scheme - Sectoral/
+# Thematic" for a US bluechip fund, "Index Funds" for an S&P 500 fund), so an Indian
+# equity section is checked against the scheme name. "S&P BSE ..." indices are Indian.
+_OVERSEAS_SCHEME = re.compile(
+    r"\b(?:nasdaq|nyse|hang seng|fang|global|international|overseas|world|"
+    r"u\.?s\.?|usa|america|american|japan|china|greater china|europe|european|"
+    r"emerging markets?|taiwan|asean|brazil)(?![a-z])|\bs(?:&| and )p\s*500\b",
+    re.IGNORECASE,
+)
+# Indian funds despite the name: S&P BSE indices, and SBI Magnum Global (Indian MNCs).
+_INDIAN_SP_INDEX = re.compile(r"\bs(?:&| and )p\s*bse\b|\bmagnum global\b", re.IGNORECASE)
+
+
+def _with_scheme_market(section: AmfiCategory | None, name: str) -> AmfiCategory | None:
+    if section is None or section.sleeve != "equity_india":
+        return section
+    if _INDIAN_SP_INDEX.search(name) or not _OVERSEAS_SCHEME.search(name):
+        return section
+    return AmfiCategory("mf:equity_global", "equity_global", sub_category="International")
+
+
 def _equity_sub_category(value: str) -> str | None:
     if "sectoral" in value or "thematic" in value:
         return "Sectoral/Thematic"
@@ -193,6 +214,7 @@ def parse_nav_all(text: str) -> list[AmfiNav]:
                 warnings.warn(
                     f"AMFI NAV row {line_number} has an invalid ISIN", RuntimeWarning, stacklevel=2
                 )
+            scheme_section = _with_scheme_market(section, name)
             rows.append(
                 AmfiNav(
                     scheme_code=code,
@@ -203,10 +225,10 @@ def parse_nav_all(text: str) -> list[AmfiNav]:
                     option=option or None,
                     nav=nav,
                     as_of=date_value,
-                    category=section.category if section else None,
-                    sleeve=section.sleeve if section else None,
-                    tax_note=section.tax_note if section else None,
-                    sub_category=section.sub_category if section else None,
+                    category=scheme_section.category if scheme_section else None,
+                    sleeve=scheme_section.sleeve if scheme_section else None,
+                    tax_note=scheme_section.tax_note if scheme_section else None,
+                    sub_category=scheme_section.sub_category if scheme_section else None,
                     plan_type=classify_amfi_scheme_name(name, plan, option)[0],
                     option_type=classify_amfi_scheme_name(name, plan, option)[1],
                 )

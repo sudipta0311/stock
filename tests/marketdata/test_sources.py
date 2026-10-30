@@ -494,3 +494,35 @@ def test_source_fetch_wrappers_use_mocked_http(monkeypatch: pytest.MonkeyPatch) 
     assert len(fred.fetch_dexinus(fetched_on=date(2026, 10, 28))) == 10
     assert len(nse.fetch_equity_list()) == 14
     assert len(nse.fetch_etf_list()) == 7
+
+
+@pytest.mark.parametrize(
+    ("section", "scheme", "expected_sleeve"),
+    [
+        ("Equity Scheme - Sectoral/Thematic", "Synthetic US Bluechip Equity Fund", "equity_global"),
+        ("Other Scheme - Index Funds", "Synthetic S and P 500 Index Fund", "equity_global"),
+        ("Other Scheme - Index Funds", "Synthetic NYSE FANG+ Fund of Fund", "equity_global"),
+        (
+            "Equity Scheme - Sectoral/Thematic",
+            "Synthetic Feeder - U.S. Opportunities",
+            "equity_global",
+        ),
+        ("Other Scheme - Index Funds", "Synthetic S&P BSE Sensex Index Fund", "equity_india"),
+        ("Equity Scheme - Sectoral/Thematic", "SBI Magnum Global Fund", "equity_india"),
+        ("Equity Scheme - Sectoral/Thematic", "Synthetic Business Cycle Fund", "equity_india"),
+        ("Debt Scheme - Short Duration Fund", "Synthetic US Dollar Bond Fund", "debt"),
+    ],
+)
+def test_overseas_funds_in_indian_amfi_sections_count_as_abroad(
+    section: str, scheme: str, expected_sleeve: str
+) -> None:
+    text = (
+        "Scheme Code;ISIN Div Payout/ ISIN Growth;ISIN Div Reinvestment;Scheme Name;Plan;"
+        "Option;Net Asset Value;Date\n"
+        f"Open Ended Schemes({section})\n"
+        f"135762;INF846K01WO1;-;{scheme};Direct;Growth;10.5;27-Oct-2026\n"
+    )
+
+    (row,) = amfi.parse_nav_all(text)
+
+    assert row.sleeve == expected_sleeve
