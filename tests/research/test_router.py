@@ -328,6 +328,63 @@ def test_flex_capacity_failures_fall_back_to_default_service_tier(
     assert [row["status"] for row in rows] == ["failed", "failed", "failed", "success"]
 
 
+def test_token_rate_limits_wait_as_azure_asks_and_keep_the_flex_tier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[dict[str, Any]] = []
+    sleeps: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(_post_body(request))
+        if len(requests) <= 5:
+            message = "Requests have exceeded token rate limit. Please retry later."
+            return httpx.Response(
+                429, headers={"retry-after": "7"}, json={"error": {"message": message}}
+            )
+        return httpx.Response(200, json=_completion('{"value":"ready"}'))
+
+    monkeypatch.setenv("FOUNDRY_ENDPOINT", "https://foundry.example.test/openai/v1/")
+    monkeypatch.setenv("FOUNDRY_API_KEY", "synthetic-test-key")
+    router = ModelRouter(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        audit_writer=lambda _row: None,
+        sleep=sleeps.append,
+    )
+    result = router.complete(
+        "nano",
+        [{"role": "user", "content": "Review synthetic prices."}],
+        schema=Reply,
+        max_output_tokens=32,
+        run_ctx=_context(),
+    )
+
+    assert result.parsed == Reply(value="ready")
+    assert sleeps == [7.0, 7.0, 8.0, 16.0, 32.0]
+    assert {request.get("service_tier") for request in requests} == {"flex"}
+
+
+def test_red_team_prompts_too_large_for_the_deepseek_quota_go_to_the_fallback_tier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    models: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        models.append(_post_body(request)["model"])
+        return httpx.Response(200, json=_completion('{"value":"ready"}'))
+
+    router = _router(handler, monkeypatch, [])
+    for content in ("Short synthetic dossier.", "Synthetic evidence row. " * 2000):
+        router.complete(
+            "redteam",
+            [{"role": "user", "content": content}],
+            schema=Reply,
+            max_output_tokens=32,
+            run_ctx=_context(),
+        )
+
+    assert models == ["deepseek-v4-flash", "gpt-6-luna"]
+
+
 def test_unauthorized_response_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
     requests = 0
 

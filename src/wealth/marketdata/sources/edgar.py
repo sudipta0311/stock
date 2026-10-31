@@ -45,7 +45,12 @@ _SIMPLE_TAGS: dict[str, tuple[tuple[str, str], ...]] = {
         ("us-gaap", "CashCashEquivalentsRestrictedCashAndRestrictedCashEquivalents"),
     ),
     "current_liabilities": (("us-gaap", "LiabilitiesCurrent"),),
-    "shares_outstanding": (("dei", "EntityCommonStockSharesOutstanding"),),
+    # Multi-class issuers report cover-page shares per class, which companyfacts omits;
+    # the diluted weighted average is the closest single count they all file.
+    "shares_outstanding": (
+        ("dei", "EntityCommonStockSharesOutstanding"),
+        ("us-gaap", "WeightedAverageNumberOfDilutedSharesOutstanding"),
+    ),
     "eps_diluted": (
         ("us-gaap", "EarningsPerShareDiluted"),
         ("us-gaap", "EarningsPerShareBasicAndDiluted"),

@@ -197,6 +197,36 @@ def test_sp500_sector_table_maps_tickers_to_gics_sectors() -> None:
     }
 
 
+def test_edgar_uses_diluted_weighted_shares_when_cover_page_shares_are_missing() -> None:
+    payload = {
+        "cik": 1,
+        "facts": {
+            "us-gaap": {
+                "WeightedAverageNumberOfDilutedSharesOutstanding": {
+                    "units": {
+                        "shares": [
+                            {
+                                "start": "2026-04-01",
+                                "end": "2026-06-30",
+                                "val": "64000000",
+                                "form": "10-Q",
+                                "filed": "2026-07-28",
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+    }
+
+    observations = edgar.parse_company_facts(payload, as_of=date(2026, 9, 30))
+
+    shares = [row for row in observations if row.metric == "shares_outstanding"]
+    assert [(row.period_end, row.value) for row in shares] == [
+        (date(2026, 6, 30), Decimal("64000000"))
+    ]
+
+
 def test_edgar_turns_year_to_date_cash_flow_and_annual_eps_into_four_quarters() -> None:
     def fact(start: str, end: str, value: str, form: str, filed: str) -> dict[str, str]:
         return {"start": start, "end": end, "val": value, "form": form, "filed": filed}

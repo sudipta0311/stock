@@ -43,7 +43,8 @@ def _candidate(symbol: str) -> dict[str, Any]:
         "market": "IN",
         "sector": "Services",
         "as_of": "2026-10-30",
-        "price": "12.5",
+        # Six places, like the implied US closes from the SPY holdings file.
+        "price": "12.505001",
         "quant_decile": 10,
         "composite": {"ALPHA": "3.0", "BETA": "2.0", "GAMMA": "1.0"}[symbol],
     }
@@ -286,6 +287,7 @@ def test_three_shortlisted_dossiers_follow_the_code_owned_gates() -> None:
         "confidence",
     }
     assert idea.dossier_status == "APPROVED"
+    assert idea.price == Decimal("12.51")
     assert {item["security_id"] for item in pack["ideas"]} <= {
         item["security_id"] for item in candidates
     }
@@ -386,6 +388,68 @@ def test_analyst_uses_at_most_six_tools_per_dossier() -> None:
     team.analyse(candidate, dossier, {})
 
     assert len(tool_audit) == 6
+
+
+def test_an_analyst_reply_outside_the_schema_gets_a_structured_retry() -> None:
+    candidate = _candidate("ALPHA")
+    registry = ToolRegistry()
+    registry.register(
+        "factor_snapshot",
+        lambda args: ({"security_id": args["security_id"], "value": "15"}, None),
+    )
+    schema_calls: list[type[Any]] = []
+
+    def fixture(
+        _calls: int,
+        _tier: str,
+        messages: list[dict[str, Any]],
+        schema: type[Any] | None,
+        _tools: Any,
+        _context: RunContext,
+    ) -> Any:
+        if schema is AnalystOutput:
+            schema_calls.append(schema)
+            return {
+                "claims": [],
+                "drivers": [],
+                "risks": [],
+                "geo_exposure": {},
+                "fundamental_verdict": "NEUTRAL",
+                "open_questions": ["More data is needed."],
+            }
+        if not any(message.get("role") == "tool" for message in messages):
+            return {
+                "tool_calls": [
+                    {
+                        "id": "request-1",
+                        "type": "function",
+                        "function": {
+                            "name": "factor_snapshot",
+                            "arguments": json.dumps({"security_id": candidate["security_id"]}),
+                        },
+                    }
+                ]
+            }
+        return "The company looks steady; here is my summary in plain words."
+
+    router = FakeRouter()
+    router.register("mini", fixture)
+    context = RunContext(
+        budget=RunBudget(max_usd=Decimal("1"), max_calls=20),
+        run_id="00000000-0000-0000-0000-000000000003",
+        dossier_budget=DossierBudget(max_usd=Decimal("0.05"), max_calls=100),
+    )
+    team = ResearchTeam(router, registry, context)
+    dossier = Dossier(
+        dossier_id=candidate["dossier_id"],
+        security=DossierSecurity(id=candidate["security_id"], market="IN", type="EQUITY"),
+        stage=Stage.SCREENED,
+    )
+
+    analysed, _results = team.analyse(candidate, dossier, {})
+
+    assert schema_calls == [AnalystOutput]
+    assert analysed.stage == Stage.ANALYSED
 
 
 def test_uncited_red_team_veto_is_downgraded_to_watch() -> None:

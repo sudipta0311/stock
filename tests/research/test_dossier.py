@@ -73,6 +73,52 @@ def test_grounding_rejects_a_number_absent_from_the_cited_result() -> None:
     assert "16.8" in failures[0]
 
 
+def test_grounding_accepts_a_cited_value_rounded_to_the_claims_precision() -> None:
+    evidence = {
+        "tool-1": {
+            "fcf_yield_pct": "18.88104007153400805429701392",
+            "momentum": "-0.3871180994932996131594742704",
+            "earnings_yield_vs_sector": "2.908146417744015776562178157",
+        }
+    }
+    accepted = _dossier(
+        claims=[_fact_claim("Free-cash-flow yield is 18.9%, momentum -0.3871, about 2.9 times.")]
+    )
+    overstated = _dossier(claims=[_fact_claim("Free-cash-flow yield is 19.0%.")])
+
+    assert validate_grounding(accepted, evidence) == []
+    failures = validate_grounding(overstated, evidence)
+    assert len(failures) == 1
+    assert "unsupported numbers 19" in failures[0]
+
+
+def test_grounding_accepts_rescaled_values_and_percentages_of_fractions() -> None:
+    evidence = {
+        "tool-1": {
+            "revenue": "1572500000",
+            "net_income": "221200000",
+            "fcf_yield": "0.07000074464851961859764166882",
+            "segment_revenue_inr": "12340000000",
+            "dist_from_200dma": "-0.0312",
+            "period": "2026",
+        }
+    }
+    accepted = _dossier(
+        claims=[
+            _fact_claim(
+                "Q3 2026 revenue was $1.573B and net income $221.2M; FCF yield 7.0%; "
+                "segment revenue 1,234 crore; price 3.1% below its 200-day average."
+            )
+        ]
+    )
+    overstated = _dossier(claims=[_fact_claim("Revenue was $1.7B with a 7.5% FCF yield.")])
+
+    assert validate_grounding(accepted, evidence) == []
+    failures = validate_grounding(overstated, evidence)
+    assert len(failures) == 1
+    assert "unsupported numbers 1.7, 7.5" in failures[0]
+
+
 def test_grounding_rejects_unknown_tool_call_ids() -> None:
     dossier = _dossier(claims=[_fact_claim("ROCE improved to 16.8%", "unknown-tool")])
     failures = validate_grounding(dossier, {})

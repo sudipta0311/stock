@@ -16,6 +16,8 @@ _DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[3] / "rules" / "models.y
 class TierConfig:
     deployment: str
     reasoning_effort: str | None = None
+    max_input_tokens: int | None = None
+    fallback_tier: str | None = None
 
 
 @dataclass(frozen=True)
@@ -54,9 +56,22 @@ class ModelConfig:
                     if values.get("reasoning_effort") is not None
                     else None
                 ),
+                max_input_tokens=(
+                    int(values["max_input_tokens"])
+                    if values.get("max_input_tokens") is not None
+                    else None
+                ),
+                fallback_tier=(
+                    str(values["fallback_tier"])
+                    if values.get("fallback_tier") is not None
+                    else None
+                ),
             )
             for name, values in raw["tiers"].items()
         }
+        for name, tier in tiers.items():
+            if tier.fallback_tier is not None and tier.fallback_tier not in tiers:
+                raise ValueError(f"Tier {name} falls back to an unknown tier")
         prices = {
             name: ModelPrice(
                 input=Decimal(str(values["input"])),

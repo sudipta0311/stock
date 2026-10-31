@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, TypedDict
 from uuid import UUID
 
@@ -583,7 +583,13 @@ def build_research_graph(
                 "symbol": str(candidate["symbol"]),
                 "market": dossier.security.market,
                 "sector": str(candidate["sector"]),
-                "price": str(candidate["price"]),
+                # Implied US closes carry six places; the policy takes prices to the cent.
+                "price": format(
+                    Decimal(str(candidate["price"])).quantize(
+                        Decimal("0.01"), rounding=ROUND_HALF_UP
+                    ),
+                    "f",
+                ),
                 "quant_decile": int(candidate["quant_decile"]),
                 "dossier_status": "APPROVED",
                 "valuation_percentile": format(dossier.valuation_percentile or Decimal("50"), "f"),

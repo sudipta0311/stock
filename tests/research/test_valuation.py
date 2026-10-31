@@ -56,6 +56,24 @@ def test_own_history_p_e_uses_three_year_monthly_sample() -> None:
     assert result.discount_rate_pct == Decimal("9")
 
 
+def test_india_without_cash_flows_is_valued_on_sector_yield_but_us_is_not() -> None:
+    def verdict(market: str, earnings_yield: str) -> str:
+        return calculate_valuation_stats(
+            security_id="synthetic-security",
+            market=market,
+            price=Decimal("100"),
+            factors=_factors(earnings_yield, None),
+            sector_earnings_yields=[Decimal("0.04")],
+            historical_pe=[],
+            rules=ResearchRules.load(),
+        ).verdict
+
+    assert verdict("IN", "0.05") == "CHEAP"
+    assert verdict("IN", "0.04") == "FAIR"
+    assert verdict("IN", "0.02") == "EXPENSIVE"
+    assert verdict("US", "0.05") == "UNKNOWN"
+
+
 def test_missing_valuation_inputs_stay_unknown() -> None:
     result = calculate_valuation_stats(
         security_id="synthetic-security",

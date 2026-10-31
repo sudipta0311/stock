@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Any, Literal
 from uuid import uuid4
@@ -204,6 +204,62 @@ def _normalise_number(value: str) -> str:
     return format(number, "f")
 
 
+# Claims round and rescale cited values ("$1.573B", "7.0%" for 0.0700..., "Rs 1,234 crore").
+_CLAIM_NUMBER_PATTERN = re.compile(
+    r"(?<![\w.])(?P<number>[-+]?(?:\d{1,3}(?:,\d{2,3})+|\d+)(?:\.\d+)?)"
+    r"(?:(?P<percent>%)|\s?(?P<scale>billion|bn|million|mn|thousand|crores?|cr|lakhs?|[BMK])"
+    r"(?![A-Za-z]))?(?![\w])"
+)
+_SCALE_POWERS = {
+    "billion": 9,
+    "bn": 9,
+    "b": 9,
+    "million": 6,
+    "mn": 6,
+    "m": 6,
+    "thousand": 3,
+    "k": 3,
+    "crore": 7,
+    "crores": 7,
+    "cr": 7,
+    "lakh": 5,
+    "lakhs": 5,
+}
+
+
+def _rounds_to(value: str, target: Decimal, quantum: Decimal) -> bool:
+    # Words often carry the sign ("3.1% below its average"), so magnitudes are compared.
+    try:
+        return abs(Decimal(value).quantize(quantum, rounding=ROUND_HALF_UP)) == abs(target)
+    except InvalidOperation:
+        return False
+
+
+def _supported(match: re.Match[str], evidence_numbers: set[str]) -> bool:
+    """A claim may quote a cited value at its own precision and scale.
+
+    Tool results carry full Decimal precision, so exact matching rejected every rounded
+    figure ("18.9%" for 18.8810...), including the screener's own four-place factor summary,
+    and every value a reader would rescale ("$221.2M", "7.0%" for 0.0700...).
+    """
+    raw = match.group("number")
+    digits = raw.replace(",", "")
+    places = len(digits.split(".", 1)[1]) if "." in digits else 0
+    number = Decimal(digits)
+    power = _SCALE_POWERS.get((match.group("scale") or "").casefold(), 0)
+    target = number.scaleb(power)
+    quantum = Decimal(1).scaleb(power - places)
+    if any(_rounds_to(value, target, quantum) for value in evidence_numbers):
+        return True
+    if match.group("percent"):
+        # A ratio stored as a fraction is quoted as a percentage.
+        fraction_quantum = Decimal(1).scaleb(-places - 2)
+        return any(
+            _rounds_to(value, number.scaleb(-2), fraction_quantum) for value in evidence_numbers
+        )
+    return False
+
+
 def _numbers(value: str) -> set[str]:
     return {_normalise_number(match.group(0)) for match in _NUMBER_PATTERN.finditer(value)}
 
@@ -248,15 +304,24 @@ def validate_grounding(dossier: Dossier, tool_calls: Any) -> list[str]:
         if missing_ids:
             failures.append(f"{claim.id}: unknown tool_call_id {', '.join(missing_ids)}")
             continue
-        claim_numbers = _numbers(claim.text)
         evidence_numbers: set[str] = set()
         for identifier in cited_ids:
             evidence_text = _json_text(_result_payload(calls[identifier]))
             evidence_numbers.update(_numbers(evidence_text))
-            # Field names carry periods ("momentum_12_1_pct", "volatility_1y_pct") that
-            # the model rightly writes as "12-1 momentum" or "1-year volatility".
-            evidence_numbers.update(_numbers(re.sub(r"[_]|(?<=\d)y\b", " ", evidence_text)))
-        unsupported = sorted(claim_numbers - evidence_numbers, key=Decimal)
+            # Field names carry periods ("momentum_12_1_pct", "volatility_1y_pct",
+            # "dist_from_200dma") that the model rightly writes as "12-1 momentum",
+            # "1-year volatility" or "200-day average".
+            evidence_numbers.update(
+                _numbers(re.sub(r"_|(?<=\d)(?=(?:dma|[dwmy])\b)", " ", evidence_text))
+            )
+        unsupported = sorted(
+            {
+                _normalise_number(match.group("number"))
+                for match in _CLAIM_NUMBER_PATTERN.finditer(claim.text)
+                if not _supported(match, evidence_numbers)
+            },
+            key=Decimal,
+        )
         if unsupported:
             failures.append(f"{claim.id}: unsupported numbers {', '.join(unsupported)}")
     return failures

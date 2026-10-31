@@ -9,6 +9,8 @@ from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from typing import Protocol
 
+_MAX_PLAUSIBLE_YIELD = Decimal("0.4")
+
 PriceSeries = Iterable[tuple[date, Decimal]]
 
 
@@ -175,6 +177,12 @@ def _last_four_quarters(rows: Sequence[FundamentalRow]) -> list[FundamentalRow] 
     return selected
 
 
+def _plausible_yield(value: Decimal | None) -> Decimal | None:
+    # Beyond 40% the price and the per-share filings disagree, usually after a stock split
+    # the filings have not caught up with, so the yield is missing rather than a bargain.
+    return value if value is None or abs(value) <= _MAX_PLAUSIBLE_YIELD else None
+
+
 def _ttm(facts: dict[tuple[str, date, str], FundamentalRow], metric: str) -> Decimal | None:
     rows = _last_four_quarters(_metric_rows(facts, metric, "Q"))
     return sum((row.value for row in rows), Decimal(0)) if rows is not None else None
@@ -261,14 +269,14 @@ def fundamental_factors(
         if ttm_net_income is not None and equity is not None and equity > 0
         else None
     )
-    earnings_yield = (
+    earnings_yield = _plausible_yield(
         ttm_eps / price if ttm_eps is not None and price is not None and price > 0 else None
     )
     ttm_operating_cash_flow = _ttm(selected, "operating_cash_flow")
     ttm_capex = _ttm(selected, "capex")
     shares = _latest_value(selected, "shares_outstanding")
     market_cap = price * shares if price is not None and shares is not None and price > 0 else None
-    fcf_yield = (
+    fcf_yield = _plausible_yield(
         (ttm_operating_cash_flow - ttm_capex) / market_cap
         if ttm_operating_cash_flow is not None
         and ttm_capex is not None

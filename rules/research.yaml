@@ -11,3 +11,6 @@ valuation:
   expensive_pe_percentile_min: "67"
   cheap_earnings_yield_vs_sector: "1.25"
   expensive_earnings_yield_vs_sector: "0.75"
+  # India's quarterly results carry no cash-flow statement, so its sector-relative
+  # earnings yield decides alone. US filings have cash flows, which stay required.
+  cash_flow_optional_markets: [IN]

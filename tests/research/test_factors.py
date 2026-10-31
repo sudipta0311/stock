@@ -116,6 +116,19 @@ def test_own_pe_percentile_waits_for_ten_years_of_monthly_history() -> None:
     assert pe_percentile_own_10y(Decimal("60"), history, as_of) == Decimal("0.5")
 
 
+def test_a_split_sized_yield_is_treated_as_missing() -> None:
+    known_at = datetime(2026, 1, 20, tzinfo=UTC)
+    quarter_ends = [date(2025, 3, 31), date(2025, 6, 30), date(2025, 9, 30), date(2025, 12, 31)]
+    facts = [Fact("eps_diluted", on, "Q", Decimal("30"), known_at, known_at) for on in quarter_ends]
+
+    # Pre-split EPS of 120 a year against a post-split price of 150 reads as an 80% yield.
+    after_split = fundamental_factors(facts, as_of=date(2026, 1, 31), price=Decimal("150"))
+    before_split = fundamental_factors(facts, as_of=date(2026, 1, 31), price=Decimal("3750"))
+
+    assert after_split.earnings_yield is None
+    assert before_split.earnings_yield == Decimal("0.032")
+
+
 def test_fundamental_factor_formulas_use_quarters_and_available_balance_values() -> None:
     quarter_ends = [
         date(2024, 3, 31),

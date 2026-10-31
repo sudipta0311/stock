@@ -12,7 +12,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from wealth.core.plain_language import find_banned_terms, sentence_word_counts
 from wealth.research.dossier import (
@@ -401,7 +401,12 @@ class ResearchTeam:
                 tool_choice="auto",
             )
             if not response.tool_calls:
-                analyst = self._parse_analyst(response.raw_text, response.parsed)
+                # A free-text answer that misses the schema goes to the structured call
+                # below, which enforces the schema and can repair the reply.
+                try:
+                    analyst = self._parse_analyst(response.raw_text, response.parsed)
+                except (SchemaError, ValidationError):
+                    analyst = None
                 break
             accepted_calls = list(response.tool_calls[: 6 - call_count])
             messages.append(

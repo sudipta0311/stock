@@ -20,10 +20,10 @@ import httpx
 from openai import APIConnectionError, APIStatusError, APITimeoutError, OpenAI
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import Engine, text
-from tenacity import Retrying, retry_if_exception, stop_after_attempt, wait_random_exponential
+from tenacity import RetryCallState, Retrying, retry_if_exception, wait_random_exponential
 
 from wealth.db.session import system_session
-from wealth.research.config import ModelConfig, ModelPrice
+from wealth.research.config import ModelConfig, ModelPrice, TierConfig
 from wealth.research.dossier import DossierBudget
 from wealth.research.errors import BudgetExceeded, PromptPolicyError, SchemaError
 
@@ -31,6 +31,9 @@ SchemaT = TypeVar("SchemaT", bound=BaseModel)
 _EMAIL_PATTERN = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 _PAN_PATTERN = re.compile(r"\b[A-Z]{5}[0-9]{4}[A-Z]\b")
 _MAX_AUDIT_BYTES = 20 * 1024
+# A token-per-minute 429 clears within a minute; wait as Azure asks, up to this long.
+_RATE_LIMIT_ATTEMPTS = 8
+_MAX_RATE_LIMIT_WAIT_SECONDS = 60.0
 
 
 def strict_json_schema(node: Any) -> Any:
@@ -186,7 +189,7 @@ class ModelRouter:
         if tools and schema is not None:
             raise ValueError("Tool calls and a response schema must use separate requests")
         self._guard_prompt(normalized_messages)
-        tier_config = self.config.tiers[tier]
+        tier_config = self._tier_for_prompt(tier, normalized_messages, tools)
         use_flex = (
             tier_config.deployment == "gpt-6-luna"
             and run_ctx.mode in self.config.flex.enabled_for_modes
@@ -333,9 +336,29 @@ class ModelRouter:
         tool_choice: str | Mapping[str, Any],
     ) -> _CallResult:
         attempts = max(1, self.config.flex.max_flex_retries) if flex else 3
+        quick_wait = wait_random_exponential(multiplier=0.1, max=2)
+
+        def rate_limited(state: RetryCallState) -> bool:
+            error = state.outcome.exception() if state.outcome else None
+            return error is not None and self._is_rate_limited(error)
+
+        def stop(state: RetryCallState) -> bool:
+            limit = _RATE_LIMIT_ATTEMPTS if rate_limited(state) else attempts
+            return state.attempt_number >= limit
+
+        def wait(state: RetryCallState) -> float:
+            if not rate_limited(state):
+                return quick_wait(state)
+            # Azure meters tokens per minute, so a 2-second retry lands in the same window.
+            error = state.outcome.exception() if state.outcome else None
+            # Some deployments answer `retry-after: 0`, so the backoff is a floor.
+            hinted = self._retry_after_seconds(error) if error is not None else None
+            backoff = 2.0 * 2 ** (state.attempt_number - 1)
+            return min(_MAX_RATE_LIMIT_WAIT_SECONDS, max(hinted or 0.0, backoff))
+
         retrying = Retrying(
-            stop=stop_after_attempt(attempts),
-            wait=wait_random_exponential(multiplier=0.1, max=2),
+            stop=stop,
+            wait=wait,
             retry=retry_if_exception(self._is_retryable),
             sleep=self.sleep,
             reraise=True,
@@ -644,6 +667,41 @@ class ModelRouter:
     def _error_body_text(error: BaseException) -> str:
         body = getattr(error, "body", None)
         return f"{body or ''} {error}".lower()
+
+    def _tier_for_prompt(
+        self,
+        tier: str,
+        messages: Sequence[Mapping[str, Any]],
+        tools: Sequence[Mapping[str, Any]] | None,
+    ) -> TierConfig:
+        """Route a prompt the deployment's per-minute quota can never admit to its fallback."""
+        config = self.config.tiers[tier]
+        if config.max_input_tokens is None or config.fallback_tier is None:
+            return config
+        size = len(json.dumps([messages, tools or []], ensure_ascii=False, default=str))
+        # Three characters a token over-estimates English and JSON, so this errs early.
+        if size // 3 <= config.max_input_tokens:
+            return config
+        return self.config.tiers[config.fallback_tier]
+
+    @classmethod
+    def _is_rate_limited(cls, error: BaseException) -> bool:
+        """A 429 for the deployment's per-minute quota, not a lack of flex capacity."""
+        return getattr(error, "status_code", None) == 429 and "rate limit" in cls._error_body_text(
+            error
+        )
+
+    @staticmethod
+    def _retry_after_seconds(error: BaseException) -> float | None:
+        headers = getattr(getattr(error, "response", None), "headers", None) or {}
+        for name, scale in (("retry-after-ms", 0.001), ("retry-after", 1.0)):
+            try:
+                seconds = float(headers.get(name, "")) * scale
+            except ValueError:
+                continue
+            if math.isfinite(seconds) and seconds >= 0:
+                return seconds
+        return None
 
     @classmethod
     def _is_capacity_error(cls, error: BaseException) -> bool:

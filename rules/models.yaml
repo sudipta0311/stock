@@ -3,7 +3,9 @@ tiers:
   nano: {deployment: gpt-6-luna, reasoning_effort: low}
   mini: {deployment: gpt-6-luna, reasoning_effort: medium}
   strong: {deployment: gpt-6-luna, reasoning_effort: high}
-  redteam: {deployment: deepseek-v4-flash}
+  # deepseek-v4-flash allows 10,000 tokens a minute, so a larger prompt can never pass;
+  # those go to `strong`. Raise the deployment's quota in Foundry to keep them on DeepSeek.
+  redteam: {deployment: deepseek-v4-flash, max_input_tokens: 8000, fallback_tier: strong}
 prices_usd_per_1m:
   gpt-6-luna: {input: "0.10", output: "0.50", cached_input: "0.01", flex_factor: "0.5"}
   deepseek-v4-flash: {input: "0.15", output: "0.31"}

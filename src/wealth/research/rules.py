@@ -23,6 +23,7 @@ class ResearchRules:
     cheap_earnings_yield_vs_sector: Decimal
     expensive_earnings_yield_vs_sector: Decimal
     macro_max_usd: Decimal = Decimal("0.05")
+    cash_flow_optional_markets: tuple[str, ...] = ()
 
     @classmethod
     def load(cls, path: Path | None = None) -> ResearchRules:
@@ -46,6 +47,9 @@ class ResearchRules:
                 str(valuation["expensive_earnings_yield_vs_sector"])
             ),
             macro_max_usd=Decimal(str(raw.get("macro_max_usd", "0.05"))),
+            cash_flow_optional_markets=tuple(
+                str(market).upper() for market in valuation.get("cash_flow_optional_markets", [])
+            ),
         )
         if result.max_dossiers_per_run < 0 or result.max_ideas_per_market < 0:
             raise ValueError("Research shortlist limits must not be negative")

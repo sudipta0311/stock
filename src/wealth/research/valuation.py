@@ -69,10 +69,16 @@ def calculate_valuation_stats(
             verdict = "EXPENSIVE"
         else:
             verdict = "FAIR"
-    elif relative_yield is not None and fcf_yield is not None:
-        if relative_yield >= rules.cheap_earnings_yield_vs_sector and fcf_yield > 0:
+    elif relative_yield is not None and (
+        fcf_yield is not None or market_code in rules.cash_flow_optional_markets
+    ):
+        if relative_yield >= rules.cheap_earnings_yield_vs_sector and (
+            fcf_yield is None or fcf_yield > 0
+        ):
             verdict = "CHEAP"
-        elif relative_yield < rules.expensive_earnings_yield_vs_sector or fcf_yield < 0:
+        elif relative_yield < rules.expensive_earnings_yield_vs_sector or (
+            fcf_yield is not None and fcf_yield < 0
+        ):
             verdict = "EXPENSIVE"
         else:
             verdict = "FAIR"
