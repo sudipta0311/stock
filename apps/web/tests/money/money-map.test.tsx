@@ -473,6 +473,11 @@ describe("Money Map", () => {
       .then(() => container.querySelector('[data-copy-screen="money"]'));
     expect(root?.firstElementChild).toHaveTextContent("Net worth");
     expect(root?.querySelectorAll('[data-primary="true"]')).toHaveLength(1);
+    for (const group of ["Funds", "Shares", "Bonds and gold bonds", "Other"]) {
+      expect(
+        screen.queryByRole("heading", { name: group }),
+      ).not.toBeInTheDocument();
+    }
     for (const section of [
       "Imports",
       "Check an investment",
@@ -495,6 +500,53 @@ describe("Money Map", () => {
     expect(
       within(sheet).getByRole("button", { name: "Add one by hand" }),
     ).toBeVisible();
+  });
+
+  it("groups holdings by their stored security type", async () => {
+    const holdings = [
+      ["equity", "Equity holding"],
+      ["etf", "ETF holding"],
+      ["mf", "Mutual fund holding"],
+      ["bond", "Bond holding"],
+      ["sgb", "Gold bond holding"],
+      ["unknown", "Other security holding"],
+    ] as const;
+    server.use(
+      ...baseHandlers(
+        networth({
+          holdings: holdings.map(([securityType, name], index) => ({
+            currency: "INR",
+            fx_as_of: null,
+            fx_missing: false,
+            name,
+            price_as_of: null,
+            price_source: "test",
+            quantity: "1",
+            security_id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+            security_type: securityType,
+            status: "priced",
+            symbol: `TEST${index + 1}`,
+            value: "100.00",
+            value_usd: null,
+          })),
+        }),
+      ),
+    );
+    renderMap();
+
+    const expectedGroups = [
+      ["Funds", ["ETF holding", "Mutual fund holding"]],
+      ["Shares", ["Equity holding"]],
+      ["Bonds and gold bonds", ["Bond holding", "Gold bond holding"]],
+      ["Other", ["Other security holding"]],
+    ] as const;
+    for (const [title, names] of expectedGroups) {
+      const group = await screen.findByRole("region", { name: title });
+      expect(within(group).getByRole("heading", { name: title })).toBeVisible();
+      for (const name of names) {
+        expect(within(group).getByText(name)).toBeVisible();
+      }
+    }
   });
 
   it("opens monthly fund amounts beside the funds list", async () => {

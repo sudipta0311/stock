@@ -870,10 +870,17 @@ export function MoneyMapPage() {
     [networth?.holdings],
   );
   const fundHoldings = sortedHoldings.filter((holding) =>
-    /fund|mutual|etf/i.test(holding.security_type),
+    ["mf", "etf"].includes(holding.security_type),
   );
   const shareHoldings = sortedHoldings.filter(
-    (holding) => !/fund|mutual|etf/i.test(holding.security_type),
+    (holding) => holding.security_type === "equity",
+  );
+  const bondsAndGoldBonds = sortedHoldings.filter((holding) =>
+    ["bond", "sgb"].includes(holding.security_type),
+  );
+  const otherHoldings = sortedHoldings.filter(
+    (holding) =>
+      !["equity", "etf", "mf", "bond", "sgb"].includes(holding.security_type),
   );
 
   return (
@@ -998,6 +1005,24 @@ export function MoneyMapPage() {
           fxQuote={fxQuote}
           showSecondary={hasDanishMember}
         />
+        <HoldingsGroup
+          title={englishCopy.money_ui.bonds_and_gold_bonds}
+          holdings={bondsAndGoldBonds}
+          showAll={showAllHoldings}
+          onToggleShowAll={() => setShowAllHoldings((shown) => !shown)}
+          primaryCurrency={primaryCurrency}
+          fxQuote={fxQuote}
+          showSecondary={hasDanishMember}
+        />
+        <HoldingsGroup
+          title={englishCopy.money_ui.other}
+          holdings={otherHoldings}
+          showAll={showAllHoldings}
+          onToggleShowAll={() => setShowAllHoldings((shown) => !shown)}
+          primaryCurrency={primaryCurrency}
+          fxQuote={fxQuote}
+          showSecondary={hasDanishMember}
+        />
         {visibleGroups.length ? (
           visibleGroups.map(([sleeve, items]) => (
             <Card key={sleeve} className="grid gap-1">
@@ -1054,6 +1079,8 @@ export function MoneyMapPage() {
         ) : offlineSummaryOnly ||
           fundHoldings.length ||
           shareHoldings.length ||
+          bondsAndGoldBonds.length ||
+          otherHoldings.length ||
           loanSummary?.loans.length ? null : (
           <EmptyState
             title={englishCopy.household_ui.money_empty_title}
