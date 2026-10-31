@@ -30,6 +30,8 @@ def test_cli_matches_scheduled_workflow_week_selectors() -> None:
     assert 'start --week "$WEEK" --mode weekly' in workflow
     assert 'continue --week "$WEEK"' in workflow
     assert "vars.RESEARCH_ENABLED == 'true'" in workflow
+    assert "github.event_name == 'workflow_dispatch' && inputs.step != 'continue'" in workflow
+    assert "github.event_name == 'workflow_dispatch' && inputs.step == 'continue'" in workflow
 
 
 def test_cli_returns_exit_code_two_when_the_run_budget_is_exceeded(
