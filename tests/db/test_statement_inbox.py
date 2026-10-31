@@ -333,7 +333,7 @@ def test_inbox_tells_full_statements_from_other_fund_house_emails(
             client,
             key,
             message_id="full-statement",
-            subject="Consolidated Account Statement for September 2026",
+            subject="Your NSDL CAS - September 2026 (NSDL ID - 00000000)",
         ).status_code
         == 202
     )
@@ -352,7 +352,7 @@ def test_inbox_tells_full_statements_from_other_fund_house_emails(
     by_subject = {item["subject"]: item for item in listed}
     note_item = by_subject["Transaction confirmation for your purchase"]
 
-    assert by_subject["Consolidated Account Statement for September 2026"]["full_statement"]
+    assert by_subject["Your NSDL CAS - September 2026 (NSDL ID - 00000000)"]["full_statement"]
     assert not note_item["full_statement"]
 
     tried = client.post(
@@ -373,7 +373,7 @@ def test_inbox_tells_full_statements_from_other_fund_house_emails(
     assert removed.status_code == 204
     assert again.status_code == 404
     assert [item["subject"] for item in remaining] == [
-        "Consolidated Account Statement for September 2026"
+        "Your NSDL CAS - September 2026 (NSDL ID - 00000000)"
     ]
 
     # A statement marked unreadable keeps its PDF, so a later reader fix can still open it.

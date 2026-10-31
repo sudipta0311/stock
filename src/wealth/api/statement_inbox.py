@@ -45,7 +45,7 @@ _SENDER_TYPES = ("cams", "kfintech", "mfcentral", "nsdl", "cdsl", "other")
 # Fund houses also email purchase notes and single-fund statements; only the
 # consolidated account statement (CAS) can be imported.
 _FULL_STATEMENT_SUBJECT = re.compile(
-    r"consolidated\s+account\s+statement|\be-?cas\b", re.IGNORECASE
+    r"consolidated\s+account\s+statement|\b(?:e-?)?cas\b", re.IGNORECASE
 )
 _SUBJECT_PREVIEW_CHARS = 140
 _NOT_A_FULL_STATEMENT = "This file isn't a full account statement, so there is nothing to import."
