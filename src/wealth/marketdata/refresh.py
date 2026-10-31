@@ -14,7 +14,7 @@ from decimal import Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import Engine, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from wealth.db.models import HoldingLot, MarketdataRun, Security, UniverseMember
@@ -110,13 +110,6 @@ class UniverseBatch:
 
 
 @dataclass(frozen=True)
-class NseHistoryBatch:
-    closes: list[NseClose]
-    requested_sessions: int
-    failed_sessions: int
-
-
-@dataclass(frozen=True)
 class SourceBatchResult:
     counts: dict[str, Any]
     errors: dict[str, str]
@@ -170,36 +163,6 @@ def _fetch_recent_bhavcopies(on: date) -> list[NseClose]:
     for offset in range(_NSE_CATCH_UP_DAYS - 1, -1, -1):
         records.extend(nse.fetch_bhavcopy(on - timedelta(days=offset)))
     return records
-
-
-def _fetch_missing_nse_history(session: Session, on: date) -> NseHistoryBatch:
-    """Fetch weekday sessions in the retention window that have no NIFTY 500 closes.
-
-    Momentum and volatility need 200 sessions, so the first run loads about a year of
-    official bhavcopies; later runs only retry gaps (holidays return no file).
-    """
-    start = on - timedelta(days=_RETENTION_DAYS)
-    loaded = store.loaded_nse_sessions(session, start, on)
-    wanted = [
-        start + timedelta(days=offset)
-        for offset in range((on - start).days + 1)
-        if (start + timedelta(days=offset)).weekday() < 5
-        and start + timedelta(days=offset) not in loaded
-    ]
-    candidates = store.nse_price_keys(session)
-    closes: list[NseClose] = []
-    failed = 0
-    for day in wanted:
-        try:
-            rows = nse.fetch_bhavcopy(day)
-        except Exception:
-            failed += 1
-            continue
-        # Keep only rows a stored security can match; a year of full files is ~1M rows.
-        closes.extend(
-            row for row in rows if row.symbol in candidates or (row.isin or "") in candidates
-        )
-    return NseHistoryBatch(closes, len(wanted), failed)
 
 
 def _upsert_curated_security(session: Session, instrument: Mapping[str, Any]) -> tuple[Any, str]:
@@ -437,13 +400,6 @@ def _default_fetchers(
         "amfi_history": (
             lambda: _fetch_missing_amfi_history(session, on) if session is not None else []
         ),
-        "nse_history": (
-            lambda: (
-                _fetch_missing_nse_history(session, on)
-                if session is not None
-                else NseHistoryBatch([], 0, 0)
-            )
-        ),
         "eu_etfs": lambda: _fetch_abroad_etfs(session, on) if session is not None else [],
         "us_stocks": lambda: _fetch_abroad_us_stocks(session, on) if session is not None else [],
         "universes": _fetch_universes,
@@ -600,17 +556,6 @@ def _store_source(
             raise TypeError("NSE price adapter returned invalid rows")
         count = store.upsert_nse_closes(session, records, fetched_at=fetched_at)
         return {"prices_eod": count}
-    if source == "nse_history":
-        if not isinstance(records, NseHistoryBatch):
-            raise TypeError("NSE history adapter returned invalid rows")
-        count = store.upsert_nse_closes(session, records.closes, fetched_at=fetched_at)
-        return SourceBatchResult(
-            {
-                "prices_eod": count,
-                "sessions_requested": records.requested_sessions,
-            },
-            {"failed_sessions": str(records.failed_sessions)} if records.failed_sessions else {},
-        )
     if source == "amfi":
         if not isinstance(records, list) or any(not isinstance(item, AmfiNav) for item in records):
             raise TypeError("AMFI adapter returned invalid rows")
@@ -721,7 +666,11 @@ def run_refresh(
     symbols: tuple[str, ...] | list[str] | None = None,
 ) -> dict[str, Any]:
     """Fetch selected sources, continue after failures, and record one run row."""
-    selected_sources = tuple(only or _SOURCES)
+    selected_sources = tuple(
+        source for source in (only or _SOURCES) if only or source != "nse_history"
+    )
+    if "nse_history" in selected_sources:
+        raise ValueError("nse_history commits day by day; use run_nse_history")
     unknown = set(selected_sources) - set(_SOURCES)
     if unknown:
         raise ValueError(f"Unknown market-data sources: {', '.join(sorted(unknown))}")
@@ -848,11 +797,6 @@ def run_refresh(
                 and counts[source].get("symbols", 0) > 0
             )
             or (
-                source == "nse_history"
-                and isinstance(counts.get(source), dict)
-                and counts[source].get("prices_eod", 0) > 0
-            )
-            or (
                 source == "index_pe"
                 and isinstance(counts.get(source), dict)
                 and counts[source].get("index_valuations", 0) > 0
@@ -885,6 +829,70 @@ def run_refresh(
         "counts": counts,
         "errors": errors,
     }
+
+
+def run_nse_history(
+    engine: Engine,
+    on: date,
+    *,
+    fetch: Callable[[date], list[NseClose]] | None = None,
+) -> dict[str, Any]:
+    """Load weekday sessions in the retention window that have no NIFTY 500 closes.
+
+    Momentum and volatility need 200 sessions, so the first run loads about a year of
+    official bhavcopies; later runs only retry gaps (holidays return no file). Each day
+    commits on its own: one transaction across ~285 downloads lost its Neon connection and
+    rolled everything back, while a day-sized commit keeps progress for the next run.
+    """
+    fetch_day = fetch or nse.fetch_bhavcopy
+    started_at = datetime.now(UTC)
+    start = on - timedelta(days=_RETENTION_DAYS)
+    with system_session(engine) as session:
+        loaded = store.loaded_nse_sessions(session, start, on)
+        candidates = store.nse_price_keys(session)
+    wanted = [
+        day
+        for day in (start + timedelta(days=offset) for offset in range((on - start).days + 1))
+        if day.weekday() < 5 and day not in loaded
+    ]
+    stored = 0
+    failed = 0
+    last_error = ""
+    for day in wanted:
+        try:
+            # Keep only rows a stored security can match; a full file has ~3,600 rows.
+            rows = [
+                row
+                for row in fetch_day(day)
+                if row.symbol in candidates or (row.isin or "") in candidates
+            ]
+            if rows:
+                with system_session(engine) as session:
+                    stored += store.upsert_nse_closes(session, rows, fetched_at=started_at)
+        except Exception as error:
+            failed += 1
+            last_error = type(error).__name__
+    counts: dict[str, Any] = {
+        "nse_history": {"prices_eod": stored, "sessions_requested": len(wanted)}
+    }
+    errors = (
+        {"nse_history:failed_sessions": str(failed), "nse_history:last_error": last_error}
+        if failed
+        else {}
+    )
+    status = "succeeded" if not failed else "partial" if stored else "failed"
+    with system_session(engine) as session:
+        run = MarketdataRun(
+            started_at=started_at,
+            finished_at=datetime.now(UTC),
+            status=status,
+            counts=counts,
+            errors=errors,
+        )
+        session.add(run)
+        session.flush()
+        run_id = str(run.id)
+    return {"run_id": run_id, "status": status, "counts": counts, "errors": errors}
 
 
 def _date_argument(value: str) -> date:
@@ -925,17 +933,35 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     engine = make_engine(database_url)
+    others = tuple(source for source in args.sources if source != "nse_history")
+    results: list[dict[str, Any]] = []
     try:
-        with system_session(engine) as session:
-            result = run_refresh(
-                session,
-                on,
-                args.sources,
-                prune_old=args.prune,
-                symbols=args.symbols,
-            )
+        if others:
+            with system_session(engine) as session:
+                results.append(
+                    run_refresh(
+                        session,
+                        on,
+                        others,
+                        prune_old=args.prune,
+                        symbols=args.symbols,
+                    )
+                )
+        if "nse_history" in args.sources:
+            results.append(run_nse_history(engine, on))
     finally:
         engine.dispose()
+    statuses = {item["status"] for item in results}
+    result = {
+        "run_id": ",".join(item["run_id"] for item in results),
+        "status": "failed"
+        if "failed" in statuses
+        else "partial"
+        if "partial" in statuses
+        else "succeeded",
+        "counts": {key: value for item in results for key, value in item["counts"].items()},
+        "errors": {key: value for item in results for key, value in item["errors"].items()},
+    }
     print(json.dumps({"date": on.isoformat(), **result}, sort_keys=True))
     return 2 if result["errors"] else 0
 
