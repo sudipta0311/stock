@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { Lightbulb } from "lucide-react";
-import { formatInr } from "../lib/money";
+import { formatInr, formatUsd } from "../lib/money";
 import { labelForCode } from "../lib/labels";
 import {
   asArray,
@@ -565,7 +565,9 @@ function ResearchCard({
                 {idea.price ? (
                   <p className="mt-1 text-xs text-muted-foreground tabular-nums">
                     Reference price{" "}
-                    {formatInr(textValue(idea.price), "compact")}
+                    {textValue(idea.market) === "US"
+                      ? formatUsd(textValue(idea.price), 0)
+                      : formatInr(textValue(idea.price), "compact")}
                   </p>
                 ) : null}
               </div>

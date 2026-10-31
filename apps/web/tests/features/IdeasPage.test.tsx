@@ -69,6 +69,37 @@ describe("Ideas page", () => {
     expect((await axe(container)).violations).toEqual([]);
   });
 
+  it("shows a US idea's reference price in dollars", async () => {
+    server.use(...ideaHandlers());
+    server.use(
+      http.get(/\/v1\/research\/ideas$/, () =>
+        HttpResponse.json({
+          week: "2026-W44",
+          ideas: [
+            {
+              security_id: "security-us-demo",
+              symbol: "USDEMO",
+              market: "US",
+              sector: "Industrials",
+              price: "1333.40",
+              quant_decile: 10,
+              dossier_status: "APPROVED",
+              valuation_percentile: "35",
+              confidence: "MEDIUM",
+            },
+          ],
+        }),
+      ),
+    );
+    renderWithQueries(
+      <MemoryRouter>
+        <IdeasPage />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText("USDEMO")).toBeInTheDocument();
+    expect(screen.getByText("Reference price $1,333")).toBeInTheDocument();
+  });
+
   it("keeps selector details closed and explains fund terms when opened", async () => {
     const user = userEvent.setup();
     server.use(...ideaHandlers());
