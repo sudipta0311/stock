@@ -435,55 +435,56 @@ class ToolRegistry:
                 )
             )
 
-        prices_by_security: dict[UUID, list[Any]] = {}
-        for row in price_rows:
-            prices_by_security.setdefault(row.security_id, []).append(row)
-        facts_by_security: dict[UUID, list[FundamentalPIT]] = {}
-        for row in fact_rows:
-            facts_by_security.setdefault(row.security_id, []).append(row)
-        current_prices: dict[UUID, Decimal] = {}
-        for peer in peers:
-            rows = prices_by_security.get(peer.id, [])
-            if rows and (as_of - rows[-1].as_of).days <= 20:
-                current_prices[peer.id] = rows[-1].close
+            # The ORM rows expire when the session commits, so read them before it closes.
+            prices_by_security: dict[UUID, list[Any]] = {}
+            for row in price_rows:
+                prices_by_security.setdefault(row.security_id, []).append(row)
+            facts_by_security: dict[UUID, list[FundamentalPIT]] = {}
+            for row in fact_rows:
+                facts_by_security.setdefault(row.security_id, []).append(row)
+            current_prices: dict[UUID, Decimal] = {}
+            for peer in peers:
+                rows = prices_by_security.get(peer.id, [])
+                if rows and (as_of - rows[-1].as_of).days <= 20:
+                    current_prices[peer.id] = rows[-1].close
 
-        security_price = current_prices.get(security.id)
-        own_facts = facts_by_security.get(security.id, [])
-        own_factors = fundamental_factors(own_facts, as_of=as_of, price=security_price)
-        peer_yields: list[Decimal] = []
-        for peer in peers:
-            peer_price = current_prices.get(peer.id)
-            if peer_price is None:
-                continue
-            peer_factors = fundamental_factors(
-                facts_by_security.get(peer.id, []), as_of=as_of, price=peer_price
+            security_price = current_prices.get(security.id)
+            own_facts = facts_by_security.get(security.id, [])
+            own_factors = fundamental_factors(own_facts, as_of=as_of, price=security_price)
+            peer_yields: list[Decimal] = []
+            for peer in peers:
+                peer_price = current_prices.get(peer.id)
+                if peer_price is None:
+                    continue
+                peer_factors = fundamental_factors(
+                    facts_by_security.get(peer.id, []), as_of=as_of, price=peer_price
+                )
+                if peer_factors.earnings_yield is not None:
+                    peer_yields.append(peer_factors.earnings_yield)
+
+            monthly_prices: dict[tuple[int, int], tuple[date, Decimal]] = {}
+            for row in prices_by_security.get(security.id, []):
+                monthly_prices[(row.as_of.year, row.as_of.month)] = (row.as_of, row.close)
+            historical_pe: list[Decimal] = []
+            for on, close in monthly_prices.values():
+                historical_factors = fundamental_factors(own_facts, as_of=on, price=close)
+                if (
+                    historical_factors.earnings_yield is not None
+                    and historical_factors.earnings_yield > 0
+                ):
+                    historical_pe.append(Decimal(1) / historical_factors.earnings_yield)
+
+            stats = calculate_valuation_stats(
+                security_id=str(security.id),
+                market=security.market,
+                price=security_price,
+                factors=own_factors,
+                sector_earnings_yields=peer_yields,
+                historical_pe=historical_pe,
+                rules=rules,
             )
-            if peer_factors.earnings_yield is not None:
-                peer_yields.append(peer_factors.earnings_yield)
-
-        monthly_prices: dict[tuple[int, int], tuple[date, Decimal]] = {}
-        for row in prices_by_security.get(security.id, []):
-            monthly_prices[(row.as_of.year, row.as_of.month)] = (row.as_of, row.close)
-        historical_pe: list[Decimal] = []
-        for on, close in monthly_prices.values():
-            historical_factors = fundamental_factors(own_facts, as_of=on, price=close)
-            if (
-                historical_factors.earnings_yield is not None
-                and historical_factors.earnings_yield > 0
-            ):
-                historical_pe.append(Decimal(1) / historical_factors.earnings_yield)
-
-        stats = calculate_valuation_stats(
-            security_id=str(security.id),
-            market=security.market,
-            price=security_price,
-            factors=own_factors,
-            sector_earnings_yields=peer_yields,
-            historical_pe=historical_pe,
-            rules=rules,
-        )
-        own_prices = prices_by_security.get(security.id, [])
-        return stats.model_dump(mode="json"), own_prices[-1].source_url if own_prices else None
+            own_prices = prices_by_security.get(security.id, [])
+            return stats.model_dump(mode="json"), own_prices[-1].source_url if own_prices else None
 
     def _sector_peers(self, args: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
         if self.owner_engine is None:

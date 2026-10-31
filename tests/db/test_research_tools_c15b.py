@@ -131,6 +131,8 @@ def test_research_tools_log_source_provenance_and_nse_auth_errors_are_unavailabl
             context,
         ),
         registry.call("nse_announcements", {"symbol": "SYNTH", "days": 2}, context),
+        # Valuation reads peers after its queries; it must not touch expired ORM rows.
+        registry.call("valuation_stats", {"security_id": str(security_id)}, context),
     ]
     with migrated_database.owner_engine.connect() as connection:
         audit_rows = connection.execute(
@@ -144,6 +146,7 @@ def test_research_tools_log_source_provenance_and_nse_auth_errors_are_unavailabl
     assert results[0].result[0]["value"] == "25.00000000"
     assert results[6].result["text"] == "Synthetic filing text."
     assert results[7].result == {"status": "unavailable"}
+    assert results[8].result["security_id"] == str(security_id)
     assert all(result.source_url for result in results)
     assert all(result.retrieved_at.tzinfo is not None for result in results)
     assert len(audit_rows) == len(results)
