@@ -31,6 +31,21 @@ import { Badge, Card, EmptyState, Term } from "../ui";
 import englishCopy from "../copy/en.json";
 import { Highlights } from "../features/Highlights";
 
+const ENTRY_HINT_REASON_COPY: Record<string, string> = {
+  price_far_above_average:
+    englishCopy.reasons.entry_hint_price_far_above_average,
+  market_valuation_high: englishCopy.reasons.entry_hint_market_expensive,
+  market_valuation_elevated: englishCopy.reasons.entry_hint_market_elevated,
+  us_price_history_unavailable:
+    englishCopy.reasons.entry_hint_us_price_history_unavailable,
+  price_history_unavailable:
+    englishCopy.reasons.entry_hint_price_history_unavailable,
+  market_valuation_unavailable:
+    englishCopy.reasons.entry_hint_market_history_unavailable,
+  market_history_short: englishCopy.reasons.entry_hint_market_history_short,
+  regular_entry_schedule: englishCopy.reasons.entry_hint_regular_schedule,
+};
+
 function dkkAmount(raw: unknown): string {
   const amount = String(raw ?? "").trim();
   if (!/^-?\d+$/.test(amount)) return "";
@@ -536,6 +551,24 @@ function ResearchCard({
           const confidence = textValue(idea.confidence);
           const valuation = textValue(idea.valuation_percentile);
           const tranche = referencedTranche(idea, actions);
+          const hint = asRecord(idea.entry_hint);
+          const hintCode = textValue(hint.code);
+          const hintParts = Number(hint.parts);
+          const hintLine =
+            hintCode === "wait"
+              ? englishCopy.ideas.entry_hint_wait
+              : hintCode === "buy_in_parts" && hintParts === 6
+                ? englishCopy.ideas.entry_hint_buy_expensive
+                : hintCode === "buy_in_parts" &&
+                    Number.isInteger(hintParts) &&
+                    hintParts > 0
+                  ? englishCopy.ideas.entry_hint_buy_parts
+                      .replace("{parts}", String(hintParts))
+                      .replace("{months}", String(hintParts))
+                  : null;
+          const hintReasons = asArray(hint.reasons)
+            .map((raw) => ENTRY_HINT_REASON_COPY[textValue(raw)])
+            .filter((reason): reason is string => Boolean(reason));
           return (
             <article
               key={`${symbol}-${index}`}
@@ -561,6 +594,25 @@ function ResearchCard({
                 </p>
                 {tranche ? (
                   <p className="mt-1 text-sm font-medium">{tranche}</p>
+                ) : null}
+                {hintLine ? (
+                  <div className="mt-1">
+                    <p className="text-sm font-medium">{hintLine}</p>
+                    {hintReasons.length ? (
+                      <details className="mt-1">
+                        <summary className="min-h-9 cursor-pointer py-1 text-xs text-muted-foreground">
+                          {englishCopy.ideas.entry_hint_why}
+                        </summary>
+                        <ul className="grid gap-1 pb-2 text-xs text-muted-foreground">
+                          {hintReasons.map((reason, reasonIndex) => (
+                            <li key={`${symbol}-hint-${reasonIndex}`}>
+                              {reason}
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    ) : null}
+                  </div>
                 ) : null}
                 {idea.price ? (
                   <p className="mt-1 text-xs text-muted-foreground tabular-nums">

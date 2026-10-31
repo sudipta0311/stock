@@ -345,14 +345,15 @@ def _factor_inputs(
     values: dict[str, Decimal | None] = {
         name: getattr(fundamentals, name) for name in _FACTOR_NAMES if hasattr(fundamentals, name)
     }
+    prices = [(row.as_of, row.close) for row in price_rows]
+    derived = price_factors(prices, as_of)
     if security.market == "IN":
-        prices = [(row.as_of, row.close) for row in price_rows]
-        derived = price_factors(prices, as_of)
         values["momentum_12_1"] = derived.momentum_12_1
         values["volatility_1y"] = derived.volatility_1y
     else:
         values["momentum_12_1"] = None
         values["volatility_1y"] = None
+    values["dist_from_200dma"] = derived.dist_from_200dma
 
     source_urls = list(dict.fromkeys(row.source_url for row in facts))
     price_sources: list[str] = []

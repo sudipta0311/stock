@@ -23,6 +23,14 @@
     "goal_approach": "A near-term goal changes how much risk fits.",
     "tax_wait": "Waiting could reduce the estimated tax.",
     "core_goal_glide_deferred": "The plan keeps this core holding in place for now.",
+    "entry_hint_price_far_above_average": "The price is far above its recent average.",
+    "entry_hint_market_expensive": "Prices across the wider market are unusually high.",
+    "entry_hint_market_elevated": "Prices across the wider market look high.",
+    "entry_hint_us_price_history_unavailable": "There are too few price observations for this check.",
+    "entry_hint_price_history_unavailable": "There is not enough price history for this check.",
+    "entry_hint_market_history_short": "The market history is still building, so it cannot guide timing.",
+    "entry_hint_market_history_unavailable": "The market's price history is not available yet.",
+    "entry_hint_regular_schedule": "The price and market checks support the usual pace.",
     "ask_insurer_for_surrender_value": "Confirm the current surrender value with your insurer.",
     "low_return_vs_ppf": "The estimated policy return is below the PPF comparison rate.",
     "low_return_vs_fd": "The estimated policy return is below the fixed deposit comparison rate.",
@@ -723,7 +731,11 @@
     "funds_title": "Funds to compare",
     "funds_intro": "These options passed the available checks. Missing details did not add to their scores.",
     "fund_term_help": "A fund groups many investments. Check its details before choosing.",
-    "term_prompt": "What's this?"
+    "term_prompt": "What's this?",
+    "entry_hint_wait": "Wait for a better price",
+    "entry_hint_buy_parts": "Buy in {parts} parts over {months} months",
+    "entry_hint_buy_expensive": "Buy in 6 parts. Markets look expensive.",
+    "entry_hint_why": "Why?"
   },
   "settings": {
     "title": "Settings",

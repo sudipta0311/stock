@@ -1,4 +1,4 @@
-// OpenAPI SHA256: bebba645d02b12c67d86c5aec7c952b4adf19f858be4f5e3670f5a2b982d921c
+// OpenAPI SHA256: 5c8a80ae216e45ee31b1fd669157cb6fb6f5eee30aea5b1e1cd5b977cba9dbc5
 export interface paths {
     "/healthz": {
         parameters: {
@@ -1530,6 +1530,18 @@ export interface components {
             notes?: string | null;
             /** Vpf Monthly */
             vpf_monthly?: string | null;
+        };
+        /** EntryHintSummary */
+        EntryHintSummary: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "buy_in_parts" | "wait";
+            /** Parts */
+            parts: number | null;
+            /** Reasons */
+            reasons: string[];
         };
         /** FinancialContextFields */
         FinancialContextFields: {
@@ -3349,6 +3361,7 @@ export interface components {
             confidence: string;
             /** Dossier Status */
             dossier_status: string;
+            entry_hint?: components["schemas"]["EntryHintSummary"] | null;
             /**
              * Market
              * @enum {string}

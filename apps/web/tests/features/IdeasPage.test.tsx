@@ -69,6 +69,100 @@ describe("Ideas page", () => {
     expect((await axe(container)).violations).toEqual([]);
   });
 
+  it("shows buy timing lines and keeps each explanation closed", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(/\/v1\/research\/ideas$/, () =>
+        HttpResponse.json({
+          week: "2026-W44",
+          ideas: [
+            {
+              security_id: "security-three-parts",
+              symbol: "THREE",
+              market: "IN",
+              sector: "Energy",
+              price: "100.00",
+              quant_decile: 8,
+              dossier_status: "APPROVED",
+              valuation_percentile: "35",
+              confidence: "HIGH",
+              entry_hint: {
+                code: "buy_in_parts",
+                parts: 3,
+                reasons: ["regular_entry_schedule"],
+              },
+            },
+            {
+              security_id: "security-six-parts",
+              symbol: "SIX",
+              market: "US",
+              sector: "Industrials",
+              price: "100.00",
+              quant_decile: 8,
+              dossier_status: "APPROVED",
+              valuation_percentile: "85",
+              confidence: "HIGH",
+              entry_hint: {
+                code: "buy_in_parts",
+                parts: 6,
+                reasons: [
+                  "us_price_history_unavailable",
+                  "market_valuation_elevated",
+                ],
+              },
+            },
+            {
+              security_id: "security-wait",
+              symbol: "WAIT",
+              market: "IN",
+              sector: "Health Care",
+              price: "100.00",
+              quant_decile: 8,
+              dossier_status: "APPROVED",
+              valuation_percentile: "45",
+              confidence: "MEDIUM",
+              entry_hint: {
+                code: "wait",
+                parts: null,
+                reasons: ["price_far_above_average"],
+              },
+            },
+          ],
+        }),
+      ),
+    );
+    const { container } = renderWithQueries(
+      <MemoryRouter>
+        <IdeasPage />
+      </MemoryRouter>,
+    );
+
+    await user.click(await screen.findByText("More research"));
+    expect(
+      await screen.findByText("Buy in 3 parts over 3 months"),
+    ).toBeVisible();
+    expect(
+      screen.getByText("Buy in 6 parts. Markets look expensive."),
+    ).toBeVisible();
+    expect(screen.getByText("Wait for a better price")).toBeVisible();
+
+    const whyDetails = screen
+      .getAllByText("Why?")
+      .map((summary) => summary.closest("details"));
+    expect(whyDetails).toHaveLength(3);
+    expect(whyDetails.every((details) => details && !details.open)).toBe(true);
+    expect(
+      screen.queryByText("The price is far above its recent average."),
+    ).not.toBeVisible();
+    const whySummary = screen.getAllByText("Why?")[2];
+    if (!whySummary) throw new Error("Expected three reason summaries");
+    await user.click(whySummary);
+    expect(
+      screen.getByText("The price is far above its recent average."),
+    ).toBeVisible();
+    expect((await axe(container)).violations).toEqual([]);
+  });
+
   it("shows a US idea's reference price in dollars", async () => {
     server.use(...ideaHandlers());
     server.use(

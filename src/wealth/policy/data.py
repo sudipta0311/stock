@@ -397,7 +397,11 @@ def _research_pack(session: Session, week: str) -> ResearchPack | None:
     document = row.pack
     ideas_list: list[SatelliteIdea] = []
     for item in document.get("ideas", []):
-        idea = SatelliteIdea.model_validate(item)
+        if not isinstance(item, dict):
+            continue
+        idea = SatelliteIdea.model_validate(
+            {key: value for key, value in item.items() if key != "entry_hint"}
+        )
         if idea.market == "US":
             try:
                 security = session.get(Security, UUID(idea.security_id))

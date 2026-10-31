@@ -84,6 +84,10 @@ def _decimal(value: Any) -> Decimal | None:
 
 
 def _parse_sp500_as_of(value: Any) -> date | None:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
     if not isinstance(value, str):
         return None
     cleaned = value.strip().removeprefix("As of ").strip()
@@ -92,6 +96,10 @@ def _parse_sp500_as_of(value: Any) -> date | None:
             return datetime.strptime(cleaned, pattern).date()
         except ValueError:
             continue
+    try:
+        return datetime.fromisoformat(cleaned).date()
+    except ValueError:
+        pass
     return None
 
 
@@ -157,30 +165,49 @@ def fetch_sp500() -> Sp500Holdings:
     return parse_sp500_holdings(get(SP500_HOLDINGS_URL).content)
 
 
-def parse_spy_total_net_assets(content: bytes) -> dict[date, Decimal]:
-    """Read SPY's daily NAV history: total net assets by date."""
+def _parse_spy_nav_workbook(content: bytes) -> tuple[dict[date, Decimal], dict[date, Decimal]]:
+    """Read daily NAV and total net assets from the SSGA workbook."""
     from openpyxl import load_workbook
 
     workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
     try:
         header: list[str] | None = None
         result: dict[date, Decimal] = {}
+        navs: dict[date, Decimal] = {}
         for row in workbook.active.iter_rows(values_only=True):
             values = [str(value).strip() if value is not None else "" for value in row]
             if header is None:
-                if {"date", "totalnetassets"} <= {_key(value) for value in values}:
+                keys = {_key(value) for value in values}
+                if "date" in keys and keys.intersection({"totalnetassets", "nav"}):
                     header = values
                 continue
             raw = dict(zip(header, row, strict=False))
             on = _parse_sp500_as_of(_field(raw, "Date"))
             assets = _decimal(_field(raw, "Total Net Assets"))
+            nav = _decimal(_field(raw, "NAV"))
             if on is not None and assets is not None and assets > 0:
                 result[on] = assets
-        if not result:
-            raise ValueError("SPY NAV history has no total net assets")
-        return result
+            if on is not None and nav is not None and nav > 0:
+                navs[on] = nav
+        return result, navs
     finally:
         workbook.close()
+
+
+def parse_spy_total_net_assets(content: bytes) -> dict[date, Decimal]:
+    """Read SPY's daily total net assets, preserving the existing parser contract."""
+    total_net_assets, _navs = _parse_spy_nav_workbook(content)
+    if not total_net_assets:
+        raise ValueError("SPY NAV history has no total net assets")
+    return total_net_assets
+
+
+def parse_spy_nav_history(content: bytes) -> dict[date, Decimal]:
+    """Read SPY's daily NAV observations from its SSGA history workbook."""
+    _total_net_assets, navs = _parse_spy_nav_workbook(content)
+    if not navs:
+        raise ValueError("SPY NAV history has no NAV observations")
+    return navs
 
 
 def implied_closes(

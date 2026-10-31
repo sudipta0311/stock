@@ -274,7 +274,10 @@ def test_three_shortlisted_dossiers_follow_the_code_owned_gates() -> None:
 
     pack = completed["pack"]
     assert len(pack["ideas"]) == 1
-    idea = SatelliteIdea.model_validate(pack["ideas"][0])
+    raw_idea = pack["ideas"][0]
+    idea = SatelliteIdea.model_validate(
+        {key: value for key, value in raw_idea.items() if key != "entry_hint"}
+    )
     assert set(pack["ideas"][0]) == {
         "security_id",
         "symbol",
@@ -285,7 +288,11 @@ def test_three_shortlisted_dossiers_follow_the_code_owned_gates() -> None:
         "dossier_status",
         "valuation_percentile",
         "confidence",
+        "entry_hint",
     }
+    assert raw_idea["entry_hint"]["code"] == "buy_in_parts"
+    assert raw_idea["entry_hint"]["parts"] == 3
+    assert pack["index_valuation_percentiles"] == {"IN": None, "US": None}
     assert idea.dossier_status == "APPROVED"
     assert idea.price == Decimal("12.51")
     assert {item["security_id"] for item in pack["ideas"]} <= {

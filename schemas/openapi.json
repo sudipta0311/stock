@@ -1181,6 +1181,44 @@
         "title": "EPFAsset",
         "type": "object"
       },
+      "EntryHintSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "enum": [
+              "buy_in_parts",
+              "wait"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "parts": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parts"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          }
+        },
+        "required": [
+          "code",
+          "parts",
+          "reasons"
+        ],
+        "title": "EntryHintSummary",
+        "type": "object"
+      },
       "FinancialContextFields": {
         "additionalProperties": false,
         "properties": {
@@ -6366,6 +6404,16 @@
           "dossier_status": {
             "title": "Dossier Status",
             "type": "string"
+          },
+          "entry_hint": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EntryHintSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "market": {
             "enum": [

@@ -70,6 +70,12 @@ class StressResponse(ApiModel):
     stress: dict[str, Any]
 
 
+class EntryHintSummary(ApiModel):
+    code: Literal["buy_in_parts", "wait"]
+    parts: int | None
+    reasons: list[str]
+
+
 class ResearchIdeaSummary(ApiModel):
     security_id: str
     symbol: str
@@ -80,6 +86,7 @@ class ResearchIdeaSummary(ApiModel):
     dossier_status: str
     valuation_percentile: str
     confidence: str
+    entry_hint: EntryHintSummary | None = None
 
 
 class ResearchIdeasResponse(ApiModel):
@@ -382,7 +389,12 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             return ResearchIdeasResponse(week=selected_week, ideas=[])
         ideas: list[ResearchIdeaSummary] = []
         for raw in record.pack.get("ideas", []):
-            idea = SatelliteIdea.model_validate(raw)
+            if not isinstance(raw, dict):
+                continue
+            raw_hint = raw.get("entry_hint")
+            idea = SatelliteIdea.model_validate(
+                {key: value for key, value in raw.items() if key != "entry_hint"}
+            )
             ideas.append(
                 ResearchIdeaSummary(
                     security_id=idea.security_id,
@@ -394,6 +406,11 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                     dossier_status=idea.dossier_status,
                     valuation_percentile=format(idea.valuation_percentile, "f"),
                     confidence=idea.confidence,
+                    entry_hint=(
+                        EntryHintSummary.model_validate(raw_hint)
+                        if isinstance(raw_hint, dict)
+                        else None
+                    ),
                 )
             )
         raw_picks = record.pack.get("core_picks", {})

@@ -8,7 +8,7 @@ import time
 from collections import defaultdict
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -380,7 +380,7 @@ def _year_to_date_quarters(
     for (unit, start), by_end in totals.items():
         ends = sorted(by_end)
         for previous_end, end in zip(ends, ends[1:], strict=False):
-            if (end - start).days + 1 < 150 or not 70 <= (end - previous_end).days <= 110:
+            if (end - start).days + 1 < 150 or not 70 <= (end - previous_end).days <= 120:
                 continue
             previous_filed, previous_value = by_end[previous_end]
             filed_at, value = by_end[end]
@@ -432,11 +432,11 @@ def _add_q4_observations(
                         by_quarter_end[row.period_end] = row
             last_three = sorted(by_quarter_end.values(), key=lambda row: row.period_end)[-3:]
             if len(last_three) != 3 or any(
-                not 70 <= (right.period_end - left.period_end).days <= 110
+                not 70 <= (right.period_end - left.period_end).days <= 120
                 for left, right in zip(last_three, last_three[1:], strict=False)
             ):
                 continue
-            if not 70 <= (annual.period_end - last_three[-1].period_end).days <= 110:
+            if not 70 <= (annual.period_end - last_three[-1].period_end).days <= 120:
                 continue
             if any(row.known_at > annual.filed_at for row in last_three):
                 continue
@@ -462,12 +462,13 @@ def parse_company_facts(
     as_of: date,
     source_url: str | None = None,
 ) -> list[FundamentalObservation]:
-    """Extract supported US-GAAP values with filing dates inside the retention window."""
+    """Extract retained US-GAAP facts, deriving quarters with a one-year input buffer."""
     cik_value = company_facts.get("cik")
     cik_text = str(cik_value) if isinstance(cik_value, int | str) else ""
     cik = f"{int(cik_text):010d}" if cik_text.isdigit() else "0000000000"
     facts_url = source_url or SEC_COMPANYFACTS_URL.format(cik=cik)
     cutoff = retention_cutoff(as_of)
+    parse_cutoff = cutoff - timedelta(days=370)
     metrics = (*_SIMPLE_TAGS.keys(), "total_debt")
     observations = [
         observation
@@ -476,7 +477,7 @@ def parse_company_facts(
             company_facts,
             metric,
             source_url=facts_url,
-            cutoff=cutoff,
+            cutoff=parse_cutoff,
             as_of=as_of,
         )
     ]
@@ -487,11 +488,12 @@ def parse_company_facts(
         row
         for metric in _QUARTERLY_METRICS
         for row in _year_to_date_quarters(
-            company_facts, metric, source_url=facts_url, cutoff=cutoff, as_of=as_of
+            company_facts, metric, source_url=facts_url, cutoff=parse_cutoff, as_of=as_of
         )
         if (row.metric, row.period_end) not in reported_quarters
     )
     observations = _add_q4_observations(observations)
+    observations = [row for row in observations if row.period_end >= cutoff]
     observations.sort(
         key=lambda row: (
             row.metric,

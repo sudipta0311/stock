@@ -18,3 +18,7 @@ lumpsum:
   stp_tranches_normal: 3
   stp_tranches_expensive: 6
   expensive_valuation_percentile: "80"
+entry_hint:
+  wait_above_200dma_pct: "15" # Prices far above their recent average have a higher chance of a poor entry.
+  wait_market_percentile: "90" # Very high market valuations support waiting for a better price.
+  more_parts_market_percentile: "80" # High valuations use the existing six-part schedule.

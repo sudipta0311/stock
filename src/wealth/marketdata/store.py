@@ -86,6 +86,8 @@ def core_candidate_ids(session: Session) -> set[UUID]:
 
 
 _PERCENTILE_PRECISION = Decimal("0.01")
+# A monthly series rebuilt from a four-year fundamentals window spans just under three years.
+LONG_HISTORY_MIN_DAYS = 1059
 
 
 @dataclass(frozen=True)
@@ -873,7 +875,9 @@ def latest_index_valuation_percentile(
         )
     first_as_of = history[0].as_of if history else latest.as_of
     history_label = (
-        "short_history" if (latest.as_of - first_as_of).days < 365 * 3 else "long_history"
+        "short_history"
+        if (latest.as_of - first_as_of).days < LONG_HISTORY_MIN_DAYS
+        else "long_history"
     )
     return IndexValuationPercentile(
         index_name=latest.index_name,

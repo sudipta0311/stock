@@ -14,10 +14,18 @@ from decimal import Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Engine, func, or_, select, update
+from sqlalchemy import Engine, delete, func, or_, select, update
 from sqlalchemy.orm import Session
 
-from wealth.db.models import HoldingLot, MarketdataRun, Security, UniverseMember
+from wealth.db.models import (
+    FundamentalPIT,
+    HoldingLot,
+    IndexValuation,
+    MarketdataRun,
+    PriceEod,
+    Security,
+    UniverseMember,
+)
 from wealth.db.session import make_engine, system_session
 from wealth.marketdata import store
 from wealth.marketdata.sources import (
@@ -33,6 +41,7 @@ from wealth.marketdata.sources import (
     nse,
     nse_fundamentals,
     universes,
+    us_index_pe,
 )
 from wealth.marketdata.sources.alpha_vantage import DailyClose
 from wealth.marketdata.sources.amfi import AmfiNav
@@ -65,6 +74,7 @@ _SOURCES = (
     "us_stocks",
     "universes",
     "edgar",
+    "us_index_pe",
     "nse_fundamentals",
     "index_pe",
     "ust",
@@ -360,6 +370,73 @@ def _fetch_nse_fundamentals(
     return FundamentalsBatch(observations, errors)
 
 
+def _fetch_us_index_pe(session: Session, on: date) -> us_index_pe.UsIndexPeBatch:
+    """Build the S&P valuation from the current SSGA snapshot and stored SEC facts."""
+    holdings = universes.fetch_sp500()
+    workbook = universes.get(universes.SPY_NAV_HISTORY_URL).content
+    nav_history = universes.parse_spy_nav_history(workbook)
+    symbols = {member.symbol for member in holdings.securities}
+    security_rows = session.execute(
+        select(Security.id, Security.symbol)
+        .join(UniverseMember, UniverseMember.security_id == Security.id)
+        .where(
+            UniverseMember.universe == "sp500",
+            UniverseMember.removed_on.is_(None),
+            Security.market == "US",
+            Security.symbol.in_(symbols),
+        )
+    ).all()
+    security_ids = {security_id for security_id, _symbol in security_rows}
+    if not security_ids:
+        return us_index_pe.UsIndexPeBatch([], {"universe": "NoCurrentSp500Members"})
+
+    price_rows = session.execute(
+        select(PriceEod.security_id, PriceEod.as_of, PriceEod.close)
+        .where(
+            PriceEod.security_id.in_(security_ids),
+            PriceEod.as_of <= holdings.as_of,
+            PriceEod.as_of >= holdings.as_of - timedelta(days=us_index_pe.MAX_PRICE_AGE_DAYS),
+            PriceEod.source == universes.SP500_PRICE_SOURCE,
+        )
+        .order_by(PriceEod.security_id, PriceEod.as_of)
+    ).all()
+    facts = list(
+        session.scalars(
+            select(FundamentalPIT)
+            .where(
+                FundamentalPIT.security_id.in_(security_ids),
+                FundamentalPIT.metric.in_({"eps_diluted", "net_income"}),
+                FundamentalPIT.period_end <= holdings.as_of,
+                FundamentalPIT.known_at
+                <= datetime.combine(holdings.as_of, datetime.max.time(), tzinfo=UTC),
+            )
+            .order_by(
+                FundamentalPIT.security_id, FundamentalPIT.period_end, FundamentalPIT.known_at
+            )
+        )
+    )
+    prices_by_id: dict[Any, list[tuple[date, Decimal]]] = {}
+    facts_by_id: dict[Any, list[FundamentalPIT]] = {}
+    for row in price_rows:
+        prices_by_id.setdefault(row.security_id, []).append((row.as_of, row.close))
+    for row in facts:
+        facts_by_id.setdefault(row.security_id, []).append(row)
+    constituents = {
+        str(symbol): us_index_pe.Sp500ConstituentData(
+            prices=prices_by_id.get(security_id, []),
+            facts=facts_by_id.get(security_id, []),
+        )
+        for security_id, symbol in security_rows
+        if symbol is not None
+    }
+    return us_index_pe.build_sp500_pe_valuations(
+        holdings,
+        constituents,
+        nav_history,
+        on=on,
+    )
+
+
 def _fetch_universes() -> UniverseBatch:
     sp500: Sp500Holdings | None = None
     nifty500: list[NseSecurity] | None = None
@@ -404,6 +481,7 @@ def _default_fetchers(
         "us_stocks": lambda: _fetch_abroad_us_stocks(session, on) if session is not None else [],
         "universes": _fetch_universes,
         "edgar": lambda: _fetch_edgar(session, on, symbols),
+        "us_index_pe": lambda: _fetch_us_index_pe(session, on) if session is not None else None,
         "nse_fundamentals": lambda: _fetch_nse_fundamentals(session, on, symbols),
         "index_pe": lambda: macro_geo.fetch_nse_index_valuations(on),
         "ust": lambda: macro_geo.fetch_treasury_yields(on),
@@ -591,6 +669,36 @@ def _store_source(
         ):
             raise TypeError("NSE index-valuation adapter returned invalid rows")
         return {"index_valuations": store.upsert_index_valuations(session, records)}
+    if source == "us_index_pe":
+        if not isinstance(records, us_index_pe.UsIndexPeBatch):
+            raise TypeError("S&P index-valuation adapter returned invalid rows")
+        backfill_dates = [
+            item.as_of
+            for item in records.observations
+            if item.source == us_index_pe.BACKFILL_SOURCE
+        ]
+        session.execute(
+            delete(IndexValuation).where(
+                IndexValuation.index_name == us_index_pe.INDEX_NAME,
+                IndexValuation.source == us_index_pe.BACKFILL_SOURCE,
+                IndexValuation.as_of.not_in(backfill_dates),
+            )
+        )
+        backfill_count = sum(
+            1 for item in records.observations if item.source == us_index_pe.BACKFILL_SOURCE
+        )
+        current_count = sum(
+            1 for item in records.observations if item.source == us_index_pe.CURRENT_SOURCE
+        )
+        count = store.upsert_index_valuations(session, records.observations)
+        return SourceBatchResult(
+            {
+                "index_valuations": count,
+                "current_points": current_count,
+                "backfill_points": backfill_count,
+            },
+            dict(records.errors),
+        )
     if source == "ust":
         if not isinstance(records, MacroSeriesBatch) or any(
             not isinstance(item, MacroSeriesObservation) for item in records.observations
@@ -798,6 +906,11 @@ def run_refresh(
             )
             or (
                 source == "index_pe"
+                and isinstance(counts.get(source), dict)
+                and counts[source].get("index_valuations", 0) > 0
+            )
+            or (
+                source == "us_index_pe"
                 and isinstance(counts.get(source), dict)
                 and counts[source].get("index_valuations", 0) > 0
             )

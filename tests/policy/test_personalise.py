@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -253,6 +254,17 @@ def test_personalise_is_deterministic_for_identical_inputs() -> None:
     second = _plan_json()
     assert first["inputs_digest"] == second["inputs_digest"]
     assert first == second
+
+
+def test_us_market_percentile_removes_missing_data_note() -> None:
+    market = replace(
+        synthetic_market(),
+        index_valuation_percentiles={"IN": Decimal("50"), "US": Decimal("85")},
+    )
+
+    plan = personalise(synthetic_user_data(), market, None, _WEEK, _AS_OF)
+
+    assert "index_valuation_percentile_missing:US" not in plan.notes
 
 
 def test_missing_holding_price_is_excluded_and_reported() -> None:

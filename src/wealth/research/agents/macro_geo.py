@@ -272,15 +272,20 @@ class MacroGeoToolbox:
         percentiles: dict[str, str | None] = {"IN": None, "US": None}
         history: dict[str, dict[str, str | int | None]] = {
             "IN": {"index": "NIFTY 50", "history_label": "unavailable", "as_of": None},
-            "US": {"index": None, "history_label": "unavailable", "as_of": None},
+            "US": {"index": "S&P 500", "history_label": "unavailable", "as_of": None},
         }
         if self.engine is None:
             return percentiles, history
         with Session(self.engine) as session:
-            value = store.latest_index_valuation_percentile(session, "NIFTY 50", self.as_of)
-        if value is not None:
-            percentiles["IN"] = _decimal_json(value.percentile)
-            history["IN"] = {
+            values = {
+                "IN": store.latest_index_valuation_percentile(session, "NIFTY 50", self.as_of),
+                "US": store.latest_index_valuation_percentile(session, "S&P 500", self.as_of),
+            }
+        for market, value in values.items():
+            if value is None:
+                continue
+            percentiles[market] = _decimal_json(value.percentile)
+            history[market] = {
                 "index": value.index_name,
                 "history_label": value.history_label,
                 "as_of": value.as_of.isoformat(),

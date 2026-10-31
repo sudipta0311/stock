@@ -10,6 +10,7 @@ from wealth.research.factors import (
     max_drawdown_1y,
     momentum_12_1,
     pe_percentile_own_10y,
+    trailing_twelve_month_eps,
     volatility_1y,
 )
 
@@ -22,6 +23,22 @@ class Fact:
     value: Decimal
     known_at: datetime
     filed_at: datetime
+
+
+def test_ttm_eps_accepts_a_sixteen_week_quarter() -> None:
+    quarter_ends = [
+        date(2025, 1, 4),
+        date(2025, 3, 29),
+        date(2025, 6, 21),
+        date(2025, 10, 11),
+    ]
+    known_at = datetime(2025, 11, 1, tzinfo=UTC)
+    facts = [
+        Fact("eps_diluted", on, "Q", Decimal(value), known_at, known_at)
+        for on, value in zip(quarter_ends, ("1.5", "2", "2.5", "3"), strict=True)
+    ]
+
+    assert trailing_twelve_month_eps(facts, date(2025, 12, 31)) == Decimal("9.0")
 
 
 def test_price_factors_use_12_to_1_month_and_trailing_200_sessions() -> None:

@@ -10,6 +10,7 @@ from openpyxl import Workbook
 
 from wealth.marketdata.sources import edgar, nse_fundamentals, universes
 from wealth.marketdata.sources.nse_fundamentals import NseFiling
+from wealth.research.factors import trailing_twelve_month_eps_for_period
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "marketdata"
 
@@ -158,6 +159,7 @@ def test_spy_files_give_each_holding_a_close_from_weight_and_net_assets() -> Non
     workbook.close()
 
     assets = universes.parse_spy_total_net_assets(stream.getvalue())
+    navs = universes.parse_spy_nav_history(stream.getvalue())
     holdings = universes.Sp500Holdings(
         securities=[
             universes.UniverseSecurity(
@@ -171,6 +173,7 @@ def test_spy_files_give_each_holding_a_close_from_weight_and_net_assets() -> Non
 
     # 2.5% of 1,000,000,000 is 25,000,000 across 100,000 shares.
     assert assets[date(2026, 10, 27)] == Decimal("1000000000.00")
+    assert navs[date(2026, 10, 27)] == Decimal("500.0")
     assert universes.implied_closes(holdings, assets) == {"EXA": Decimal("250.000000")}
     assert universes.implied_closes(stale, assets) == {}
 
@@ -270,3 +273,65 @@ def test_edgar_turns_year_to_date_cash_flow_and_annual_eps_into_four_quarters() 
         date(2025, 12, 31): (Decimal("25"), date(2026, 2, 15)),
     }
     assert quarters("eps_diluted")[date(2025, 12, 31)] == (Decimal("1.30"), date(2026, 2, 15))
+
+
+def test_edgar_derives_q4_for_a_sixteen_week_fiscal_quarter() -> None:
+    def eps_fact(start: str, end: str, value: str, form: str, filed: str) -> dict[str, str]:
+        return {"start": start, "end": end, "val": value, "form": form, "filed": filed}
+
+    eps = [
+        eps_fact("2024-10-13", "2025-01-04", "1.0", "10-Q", "2025-02-01"),
+        eps_fact("2025-01-05", "2025-03-29", "1.1", "10-Q", "2025-05-01"),
+        eps_fact("2025-03-30", "2025-06-21", "1.2", "10-Q", "2025-08-01"),
+        eps_fact("2024-10-13", "2025-10-11", "4.9", "10-K", "2025-11-01"),
+    ]
+    payload = {
+        "cik": 1,
+        "facts": {"us-gaap": {"EarningsPerShareDiluted": {"units": {"USD/shares": eps}}}},
+    }
+
+    observations = edgar.parse_company_facts(payload, as_of=date(2025, 12, 31))
+    q4 = next(
+        row
+        for row in observations
+        if row.metric == "eps_diluted"
+        and row.period_type == "Q"
+        and row.period_end == date(2025, 10, 11)
+    )
+
+    assert q4.value == Decimal("1.6")
+    assert q4.known_at.date() == date(2025, 11, 1)
+
+
+def test_edgar_uses_pre_retention_quarters_to_derive_a_retained_q4() -> None:
+    def eps_fact(start: str, end: str, value: str, form: str, filed: str) -> dict[str, str]:
+        return {"start": start, "end": end, "val": value, "form": form, "filed": filed}
+
+    eps = [
+        eps_fact("2022-07-01", "2022-09-30", "1.0", "10-Q", "2022-11-01"),
+        eps_fact("2022-10-01", "2022-12-31", "1.1", "10-Q", "2023-02-01"),
+        eps_fact("2023-01-01", "2023-03-31", "1.2", "10-Q", "2023-05-01"),
+        eps_fact("2022-07-01", "2023-06-30", "4.9", "10-K", "2023-08-01"),
+        eps_fact("2023-07-01", "2023-09-30", "1.3", "10-Q", "2023-11-01"),
+    ]
+    payload = {
+        "cik": 1,
+        "facts": {"us-gaap": {"EarningsPerShareDiluted": {"units": {"USD/shares": eps}}}},
+    }
+    holdings_date = date(2026, 10, 31)
+    observations = edgar.parse_company_facts(payload, as_of=holdings_date)
+    q4 = next(
+        row
+        for row in observations
+        if row.metric == "eps_diluted"
+        and row.period_type == "Q"
+        and row.period_end == date(2023, 6, 30)
+    )
+
+    assert q4.value == Decimal("1.6")
+    assert all(row.period_end >= date(2022, 10, 31) for row in observations)
+    assert trailing_twelve_month_eps_for_period(
+        observations,
+        period_end=date(2023, 9, 30),
+        known_as_of=holdings_date,
+    ) == Decimal("5.2")

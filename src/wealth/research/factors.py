@@ -170,7 +170,7 @@ def _last_four_quarters(rows: Sequence[FundamentalRow]) -> list[FundamentalRow] 
         return None
     selected = list(rows[-4:])
     if any(
-        not 70 <= (right.period_end - left.period_end).days <= 110
+        not 70 <= (right.period_end - left.period_end).days <= 120
         for left, right in zip(selected, selected[1:], strict=False)
     ):
         return None
@@ -193,6 +193,53 @@ def _latest_value(
 ) -> Decimal | None:
     rows = _metric_rows(facts, metric)
     return rows[-1].value if rows else None
+
+
+def latest_fundamental_value(
+    facts: Iterable[FundamentalRow], metric: str, as_of: date
+) -> Decimal | None:
+    """Return the latest value known by ``as_of`` for one stored metric."""
+    return _latest_value(_facts_as_of(facts, as_of), metric)
+
+
+def trailing_twelve_month_net_income(
+    facts: Iterable[FundamentalRow], as_of: date
+) -> Decimal | None:
+    """Return four contiguous quarterly net-income values known by ``as_of``."""
+    selected = _facts_as_of(facts, as_of)
+    return _ttm(selected, "net_income")
+
+
+def trailing_twelve_month_net_income_for_period(
+    facts: Iterable[FundamentalRow], *, period_end: date, known_as_of: date
+) -> Decimal | None:
+    """Use latest restated net-income quarters known by ``known_as_of`` through ``period_end``."""
+    selected = _facts_as_of(facts, known_as_of)
+    eligible = {
+        key: fact
+        for key, fact in selected.items()
+        if key[0] == "net_income" and key[1] <= period_end
+    }
+    return _ttm(eligible, "net_income")
+
+
+def trailing_twelve_month_eps(facts: Iterable[FundamentalRow], as_of: date) -> Decimal | None:
+    """Return four contiguous quarterly diluted EPS values known by ``as_of``."""
+    selected = _facts_as_of(facts, as_of)
+    return _ttm(selected, "eps_diluted")
+
+
+def trailing_twelve_month_eps_for_period(
+    facts: Iterable[FundamentalRow], *, period_end: date, known_as_of: date
+) -> Decimal | None:
+    """Use latest restated EPS known by ``known_as_of`` for quarters through ``period_end``."""
+    selected = _facts_as_of(facts, known_as_of)
+    eligible = {
+        key: fact
+        for key, fact in selected.items()
+        if key[0] == "eps_diluted" and key[1] <= period_end
+    }
+    return _ttm(eligible, "eps_diluted")
 
 
 def pe_percentile_own_10y(
@@ -233,7 +280,7 @@ def fundamental_factors(
         if len(revenue_rows) >= 8:
             prior_rows = revenue_rows[-8:-4]
             if all(
-                70 <= (right.period_end - left.period_end).days <= 110
+                70 <= (right.period_end - left.period_end).days <= 120
                 for left, right in zip(revenue_rows[-8:], revenue_rows[-7:], strict=False)
             ):
                 prior_revenue = sum((row.value for row in prior_rows), Decimal(0))

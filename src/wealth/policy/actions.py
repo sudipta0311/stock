@@ -269,6 +269,19 @@ def validate_buying_rules(rules: BuyingRules) -> None:
     if not Decimal(0) <= expensive_percentile <= Decimal(100):
         raise ValueError("expensive valuation percentile must be from 0 to 100")
 
+    entry_hint = rules.get("entry_hint")
+    if not isinstance(entry_hint, Mapping):
+        raise ValueError("entry_hint must be a mapping")
+    if (
+        decimal_rule(entry_hint.get("wait_above_200dma_pct"), "entry_hint.wait_above_200dma_pct")
+        < 0
+    ):
+        raise ValueError("entry_hint.wait_above_200dma_pct must be non-negative")
+    for key in ("wait_market_percentile", "more_parts_market_percentile"):
+        percentile = decimal_rule(entry_hint.get(key), f"entry_hint.{key}")
+        if not Decimal(0) <= percentile <= Decimal(100):
+            raise ValueError(f"entry_hint.{key} must be from 0 to 100")
+
 
 def build_action_list(
     week_input: WeekInput,

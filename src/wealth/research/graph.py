@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, TypedDict
 from uuid import UUID
@@ -15,6 +16,7 @@ from wealth.research.agents import (
     ResearchTeam,
     dossier_compliance_failures,
 )
+from wealth.research.buy_hints import entry_hint
 from wealth.research.dossier import (
     Dossier,
     DossierBudget,
@@ -74,6 +76,50 @@ def _load_dossiers(state: ResearchState) -> list[Dossier]:
 
 def _candidate_map(state: ResearchState) -> dict[str, dict[str, Any]]:
     return {str(item["dossier_id"]): item for item in state.get("shortlist", [])}
+
+
+def _week_as_of(week: str) -> date | None:
+    if len(week) != 7 or week[4:6] != "-W":
+        return None
+    try:
+        return date.fromisocalendar(int(week[:4]), int(week[6:]), 5)
+    except ValueError:
+        return None
+
+
+def _stored_dist_from_200dma(
+    candidate: Mapping[str, Any],
+    dossier: Dossier,
+    tool_results: Mapping[str, Any],
+) -> Decimal | None:
+    """Read a stored price factor without asking a model or fetching new data."""
+    candidate_results = candidate.get("tool_results")
+    records = list(candidate_results.values()) if isinstance(candidate_results, Mapping) else []
+    if isinstance(tool_results, Mapping):
+        records.extend(tool_results.values())
+    if dossier.valuation_stats is not None:
+        records.append({"result": dossier.valuation_stats})
+    for record in records:
+        if not isinstance(record, Mapping):
+            continue
+        result = record.get("result")
+        if not isinstance(result, Mapping):
+            continue
+        raw_factors = result.get("raw_factors")
+        factors = result.get("factors")
+        for values in (raw_factors, factors, result):
+            if not isinstance(values, Mapping):
+                continue
+            raw_value = values.get("dist_from_200dma")
+            if raw_value is None:
+                continue
+            try:
+                value = Decimal(str(raw_value))
+            except (ArithmeticError, TypeError, ValueError):
+                continue
+            if value.is_finite():
+                return value
+    return None
 
 
 def _budget_for(dossier: Dossier, rules: ResearchRules, context: RunContext) -> None:
@@ -576,6 +622,19 @@ def build_research_graph(
     def pack_node(state: ResearchState) -> dict[str, Any]:
         candidates = _candidate_map(state)
         dossiers = _load_dossiers(state)
+        week = str(state.get("week", ""))
+        as_of = _week_as_of(week)
+        index_percentiles: dict[str, str | None] = {"IN": None, "US": None}
+        index_history: dict[str, dict[str, str | int | None]] = {
+            "IN": {"index": "NIFTY 50", "history_label": "unavailable", "as_of": None},
+            "US": {"index": "S&P 500", "history_label": "unavailable", "as_of": None},
+        }
+        if owner_engine is not None and as_of is not None:
+            from wealth.research.agents.macro_geo import MacroGeoToolbox
+
+            index_percentiles, index_history = MacroGeoToolbox(
+                owner_engine, as_of
+            ).policy_index_percentiles()
         shortlist_ids = set(state.get("shortlist_ids", []))
         approved_ids = {dossier.dossier_id for dossier in dossiers if dossier.status == "APPROVED"}
         if not approved_ids <= shortlist_ids:
@@ -629,8 +688,21 @@ def build_research_graph(
                 ),
             }
             idea = SatelliteIdea.model_validate(value)
-            ideas.append(idea.model_dump(mode="json", exclude_unset=True))
-        week = str(state.get("week", ""))
+            idea_json = idea.model_dump(mode="json", exclude_unset=True)
+            raw_tool_results = state.get("tool_results_by_dossier", {}).get(dossier.dossier_id, {})
+            market_history = index_history.get(dossier.security.market, {})
+            history_label = market_history.get("history_label")
+            idea_json["entry_hint"] = entry_hint(
+                market=dossier.security.market,
+                dist_from_200dma=_stored_dist_from_200dma(
+                    candidate,
+                    dossier,
+                    raw_tool_results if isinstance(raw_tool_results, Mapping) else {},
+                ),
+                market_percentile=index_percentiles.get(dossier.security.market),
+                market_history_label=(history_label if isinstance(history_label, str) else None),
+            )
+            ideas.append(idea_json)
         run_id = str(state.get("run_id", ""))
         markets = {
             market: {
@@ -646,6 +718,8 @@ def build_research_graph(
             "run_id": run_id,
             "markets": markets,
             "cio_agenda": state.get("cio_agenda", {}),
+            "index_valuation_percentiles": index_percentiles,
+            "macro": {"index_valuation_history": index_history},
         }
         if owner_engine is not None:
             researched = {
@@ -657,18 +731,12 @@ def build_research_graph(
                 pack, load_research_pack(owner_engine, week) or {}, researched
             )
             save_research_pack(owner_engine, week, pack)
-            from datetime import date
-
             from wealth.research.agents.macro_geo import (
                 MacroGeoAgent,
                 register_macro_geo_tools,
             )
 
-            macro_date = (
-                date.fromisocalendar(int(week[:4]), int(week[-2:]), 5)
-                if "-W" in week
-                else date.today()
-            )
+            macro_date = as_of or date.today()
             remaining_usd = max(Decimal(0), context.budget.max_usd - context.budget.spent_usd)
             macro_budget = RunBudget(
                 max_usd=min(selected_rules.macro_max_usd, remaining_usd),

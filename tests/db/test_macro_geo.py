@@ -80,6 +80,29 @@ def test_index_percentile_uses_history_and_labels_short_history(
             ),
         ]
     )
+    records.extend(
+        IndexValuationObservation(
+            "S&P 500",
+            on,
+            Decimal(value),
+            None,
+            None,
+            "COMPUTED_SPY_EDGAR_BACKFILL",
+            "https://www.ssga.com/synthetic-nav.xlsx",
+        )
+        for on, value in zip(old_dates, ("10", "20", "30"), strict=True)
+    )
+    records.append(
+        IndexValuationObservation(
+            "S&P 500",
+            date(2026, 10, 29),
+            Decimal("25"),
+            None,
+            None,
+            "COMPUTED_SPY_EDGAR",
+            "https://www.ssga.com/synthetic-holdings.xlsx",
+        )
+    )
 
     with Session(migrated_database.owner_engine) as session, session.begin():
         assert store.upsert_index_valuations(session, records) == len(records)
@@ -107,6 +130,16 @@ def test_index_percentile_uses_history_and_labels_short_history(
     ).index_valuation({"index": "NIFTY 50"})
     assert (tool_result["pb"], tool_result["div_yield"]) == ("3.00000000", "1.00000000")
     assert source_url == "https://nsearchives.nseindia.com/synthetic.csv"
+    percentiles, history = MacroGeoToolbox(
+        migrated_database.owner_engine, date(2026, 10, 30)
+    ).policy_index_percentiles()
+    assert percentiles["US"] == "66.67"
+    assert history["US"] == {
+        "index": "S&P 500",
+        "history_label": "long_history",
+        "as_of": "2026-10-29",
+        "history_count": 4,
+    }
 
 
 def test_weekly_pack_merges_macro_fields_and_policy_loads_tilts_and_percentiles(
@@ -131,7 +164,7 @@ def test_weekly_pack_merges_macro_fields_and_policy_loads_tilts_and_percentiles(
         {
             "geo_tilts": tilts.model_dump(mode="json"),
             "macro": {"agent_status": "completed", "regime_notes": []},
-            "index_valuation_percentiles": {"IN": "72.50", "US": None},
+            "index_valuation_percentiles": {"IN": "72.50", "US": "85"},
         },
     )
     user_id = resolve_user(
@@ -146,16 +179,22 @@ def test_weekly_pack_merges_macro_fields_and_policy_loads_tilts_and_percentiles(
         assert user_data is not None
         assert pack is not None
         assert pack.geo_tilts == tilts
-        assert market.index_valuation_percentiles == {"IN": Decimal("72.50")}
+        assert market.index_valuation_percentiles == {
+            "IN": Decimal("72.50"),
+            "US": Decimal("85"),
+        }
 
     assert load_prior_geo_tilts(migrated_database.owner_engine, "2026-W45") == tilts
     with Session(migrated_database.owner_engine) as session:
         row = session.get(ResearchPackRecord, week)
         assert row is not None
         assert row.pack["macro"]["agent_status"] == "completed"
-        assert row.pack["index_valuation_percentiles"] == {"IN": "72.50", "US": None}
+        assert row.pack["index_valuation_percentiles"] == {"IN": "72.50", "US": "85"}
         assert "macro" not in ResearchPackRecord.__table__.columns
-        assert _research_index_percentiles(session, week) == {"IN": Decimal("72.50")}
+        assert _research_index_percentiles(session, week) == {
+            "IN": Decimal("72.50"),
+            "US": Decimal("85"),
+        }
 
 
 def test_macro_market_data_tables_have_shared_read_only_grants(

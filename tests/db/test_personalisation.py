@@ -86,10 +86,23 @@ def test_research_ideas_reads_selector_and_track_record_from_existing_pack(
 ) -> None:
     client, secret, _application = api_client
     headers, _subject = _auth(secret, "c16b-pack-reader")
+    old_week = "2026-W43"
     pack = ResearchPackRecord(
-        week=_WEEK,
+        week=old_week,
         pack={
-            "ideas": [],
+            "ideas": [
+                {
+                    "security_id": "synthetic-old-idea",
+                    "symbol": "OLD",
+                    "market": "IN",
+                    "sector": "Industrials",
+                    "price": "100.00",
+                    "quant_decile": 8,
+                    "dossier_status": "APPROVED",
+                    "valuation_percentile": "45",
+                    "confidence": "HIGH",
+                }
+            ],
             "core_picks": {
                 "in_nifty50": [
                     {
@@ -117,11 +130,12 @@ def test_research_ideas_reads_selector_and_track_record_from_existing_pack(
     with Session(migrated_database.owner_engine) as session, session.begin():
         session.add(pack)
 
-    response = client.get("/v1/research/ideas", params={"week": _WEEK}, headers=headers)
+    response = client.get("/v1/research/ideas", params={"week": old_week}, headers=headers)
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["ideas"] == []
+    assert payload["ideas"][0]["symbol"] == "OLD"
+    assert payload["ideas"][0]["entry_hint"] is None
     assert payload["core_picks"]["in_nifty50"][0]["symbol"] == "SYNTH"
     assert payload["track_record"]["markets"]["IN"]["status"] == "available"
 

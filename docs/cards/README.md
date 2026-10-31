@@ -54,6 +54,7 @@ Status: ⬜ not started · 🟦 in progress · ✅ accepted · 🔁 rework · �
 | C24 | End-to-end tests (Playwright), accessibility and performance checks | 10 | ✅ |
 | C25 | Docs, cleanup, final plan sync | — | ✅ |
 | C34 | Savings in DKK/EUR; fixes from the mock-data walkthrough (hint, fund check, errors, required marks, quick-add amounts, push on account switch, rate note, onboarding counter) | 3, 8 | ✅ |
+| C35 | US market valuation (S&P 500 look-through P/E from SPY holdings and EDGAR EPS, ~3 years of split-checked monthly history) and a code-decided buy hint on each research idea | 4.9, 5 | ✅ |
 
 ## Follow-ups and review outcomes
 
