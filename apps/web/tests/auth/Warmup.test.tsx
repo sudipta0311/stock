@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import { act, render, screen } from "@testing-library/react";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { AuthProvider } from "../../src/auth/AuthContext";
 import { AuthCallbackPage, LoginPage } from "../../src/app/AuthPages";
@@ -90,7 +90,7 @@ it("gives up on a server that never answers", async () => {
   );
 
   const result = pollUntilApiAnswers();
-  await vi.advanceTimersByTimeAsync(151_000);
+  await vi.advanceTimersByTimeAsync(241_000);
 
   expect(await result).toBe(false);
 });
@@ -115,6 +115,72 @@ it("offers Try again and keeps the saved sign-in when the server can't be reache
   expect(screen.getByRole("button", { name: "Try again" })).toBeVisible();
   expect(fetcher).not.toHaveBeenCalled();
   expect(getRefreshToken()).toBe("synthetic-refresh");
+});
+
+it("quietly restores the saved sign-in after the API starts answering", async () => {
+  warmup.reachable = false;
+  window.localStorage.setItem(REFRESH_TOKEN_STORAGE_KEY, "synthetic-refresh");
+  const paths: string[] = [];
+  let retryCallback: (() => void) | undefined;
+  const nativeSetTimeout = window.setTimeout.bind(window);
+  vi.spyOn(window, "setTimeout").mockImplementation(((
+    handler: TimerHandler,
+    timeout?: number,
+    ...args: unknown[]
+  ) => {
+    if (timeout === 20_000 && typeof handler === "function") {
+      retryCallback = handler as () => void;
+      return 42;
+    }
+    return nativeSetTimeout(handler, timeout, ...args);
+  }) as typeof window.setTimeout);
+  vi.stubGlobal(
+    "fetch",
+    vi.fn<typeof fetch>(async (input) => {
+      const path = new URL(String(input)).pathname;
+      paths.push(path);
+      if (path === "/v1/auth/refresh") {
+        return new Response(
+          JSON.stringify({
+            access_token: "synthetic-access",
+            refresh_token: "synthetic-rotated-refresh",
+            expires_in: 1_800,
+            session_expires_at: "2026-11-01T00:00:00Z",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ profile: {} }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }),
+  );
+
+  render(
+    <MemoryRouter initialEntries={["/login"]}>
+      <AuthProvider>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/" element={<p>Home restored</p>} />
+        </Routes>
+      </AuthProvider>
+    </MemoryRouter>,
+  );
+
+  expect(
+    await screen.findByText(/We couldn't reach the server/),
+  ).toBeInTheDocument();
+  expect(getRefreshToken()).toBe("synthetic-refresh");
+  expect(retryCallback).toBeDefined();
+  await act(async () => {
+    retryCallback?.();
+  });
+
+  expect(await screen.findByText("Home restored")).toBeInTheDocument();
+  expect(paths).toContain("/healthz");
+  expect(paths).toContain("/v1/auth/refresh");
+  expect(getRefreshToken()).toBe("synthetic-rotated-refresh");
 });
 
 it("doesn't spend the one-time Google code while the server is asleep", async () => {

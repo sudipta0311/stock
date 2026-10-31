@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { MemoryRouter } from "react-router";
@@ -64,13 +64,14 @@ describe("Ideas page", () => {
     expect(screen.getByText("How sure we are: High")).toBeInTheDocument();
     expect(screen.getByText("Part 1 of 3")).toBeInTheDocument();
     expect(
-      screen.getByText("Research, not personal advice"),
+      screen.getByText("Ideas are research to review, not a reason to rush."),
     ).toBeInTheDocument();
     expect((await axe(container)).violations).toEqual([]);
   });
 
   it("shows buy timing lines and keeps each explanation closed", async () => {
     const user = userEvent.setup();
+    server.use(...ideaHandlers());
     server.use(
       http.get(/\/v1\/research\/ideas$/, () =>
         HttpResponse.json({
@@ -137,7 +138,6 @@ describe("Ideas page", () => {
       </MemoryRouter>,
     );
 
-    await user.click(await screen.findByText("More research"));
     expect(
       await screen.findByText("Buy in 3 parts over 3 months"),
     ).toBeVisible();
@@ -152,11 +152,11 @@ describe("Ideas page", () => {
     expect(whyDetails).toHaveLength(3);
     expect(whyDetails.every((details) => details && !details.open)).toBe(true);
     expect(
-      screen.queryByText("The price is far above its recent average."),
+      screen.getByText("The price is far above its recent average."),
     ).not.toBeVisible();
-    const whySummary = screen.getAllByText("Why?")[2];
-    if (!whySummary) throw new Error("Expected three reason summaries");
-    await user.click(whySummary);
+    const waitCard = screen.getByText("WAIT").closest("article");
+    if (!waitCard) throw new Error("Expected the wait idea card");
+    await user.click(within(waitCard).getByText("Why?"));
     expect(
       screen.getByText("The price is far above its recent average."),
     ).toBeVisible();
@@ -231,19 +231,57 @@ describe("Ideas page", () => {
       </MemoryRouter>,
     );
 
-    const moreResearch = await screen.findByText("More research");
-    expect(screen.queryByText("How past ideas did")).not.toBeVisible();
-    expect(screen.getByText("Review your plan")).toBeVisible();
-    expect(container.querySelectorAll('[data-primary="true"]')).toHaveLength(1);
-
-    await user.click(moreResearch);
-    expect(screen.getByText("How past ideas did")).toBeVisible();
-    expect(screen.getByText("Funds to compare")).toBeVisible();
-    await user.click(screen.getByText("Funds to compare"));
+    expect(await screen.findByText("This week's research ideas")).toBeVisible();
+    expect(screen.queryByText("How past ideas did")).not.toBeInTheDocument();
+    expect(screen.queryByText("Review your plan")).not.toBeInTheDocument();
+    const fundsSummary = screen.getByText("Funds to compare");
+    expect(fundsSummary.closest("details")).not.toHaveAttribute("open");
+    expect(
+      screen.getByRole("link", { name: "Explore the wider picture" }),
+    ).toHaveAttribute("href", "/ideas/world");
+    await user.click(fundsSummary);
     expect(screen.getByText("India large companies")).toBeVisible();
     expect(screen.getByText("Synthetic ETF fund")).toBeVisible();
     expect(screen.getByRole("button", { name: "What's this?" })).toBeVisible();
     expect((await axe(container)).violations).toEqual([]);
+  });
+
+  it("shows three ideas per market and opens the remaining ideas", async () => {
+    const user = userEvent.setup();
+    const ideas = ["IN1", "IN2", "IN3", "IN4", "US1", "US2", "US3", "US4"].map(
+      (symbol) => ({
+        security_id: `security-${symbol}`,
+        symbol,
+        market: symbol.startsWith("IN") ? "IN" : "US",
+        sector: "Energy",
+        price: "100.00",
+        quant_decile: 8,
+        dossier_status: "APPROVED",
+        valuation_percentile: "35",
+        confidence: "HIGH",
+      }),
+    );
+    server.use(...ideaHandlers());
+    server.use(
+      http.get(/\/v1\/research\/ideas$/, () =>
+        HttpResponse.json({ week: "2026-W44", ideas }),
+      ),
+    );
+    renderWithQueries(
+      <MemoryRouter>
+        <IdeasPage />
+      </MemoryRouter>,
+    );
+
+    for (const symbol of ["IN1", "IN2", "IN3", "US1", "US2", "US3"]) {
+      expect(await screen.findByText(symbol)).toBeVisible();
+    }
+    expect(screen.getByText("IN4")).not.toBeVisible();
+    expect(screen.getByText("US4")).not.toBeVisible();
+    expect(screen.queryByText("Helpful notes")).not.toBeInTheDocument();
+    await user.click(screen.getByText("See all ideas"));
+    expect(screen.getByText("IN4")).toBeVisible();
+    expect(screen.getByText("US4")).toBeVisible();
   });
 
   it("shows a sourced Denmark buy line with details closed by default", async () => {
@@ -298,7 +336,6 @@ describe("Ideas page", () => {
       screen.getByText("We use your share savings account first when it fits."),
     ).toBeInTheDocument();
     expect(screen.queryByText("Core picks for you")).not.toBeInTheDocument();
-    expect(container.querySelectorAll('[data-primary="true"]')).toHaveLength(1);
     expect(screen.getByText("DKK 10,000")).toBeInTheDocument();
     expect(screen.getByText(/Share savings account/)).toBeInTheDocument();
     expect(screen.getByText("IE00ABC00001")).toBeInTheDocument();

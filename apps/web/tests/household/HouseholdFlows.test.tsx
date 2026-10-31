@@ -200,6 +200,20 @@ function householdHandlers({
     ),
     http.get(/\/v1\/plan$/, () => HttpResponse.json(plan)),
     http.get(/\/v1\/actions$/, () => HttpResponse.json(actions)),
+    http.get(/\/v1\/me\/investing$/, () =>
+      HttpResponse.json({
+        monthly_sip_capacity: "0.00",
+        new_money_this_week: "0.00",
+        existing_sips: [],
+      }),
+    ),
+    http.get(/\/v1\/loans$/, () =>
+      HttpResponse.json({
+        loans: [],
+        remaining_inr: "0.00",
+        monthly_emis_inr: "0.00",
+      }),
+    ),
     http.get(/\/v1\/networth$/, ({ request }) => {
       const memberId = new URL(request.url).searchParams.get("member_id") ?? "";
       onNetworth?.(memberId);

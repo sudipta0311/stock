@@ -173,9 +173,13 @@ export async function skipGuidedTour(page: Page): Promise<void> {
 
 export async function openFixedDepositForm(page: Page): Promise<void> {
   await gotoApp(page, "/money");
-  await page
-    .getByRole("button", { name: "Fixed deposits", exact: true })
-    .click();
+  await page.getByText("What else do you have?", { exact: true }).click();
+  const fixedDeposits = page.getByRole("button", {
+    name: "Fixed deposits",
+    exact: true,
+  });
+  await expect(fixedDeposits).toBeVisible();
+  await fixedDeposits.click();
   await page.getByRole("button", { name: /Continue \(1 selected\)/ }).click();
   await expect(
     page.getByRole("heading", { name: "Fixed deposit", exact: true }),

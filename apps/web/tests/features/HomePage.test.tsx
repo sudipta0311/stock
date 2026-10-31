@@ -1,22 +1,79 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 import { axe } from "vitest-axe";
 import englishCopy from "../../src/copy/en.json";
+import {
+  HouseholdProvider,
+  PRIMARY_CURRENCY_STORAGE_KEY,
+} from "../../src/household/HouseholdContext";
 import { actionHowTo, HomePage } from "../../src/home/HomePage";
 import type { ActionResponse } from "../../src/planning/api";
-import { action, baseHomeHandlers, weeklyPlan } from "./fixtures";
+import { action, baseHomeHandlers, networth, weeklyPlan } from "./fixtures";
 import { renderWithQueries } from "./render";
 import { server } from "../msw";
+import { WakeIndicator } from "../../src/app/WakeIndicator";
 
 function renderHome() {
   return renderWithQueries(
     <MemoryRouter>
-      <HomePage />
+      <>
+        <HomePage />
+        <WakeIndicator />
+      </>
     </MemoryRouter>,
   );
+}
+
+function renderDkkHome(
+  investingPrefs: Record<string, unknown>,
+  fxRate: string | undefined,
+) {
+  window.localStorage.clear();
+  window.localStorage.setItem(PRIMARY_CURRENCY_STORAGE_KEY, "DKK");
+  let markFxRequested!: () => void;
+  const fxRequested = new Promise<void>((resolve) => {
+    markFxRequested = resolve;
+  });
+  server.use(
+    ...baseHomeHandlers([], investingPrefs),
+    http.get(/\/v1\/members$/, () =>
+      HttpResponse.json([
+        {
+          id: "member-dk-test",
+          display_name: "Test Denmark member",
+          relationship: "self",
+          residency: {
+            country: "DK",
+            status: "NRI",
+            settle_plan: "undecided",
+            us_person: false,
+            planned_return_year: null,
+          },
+        },
+      ]),
+    ),
+    http.get(/\/v1\/households$/, () => HttpResponse.json([])),
+    http.get(/\/v1\/fx\/dkk-inr$/, () => {
+      markFxRequested();
+      return fxRate
+        ? HttpResponse.json({ date: "2026-10-28", rate: fxRate })
+        : HttpResponse.json({ date: "2026-10-28" });
+    }),
+  );
+  const view = renderWithQueries(
+    <HouseholdProvider>
+      <MemoryRouter>
+        <>
+          <HomePage />
+          <WakeIndicator />
+        </>
+      </MemoryRouter>
+    </HouseholdProvider>,
+  );
+  return { ...view, fxRequested };
 }
 
 function withRoute(route: string, id = `action-${route}`): ActionResponse {
@@ -55,13 +112,17 @@ describe("Home this week", () => {
     );
   });
 
-  it("shows a positive no-action state when the API returns zero actions", async () => {
+  it("asks for a monthly amount when none is set", async () => {
     server.use(...baseHomeHandlers([]));
     renderHome();
-    const emptyMessage = await screen.findByText("Nothing to do this week");
-    expect(emptyMessage).toBeInTheDocument();
-    expect(emptyMessage).not.toHaveTextContent("✓");
-    expect(screen.getByText("Net worth")).toBeInTheDocument();
+    expect(
+      await screen.findByText(englishCopy.home.amount_question),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Save" })).toBeVisible();
+    expect(
+      screen.queryByText(englishCopy.home.nothing_to_buy),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Money/ })).toBeVisible();
     const root = document.querySelector<HTMLElement>(
       '[data-copy-screen="home"]',
     );
@@ -70,6 +131,189 @@ describe("Home this week", () => {
     expect(
       root?.querySelectorAll(":scope > section").length,
     ).toBeLessThanOrEqual(4);
+  });
+
+  it("shows the positive no-buy state after a monthly amount is set", async () => {
+    server.use(
+      ...baseHomeHandlers([], {
+        monthly_sip_capacity: "20000.00",
+        new_money_this_week: "0.00",
+      }),
+    );
+    renderHome();
+    expect(
+      await screen.findByText(englishCopy.home.nothing_to_buy),
+    ).toBeVisible();
+    expect(
+      screen.queryByLabelText(englishCopy.home.monthly_amount),
+    ).not.toBeInTheDocument();
+  });
+
+  it("saves the monthly amount through the existing settings API", async () => {
+    const user = userEvent.setup();
+    let saved: Record<string, unknown> | null = null;
+    server.use(...baseHomeHandlers([]));
+    server.use(
+      http.put(/\/v1\/me\/investing$/, async ({ request }) => {
+        saved = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(saved);
+      }),
+    );
+    renderHome();
+    await screen.findByText(englishCopy.home.amount_question);
+    await user.type(
+      screen.getByRole("spinbutton", {
+        name: new RegExp(englishCopy.home.monthly_amount),
+      }),
+      "25000",
+    );
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(saved).toMatchObject({ monthly_sip_capacity: "25000" }),
+    );
+    expect(
+      await screen.findByText(englishCopy.home.amount_saved),
+    ).toBeVisible();
+  });
+
+  it("converts a monthly DKK amount to rupees before saving", async () => {
+    const user = userEvent.setup();
+    let saved: Record<string, unknown> | null = null;
+    renderDkkHome(
+      { monthly_sip_capacity: "0.00", new_money_this_week: "0.00" },
+      "12.5",
+    );
+    server.use(
+      http.put(/\/v1\/me\/investing$/, async ({ request }) => {
+        saved = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(saved);
+      }),
+    );
+
+    await screen.findByText(englishCopy.home.amount_question);
+    const amount = screen.getByRole("spinbutton", {
+      name: new RegExp(englishCopy.home.monthly_amount),
+    });
+    expect(
+      await within(amount.closest("label")!).findByText("DKK"),
+    ).toBeInTheDocument();
+    await user.type(amount, "5000");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(saved).toMatchObject({ monthly_sip_capacity: "62500.00" }),
+    );
+  });
+
+  it("shows a DKK prefill and converts extra money before saving", async () => {
+    const user = userEvent.setup();
+    let saved: Record<string, unknown> | null = null;
+    renderDkkHome(
+      {
+        monthly_sip_capacity: "125000.00",
+        new_money_this_week: "62500.00",
+      },
+      "12.5",
+    );
+    server.use(
+      http.put(/\/v1\/me\/investing$/, async ({ request }) => {
+        saved = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(saved);
+      }),
+    );
+
+    expect(
+      await screen.findByRole("link", { name: /DKK 80,000/ }),
+    ).toBeInTheDocument();
+    await user.click(
+      await screen.findByRole("button", {
+        name: englishCopy.home.extra_money_link,
+      }),
+    );
+    const amount = screen.getByRole("spinbutton", {
+      name: new RegExp(englishCopy.home.weekly_amount),
+    });
+    expect(amount).toHaveValue(5000);
+    expect(
+      within(amount.closest("label")!).getByText("DKK"),
+    ).toBeInTheDocument();
+    await user.clear(amount);
+    await user.type(amount, "5000");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(saved).toMatchObject({
+        monthly_sip_capacity: "125000.00",
+        new_money_this_week: "62500.00",
+      }),
+    );
+  });
+
+  it("uses rupee entry and saves the typed value when the DKK rate is missing", async () => {
+    const user = userEvent.setup();
+    let saved: Record<string, unknown> | null = null;
+    const { queryClient, fxRequested } = renderDkkHome(
+      { monthly_sip_capacity: "0.00", new_money_this_week: "0.00" },
+      undefined,
+    );
+    server.use(
+      http.put(/\/v1\/me\/investing$/, async ({ request }) => {
+        saved = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(saved);
+      }),
+    );
+
+    await screen.findByText(englishCopy.home.amount_question);
+    await fxRequested;
+    await waitFor(() =>
+      expect(
+        queryClient.getQueryState(["household-context", "fx", "DKK", "INR"])
+          ?.fetchStatus,
+      ).toBe("idle"),
+    );
+    expect(
+      queryClient.getQueryState(["household-context", "fx", "DKK", "INR"])
+        ?.status,
+    ).toBe("error");
+    const amount = screen.getByRole("spinbutton", {
+      name: new RegExp(englishCopy.home.monthly_amount),
+    });
+    expect(
+      within(amount.closest("label")!).getByText("\u20b9"),
+    ).toBeInTheDocument();
+    await user.type(amount, "5000");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(saved).toMatchObject({ monthly_sip_capacity: "5000" }),
+    );
+  });
+
+  it("keeps cached content visible with an updating chip during a slow refresh", async () => {
+    server.use(...baseHomeHandlers([]));
+    const { queryClient } = renderHome();
+    expect(await screen.findByRole("link", { name: /Money/ })).toBeVisible();
+    let requestStarted = false;
+    let releaseRequest: (() => void) | undefined;
+    server.use(
+      http.get(/\/v1\/networth$/, async () => {
+        requestStarted = true;
+        await new Promise<void>((resolve) => {
+          releaseRequest = resolve;
+        });
+        return HttpResponse.json(networth());
+      }),
+    );
+    const refresh = queryClient.invalidateQueries({
+      queryKey: ["c27b", "networth"],
+    });
+    await waitFor(() => expect(requestStarted).toBe(true));
+    act(() =>
+      window.dispatchEvent(
+        new CustomEvent("wealth:api-waking", { detail: { waking: true } }),
+      ),
+    );
+    expect(screen.getByText("This week")).toBeVisible();
+    expect(screen.getByText(englishCopy.offline.updating)).toBeVisible();
+    releaseRequest?.();
+    await refresh;
   });
 
   it("shows one action and removes it after Mark done succeeds", async () => {
@@ -98,7 +342,7 @@ describe("Home this week", () => {
     await user.click(screen.getByRole("button", { name: "Mark done" }));
     await waitFor(() => expect(patched).toBe(true));
     expect(
-      await screen.findByText(/Nothing to do this week/),
+      await screen.findByText(englishCopy.home.amount_question),
     ).toBeInTheDocument();
   });
 
@@ -272,7 +516,7 @@ describe("Home this week", () => {
   it("has no axe violations", async () => {
     server.use(...baseHomeHandlers([]));
     const { container } = renderHome();
-    await screen.findByText(/Nothing to do this week/);
+    await screen.findByText(englishCopy.home.amount_question);
     expect((await axe(container)).violations).toEqual([]);
   });
 });

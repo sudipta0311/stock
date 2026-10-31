@@ -1,4 +1,4 @@
-const WAKE_LIMIT_MS = 150_000;
+const WAKE_LIMIT_MS = 240_000;
 const ATTEMPT_LIMIT_MS = 30_000;
 const MAX_BACKOFF_MS = 5_000;
 const SHOW_WAKING_AFTER_MS = 1_500;
@@ -22,9 +22,9 @@ function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
-async function answers(): Promise<boolean> {
+async function answers(timeoutMs = ATTEMPT_LIMIT_MS): Promise<boolean> {
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), ATTEMPT_LIMIT_MS);
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(healthUrl(), {
       cache: "no-store",
@@ -52,14 +52,16 @@ export function pollUntilApiAnswers(): Promise<boolean> {
     );
     let delay = 1_000;
     try {
-      while (Date.now() - startedAt < WAKE_LIMIT_MS) {
-        if (await answers()) {
+      while (true) {
+        const remaining = WAKE_LIMIT_MS - (Date.now() - startedAt);
+        if (remaining <= 0) break;
+        if (await answers(Math.min(ATTEMPT_LIMIT_MS, remaining))) {
           awakeUntil = Date.now() + STAYS_AWAKE_MS;
           return true;
         }
-        const remaining = WAKE_LIMIT_MS - (Date.now() - startedAt);
-        if (remaining <= 0) break;
-        await wait(Math.min(delay, remaining));
+        const remainingAfterAttempt = WAKE_LIMIT_MS - (Date.now() - startedAt);
+        if (remainingAfterAttempt <= 0) break;
+        await wait(Math.min(delay, remainingAfterAttempt));
         delay = Math.min(delay * 2, MAX_BACKOFF_MS);
       }
       return false;
@@ -75,6 +77,11 @@ export function pollUntilApiAnswers(): Promise<boolean> {
 /** Waits for the deployed API; local development and tests have no sleeping host. */
 export function waitForApi(): Promise<boolean> {
   return import.meta.env.PROD ? pollUntilApiAnswers() : Promise.resolve(true);
+}
+
+/** A quiet one-shot health check used after the sign-in screen reports a wake timeout. */
+export function checkApiNow(): Promise<boolean> {
+  return answers();
 }
 
 /** Starts waking the API without waiting, e.g. while the person is at Google. */

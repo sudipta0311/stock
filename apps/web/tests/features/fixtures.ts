@@ -216,7 +216,13 @@ export function action(
   };
 }
 
-export function baseHomeHandlers(actions: ActionResponse[] = []) {
+export function baseHomeHandlers(
+  actions: ActionResponse[] = [],
+  investingPrefs: Record<string, unknown> = {
+    monthly_sip_capacity: "0.00",
+    new_money_this_week: "0.00",
+  },
+) {
   return [
     http.get(/\/v1\/me$/, () =>
       HttpResponse.json({
@@ -230,5 +236,9 @@ export function baseHomeHandlers(actions: ActionResponse[] = []) {
     http.get(/\/v1\/networth$/, () => HttpResponse.json(networth())),
     http.get(/\/v1\/plan$/, () => HttpResponse.json(weeklyPlan())),
     http.get(/\/v1\/actions$/, () => HttpResponse.json(actions)),
+    http.get(/\/v1\/me\/investing$/, () => HttpResponse.json(investingPrefs)),
+    http.put(/\/v1\/me\/investing$/, async ({ request }) =>
+      HttpResponse.json(await request.json()),
+    ),
   ];
 }

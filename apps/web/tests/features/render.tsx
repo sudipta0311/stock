@@ -9,7 +9,8 @@ export function renderWithQueries(ui: ReactElement) {
       mutations: { retry: false },
     },
   });
-  return render(
+  const view = render(
     <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
   );
+  return { ...view, queryClient: client };
 }

@@ -69,6 +69,7 @@ test("short household setup reaches the first plan in five setup taps", async ({
   await page.getByRole("button", { name: "Save answers" }).click();
   await expect(page.getByText(/^Your plan:/)).toBeVisible();
   await gotoApp(page, "/settings");
+  await page.getByText("Your plan", { exact: true }).click();
   await page.getByText("Fine-tune your plan", { exact: true }).click();
   await page.getByLabel("Tax regime").selectOption("new");
   await page.getByRole("button", { name: "Save plan details" }).click();

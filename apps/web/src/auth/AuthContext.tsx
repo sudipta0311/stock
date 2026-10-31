@@ -27,7 +27,7 @@ import {
   refreshAuthSession,
   scheduleProactiveRefresh,
 } from "./session";
-import { nudgeApi, waitForApi } from "./warmup";
+import { checkApiNow, nudgeApi, waitForApi } from "./warmup";
 import { developmentTokenSignInAllowed } from "./dev-auth";
 
 type AuthMode = "oidc" | "dev";
@@ -260,6 +260,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       active = false;
     };
   }, [mode, verifyProfile]);
+
+  useEffect(() => {
+    if (
+      !serverUnreachable ||
+      mode !== "oidc" ||
+      state !== "anonymous" ||
+      !getRefreshToken()
+    ) {
+      return;
+    }
+    let active = true;
+    let timeout: number | undefined;
+    const retry = async () => {
+      if (await checkApiNow()) {
+        try {
+          const refreshed = await refreshAuthSession();
+          if (!active) return;
+          if (refreshed) {
+            await claimDeviceFor(refreshed.access_token);
+            setServerUnreachable(false);
+            setAuthToken(refreshed.access_token);
+            scheduleProactiveRefresh();
+            const cachedProfile = readCachedProfileStatus();
+            setHasProfile(cachedProfile);
+            setState("authenticated");
+            if (cachedProfile) warmHomeQueries();
+            void verifyProfile();
+            return;
+          }
+          setServerUnreachable(false);
+          return;
+        } catch {
+          // Keep the saved sign-in and retry quietly after a short pause.
+        }
+      }
+      if (active) timeout = window.setTimeout(() => void retry(), 20_000);
+    };
+    timeout = window.setTimeout(() => void retry(), 20_000);
+    return () => {
+      active = false;
+      if (timeout !== undefined) window.clearTimeout(timeout);
+    };
+  }, [mode, serverUnreachable, state, verifyProfile]);
 
   useEffect(() => {
     function expireSession() {

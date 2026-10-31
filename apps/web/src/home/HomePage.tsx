@@ -32,18 +32,17 @@ import {
   updateActionStatus,
 } from "../planning/api";
 import type { ActionResponse, WeeklyPlan } from "../planning/api";
-import { Button, Card, Sheet, Term } from "../ui";
+import { Button, Card, Sheet } from "../ui";
 import { Highlights } from "../features/Highlights";
 import englishCopy from "../copy/en.json";
 import { useHousehold } from "../household/HouseholdContext";
 import { MoneyValue } from "../household/currency-view";
-import {
-  formatHouseholdAmount,
-  formatSecondaryAmount,
-} from "../household/currency";
-import { formatRateToTwoDecimals } from "../household/fx";
+import { formatHouseholdAmount } from "../household/currency";
+import { dkkToInr, inrToDkk } from "../household/fx";
 import type { DkkInrRate } from "../household/fx";
 import type { MemberResponse } from "../money/api";
+import { getInvestingPrefs, saveInvestingPrefs } from "../settings/api";
+import type { InvestingPrefs, InvestingPrefsInput } from "../settings/api";
 
 function payloadFor(action: ActionResponse): Record<string, unknown> {
   const payload = asRecord(action.payload);
@@ -71,16 +70,6 @@ function rawActionAmount(action: ActionResponse): string {
 
 function actionAmount(action: ActionResponse): string {
   return roundActionAmount(rawActionAmount(action));
-}
-
-function networthAsOf(date: string | undefined): string {
-  if (!date) return englishCopy.home.net_worth_as_of_today;
-  const shownDate = new Intl.DateTimeFormat("en-IN", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  }).format(new Date(`${date}T00:00:00`));
-  return englishCopy.home.net_worth_as_of.replace("{date}", shownDate);
 }
 
 function sellDetails(action: ActionResponse): {
@@ -279,6 +268,62 @@ function upcomingMaturities(
     .sort((left, right) => left.date.localeCompare(right.date));
 }
 
+type InvestingAmountCurrency = "INR" | "DKK";
+
+function amountEntryCurrency(
+  primaryCurrency: "INR" | "DKK",
+  fxRate: DkkInrRate | undefined,
+): InvestingAmountCurrency {
+  return primaryCurrency === "DKK" && fxRate && inrToDkk("0.01", fxRate)
+    ? "DKK"
+    : "INR";
+}
+
+function amountInEntryCurrency(
+  amountInr: string,
+  currency: InvestingAmountCurrency,
+  fxRate: DkkInrRate | undefined,
+): string {
+  if (currency === "DKK" && fxRate) return inrToDkk(amountInr, fxRate) ?? "";
+  return amountInr;
+}
+
+function amountInRupees(
+  amount: string,
+  currency: InvestingAmountCurrency,
+  fxRate: DkkInrRate | undefined,
+): string | null {
+  if (currency === "DKK") return fxRate ? dkkToInr(amount, fxRate) : null;
+  return amount;
+}
+
+function investingPrefsInput(
+  current: InvestingPrefs | undefined,
+  amountInr: string,
+  mode: "monthly" | "weekly",
+): InvestingPrefsInput {
+  return {
+    monthly_sip_capacity:
+      mode === "monthly" ? amountInr : (current?.monthly_sip_capacity ?? "0"),
+    existing_sips: current?.existing_sips ?? [],
+    new_money_this_week:
+      mode === "weekly" ? amountInr : (current?.new_money_this_week ?? "0"),
+    has_lrs_broker: current?.has_lrs_broker ?? false,
+    prefers_no_paperwork: current?.prefers_no_paperwork ?? false,
+    satellite_pct: current?.satellite_pct ?? "20",
+    birth_year: current?.birth_year ?? null,
+    ask_used_this_fy_dkk: current?.ask_used_this_fy_dkk ?? "0",
+    ask_value_start_of_year_dkk: current?.ask_value_start_of_year_dkk ?? null,
+    lrs_used_this_fy: current?.lrs_used_this_fy ?? "0",
+    broker: current?.broker ?? "nordnet",
+    has_indian_nri_share_account:
+      current?.has_indian_nri_share_account ?? false,
+    has_danish_pension_account: current?.has_danish_pension_account ?? false,
+    us_stock_picks_opt_in: current?.us_stock_picks_opt_in ?? false,
+    us_stock_picks_pct: current?.us_stock_picks_pct ?? "10",
+  };
+}
+
 function ActionCard({
   action,
   person,
@@ -367,6 +412,11 @@ function ActionCard({
 
 export function HomePage() {
   const [sheetAction, setSheetAction] = useState<ActionResponse | null>(null);
+  const [amountMode, setAmountMode] = useState<"monthly" | "weekly" | null>(
+    null,
+  );
+  const [amountDraft, setAmountDraft] = useState("");
+  const [amountMessage, setAmountMessage] = useState("");
   const queryClient = useQueryClient();
   const {
     activeMemberId,
@@ -377,6 +427,7 @@ export function HomePage() {
     primaryCurrency,
     fxRate,
   } = useHousehold();
+  const amountCurrency = amountEntryCurrency(primaryCurrency, fxRate);
   const networth = useFeatureQuery(
     ["c27b", "networth", selectedHouseholdId, activeMemberId],
     "/v1/networth",
@@ -391,6 +442,11 @@ export function HomePage() {
     ["c27b", "actions", selectedHouseholdId],
     "/v1/actions",
     getActions,
+  );
+  const investing = useFeatureQuery(
+    ["settings", "investing"],
+    "/v1/me/investing",
+    getInvestingPrefs,
   );
   const markDone = useMutation({
     mutationFn: (action: ActionResponse) =>
@@ -412,6 +468,30 @@ export function HomePage() {
         queryKey: ["c27b", "plan", selectedHouseholdId, activeMemberId],
       }),
   });
+  const saveAmount = useMutation({
+    mutationFn: ({
+      amountInr,
+      mode,
+    }: {
+      amountInr: string;
+      mode: "monthly" | "weekly";
+    }) =>
+      saveInvestingPrefs(investingPrefsInput(investing.data, amountInr, mode)),
+    onSuccess: async (saved) => {
+      queryClient.setQueryData(["settings", "investing"], saved);
+      setAmountMode(null);
+      setAmountMessage(englishCopy.home.amount_saved);
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ["c27b", "plan", selectedHouseholdId],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ["c27b", "actions", selectedHouseholdId],
+        }),
+      ]);
+    },
+    onError: () => setAmountMessage(englishCopy.home.amount_error),
+  });
   const planValue = plan.data as WeeklyPlan | undefined;
   const visibleActions = (actions.data ?? []).filter(
     (action) => !activeMemberId || actionMemberId(action) === activeMemberId,
@@ -421,70 +501,34 @@ export function HomePage() {
   const netWorthPrimary = networth.data
     ? formatHouseholdAmount(networth.data.net_worth, primaryCurrency, fxRate)
     : null;
-  const netWorthSecondary = networth.data
-    ? formatSecondaryAmount(networth.data.net_worth, primaryCurrency, fxRate)
-    : null;
+  const monthlyAmountSet = isPositiveAmount(
+    investing.data?.monthly_sip_capacity,
+  );
+  const editorMode =
+    amountMode ?? (!monthlyAmountSet && !isViewer ? "monthly" : null);
 
   if (
     (networth.supported && networth.isPending) ||
     (plan.supported && plan.isPending) ||
-    (actions.supported && actions.isPending)
+    (actions.supported && actions.isPending) ||
+    (investing.supported && investing.isPending)
   ) {
     return <ScreenLoading label="Loading your week" />;
   }
   if (
-    [networth.error, plan.error, actions.error].some(
-      (error) => error && !isMissingFeature(error),
-    )
+    (networth.error && !networth.data && !isMissingFeature(networth.error)) ||
+    (plan.error && !plan.data && !isMissingFeature(plan.error)) ||
+    (actions.error && !actions.data && !isMissingFeature(actions.error))
   ) {
     return <ScreenError title="Your week couldn't load" />;
   }
 
   return (
     <div data-copy-screen="home" className="grid gap-4">
-      <Card className="home-hero">
-        <p className="text-sm font-medium text-muted-foreground">
-          <Term
-            explanation="The value of everything you own, minus what you owe."
-            prompt="What's this?"
-            learnMoreHref="/help#term-net-worth"
-          >
-            Net worth
-          </Term>
-        </p>
-        {networth.supported && netWorthPrimary ? (
-          <p className="mt-1 text-hero font-bold tabular-nums">
-            <span className="tracking-tight">{netWorthPrimary}</span>
-            {netWorthSecondary ? (
-              <span className="block text-xs font-normal tracking-normal text-muted-foreground">
-                {netWorthSecondary}
-              </span>
-            ) : null}
-          </p>
-        ) : (
-          <p className="mt-1 text-base">
-            Add an item in Money to see your total.
-          </p>
-        )}
-        <div className="mt-3 grid gap-1.5">
-          {fxRate === undefined &&
-          members.some((member) => member.residency.country === "DK") ? (
-            <p className="text-xs text-muted-foreground">
-              {englishCopy.household_ui.no_fx_rate}
-            </p>
-          ) : null}
-          {networth.data || fxRate ? (
-            <p className="text-xs text-muted-foreground">
-              {networthAsOf(networth.data?.as_of ?? fxRate?.date)}
-              {fxRate
-                ? ` · 1 DKK = ₹${formatRateToTwoDecimals(fxRate.rate)}`
-                : ""}
-            </p>
-          ) : null}
-        </div>
-      </Card>
-
-      <Card className="grid gap-3" aria-labelledby="this-week-heading">
+      <Card
+        className="home-hero grid gap-3"
+        aria-labelledby="this-week-heading"
+      >
         <h2 id="this-week-heading" className="text-lg font-semibold">
           This week
         </h2>
@@ -512,27 +556,121 @@ export function HomePage() {
               </Link>
             ) : null}
           </div>
-        ) : (
+        ) : monthlyAmountSet ? (
           <div className="grid justify-items-center gap-3 py-3 text-center">
             <span className="grid size-11 place-items-center rounded-full bg-success-soft text-success-foreground">
               <CheckCircle2 aria-hidden="true" className="size-5" />
             </span>
             <p className="text-base font-medium">
-              {englishCopy.home.nothing_to_do}
+              {englishCopy.home.nothing_to_buy}
             </p>
-            <Link
-              to="/plan"
-              data-primary="true"
-              className="motion-safe:active:scale-[.98] inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground transition"
-            >
-              Review your plan
-            </Link>
           </div>
-        )}
+        ) : isViewer ? (
+          <p className="text-sm text-muted-foreground">
+            {englishCopy.home.amount_not_set}
+          </p>
+        ) : null}
+        {editorMode ? (
+          <form
+            className="grid gap-3 border-t border-line pt-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const mode = editorMode;
+              const amount = amountDraft.trim();
+              setAmountMessage("");
+              if (!/^\d{1,12}(?:\.\d{1,2})?$/.test(amount)) {
+                setAmountMessage(englishCopy.home.amount_error);
+                return;
+              }
+              if (!isPositiveAmount(amount)) {
+                setAmountMessage(englishCopy.home.amount_required);
+                return;
+              }
+              const amountInr = amountInRupees(amount, amountCurrency, fxRate);
+              if (amountInr === null) {
+                setAmountMessage(englishCopy.home.amount_error);
+                return;
+              }
+              saveAmount.mutate({ amountInr, mode });
+            }}
+          >
+            {editorMode === "monthly" ? (
+              <p className="text-sm font-medium">
+                {englishCopy.home.amount_question}
+              </p>
+            ) : null}
+            <label
+              className="grid gap-1 text-sm font-medium"
+              htmlFor="home-investing-amount"
+            >
+              {editorMode === "weekly"
+                ? englishCopy.home.weekly_amount
+                : englishCopy.home.monthly_amount}
+              <span className="relative">
+                <span
+                  aria-hidden="true"
+                  className={`pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-muted-foreground ${amountCurrency === "DKK" ? "" : "text-base"}`}
+                >
+                  {amountCurrency === "DKK" ? "DKK" : "₹"}
+                </span>
+                <input
+                  id="home-investing-amount"
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  inputMode="decimal"
+                  value={amountDraft}
+                  onChange={(event) =>
+                    setAmountDraft(event.currentTarget.value)
+                  }
+                  className={`min-h-12 w-full rounded-xl border border-line bg-surface pr-3 text-base tabular-nums ${amountCurrency === "DKK" ? "pl-14" : "pl-9"}`}
+                />
+              </span>
+            </label>
+            <Button
+              type="submit"
+              loading={saveAmount.isPending}
+              variant={actionList.length ? "secondary" : undefined}
+              data-primary={actionList.length ? undefined : "true"}
+            >
+              {englishCopy.home.amount_save}
+            </Button>
+            {amountMessage ? (
+              <p role="status" className="text-sm text-muted-foreground">
+                {amountMessage}
+              </p>
+            ) : null}
+          </form>
+        ) : null}
+        {amountMessage && !editorMode ? (
+          <p role="status" className="text-sm text-muted-foreground">
+            {amountMessage}
+          </p>
+        ) : null}
         {markDone.isError ? (
           <p role="alert" className="text-sm text-muted-foreground">
             We couldn't mark this done. Try again.
           </p>
+        ) : null}
+        {!isViewer ? (
+          <Button
+            type="button"
+            variant="ghost"
+            className="justify-start text-sm font-medium text-muted-foreground"
+            onClick={() => {
+              setAmountDraft(
+                amountInEntryCurrency(
+                  investing.data?.new_money_this_week ?? "",
+                  amountCurrency,
+                  fxRate,
+                ),
+              );
+              setAmountMessage("");
+              setAmountMode("weekly");
+            }}
+          >
+            {englishCopy.home.extra_money_link}
+          </Button>
         ) : null}
         <details className="border-t border-line pt-2">
           <summary className="min-h-10 cursor-pointer py-2 text-sm font-medium">
@@ -568,21 +706,50 @@ export function HomePage() {
         </details>
       </Card>
 
+      {netWorthPrimary ? (
+        <Link
+          to="/money"
+          className="flex min-h-12 items-center justify-between gap-3 rounded-xl border border-line bg-surface px-4 py-3 text-sm font-medium"
+        >
+          <span>
+            {englishCopy.home.money_summary.replace(
+              "{amount}",
+              netWorthPrimary,
+            )}
+          </span>
+          <ChevronRight
+            aria-hidden="true"
+            className="size-4 shrink-0 text-muted-foreground"
+          />
+        </Link>
+      ) : (
+        <Link
+          to="/money"
+          className="flex min-h-12 items-center justify-between gap-3 rounded-xl border border-line bg-surface px-4 py-3 text-sm font-medium"
+        >
+          <span>{englishCopy.home.money_summary_empty}</span>
+          <ChevronRight
+            aria-hidden="true"
+            className="size-4 shrink-0 text-muted-foreground"
+          />
+        </Link>
+      )}
+
       <Highlights
         items={planValue?.highlights_by_screen?.home}
         onDismiss={(key) => hideHighlight.mutate(key)}
       />
 
-      <Card className="grid gap-2" aria-labelledby="coming-up-heading">
-        <div className="flex items-center justify-between gap-3">
-          <h2 id="coming-up-heading" className="text-lg font-semibold">
-            Coming up
-          </h2>
-          <Link to="/money" className="text-sm font-semibold text-brand">
-            See all
-          </Link>
-        </div>
-        {nextMaturity ? (
+      {nextMaturity ? (
+        <Card className="grid gap-2" aria-labelledby="coming-up-heading">
+          <div className="flex items-center justify-between gap-3">
+            <h2 id="coming-up-heading" className="text-lg font-semibold">
+              Coming up
+            </h2>
+            <Link to="/money" className="text-sm font-semibold text-brand">
+              See all
+            </Link>
+          </div>
           <Link
             to={`/money/asset/${nextMaturity.asset_id}`}
             className="flex min-h-16 items-center justify-between gap-3 border-t border-line py-2"
@@ -613,12 +780,20 @@ export function HomePage() {
               />
             </span>
           </Link>
-        ) : (
-          <p className="border-t border-line pt-2 text-sm text-muted-foreground">
+        </Card>
+      ) : (
+        <details className="rounded-xl border border-line px-4">
+          <summary
+            id="coming-up-heading"
+            className="min-h-12 cursor-pointer py-3 text-sm font-semibold"
+          >
+            Coming up
+          </summary>
+          <p className="pb-3 text-sm text-muted-foreground">
             Nothing is due in the next 30 days.
           </p>
-        )}
-      </Card>
+        </details>
+      )}
 
       {sheetAction
         ? (() => {

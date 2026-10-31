@@ -7,8 +7,8 @@ import {
 import type { AuthSessionTokens } from "./token";
 
 const RETRYABLE_STATUS = new Set([502, 503, 504]);
-// Render's free host can take over a minute to wake after 15 idle minutes.
-const MAX_REFRESH_RETRY_MS = 150_000;
+// Render's free host can take up to four minutes to wake after a quiet spell.
+const MAX_REFRESH_RETRY_MS = 240_000;
 const MAX_BACKOFF_MS = 15_000;
 const REFRESH_EARLY_MS = 2 * 60_000;
 

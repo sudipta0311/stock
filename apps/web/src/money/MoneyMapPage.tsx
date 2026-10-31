@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
@@ -5,13 +6,21 @@ import {
   Building2,
   CalendarDays,
   ChevronRight,
-  CloudUpload,
   WalletCards,
 } from "lucide-react";
 import { Link, useNavigate } from "react-router";
 import { ApiError } from "../api/client";
 import { formatInr, sumInr } from "../lib/money";
-import { Badge, Button, Card, EmptyState, Progress, Stat, Term } from "../ui";
+import {
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  Progress,
+  Sheet,
+  Stat,
+  Term,
+} from "../ui";
 import {
   getNetworth,
   listAssets,
@@ -29,7 +38,6 @@ import {
 } from "./config";
 import type { ChecklistWorkflow } from "./config";
 import { listImports } from "../imports/api";
-import type { ImportJob } from "../imports/api";
 import { ImportHistorySheet } from "../imports/ImportHistorySheet";
 import { markValueMoment } from "../pwa/install";
 import englishCopy from "../copy/en.json";
@@ -37,9 +45,8 @@ import { apiPathAvailable } from "../api/feature-support";
 import { useHousehold } from "../household/HouseholdContext";
 import { quantityLabel } from "./quantity";
 import { assetTitles } from "./titles";
-import { dismissHighlight, getPlan } from "../planning/api";
+import { getPlan } from "../planning/api";
 import type { WeeklyPlan } from "../planning/api";
-import { Highlights } from "../features/Highlights";
 import {
   formatHouseholdAmount,
   formatSecondaryAmount,
@@ -49,6 +56,7 @@ import {
   formatRateToTwoDecimals,
   type DkkInrRate,
 } from "../household/fx";
+import { FundSipFineTune } from "../settings/FundSipFineTune";
 
 const FundCheckCard = lazy(() =>
   import("./FundCheckCard").then((module) => ({
@@ -56,12 +64,10 @@ const FundCheckCard = lazy(() =>
   })),
 );
 
-const SLEEVE_ORDER = [
-  englishCopy.household_ui.indian_shares,
-  "Deposits & PPF",
-  "Gold",
-  englishCopy.household_ui.abroad,
-  englishCopy.household_ui.other_holdings,
+const ASSET_KIND_ORDER = [
+  englishCopy.money_ui.deposits,
+  englishCopy.money_ui.savings,
+  englishCopy.money_ui.other,
 ];
 
 function readChecklist(): string[] {
@@ -140,16 +146,10 @@ function byValue<T extends { value?: string | null; name: string }>(
   });
 }
 
-function sleeveForAsset(asset: AssetResponse): string {
+function moneyKindForAsset(asset: AssetResponse): string {
   switch (asset.asset_type) {
-    case "gold":
-      return "Gold";
-    case "property":
-    case "term_insurance":
-    case "health_insurance":
-      return englishCopy.household_ui.other_holdings;
-    case "loan":
-      return "Loans";
+    case "savings":
+      return englishCopy.money_ui.savings;
     case "fd":
     case "rd":
     case "ppf":
@@ -157,12 +157,9 @@ function sleeveForAsset(asset: AssetResponse): string {
     case "nps":
     case "po_scheme":
     case "bond":
-    case "savings":
-    case "traditional_policy":
-    case "ulip":
-      return "Deposits & PPF";
+      return englishCopy.money_ui.deposits;
     default:
-      return englishCopy.household_ui.indian_shares;
+      return englishCopy.money_ui.other;
   }
 }
 
@@ -338,6 +335,82 @@ function LoansGroup({
         );
       })}
     </Card>
+  );
+}
+
+function HoldingsGroup({
+  title,
+  holdings,
+  showAll,
+  onToggleShowAll,
+  primaryCurrency,
+  fxQuote,
+  showSecondary,
+}: {
+  title: string;
+  holdings: NetworthResponse["holdings"];
+  showAll: boolean;
+  onToggleShowAll(): void;
+  primaryCurrency: "INR" | "DKK";
+  fxQuote: DkkInrRate | undefined;
+  showSecondary: boolean;
+}) {
+  if (!holdings.length) return null;
+  return (
+    <section className="grid gap-2" aria-label={title}>
+      <Card className="grid gap-2">
+        <h2 className="text-sm font-semibold">{title}</h2>
+        {byValue(holdings)
+          .slice(0, showAll ? undefined : HOLDINGS_SHOWN)
+          .map((holding) => (
+            <Link
+              key={holding.security_id}
+              to={`/money/holding/${holding.security_id}`}
+              className="flex min-h-16 items-center justify-between gap-3 border-t border-line py-2 first:border-0 first:pt-0 hover:text-brand"
+            >
+              <span className="flex w-0 min-w-0 flex-1 items-center gap-3">
+                <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground">
+                  <Building2 aria-hidden="true" className="size-4" />
+                </span>
+                <span className="min-w-0">
+                  <strong className="block truncate text-sm">
+                    <span data-security>{holding.name}</span>
+                  </strong>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    <span data-security>{holding.symbol}</span> ·{" "}
+                    {quantityLabel(holding.quantity, holding.security_type)}
+                  </span>
+                </span>
+              </span>
+              <span className="flex shrink-0 items-center gap-2 text-right text-sm font-semibold tabular-nums">
+                {holding.value ? (
+                  <AmountLabel
+                    amount={holding.value}
+                    primaryCurrency={primaryCurrency}
+                    fxQuote={fxQuote}
+                    showSecondary={showSecondary}
+                  />
+                ) : (
+                  "Not available"
+                )}
+                <ChevronRight
+                  aria-hidden="true"
+                  className="size-4 text-muted-foreground"
+                />
+              </span>
+            </Link>
+          ))}
+        {holdings.length > HOLDINGS_SHOWN ? (
+          <Button
+            variant="secondary"
+            aria-expanded={showAll}
+            onClick={onToggleShowAll}
+          >
+            {showAll ? "Show fewer" : `Show all ${holdings.length}`}
+          </Button>
+        ) : null}
+      </Card>
+    </section>
   );
 }
 
@@ -606,84 +679,56 @@ export function MoneyMapPage() {
     isViewer,
     fxRate,
   } = useHousehold();
-  const [assets, setAssets] = useState<AssetResponse[]>([]);
   const [showAllHoldings, setShowAllHoldings] = useState(false);
-  const [importJobs, setImportJobs] = useState<ImportJob[]>([]);
-  const [networth, setNetworth] = useState<NetworthResponse | null>(null);
-  const [loanSummary, setLoanSummary] = useState<LoanListResponse | null>(null);
-  const [plan, setPlan] = useState<WeeklyPlan | null>(null);
   const [checklist, setChecklist] = useState<string[]>(readChecklist);
-  const [loading, setLoading] = useState(true);
-  const [pageError, setPageError] = useState("");
-  const [offlineSummaryOnly, setOfflineSummaryOnly] = useState(false);
   const [checklistError, setChecklistError] = useState("");
   const [showFundCheck, setShowFundCheck] = useState(false);
+  const [showMonthlyAmounts, setShowMonthlyAmounts] = useState(false);
+  const [addSheetOpen, setAddSheetOpen] = useState(false);
+  const assetsQuery = useQuery({
+    queryKey: ["c27b", "assets", selectedHouseholdId, activeMemberId],
+    queryFn: () => listAssets(activeMemberId),
+    staleTime: 0,
+  });
+  const networthQuery = useQuery({
+    queryKey: ["c27b", "networth", selectedHouseholdId, activeMemberId],
+    queryFn: () => getNetworth(activeMemberId),
+    staleTime: 0,
+  });
+  const planQuery = useQuery({
+    queryKey: ["c27b", "plan", selectedHouseholdId, activeMemberId],
+    queryFn: getPlan,
+    enabled: apiPathAvailable("/v1/plan"),
+    staleTime: 0,
+  });
+  const loansQuery = useQuery({
+    queryKey: ["c30", "loans", selectedHouseholdId],
+    queryFn: listLoans,
+    enabled: apiPathAvailable("/v1/loans"),
+    staleTime: 0,
+  });
+  const importsQuery = useQuery({
+    queryKey: ["c36", "imports", selectedHouseholdId],
+    queryFn: listImports,
+    staleTime: 0,
+  });
+  const assets = useMemo(() => assetsQuery.data ?? [], [assetsQuery.data]);
+  const importJobs = importsQuery.data ?? [];
+  const networth = networthQuery.data ?? null;
+  const loanSummary = loansQuery.data ?? null;
+  const plan = (planQuery.data as WeeklyPlan | undefined) ?? null;
+  const loading = networthQuery.isPending;
+  const pageError =
+    networthQuery.error && !networth
+      ? "We couldn't load your Money Map. Please try again."
+      : "";
+  const offlineSummaryOnly = Boolean(
+    networth && assetsQuery.error && !assetsQuery.data,
+  );
 
   useEffect(() => {
-    let active = true;
-    setLoading(true);
-    setPageError("");
-    setOfflineSummaryOnly(false);
-    setAssets([]);
-    setNetworth(null);
-    setLoanSummary(null);
-    setPlan(null);
-    setImportJobs([]);
-    const planRequest = apiPathAvailable("/v1/plan")
-      ? getPlan()
-      : Promise.resolve(null);
-    const loanRequest = apiPathAvailable("/v1/loans")
-      ? listLoans()
-      : Promise.resolve(null);
-    Promise.allSettled([
-      listAssets(activeMemberId),
-      getNetworth(activeMemberId),
-      planRequest,
-      loanRequest,
-    ])
-      .then(([assetResult, networthResult, planResult, loanResult]) => {
-        if (!active) return;
-        if (networthResult.status === "rejected") throw networthResult.reason;
-        const loadedNetworth = networthResult.value;
-        setNetworth(loadedNetworth);
-        if (planResult.status === "fulfilled") setPlan(planResult.value);
-        if (loanResult.status === "fulfilled") setLoanSummary(loanResult.value);
-        if (assetResult.status === "rejected") {
-          setAssets([]);
-          setOfflineSummaryOnly(true);
-          return;
-        }
-        const visibleAssets = assetResult.value;
-        setAssets(visibleAssets);
-        setOfflineSummaryOnly(false);
-        if (visibleAssets.length >= 3) markValueMoment();
-      })
-      .catch(() => {
-        if (active)
-          setPageError("We couldn't load your Money Map. Please try again.");
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [activeMemberId, selectedHouseholdId]);
-
-  useEffect(() => {
-    let active = true;
-    listImports()
-      .then((jobs) => {
-        if (active) setImportJobs(jobs);
-      })
-      .catch(() => {
-        if (active) setImportJobs([]);
-      })
-      .finally(() => {});
-    return () => {
-      active = false;
-    };
-  }, [selectedHouseholdId]);
+    if (assets.length >= 3) markValueMoment();
+  }, [assets.length]);
 
   useEffect(() => {
     function syncChecklist() {
@@ -753,7 +798,6 @@ export function MoneyMapPage() {
       !networth?.completeness.done.includes(tile.category),
   )?.category;
   const completenessText = `Money Map ${completenessPct}% complete${nextCategory ? ` · add ${categoryLabel(nextCategory)} to finish` : tickedCategories.length ? " · everything is up to date" : ""}`;
-  const checklistCompleted = (networth?.completeness.done.length ?? 0) > 0;
 
   async function toggleCategory(category: string) {
     if (isViewer) return;
@@ -809,26 +853,28 @@ export function MoneyMapPage() {
     });
   }
 
-  async function hideHighlight(key: string) {
-    try {
-      await dismissHighlight(key);
-      setPlan(await getPlan());
-    } catch {
-      setPageError("We couldn't hide this note. Please try again.");
-    }
-  }
-
   const visibleGroups = useMemo(() => {
     const groups = new Map<string, AssetResponse[]>();
     for (const asset of assets) {
       if (asset.asset_type === "loan") continue;
-      const sleeve = sleeveForAsset(asset);
-      groups.set(sleeve, [...(groups.get(sleeve) ?? []), asset]);
+      const kind = moneyKindForAsset(asset);
+      groups.set(kind, [...(groups.get(kind) ?? []), asset]);
     }
-    return SLEEVE_ORDER.filter((sleeve) => groups.has(sleeve)).map(
-      (sleeve) => [sleeve, groups.get(sleeve) ?? []] as const,
+    return ASSET_KIND_ORDER.filter((kind) => groups.has(kind)).map(
+      (kind) => [kind, groups.get(kind) ?? []] as const,
     );
   }, [assets]);
+
+  const sortedHoldings = useMemo(
+    () => byValue(networth?.holdings ?? []),
+    [networth?.holdings],
+  );
+  const fundHoldings = sortedHoldings.filter((holding) =>
+    /fund|mutual|etf/i.test(holding.security_type),
+  );
+  const shareHoldings = sortedHoldings.filter(
+    (holding) => !/fund|mutual|etf/i.test(holding.security_type),
+  );
 
   return (
     <div data-copy-screen="money" className="grid gap-4">
@@ -837,33 +883,6 @@ export function MoneyMapPage() {
           {pageError}
         </Card>
       ) : null}
-      {!offlineSummaryOnly ? (
-        <Card className="grid gap-3 border-brand/40 bg-brand/5">
-          <div className="flex items-center gap-3">
-            <span className="grid size-11 place-items-center rounded-xl bg-brand/10 text-brand">
-              <CloudUpload aria-hidden="true" className="size-5" />
-            </span>
-            <div>
-              <h2 className="text-base font-semibold">Upload your statement</h2>
-              <p className="text-sm text-muted-foreground">
-                Add account and investment details in one go.
-              </p>
-            </div>
-          </div>
-          <Link
-            to={isViewer ? "/plan" : "/import"}
-            data-primary="true"
-            className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground"
-          >
-            {isViewer ? "View your plan" : "Upload statement"}
-          </Link>
-        </Card>
-      ) : null}
-      {!isViewer ? <QuickAddBar onDraft={startQuickDraft} /> : null}
-      <Highlights
-        items={plan?.highlights_by_screen?.money}
-        onDismiss={(key) => void hideHighlight(key)}
-      />
       <Card className="grid gap-4">
         {loading || !totals ? (
           <div
@@ -891,50 +910,33 @@ export function MoneyMapPage() {
                 value={shownAmount(totals.netWorth)}
                 detail={`${secondaryAmount(totals.netWorth) ? `${secondaryAmount(totals.netWorth)} · ` : ""}Updated ${networth?.as_of ? new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric" }).format(new Date(`${networth.as_of}T00:00:00`)) : "recently"}`}
               />
-              <div className="grid grid-cols-2 gap-4 text-right">
-                <Stat
-                  label={englishCopy.household_ui.money_you_own}
-                  value={shownAmount(totals.assets)}
-                  detail={secondaryAmount(totals.assets) ?? undefined}
-                />
-                <Stat
-                  label={englishCopy.household_ui.money_you_owe}
-                  value={shownAmount(totals.liabilities)}
-                  detail={secondaryAmount(totals.liabilities) ?? undefined}
-                />
-              </div>
-            </div>
-            <div className="grid gap-2">
-              <div className="flex justify-between gap-3 text-sm">
-                <span>{completenessText}</span>
-                <span className="tabular-nums">{completenessPct}%</span>
-              </div>
-              <Progress value={completenessPct} label={completenessText} />
             </div>
             {selectedMemberId === "family" && familyMembers.length > 0 ? (
-              <div className="grid gap-2 border-t border-line pt-3">
-                <h2 className="text-sm font-semibold">
+              <details className="border-t border-line pt-2">
+                <summary className="min-h-12 cursor-pointer py-2 text-sm font-semibold">
                   {englishCopy.household.money.member_breakdown}
-                </h2>
-                {familyMembers.map((member) => (
-                  <div
-                    key={member.id}
-                    className="flex items-center justify-between gap-3 text-sm"
-                  >
-                    <span>
-                      {member.id === meMemberId
-                        ? englishCopy.household.you
-                        : member.name}
-                    </span>
-                    <AmountLabel
-                      amount={member.net_worth}
-                      primaryCurrency={primaryCurrency}
-                      fxQuote={fxQuote}
-                      showSecondary={hasDanishMember}
-                    />
-                  </div>
-                ))}
-              </div>
+                </summary>
+                <div className="grid gap-2 pb-2">
+                  {familyMembers.map((member) => (
+                    <div
+                      key={member.id}
+                      className="flex items-center justify-between gap-3 text-sm"
+                    >
+                      <span>
+                        {member.id === meMemberId
+                          ? englishCopy.household.you
+                          : member.name}
+                      </span>
+                      <AmountLabel
+                        amount={member.net_worth}
+                        primaryCurrency={primaryCurrency}
+                        fxQuote={fxQuote}
+                        showSecondary={hasDanishMember}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </details>
             ) : null}
             {hasDanishMember ? (
               <p className="text-xs text-muted-foreground">
@@ -945,59 +947,16 @@ export function MoneyMapPage() {
         )}
       </Card>
 
-      <ImportHistorySheet jobs={importJobs} />
-
-      <details onToggle={(event) => setShowFundCheck(event.currentTarget.open)}>
-        <summary className="min-h-12 cursor-pointer py-3 text-sm font-semibold">
-          Check an investment
-        </summary>
-        {showFundCheck ? (
-          <Suspense fallback={<p className="py-3 text-sm">Loading…</p>}>
-            <FundCheckCard />
-          </Suspense>
-        ) : null}
-      </details>
-
-      <details id="money-checklist" open={!checklistCompleted}>
-        <summary className="min-h-12 cursor-pointer py-3 text-base font-semibold">
-          What else do you have?
-        </summary>
-        <Card className="grid gap-4">
-          <p className="text-sm text-muted-foreground">
-            Tap everything that applies. Rough numbers are fine; you can edit
-            anytime.
-          </p>
-          <div className="grid grid-cols-2 gap-2 [@media(min-width:360px)]:grid-cols-3">
-            {checklistTiles.map((tile) => {
-              const selected = checklist.includes(tile.category);
-              return (
-                <button
-                  key={tile.category}
-                  type="button"
-                  aria-pressed={selected}
-                  disabled={isViewer}
-                  onClick={() => void toggleCategory(tile.category)}
-                  className={`min-h-16 rounded-xl border px-2 py-3 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-brand ${selected ? "border-brand bg-brand/10 text-brand" : "border-line bg-background hover:bg-muted"}`}
-                >
-                  {selected ? <span aria-hidden="true">✓ </span> : null}
-                  {tile.shortLabel}
-                </button>
-              );
-            })}
-          </div>
-          {checklistError ? (
-            <p className="text-sm text-danger-foreground" role="status">
-              {checklistError}
-            </p>
-          ) : null}
-          <Button
-            onClick={startChecklist}
-            disabled={isViewer || !orderedSelected.length}
-          >
-            Continue ({orderedSelected.length} selected)
-          </Button>
-        </Card>
-      </details>
+      {!offlineSummaryOnly ? (
+        <Button
+          data-primary="true"
+          onClick={() => setAddSheetOpen(true)}
+          disabled={isViewer}
+          className="w-full"
+        >
+          {englishCopy.money_ui.add_update}
+        </Button>
+      ) : null}
 
       <section className="grid gap-3" aria-labelledby="assets-heading">
         <div className="flex items-center justify-between">
@@ -1013,7 +972,32 @@ export function MoneyMapPage() {
             </p>
           </Card>
         ) : null}
-        <LoansGroup summary={loanSummary} shownAmount={shownAmount} />
+        <HoldingsGroup
+          title={englishCopy.money_ui.funds}
+          holdings={fundHoldings}
+          showAll={showAllHoldings}
+          onToggleShowAll={() => setShowAllHoldings((shown) => !shown)}
+          primaryCurrency={primaryCurrency}
+          fxQuote={fxQuote}
+          showSecondary={hasDanishMember}
+        />
+        <details
+          onToggle={(event) => setShowMonthlyAmounts(event.currentTarget.open)}
+        >
+          <summary className="min-h-12 cursor-pointer py-3 text-sm font-semibold">
+            {englishCopy.money_ui.monthly_amounts}
+          </summary>
+          {showMonthlyAmounts ? <FundSipFineTune /> : null}
+        </details>
+        <HoldingsGroup
+          title={englishCopy.money_ui.shares}
+          holdings={shareHoldings}
+          showAll={showAllHoldings}
+          onToggleShowAll={() => setShowAllHoldings((shown) => !shown)}
+          primaryCurrency={primaryCurrency}
+          fxQuote={fxQuote}
+          showSecondary={hasDanishMember}
+        />
         {visibleGroups.length ? (
           visibleGroups.map(([sleeve, items]) => (
             <Card key={sleeve} className="grid gap-1">
@@ -1067,7 +1051,10 @@ export function MoneyMapPage() {
               ))}
             </Card>
           ))
-        ) : offlineSummaryOnly ? null : (
+        ) : offlineSummaryOnly ||
+          fundHoldings.length ||
+          shareHoldings.length ||
+          loanSummary?.loans.length ? null : (
           <EmptyState
             title={englishCopy.household_ui.money_empty_title}
             description="Choose one item below to add it to your Money Map."
@@ -1087,98 +1074,139 @@ export function MoneyMapPage() {
             }
           />
         )}
+        <LoansGroup summary={loanSummary} shownAmount={shownAmount} />
       </section>
-
-      {networth?.holdings.length ? (
-        <section className="grid gap-3" aria-labelledby="holdings-heading">
-          <div className="flex items-center justify-between gap-3">
-            <h2 id="holdings-heading" className="text-lg font-semibold">
-              Shares and funds
-            </h2>
-            <Badge>{networth.holdings.length} holdings</Badge>
-          </div>
-          <Card className="grid gap-2">
-            {byValue(networth.holdings)
-              .slice(0, showAllHoldings ? undefined : HOLDINGS_SHOWN)
-              .map((holding) => (
-                <Link
-                  key={holding.security_id}
-                  to={`/money/holding/${holding.security_id}`}
-                  className="flex min-h-16 items-center justify-between gap-3 border-t border-line py-2 first:border-0 first:pt-0 hover:text-brand"
-                >
-                  <span className="flex w-0 min-w-0 flex-1 items-center gap-3">
-                    <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground">
-                      <Building2 aria-hidden="true" className="size-4" />
-                    </span>
-                    <span className="min-w-0">
-                      <strong className="block truncate text-sm">
-                        <span data-security>{holding.name}</span>
-                      </strong>
-                      <span className="block truncate text-xs text-muted-foreground">
-                        <span data-security>{holding.symbol}</span> ·{" "}
-                        {quantityLabel(holding.quantity, holding.security_type)}
-                      </span>
-                    </span>
-                  </span>
-                  <span className="flex shrink-0 items-center gap-2 text-right text-sm font-semibold tabular-nums">
-                    <span>
-                      {holding.value ? (
-                        <AmountLabel
-                          amount={holding.value}
-                          primaryCurrency={primaryCurrency}
-                          fxQuote={fxQuote}
-                          showSecondary={hasDanishMember}
-                        />
-                      ) : (
-                        "Not available"
-                      )}
-                    </span>
-                    <ChevronRight
-                      aria-hidden="true"
-                      className="size-4 text-muted-foreground"
-                    />
-                  </span>
-                </Link>
-              ))}
-            {networth.holdings.length > HOLDINGS_SHOWN ? (
-              <Button
-                variant="secondary"
-                aria-expanded={showAllHoldings}
-                onClick={() => setShowAllHoldings((shown) => !shown)}
-              >
-                {showAllHoldings
-                  ? "Show fewer"
-                  : `Show all ${networth.holdings.length}`}
-              </Button>
+      <ImportHistorySheet jobs={importJobs} />
+      <details onToggle={(event) => setShowFundCheck(event.currentTarget.open)}>
+        <summary className="min-h-12 cursor-pointer py-3 text-sm font-semibold">
+          Check an investment
+        </summary>
+        {showFundCheck ? (
+          <Suspense fallback={<p className="py-3 text-sm">Loading…</p>}>
+            <FundCheckCard />
+          </Suspense>
+        ) : null}
+      </details>
+      <details id="money-checklist">
+        <summary className="min-h-12 cursor-pointer py-3 text-base font-semibold">
+          What else do you have?
+        </summary>
+        <div className="grid gap-4">
+          {!isViewer ? <QuickAddBar onDraft={startQuickDraft} /> : null}
+          <Card className="grid gap-4">
+            <p className="text-sm text-muted-foreground">
+              Tap everything that applies. Rough numbers are fine; you can edit
+              anytime.
+            </p>
+            {networth ? (
+              <p className="text-xs text-muted-foreground">
+                {completenessText}
+              </p>
             ) : null}
-          </Card>
-        </section>
-      ) : null}
-
-      {networth ? (
-        <HouseholdInsights
-          networth={networth}
-          primaryCurrency={primaryCurrency}
-          fxQuote={fxQuote}
-          showSecondary={hasDanishMember}
-        />
-      ) : null}
-      {networth?.by_sleeve.length ? (
-        <Card className="grid gap-3">
-          <h2 className="text-base font-semibold">Split by type</h2>
-          {sleeveRows(networth.by_sleeve).map((row) => (
-            <div
-              key={row.label}
-              className="flex min-h-10 items-center justify-between gap-3 border-t border-line pt-2 text-sm"
-            >
-              <span>{row.label}</span>
-              <span className="tabular-nums">
-                {shownAmount(row.amount)} · {plainPercent(row.pct)}
-              </span>
+            <div className="grid grid-cols-2 gap-2 [@media(min-width:360px)]:grid-cols-3">
+              {checklistTiles.map((tile) => {
+                const selected = checklist.includes(tile.category);
+                return (
+                  <button
+                    key={tile.category}
+                    type="button"
+                    aria-pressed={selected}
+                    disabled={isViewer}
+                    onClick={() => void toggleCategory(tile.category)}
+                    className={`min-h-16 rounded-xl border px-2 py-3 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-brand ${selected ? "border-brand bg-brand/10 text-brand" : "border-line bg-background hover:bg-muted"}`}
+                  >
+                    {selected ? <span aria-hidden="true">✓ </span> : null}
+                    {tile.shortLabel}
+                  </button>
+                );
+              })}
             </div>
-          ))}
-        </Card>
+            {checklistError ? (
+              <p className="text-sm text-danger-foreground" role="status">
+                {checklistError}
+              </p>
+            ) : null}
+            <Button
+              onClick={startChecklist}
+              disabled={isViewer || !orderedSelected.length}
+            >
+              Continue ({orderedSelected.length} selected)
+            </Button>
+          </Card>
+        </div>
+      </details>
+      {networth ? (
+        <details>
+          <summary className="min-h-12 cursor-pointer py-3 text-sm font-semibold">
+            {englishCopy.money_ui.more_details}
+          </summary>
+          <div className="grid gap-4">
+            {networth ? (
+              <HouseholdInsights
+                networth={networth}
+                primaryCurrency={primaryCurrency}
+                fxQuote={fxQuote}
+                showSecondary={hasDanishMember}
+              />
+            ) : null}
+            {networth?.by_sleeve.length ? (
+              <Card className="grid gap-3">
+                <h2 className="text-base font-semibold">Split by type</h2>
+                {sleeveRows(networth.by_sleeve).map((row) => (
+                  <div
+                    key={row.label}
+                    className="flex min-h-10 items-center justify-between gap-3 border-t border-line pt-2 text-sm"
+                  >
+                    <span>{row.label}</span>
+                    <span className="tabular-nums">
+                      {shownAmount(row.amount)} · {plainPercent(row.pct)}
+                    </span>
+                  </div>
+                ))}
+              </Card>
+            ) : null}
+          </div>
+        </details>
       ) : null}
+      <Sheet
+        open={addSheetOpen}
+        onOpenChange={setAddSheetOpen}
+        title={englishCopy.money_ui.add_update}
+      >
+        <div className="grid gap-2">
+          <Link
+            to="/import"
+            onClick={() => setAddSheetOpen(false)}
+            className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground"
+          >
+            {englishCopy.money_ui.upload_statement}
+          </Link>
+          <Link
+            to="/settings/gmail"
+            onClick={() => setAddSheetOpen(false)}
+            className="inline-flex min-h-12 items-center justify-center rounded-xl border border-line px-4 py-3 text-sm font-semibold"
+          >
+            {englishCopy.money_ui.gmail_statements}
+          </Link>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setAddSheetOpen(false);
+              const checklistDetails = document.getElementById(
+                "money-checklist",
+              ) as HTMLDetailsElement | null;
+              if (checklistDetails) {
+                checklistDetails.open = true;
+                requestAnimationFrame(() =>
+                  checklistDetails.scrollIntoView({ block: "start" }),
+                );
+              }
+            }}
+          >
+            {englishCopy.money_ui.add_by_hand}
+          </Button>
+        </div>
+      </Sheet>
     </div>
   );
 }

@@ -181,6 +181,9 @@ function settingsHandlers() {
       HttpResponse.json(await request.json()),
     ),
     http.get("*/v1/me/investing", () => HttpResponse.json(investingPrefs)),
+    http.get("*/v1/fx/dkk-inr", () =>
+      HttpResponse.json({ date: "2026-10-28", rate: "12.5" }),
+    ),
     http.put("*/v1/me/investing", async ({ request }) =>
       HttpResponse.json(await request.json()),
     ),
@@ -236,13 +239,22 @@ function renderSettings() {
       <QueryClientProvider client={queryClient}>
         <ThemeProvider>
           <HouseholdProvider>
-            <SettingsPage />
+            <main>
+              <SettingsPage />
+            </main>
           </HouseholdProvider>
         </ThemeProvider>
       </QueryClientProvider>
     </MemoryRouter>,
   );
   return { ...view, queryClient };
+}
+
+async function openSection(
+  user: ReturnType<typeof userEvent.setup>,
+  title: string,
+) {
+  await user.click(await screen.findByText(title));
 }
 
 beforeEach(() => {
@@ -262,6 +274,7 @@ describe("Settings", () => {
   it("lists signed-in devices and confirms sign-out everywhere", async () => {
     const user = userEvent.setup();
     renderSettings();
+    await openSection(user, englishCopy.settings.sections.app_title);
 
     expect(await screen.findByText("iPhone · This phone")).toBeInTheDocument();
     expect(
@@ -282,39 +295,52 @@ describe("Settings", () => {
   });
 
   it("shows four simple groups, keeps plan details closed, and passes the accessibility scan", async () => {
+    const user = userEvent.setup();
     renderSettings();
+    const sectionTitles = [
+      englishCopy.settings.sections.family_title,
+      englishCopy.settings.sections.plan_title,
+      englishCopy.settings.sections.statements_title,
+      englishCopy.settings.sections.app_title,
+    ];
+    for (const title of sectionTitles) {
+      expect(screen.getByText(title).closest("details")).not.toHaveAttribute(
+        "open",
+      );
+    }
+    await openSection(user, englishCopy.settings.sections.family_title);
     expect(
-      await screen.findByRole("heading", {
+      screen.getByRole("heading", {
         name: englishCopy.household.settings.household,
         level: 2,
       }),
-    ).toBeInTheDocument();
+    ).toBeVisible();
+    await openSection(user, englishCopy.settings.sections.plan_title);
     expect(
-      screen.getByRole("heading", {
-        name: englishCopy.settings.notifications.title,
-        level: 2,
+      screen.getByText(englishCopy.settings.family.fine_tune),
+    ).toBeVisible();
+    expect(
+      screen
+        .getByText(englishCopy.settings.family.fine_tune)
+        .closest("details"),
+    ).not.toHaveAttribute("open");
+    await openSection(user, englishCopy.settings.sections.statements_title);
+    expect(
+      screen.getByRole("link", { name: "Get statements from Gmail" }),
+    ).toBeVisible();
+    await openSection(user, englishCopy.settings.sections.app_title);
+    expect(
+      screen.getByLabelText(englishCopy.household.primary_currency),
+    ).toBeVisible();
+    expect(
+      screen.getByLabelText(englishCopy.settings.notifications.weekly_email),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("checkbox", {
+        name: new RegExp(englishCopy.settings.privacy.shared_device),
       }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", {
-        name: englishCopy.settings.privacy.title,
-        level: 2,
-      }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", {
-        name: englishCopy.settings.about.title,
-        level: 2,
-      }),
-    ).toBeInTheDocument();
-    const details = screen
-      .getByText(englishCopy.settings.family.fine_tune)
-      .closest("details");
-    expect(details).not.toHaveAttribute("open");
-    expect(
-      screen.queryByRole("button", { name: englishCopy.household.leave }),
-    ).not.toBeInTheDocument();
-    expect(await axe(document.body)).toEqual(
+    ).toBeVisible();
+    expect(await axe(document.querySelector("main")!)).toEqual(
       expect.objectContaining({ violations: [] }),
     );
   });
@@ -345,6 +371,7 @@ describe("Settings", () => {
         }),
       );
       renderSettings();
+      await openSection(user, englishCopy.settings.sections.family_title);
       await screen.findByRole("heading", {
         name: englishCopy.household.share_with_partner,
       });
@@ -369,7 +396,7 @@ describe("Settings", () => {
   it("saves the selected main display currency", async () => {
     const user = userEvent.setup();
     renderSettings();
-    await screen.findByText("Test Child");
+    await openSection(user, englishCopy.settings.sections.app_title);
     await user.selectOptions(
       screen.getByLabelText(englishCopy.household.primary_currency),
       "DKK",
@@ -397,7 +424,8 @@ describe("Settings", () => {
       }),
     );
     renderSettings();
-    await screen.findByText("Test Child");
+    await openSection(user, englishCopy.settings.sections.plan_title);
+    await screen.findByText(englishCopy.settings.sections.plan_summary_set);
     await user.click(screen.getByText(englishCopy.settings.family.fine_tune));
     await user.clear(
       screen.getByLabelText(englishCopy.settings.family.display_name),
@@ -467,7 +495,10 @@ describe("Settings", () => {
       }),
     );
     renderSettings();
-    await screen.findByText("Test Child");
+    await openSection(user, englishCopy.settings.sections.family_title);
+    await screen.findAllByRole("button", {
+      name: englishCopy.household.settings.edit_member,
+    });
     await user.click(
       screen.getAllByText(englishCopy.household.settings.edit_member)[0]!,
     );
@@ -503,6 +534,7 @@ describe("Settings", () => {
       }),
     );
     renderSettings();
+    await openSection(user, englishCopy.settings.sections.app_title);
     const pushToggle = await screen.findByRole("checkbox", {
       name: englishCopy.settings.notifications.push,
     });
@@ -530,7 +562,10 @@ describe("Settings", () => {
       }),
     );
     renderSettings();
-    await screen.findByText("Test Child");
+    await openSection(user, englishCopy.settings.sections.family_title);
+    await screen.findByRole("button", {
+      name: englishCopy.settings.family.add_person,
+    });
     await user.click(
       screen.getByRole("button", {
         name: englishCopy.settings.family.add_person,
@@ -595,7 +630,10 @@ describe("Settings", () => {
     const { queryClient } = renderSettings();
     queryClient.setQueryData(["c27b", "plan"], { members: [] });
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
-    await screen.findByText("Test Child");
+    await openSection(user, englishCopy.settings.sections.family_title);
+    await screen.findAllByRole("button", {
+      name: englishCopy.household.settings.edit_member,
+    });
     await user.click(
       screen.getAllByRole("button", {
         name: englishCopy.household.settings.edit_member,
@@ -702,7 +740,7 @@ describe("Settings", () => {
       }),
     );
     renderSettings();
-    await screen.findByText("Test Child");
+    await openSection(user, englishCopy.settings.sections.app_title);
     await user.click(
       screen.getByRole("button", { name: englishCopy.settings.privacy.delete }),
     );

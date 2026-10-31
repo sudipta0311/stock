@@ -1,8 +1,34 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { Highlights } from "../../src/features/Highlights";
 
 describe("policy highlights", () => {
+  it("shows the first two notes and opens the rest with See all", async () => {
+    const user = userEvent.setup();
+    render(
+      <Highlights
+        items={[1, 2, 3, 4].map((number) => ({
+          key: `note-${number}`,
+          screen: "home" as const,
+          title: `Note ${number}`,
+          body: `Body ${number}`,
+          learn_more_key: "plan_details",
+          severity: "info" as const,
+        }))}
+      />,
+    );
+
+    expect(screen.getByText("Note 1")).toBeVisible();
+    expect(screen.getByText("Note 2")).toBeVisible();
+    expect(screen.getByText("Note 3")).not.toBeVisible();
+    const seeAll = screen.getByText("See all notes (2)");
+    expect(seeAll).toBeVisible();
+    await user.click(seeAll);
+    expect(screen.getByText("Note 3")).toBeVisible();
+    expect(screen.getByText("Note 4")).toBeVisible();
+  });
+
   it("uses the copied instrument name when a rate is missing", () => {
     render(
       <Highlights

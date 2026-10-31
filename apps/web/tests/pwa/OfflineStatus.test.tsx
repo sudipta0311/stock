@@ -49,7 +49,7 @@ describe("offline and cold-start status", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows the longer cold-start message after twenty seconds", async () => {
+  it("keeps the wake state to a small updating chip", async () => {
     vi.useFakeTimers();
     render(<WakeIndicator />);
     act(() =>
@@ -57,13 +57,14 @@ describe("offline and cold-start status", () => {
         new CustomEvent("wealth:api-waking", { detail: { waking: true } }),
       ),
     );
-    expect(
-      screen.getByText(englishCopy.offline.short_wake),
-    ).toBeInTheDocument();
+    expect(screen.getByText(englishCopy.offline.updating)).toBeInTheDocument();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(20_000);
     });
-    expect(screen.getByText(englishCopy.offline.long_wake)).toBeInTheDocument();
+    expect(screen.getByText(englishCopy.offline.updating)).toBeInTheDocument();
+    expect(
+      screen.queryByText(englishCopy.offline.long_wake),
+    ).not.toBeInTheDocument();
   });
 });

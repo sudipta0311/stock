@@ -54,7 +54,6 @@ import { SUPPORTED_LANGUAGES } from "../i18n/config";
 import packageMetadata from "../../package.json";
 import { HouseholdSharingPanel } from "./HouseholdSharingPanel";
 import { MemberDetailsEditor } from "./MemberDetailsEditor";
-import { FundSipFineTune } from "./FundSipFineTune";
 import { useHousehold } from "../household/HouseholdContext";
 import { SignOutConfirmation } from "../account/SignOutConfirmation";
 import { SignedInDevicesPanel } from "./SignedInDevicesPanel";
@@ -627,777 +626,876 @@ export function SettingsPage() {
     riskQuestions.every((question) => Boolean(riskAnswers[question.id]));
   const warning = deleteWarning(me, sharedPeople, householdQuery.data);
   const viewOnly = me?.role === "viewer";
+  const sectionCopy = englishCopy.settings.sections;
+  const sharingSummary =
+    sharedPeople.length > 0
+      ? sectionCopy.family_shared
+      : sectionCopy.family_private;
+  const familySummary =
+    members.length === 1
+      ? sectionCopy.family_summary_one.replace("{sharing}", sharingSummary)
+      : sectionCopy.family_summary_many
+          .replace("{members}", String(members.length))
+          .replace("{sharing}", sharingSummary);
+  const planSummary =
+    Number(monthlySip) > 0
+      ? sectionCopy.plan_summary_set
+      : sectionCopy.plan_summary_empty;
+  const appSummary = sectionCopy.app_summary
+    .replace("{currency}", primaryCurrency)
+    .replace(
+      "{alerts}",
+      Object.values(consents).some(Boolean)
+        ? sectionCopy.alerts_on
+        : sectionCopy.alerts_off,
+    );
 
   return (
     <div data-copy-screen="settings" className="grid gap-4">
-      <section aria-labelledby="settings-family-heading" className="grid gap-3">
-        <Card className="grid gap-4">
-          <div>
-            <h2
-              id="settings-family-heading"
-              className="text-base font-semibold"
-            >
-              {englishCopy.household.settings.household}
-            </h2>
-            {role && hasMultipleLogins ? (
-              <div className="mt-2">
-                <Badge>{englishCopy.household_ui.roles[role]}</Badge>
+      <details className="rounded-xl border border-line px-3">
+        <summary className="min-h-14 cursor-pointer py-3">
+          <span className="block text-base font-semibold">
+            {sectionCopy.family_title}
+          </span>
+          <span className="block text-sm font-normal text-muted-foreground">
+            {familySummary}
+          </span>
+        </summary>
+        <div className="grid gap-4 pb-3">
+          <section
+            aria-labelledby="settings-family-heading"
+            className="grid gap-3"
+          >
+            <Card className="grid gap-4">
+              <div>
+                <h2
+                  id="settings-family-heading"
+                  className="text-base font-semibold"
+                >
+                  {englishCopy.household.settings.household}
+                </h2>
+                {role && hasMultipleLogins ? (
+                  <div className="mt-2">
+                    <Badge>{englishCopy.household_ui.roles[role]}</Badge>
+                  </div>
+                ) : null}
               </div>
-            ) : null}
-          </div>
-          {viewOnly ? (
-            <p className="text-sm text-muted-foreground">
-              {englishCopy.settings.family.read_only}
-            </p>
-          ) : null}
-          <div className="grid gap-2">
-            {members.map((member) => (
-              <div
-                key={member.id}
-                className="grid gap-2 rounded-xl border border-line px-3 py-2"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-medium">
-                    {member.display_name}
-                    {member.id === meMemberId
-                      ? ` · ${englishCopy.household.you}`
-                      : ""}
+              {viewOnly ? (
+                <p className="text-sm text-muted-foreground">
+                  {englishCopy.settings.family.read_only}
+                </p>
+              ) : null}
+              <div className="grid gap-2">
+                {members.map((member) => (
+                  <div
+                    key={member.id}
+                    className="grid gap-2 rounded-xl border border-line px-3 py-2"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-medium">
+                        {member.display_name}
+                        {member.id === meMemberId
+                          ? ` · ${englishCopy.household.you}`
+                          : ""}
+                      </p>
+                      {member.id !== meMemberId &&
+                      membersSupported &&
+                      canEditHousehold ? (
+                        <Button
+                          variant="ghost"
+                          className="min-h-10 px-3 py-2 text-danger-foreground"
+                          onClick={() => {
+                            setRemoveMemberMessage("");
+                            setRemovingMember(member);
+                          }}
+                        >
+                          {englishCopy.settings.family.remove_person}
+                        </Button>
+                      ) : null}
+                    </div>
+                    <MemberDetailsEditor
+                      member={member}
+                      disabled={!membersSupported || !canEditHousehold}
+                    />
+                  </div>
+                ))}
+                {members.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    {englishCopy.settings.family.no_members}
                   </p>
-                  {member.id !== meMemberId &&
-                  membersSupported &&
-                  canEditHousehold ? (
-                    <Button
-                      variant="ghost"
-                      className="min-h-10 px-3 py-2 text-danger-foreground"
-                      onClick={() => {
-                        setRemoveMemberMessage("");
-                        setRemovingMember(member);
-                      }}
-                    >
-                      {englishCopy.settings.family.remove_person}
-                    </Button>
-                  ) : null}
-                </div>
-                <MemberDetailsEditor
-                  member={member}
-                  disabled={!membersSupported || !canEditHousehold}
-                />
+                ) : null}
               </div>
-            ))}
-            {members.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                {englishCopy.settings.family.no_members}
-              </p>
-            ) : null}
-          </div>
-          {membersSupported && canEditHousehold ? (
-            addPersonOpen ? (
-              <form
-                onSubmit={(event) => void addPerson(event)}
-                className="grid gap-5 rounded-xl border border-line p-3"
-              >
-                <label
-                  className="grid gap-1 text-sm font-medium"
-                  htmlFor="new-member-name"
-                >
-                  {englishCopy.settings.family.name}
-                  <input
-                    id="new-member-name"
-                    value={newMemberName}
-                    onChange={(event) =>
-                      setNewMemberName(event.currentTarget.value)
-                    }
-                    className="min-h-12 rounded-xl border border-line bg-surface px-3 text-base"
-                    required
-                    maxLength={40}
-                  />
-                </label>
-                <Select
-                  id="new-member-relationship"
-                  label={englishCopy.settings.family.relationship}
-                  value={newRelationship}
-                  onChange={(event) =>
-                    setNewRelationship(
-                      event.currentTarget.value as Relationship,
-                    )
-                  }
-                >
-                  {(["spouse", "child", "parent", "other"] as const).map(
-                    (relationship) => (
-                      <option key={relationship} value={relationship}>
-                        {englishCopy.settings.family[relationship]}
-                      </option>
-                    ),
-                  )}
-                </Select>
-                <Select
-                  id="new-member-residence"
-                  label={englishCopy.household.residency_title}
-                  value={newResidence}
-                  onChange={(event) =>
-                    setNewResidence(
-                      event.currentTarget.value as "RI" | "NRI" | "RNOR",
-                    )
-                  }
-                >
-                  <option value="RI">
-                    {englishCopy.household.residency_ri}
-                  </option>
-                  <option value="NRI">
-                    {englishCopy.household.residency_nri_dk}
-                  </option>
-                  <option value="RNOR">
-                    {englishCopy.household.residency_rnor}
-                  </option>
-                </Select>
-                {newResidence === "NRI" ? (
-                  <details>
-                    <summary className="cursor-pointer text-sm font-medium">
-                      {englishCopy.household.add_details}
-                    </summary>
+              {membersSupported && canEditHousehold ? (
+                addPersonOpen ? (
+                  <form
+                    onSubmit={(event) => void addPerson(event)}
+                    className="grid gap-5 rounded-xl border border-line p-3"
+                  >
                     <label
-                      className="mt-2 grid gap-1 text-sm font-medium"
-                      htmlFor="new-member-return-year"
+                      className="grid gap-1 text-sm font-medium"
+                      htmlFor="new-member-name"
                     >
-                      {englishCopy.household.return_year}
+                      {englishCopy.settings.family.name}
                       <input
-                        id="new-member-return-year"
-                        type="number"
-                        min="1900"
-                        max="9999"
-                        value={newReturnYear}
+                        id="new-member-name"
+                        value={newMemberName}
                         onChange={(event) =>
-                          setNewReturnYear(event.currentTarget.value)
+                          setNewMemberName(event.currentTarget.value)
                         }
-                        className="min-h-12 rounded-xl border border-line bg-surface px-3"
+                        className="min-h-12 rounded-xl border border-line bg-surface px-3 text-base"
+                        required
+                        maxLength={40}
                       />
                     </label>
-                  </details>
-                ) : null}
-                <div className="flex flex-wrap gap-2">
-                  <Button type="submit" variant="secondary">
-                    {englishCopy.settings.family.add_person}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => setAddPersonOpen(false)}
-                  >
-                    {englishCopy.settings.family.cancel}
-                  </Button>
-                </div>
-              </form>
-            ) : (
-              <Button
-                variant="secondary"
-                className="w-full"
-                onClick={() => setAddPersonOpen(true)}
-              >
-                {englishCopy.settings.family.add_person}
-              </Button>
-            )
-          ) : null}
-          {membersMessage ? (
-            <p role="status" className="text-sm text-danger-foreground">
-              {membersMessage}
-            </p>
-          ) : null}
-          <details className="border-t border-line pt-3">
-            <summary className="cursor-pointer text-sm font-semibold">
-              {englishCopy.settings.family.fine_tune}
-            </summary>
-            <form
-              onSubmit={(event) => void savePlanDetails(event)}
-              className="mt-4 grid gap-5"
-            >
-              <fieldset disabled={viewOnly} className="grid gap-5">
-                <label
-                  className="grid gap-1 text-sm font-medium"
-                  htmlFor="profile-name"
-                >
-                  {englishCopy.settings.family.display_name}
-                  <input
-                    id="profile-name"
-                    value={profileName}
-                    onChange={(event) =>
-                      setProfileName(event.currentTarget.value)
-                    }
-                    className="min-h-12 rounded-xl border border-line bg-surface px-3 text-base"
-                    maxLength={40}
-                  />
-                </label>
-                <Select
-                  id="tax-regime"
-                  label={englishCopy.settings.family.tax_regime}
-                  value={taxRegime}
-                  onChange={(event) =>
-                    setTaxRegime(event.currentTarget.value as "old" | "new")
-                  }
-                >
-                  <option value="new">
-                    {englishCopy.settings.family.new_regime}
-                  </option>
-                  <option value="old">
-                    {englishCopy.settings.family.old_regime}
-                  </option>
-                </Select>
-                <Select
-                  id="tax-slab"
-                  label={englishCopy.settings.family.income_bracket}
-                  value={taxSlab}
-                  onChange={(event) => setTaxSlab(event.currentTarget.value)}
-                >
-                  <option value="">
-                    {englishCopy.settings.family.no_bracket}
-                  </option>
-                  {[0, 5, 10, 15, 20, 25, 30].map((value) => (
-                    <option key={value} value={String(value)}>
-                      {value}%
-                    </option>
-                  ))}
-                </Select>
-                <Select
-                  id="city-tier"
-                  label={englishCopy.settings.family.city_tier}
-                  value={cityTier}
-                  onChange={(event) => setCityTier(event.currentTarget.value)}
-                >
-                  <option value="">
-                    {englishCopy.settings.family.no_bracket}
-                  </option>
-                  <option value="1">
-                    {englishCopy.settings.family.tier_1}
-                  </option>
-                  <option value="2">
-                    {englishCopy.settings.family.tier_2}
-                  </option>
-                  <option value="3">
-                    {englishCopy.settings.family.tier_3}
-                  </option>
-                </Select>
-                <label
-                  className="grid gap-1 text-sm font-medium"
-                  htmlFor="timezone"
-                >
-                  {englishCopy.settings.family.timezone}
-                  <input
-                    id="timezone"
-                    value={timezone}
-                    onChange={(event) => setTimezone(event.currentTarget.value)}
-                    className="min-h-12 rounded-xl border border-line bg-surface px-3 text-base"
-                  />
-                </label>
-                <Select
-                  id="language"
-                  label={englishCopy.settings.family.language}
-                  value={SUPPORTED_LANGUAGES[0].code}
-                  disabled={SUPPORTED_LANGUAGES.length === 1}
-                >
-                  {SUPPORTED_LANGUAGES.map((language) => (
-                    <option key={language.code} value={language.code}>
-                      {language.label}
-                    </option>
-                  ))}
-                </Select>
-                <Field
-                  id="monthly-sip"
-                  label={englishCopy.settings.family.monthly_sip}
-                  prefix={primaryCurrency === "DKK" ? "DKK" : "₹"}
-                >
-                  <input
-                    id="monthly-sip"
-                    inputMode="decimal"
-                    value={monthlySip}
-                    onChange={(event) =>
-                      setMonthlySip(event.currentTarget.value)
-                    }
-                    className={`min-h-12 rounded-xl border border-line bg-surface pr-3 text-base tabular-nums ${primaryCurrency === "DKK" ? "pl-14" : "pl-9"}`}
-                  />
-                </Field>
-                <Field
-                  id="new-money"
-                  label={englishCopy.settings.family.this_week}
-                  prefix={primaryCurrency === "DKK" ? "DKK" : "₹"}
-                >
-                  <input
-                    id="new-money"
-                    inputMode="decimal"
-                    value={newMoney}
-                    onChange={(event) => setNewMoney(event.currentTarget.value)}
-                    className={`min-h-12 rounded-xl border border-line bg-surface pr-3 text-base tabular-nums ${primaryCurrency === "DKK" ? "pl-14" : "pl-9"}`}
-                  />
-                </Field>
-                <div className="grid gap-2">
-                  <h3 className="text-sm font-semibold">
-                    {englishCopy.settings.family.existing_sips}
-                  </h3>
-                  {existingSips.map((sip, index) => (
-                    <div
-                      key={`${sip.sleeve}-${index}`}
-                      className="grid gap-5 rounded-xl border border-line p-3"
+                    <Select
+                      id="new-member-relationship"
+                      label={englishCopy.settings.family.relationship}
+                      value={newRelationship}
+                      onChange={(event) =>
+                        setNewRelationship(
+                          event.currentTarget.value as Relationship,
+                        )
+                      }
                     >
-                      <Select
-                        id={`sip-sleeve-${index}`}
-                        label={
-                          englishCopy.labels.sleeves[
-                            sip.sleeve as keyof typeof englishCopy.labels.sleeves
-                          ] ?? englishCopy.settings.family.existing_sips
-                        }
-                        value={sip.sleeve}
-                        onChange={(event) =>
-                          updateSip(index, "sleeve", event.currentTarget.value)
-                        }
-                      >
-                        {Object.entries(englishCopy.labels.sleeves).map(
-                          ([key, label]) => (
-                            <option key={key} value={key}>
-                              {label}
-                            </option>
-                          ),
-                        )}
-                      </Select>
-                      <Select
-                        id={`sip-instrument-${index}`}
-                        label={englishCopy.settings.family.existing_sips}
-                        value={sip.instrument_category}
-                        onChange={(event) =>
-                          updateSip(
-                            index,
-                            "instrument_category",
-                            event.currentTarget.value,
-                          )
-                        }
-                      >
-                        {Object.entries(
-                          englishCopy.labels.instrument_categories,
-                        ).map(([key, label]) => (
-                          <option key={key} value={key}>
-                            {label}
+                      {(["spouse", "child", "parent", "other"] as const).map(
+                        (relationship) => (
+                          <option key={relationship} value={relationship}>
+                            {englishCopy.settings.family[relationship]}
                           </option>
-                        ))}
-                      </Select>
-                      <Field
-                        id={`sip-amount-${index}`}
-                        label={englishCopy.settings.family.monthly_sip}
-                        prefix="₹"
-                      >
-                        <input
-                          id={`sip-amount-${index}`}
-                          inputMode="decimal"
-                          value={sip.monthly_amount}
-                          onChange={(event) =>
-                            updateSip(
-                              index,
-                              "monthly_amount",
-                              event.currentTarget.value,
-                            )
-                          }
-                          className="min-h-12 rounded-xl border border-line bg-surface pl-9 pr-3 text-base tabular-nums"
-                        />
-                      </Field>
+                        ),
+                      )}
+                    </Select>
+                    <Select
+                      id="new-member-residence"
+                      label={englishCopy.household.residency_title}
+                      value={newResidence}
+                      onChange={(event) =>
+                        setNewResidence(
+                          event.currentTarget.value as "RI" | "NRI" | "RNOR",
+                        )
+                      }
+                    >
+                      <option value="RI">
+                        {englishCopy.household.residency_ri}
+                      </option>
+                      <option value="NRI">
+                        {englishCopy.household.residency_nri_dk}
+                      </option>
+                      <option value="RNOR">
+                        {englishCopy.household.residency_rnor}
+                      </option>
+                    </Select>
+                    {newResidence === "NRI" ? (
+                      <details>
+                        <summary className="cursor-pointer text-sm font-medium">
+                          {englishCopy.household.add_details}
+                        </summary>
+                        <label
+                          className="mt-2 grid gap-1 text-sm font-medium"
+                          htmlFor="new-member-return-year"
+                        >
+                          {englishCopy.household.return_year}
+                          <input
+                            id="new-member-return-year"
+                            type="number"
+                            min="1900"
+                            max="9999"
+                            value={newReturnYear}
+                            onChange={(event) =>
+                              setNewReturnYear(event.currentTarget.value)
+                            }
+                            className="min-h-12 rounded-xl border border-line bg-surface px-3"
+                          />
+                        </label>
+                      </details>
+                    ) : null}
+                    <div className="flex flex-wrap gap-2">
+                      <Button type="submit" variant="secondary">
+                        {englishCopy.settings.family.add_person}
+                      </Button>
                       <Button
                         type="button"
                         variant="ghost"
-                        className="justify-start"
-                        onClick={() =>
-                          setExistingSips((current) =>
-                            current.filter((_, position) => position !== index),
-                          )
-                        }
+                        onClick={() => setAddPersonOpen(false)}
                       >
-                        {englishCopy.settings.family.remove_sip}
+                        {englishCopy.settings.family.cancel}
                       </Button>
                     </div>
-                  ))}
+                  </form>
+                ) : (
                   <Button
-                    type="button"
                     variant="secondary"
                     className="w-full"
-                    onClick={() =>
-                      setExistingSips((current) => [
-                        ...current,
-                        {
-                          sleeve: "equity_india",
-                          instrument_category: "in_core_index",
-                          monthly_amount: "0",
-                        },
-                      ])
-                    }
+                    onClick={() => setAddPersonOpen(true)}
                   >
-                    {englishCopy.settings.family.add_sip}
+                    {englishCopy.settings.family.add_person}
                   </Button>
-                </div>
-                <Checkbox
-                  id="has-lrs-broker"
-                  label={englishCopy.settings.family.lrs_broker}
-                  checked={hasLrsBroker}
-                  onChange={(event) =>
-                    setHasLrsBroker(event.currentTarget.checked)
-                  }
-                />
-                <Checkbox
-                  id="less-paperwork"
-                  label={englishCopy.settings.family.no_paperwork}
-                  checked={lessPaperwork}
-                  onChange={(event) =>
-                    setLessPaperwork(event.currentTarget.checked)
-                  }
-                />
-                <label
-                  className="grid gap-2 text-sm font-medium"
-                  htmlFor="satellite-pct"
-                >
-                  {englishCopy.settings.family.satellite_pct}
-                  <span className="text-xs font-normal text-muted-foreground">
-                    {englishCopy.settings.family.satellite_help}
-                  </span>
-                  <input
-                    id="satellite-pct"
-                    type="range"
-                    min="0"
-                    max="25"
-                    step="1"
-                    value={satellitePct}
-                    onChange={(event) =>
-                      setSatellitePct(event.currentTarget.value)
-                    }
-                  />
-                  <span className="tabular-nums text-muted-foreground">
-                    {satellitePct}%
-                  </span>
-                </label>
-                <label
-                  className="grid gap-1 text-sm font-medium"
-                  htmlFor="birth-year"
-                >
-                  {englishCopy.settings.family.birth_year}
-                  <input
-                    id="birth-year"
-                    type="number"
-                    min="1900"
-                    max="9999"
-                    value={birthYear}
-                    onChange={(event) =>
-                      setBirthYear(event.currentTarget.value)
-                    }
-                    className="min-h-12 rounded-xl border border-line bg-surface px-3 text-base"
-                  />
-                </label>
-                {investingSupported ||
-                profileSupported ||
-                settingsPathAvailable("/v1/members/{member_id}") ? (
-                  <Button
-                    type="submit"
-                    variant="secondary"
-                    loading={savingProfile}
-                    className="w-full"
+                )
+              ) : null}
+              {membersMessage ? (
+                <p role="status" className="text-sm text-danger-foreground">
+                  {membersMessage}
+                </p>
+              ) : null}
+            </Card>
+          </section>
+          <HouseholdSharingPanel />
+        </div>
+      </details>
+      <details className="rounded-xl border border-line px-3">
+        <summary className="min-h-14 cursor-pointer py-3">
+          <span className="block text-base font-semibold">
+            {sectionCopy.plan_title}
+          </span>
+          <span className="block text-sm font-normal text-muted-foreground">
+            {planSummary}
+          </span>
+        </summary>
+        <section className="grid gap-3 pb-3">
+          <Card className="grid gap-4">
+            <details className="border-t border-line pt-3">
+              <summary className="cursor-pointer text-sm font-semibold">
+                {englishCopy.settings.family.fine_tune}
+              </summary>
+              <form
+                onSubmit={(event) => void savePlanDetails(event)}
+                className="mt-4 grid gap-5"
+              >
+                <fieldset disabled={viewOnly} className="grid gap-5">
+                  <label
+                    className="grid gap-1 text-sm font-medium"
+                    htmlFor="profile-name"
                   >
-                    {englishCopy.settings.family.save_plan}
+                    {englishCopy.settings.family.display_name}
+                    <input
+                      id="profile-name"
+                      value={profileName}
+                      onChange={(event) =>
+                        setProfileName(event.currentTarget.value)
+                      }
+                      className="min-h-12 rounded-xl border border-line bg-surface px-3 text-base"
+                      maxLength={40}
+                    />
+                  </label>
+                  <Select
+                    id="tax-regime"
+                    label={englishCopy.settings.family.tax_regime}
+                    value={taxRegime}
+                    onChange={(event) =>
+                      setTaxRegime(event.currentTarget.value as "old" | "new")
+                    }
+                  >
+                    <option value="new">
+                      {englishCopy.settings.family.new_regime}
+                    </option>
+                    <option value="old">
+                      {englishCopy.settings.family.old_regime}
+                    </option>
+                  </Select>
+                  <Select
+                    id="tax-slab"
+                    label={englishCopy.settings.family.income_bracket}
+                    value={taxSlab}
+                    onChange={(event) => setTaxSlab(event.currentTarget.value)}
+                  >
+                    <option value="">
+                      {englishCopy.settings.family.no_bracket}
+                    </option>
+                    {[0, 5, 10, 15, 20, 25, 30].map((value) => (
+                      <option key={value} value={String(value)}>
+                        {value}%
+                      </option>
+                    ))}
+                  </Select>
+                  <Select
+                    id="city-tier"
+                    label={englishCopy.settings.family.city_tier}
+                    value={cityTier}
+                    onChange={(event) => setCityTier(event.currentTarget.value)}
+                  >
+                    <option value="">
+                      {englishCopy.settings.family.no_bracket}
+                    </option>
+                    <option value="1">
+                      {englishCopy.settings.family.tier_1}
+                    </option>
+                    <option value="2">
+                      {englishCopy.settings.family.tier_2}
+                    </option>
+                    <option value="3">
+                      {englishCopy.settings.family.tier_3}
+                    </option>
+                  </Select>
+                  <label
+                    className="grid gap-1 text-sm font-medium"
+                    htmlFor="timezone"
+                  >
+                    {englishCopy.settings.family.timezone}
+                    <input
+                      id="timezone"
+                      value={timezone}
+                      onChange={(event) =>
+                        setTimezone(event.currentTarget.value)
+                      }
+                      className="min-h-12 rounded-xl border border-line bg-surface px-3 text-base"
+                    />
+                  </label>
+                  <Select
+                    id="language"
+                    label={englishCopy.settings.family.language}
+                    value={SUPPORTED_LANGUAGES[0].code}
+                    disabled={SUPPORTED_LANGUAGES.length === 1}
+                  >
+                    {SUPPORTED_LANGUAGES.map((language) => (
+                      <option key={language.code} value={language.code}>
+                        {language.label}
+                      </option>
+                    ))}
+                  </Select>
+                  <Field
+                    id="monthly-sip"
+                    label={englishCopy.settings.family.monthly_sip}
+                    prefix={primaryCurrency === "DKK" ? "DKK" : "₹"}
+                  >
+                    <input
+                      id="monthly-sip"
+                      inputMode="decimal"
+                      value={monthlySip}
+                      onChange={(event) =>
+                        setMonthlySip(event.currentTarget.value)
+                      }
+                      className={`min-h-12 rounded-xl border border-line bg-surface pr-3 text-base tabular-nums ${primaryCurrency === "DKK" ? "pl-14" : "pl-9"}`}
+                    />
+                  </Field>
+                  <Field
+                    id="new-money"
+                    label={englishCopy.settings.family.this_week}
+                    prefix={primaryCurrency === "DKK" ? "DKK" : "₹"}
+                  >
+                    <input
+                      id="new-money"
+                      inputMode="decimal"
+                      value={newMoney}
+                      onChange={(event) =>
+                        setNewMoney(event.currentTarget.value)
+                      }
+                      className={`min-h-12 rounded-xl border border-line bg-surface pr-3 text-base tabular-nums ${primaryCurrency === "DKK" ? "pl-14" : "pl-9"}`}
+                    />
+                  </Field>
+                  <div className="grid gap-2">
+                    <h3 className="text-sm font-semibold">
+                      {englishCopy.settings.family.existing_sips}
+                    </h3>
+                    {existingSips.map((sip, index) => (
+                      <div
+                        key={`${sip.sleeve}-${index}`}
+                        className="grid gap-5 rounded-xl border border-line p-3"
+                      >
+                        <Select
+                          id={`sip-sleeve-${index}`}
+                          label={
+                            englishCopy.labels.sleeves[
+                              sip.sleeve as keyof typeof englishCopy.labels.sleeves
+                            ] ?? englishCopy.settings.family.existing_sips
+                          }
+                          value={sip.sleeve}
+                          onChange={(event) =>
+                            updateSip(
+                              index,
+                              "sleeve",
+                              event.currentTarget.value,
+                            )
+                          }
+                        >
+                          {Object.entries(englishCopy.labels.sleeves).map(
+                            ([key, label]) => (
+                              <option key={key} value={key}>
+                                {label}
+                              </option>
+                            ),
+                          )}
+                        </Select>
+                        <Select
+                          id={`sip-instrument-${index}`}
+                          label={englishCopy.settings.family.existing_sips}
+                          value={sip.instrument_category}
+                          onChange={(event) =>
+                            updateSip(
+                              index,
+                              "instrument_category",
+                              event.currentTarget.value,
+                            )
+                          }
+                        >
+                          {Object.entries(
+                            englishCopy.labels.instrument_categories,
+                          ).map(([key, label]) => (
+                            <option key={key} value={key}>
+                              {label}
+                            </option>
+                          ))}
+                        </Select>
+                        <Field
+                          id={`sip-amount-${index}`}
+                          label={englishCopy.settings.family.monthly_sip}
+                          prefix="₹"
+                        >
+                          <input
+                            id={`sip-amount-${index}`}
+                            inputMode="decimal"
+                            value={sip.monthly_amount}
+                            onChange={(event) =>
+                              updateSip(
+                                index,
+                                "monthly_amount",
+                                event.currentTarget.value,
+                              )
+                            }
+                            className="min-h-12 rounded-xl border border-line bg-surface pl-9 pr-3 text-base tabular-nums"
+                          />
+                        </Field>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="justify-start"
+                          onClick={() =>
+                            setExistingSips((current) =>
+                              current.filter(
+                                (_, position) => position !== index,
+                              ),
+                            )
+                          }
+                        >
+                          {englishCopy.settings.family.remove_sip}
+                        </Button>
+                      </div>
+                    ))}
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="w-full"
+                      onClick={() =>
+                        setExistingSips((current) => [
+                          ...current,
+                          {
+                            sleeve: "equity_india",
+                            instrument_category: "in_core_index",
+                            monthly_amount: "0",
+                          },
+                        ])
+                      }
+                    >
+                      {englishCopy.settings.family.add_sip}
+                    </Button>
+                  </div>
+                  <Checkbox
+                    id="has-lrs-broker"
+                    label={englishCopy.settings.family.lrs_broker}
+                    checked={hasLrsBroker}
+                    onChange={(event) =>
+                      setHasLrsBroker(event.currentTarget.checked)
+                    }
+                  />
+                  <Checkbox
+                    id="less-paperwork"
+                    label={englishCopy.settings.family.no_paperwork}
+                    checked={lessPaperwork}
+                    onChange={(event) =>
+                      setLessPaperwork(event.currentTarget.checked)
+                    }
+                  />
+                  <label
+                    className="grid gap-2 text-sm font-medium"
+                    htmlFor="satellite-pct"
+                  >
+                    {englishCopy.settings.family.satellite_pct}
+                    <span className="text-xs font-normal text-muted-foreground">
+                      {englishCopy.settings.family.satellite_help}
+                    </span>
+                    <input
+                      id="satellite-pct"
+                      type="range"
+                      min="0"
+                      max="25"
+                      step="1"
+                      value={satellitePct}
+                      onChange={(event) =>
+                        setSatellitePct(event.currentTarget.value)
+                      }
+                    />
+                    <span className="tabular-nums text-muted-foreground">
+                      {satellitePct}%
+                    </span>
+                  </label>
+                  <label
+                    className="grid gap-1 text-sm font-medium"
+                    htmlFor="birth-year"
+                  >
+                    {englishCopy.settings.family.birth_year}
+                    <input
+                      id="birth-year"
+                      type="number"
+                      min="1900"
+                      max="9999"
+                      value={birthYear}
+                      onChange={(event) =>
+                        setBirthYear(event.currentTarget.value)
+                      }
+                      className="min-h-12 rounded-xl border border-line bg-surface px-3 text-base"
+                    />
+                  </label>
+                  {investingSupported ||
+                  profileSupported ||
+                  settingsPathAvailable("/v1/members/{member_id}") ? (
+                    <Button
+                      type="submit"
+                      variant="secondary"
+                      loading={savingProfile}
+                      className="w-full"
+                    >
+                      {englishCopy.settings.family.save_plan}
+                    </Button>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      {englishCopy.settings.family.unsupported}
+                    </p>
+                  )}
+                  {profileMessage ? (
+                    <p role="status" className="text-sm text-muted-foreground">
+                      {profileMessage}
+                    </p>
+                  ) : null}
+                </fieldset>
+              </form>
+              {riskSupported ? (
+                <div className="mt-4 border-t border-line pt-4">
+                  <Button
+                    variant="secondary"
+                    className="w-full"
+                    onClick={() => {
+                      setRiskMessage("");
+                      setRiskOpen(true);
+                      void riskQuestionQuery
+                        .refetch()
+                        .catch(() =>
+                          setRiskMessage(
+                            englishCopy.settings.family.risk_question_error,
+                          ),
+                        );
+                    }}
+                  >
+                    {englishCopy.settings.family.retake_risk}
+                  </Button>
+                  {riskMessage ? (
+                    <p
+                      role="status"
+                      className="mt-2 text-sm text-muted-foreground"
+                    >
+                      {riskMessage}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+              <Checkbox
+                id="show-daily-changes"
+                className="mt-4"
+                label={englishCopy.settings.family.daily_changes}
+                checked={showDailyChanges}
+                onChange={(event) => {
+                  const enabled = event.currentTarget.checked;
+                  setShowDailyChanges(enabled);
+                  try {
+                    window.localStorage.setItem(
+                      DAILY_CHANGES_KEY,
+                      String(enabled),
+                    );
+                  } catch {
+                    /* The default remains off for this session. */
+                  }
+                }}
+              />
+            </details>
+          </Card>
+        </section>
+      </details>
+      <details className="rounded-xl border border-line px-3">
+        <summary className="min-h-14 cursor-pointer py-3">
+          <span className="block text-base font-semibold">
+            {sectionCopy.statements_title}
+          </span>
+          <span className="block text-sm font-normal text-muted-foreground">
+            {sectionCopy.statements_summary}
+          </span>
+        </summary>
+        <div className="pb-3">
+          <section aria-labelledby="settings-statements-heading">
+            <Card className="grid gap-3">
+              <h2
+                id="settings-statements-heading"
+                className="text-base font-semibold"
+              >
+                Statements from Gmail
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                PDFs wait in Inbox. Enter each password and review changes
+                before saving.
+              </p>
+              <Link
+                to="/settings/gmail"
+                className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground"
+              >
+                Get statements from Gmail
+              </Link>
+            </Card>
+          </section>
+        </div>
+      </details>
+      <details className="rounded-xl border border-line px-3">
+        <summary className="min-h-14 cursor-pointer py-3">
+          <span className="block text-base font-semibold">
+            {sectionCopy.app_title}
+          </span>
+          <span className="block text-sm font-normal text-muted-foreground">
+            {appSummary}
+          </span>
+        </summary>
+        <div className="grid gap-4 pb-3">
+          <Card className="grid gap-3">
+            <h3 className="text-sm font-semibold">
+              {englishCopy.household.primary_currency}
+            </h3>
+            <Select
+              id="primary-currency"
+              label={englishCopy.household.primary_currency}
+              value={primaryCurrency}
+              onChange={(event) =>
+                setPrimaryCurrency(event.currentTarget.value as "INR" | "DKK")
+              }
+            >
+              <option value="INR">{englishCopy.household.inr}</option>
+              <option value="DKK">{englishCopy.household.dkk}</option>
+            </Select>
+          </Card>
+
+          <section aria-labelledby="settings-notifications-heading">
+            <Card className="grid gap-3">
+              <div>
+                <h2
+                  id="settings-notifications-heading"
+                  className="text-base font-semibold"
+                >
+                  {englishCopy.settings.notifications.title}
+                </h2>
+              </div>
+              <Checkbox
+                id="weekly-email"
+                label={englishCopy.settings.notifications.weekly_email}
+                checked={consents.weekly_email}
+                disabled={
+                  consentSaving || (consentsSupported && consentQuery.isPending)
+                }
+                onChange={(event) =>
+                  void updateConsent(
+                    "weekly_email",
+                    event.currentTarget.checked,
+                  )
+                }
+              />
+              <Checkbox
+                id="reminder-email"
+                label={englishCopy.settings.notifications.reminders}
+                checked={consents.reminder_email}
+                disabled={
+                  consentSaving || (consentsSupported && consentQuery.isPending)
+                }
+                onChange={(event) =>
+                  void updateConsent(
+                    "reminder_email",
+                    event.currentTarget.checked,
+                  )
+                }
+              />
+              <Checkbox
+                id="push-alerts"
+                label={englishCopy.settings.notifications.push}
+                checked={consents.push}
+                disabled={
+                  consentSaving || (consentsSupported && consentQuery.isPending)
+                }
+                onChange={(event) =>
+                  void updateConsent("push", event.currentTarget.checked)
+                }
+              />
+              <Checkbox
+                id="urgent-alerts"
+                label={englishCopy.settings.notifications.urgent}
+                checked={consents.urgent_alerts}
+                disabled={
+                  consentSaving || (consentsSupported && consentQuery.isPending)
+                }
+                onChange={(event) =>
+                  void updateConsent(
+                    "urgent_alerts",
+                    event.currentTarget.checked,
+                  )
+                }
+              />
+              {!consentsSupported ? (
+                <p className="text-sm text-muted-foreground">
+                  {englishCopy.settings.notifications.sync_later}
+                </p>
+              ) : null}
+              {notificationMessage ? (
+                <p role="status" className="text-sm text-muted-foreground">
+                  {notificationMessage}
+                </p>
+              ) : null}
+            </Card>
+          </section>
+
+          <section aria-labelledby="settings-privacy-heading">
+            <Card className="grid gap-3">
+              <div>
+                <h2
+                  id="settings-privacy-heading"
+                  className="text-base font-semibold"
+                >
+                  {englishCopy.settings.privacy.title}
+                </h2>
+              </div>
+              <Checkbox
+                id="shared-device"
+                label={englishCopy.settings.privacy.shared_device}
+                help={englishCopy.settings.privacy.shared_device_help}
+                checked={sharedDevice}
+                onChange={(event) =>
+                  void toggleSharedDevice(event.currentTarget.checked)
+                }
+              />
+              {sharedDeviceMessage ? (
+                <p role="status" className="text-sm text-muted-foreground">
+                  {sharedDeviceMessage}
+                </p>
+              ) : null}
+              <div className="border-t border-line pt-3">
+                <Checkbox
+                  id="app-lock"
+                  label={englishCopy.settings.privacy.lock}
+                  help={englishCopy.settings.privacy.lock_help}
+                  checked={lockEnabled}
+                  onChange={(event) =>
+                    void changeDeviceLock(event.currentTarget.checked)
+                  }
+                />
+                {!lockEnabled && !appLockSupported() ? (
+                  <p className="pl-9 text-sm text-muted-foreground">
+                    {englishCopy.settings.privacy.lock_unsupported}
+                  </p>
+                ) : null}
+                {lockMessage ? (
+                  <p
+                    role="status"
+                    className="pl-9 text-sm text-muted-foreground"
+                  >
+                    {lockMessage}
+                  </p>
+                ) : null}
+              </div>
+              <SignedInDevicesPanel />
+              <div className="grid gap-2 border-t border-line pt-3">
+                {meSupported ? (
+                  <Button
+                    variant="secondary"
+                    className="w-full"
+                    onClick={() => void exportData()}
+                  >
+                    {englishCopy.settings.privacy.export}
                   </Button>
                 ) : (
                   <p className="text-sm text-muted-foreground">
                     {englishCopy.settings.family.unsupported}
                   </p>
                 )}
-                {profileMessage ? (
-                  <p role="status" className="text-sm text-muted-foreground">
-                    {profileMessage}
-                  </p>
-                ) : null}
-              </fieldset>
-            </form>
-            {riskSupported ? (
-              <div className="mt-4 border-t border-line pt-4">
-                <Button
-                  variant="secondary"
-                  className="w-full"
-                  onClick={() => {
-                    setRiskMessage("");
-                    setRiskOpen(true);
-                    void riskQuestionQuery
-                      .refetch()
-                      .catch(() =>
-                        setRiskMessage(
-                          englishCopy.settings.family.risk_question_error,
-                        ),
-                      );
-                  }}
-                >
-                  {englishCopy.settings.family.retake_risk}
-                </Button>
-                {riskMessage ? (
-                  <p
-                    role="status"
-                    className="mt-2 text-sm text-muted-foreground"
-                  >
-                    {riskMessage}
+                {exportMessage ? (
+                  <p role="status" className="text-sm text-danger-foreground">
+                    {exportMessage}
                   </p>
                 ) : null}
               </div>
-            ) : null}
-            <Checkbox
-              id="show-daily-changes"
-              className="mt-4"
-              label={englishCopy.settings.family.daily_changes}
-              checked={showDailyChanges}
-              onChange={(event) => {
-                const enabled = event.currentTarget.checked;
-                setShowDailyChanges(enabled);
-                try {
-                  window.localStorage.setItem(
-                    DAILY_CHANGES_KEY,
-                    String(enabled),
-                  );
-                } catch {
-                  /* The default remains off for this session. */
-                }
-              }}
-            />
-          </details>
-        </Card>
-        <HouseholdSharingPanel />
-        <section aria-labelledby="settings-statements-heading">
-          <Card className="grid gap-3">
-            <h2
-              id="settings-statements-heading"
-              className="text-base font-semibold"
-            >
-              Statements from Gmail
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              PDFs wait in Inbox. Enter each password and review changes before
-              saving.
-            </p>
-            <Link
-              to="/settings/gmail"
-              className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground"
-            >
-              Get statements from Gmail
-            </Link>
-          </Card>
-        </section>
-        <section
-          aria-labelledby="fund-sip-settings-heading"
-          className="grid gap-3"
-        >
-          <FundSipFineTune />
-        </section>
-        <Card className="grid gap-3">
-          <h3 className="text-sm font-semibold">
-            {englishCopy.household.primary_currency}
-          </h3>
-          <Select
-            id="primary-currency"
-            label={englishCopy.household.primary_currency}
-            value={primaryCurrency}
-            onChange={(event) =>
-              setPrimaryCurrency(event.currentTarget.value as "INR" | "DKK")
-            }
-          >
-            <option value="INR">{englishCopy.household.inr}</option>
-            <option value="DKK">{englishCopy.household.dkk}</option>
-          </Select>
-        </Card>
-      </section>
+              <div className="grid gap-2 border-t border-line pt-3">
+                {meSupported ? (
+                  <Button
+                    variant="danger"
+                    className="w-full"
+                    onClick={() => {
+                      setDeleteText("");
+                      setDeleteMessage("");
+                      setDeleteOpen(true);
+                    }}
+                  >
+                    {englishCopy.settings.privacy.delete}
+                  </Button>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    {englishCopy.settings.family.unsupported}
+                  </p>
+                )}
+                <Button
+                  variant="ghost"
+                  className="w-full"
+                  onClick={() => setSignOutOpen(true)}
+                >
+                  {englishCopy.settings.family.sign_out}
+                </Button>
+              </div>
+            </Card>
+          </section>
 
-      <section aria-labelledby="settings-notifications-heading">
-        <Card className="grid gap-3">
-          <div>
-            <h2
-              id="settings-notifications-heading"
-              className="text-base font-semibold"
-            >
-              {englishCopy.settings.notifications.title}
-            </h2>
-          </div>
-          <Checkbox
-            id="weekly-email"
-            label={englishCopy.settings.notifications.weekly_email}
-            checked={consents.weekly_email}
-            disabled={
-              consentSaving || (consentsSupported && consentQuery.isPending)
-            }
-            onChange={(event) =>
-              void updateConsent("weekly_email", event.currentTarget.checked)
-            }
-          />
-          <Checkbox
-            id="reminder-email"
-            label={englishCopy.settings.notifications.reminders}
-            checked={consents.reminder_email}
-            disabled={
-              consentSaving || (consentsSupported && consentQuery.isPending)
-            }
-            onChange={(event) =>
-              void updateConsent("reminder_email", event.currentTarget.checked)
-            }
-          />
-          <Checkbox
-            id="push-alerts"
-            label={englishCopy.settings.notifications.push}
-            checked={consents.push}
-            disabled={
-              consentSaving || (consentsSupported && consentQuery.isPending)
-            }
-            onChange={(event) =>
-              void updateConsent("push", event.currentTarget.checked)
-            }
-          />
-          <Checkbox
-            id="urgent-alerts"
-            label={englishCopy.settings.notifications.urgent}
-            checked={consents.urgent_alerts}
-            disabled={
-              consentSaving || (consentsSupported && consentQuery.isPending)
-            }
-            onChange={(event) =>
-              void updateConsent("urgent_alerts", event.currentTarget.checked)
-            }
-          />
-          {!consentsSupported ? (
-            <p className="text-sm text-muted-foreground">
-              {englishCopy.settings.notifications.sync_later}
-            </p>
-          ) : null}
-          {notificationMessage ? (
-            <p role="status" className="text-sm text-muted-foreground">
-              {notificationMessage}
-            </p>
-          ) : null}
-        </Card>
-      </section>
-
-      <section aria-labelledby="settings-privacy-heading">
-        <Card className="grid gap-3">
-          <div>
-            <h2
-              id="settings-privacy-heading"
-              className="text-base font-semibold"
-            >
-              {englishCopy.settings.privacy.title}
-            </h2>
-          </div>
-          <Checkbox
-            id="shared-device"
-            label={englishCopy.settings.privacy.shared_device}
-            help={englishCopy.settings.privacy.shared_device_help}
-            checked={sharedDevice}
-            onChange={(event) =>
-              void toggleSharedDevice(event.currentTarget.checked)
-            }
-          />
-          {sharedDeviceMessage ? (
-            <p role="status" className="text-sm text-muted-foreground">
-              {sharedDeviceMessage}
-            </p>
-          ) : null}
-          <div className="border-t border-line pt-3">
-            <Checkbox
-              id="app-lock"
-              label={englishCopy.settings.privacy.lock}
-              help={englishCopy.settings.privacy.lock_help}
-              checked={lockEnabled}
-              onChange={(event) =>
-                void changeDeviceLock(event.currentTarget.checked)
-              }
-            />
-            {!lockEnabled && !appLockSupported() ? (
-              <p className="pl-9 text-sm text-muted-foreground">
-                {englishCopy.settings.privacy.lock_unsupported}
+          <section aria-labelledby="settings-about-heading">
+            <Card className="grid gap-3">
+              <h2
+                id="settings-about-heading"
+                className="text-base font-semibold"
+              >
+                {englishCopy.settings.about.title}
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                {englishCopy.settings.about.version}: {packageMetadata.version}
               </p>
-            ) : null}
-            {lockMessage ? (
-              <p role="status" className="pl-9 text-sm text-muted-foreground">
-                {lockMessage}
+              <p className="text-sm text-muted-foreground">
+                {englishCopy.settings.about.disclaimer}
               </p>
-            ) : null}
-          </div>
-          <SignedInDevicesPanel />
-          <div className="grid gap-2 border-t border-line pt-3">
-            {meSupported ? (
+              <div className="flex flex-wrap gap-4 border-t border-line pt-3 text-sm">
+                <a
+                  className="min-h-10 text-brand underline"
+                  href={englishCopy.settings.about.investor_url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {englishCopy.settings.about.investor_link}
+                </a>
+                <a
+                  className="min-h-10 text-brand underline"
+                  href={englishCopy.settings.about.data_url}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {englishCopy.settings.about.data_link}
+                </a>
+              </div>
               <Button
                 variant="secondary"
                 className="w-full"
-                onClick={() => void exportData()}
+                onClick={toggleTheme}
               >
-                {englishCopy.settings.privacy.export}
+                {resolved === "dark"
+                  ? englishCopy.settings.about.use_light_theme
+                  : englishCopy.settings.about.use_dark_theme}
               </Button>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                {englishCopy.settings.family.unsupported}
-              </p>
-            )}
-            {exportMessage ? (
-              <p role="status" className="text-sm text-danger-foreground">
-                {exportMessage}
-              </p>
-            ) : null}
-          </div>
-          <div className="grid gap-2 border-t border-line pt-3">
-            {meSupported ? (
-              <Button
-                variant="danger"
-                className="w-full"
-                onClick={() => {
-                  setDeleteText("");
-                  setDeleteMessage("");
-                  setDeleteOpen(true);
-                }}
-              >
-                {englishCopy.settings.privacy.delete}
-              </Button>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                {englishCopy.settings.family.unsupported}
-              </p>
-            )}
-            <Button
-              variant="ghost"
-              className="w-full"
-              onClick={() => setSignOutOpen(true)}
-            >
-              {englishCopy.settings.family.sign_out}
-            </Button>
-          </div>
-        </Card>
-      </section>
-
-      <section aria-labelledby="settings-about-heading">
-        <Card className="grid gap-3">
-          <h2 id="settings-about-heading" className="text-base font-semibold">
-            {englishCopy.settings.about.title}
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            {englishCopy.settings.about.version}: {packageMetadata.version}
-          </p>
-          <p className="text-sm text-muted-foreground">
-            {englishCopy.settings.about.disclaimer}
-          </p>
-          <div className="flex flex-wrap gap-4 border-t border-line pt-3 text-sm">
-            <a
-              className="min-h-10 text-brand underline"
-              href={englishCopy.settings.about.investor_url}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {englishCopy.settings.about.investor_link}
-            </a>
-            <a
-              className="min-h-10 text-brand underline"
-              href={englishCopy.settings.about.data_url}
-              target="_blank"
-              rel="noreferrer"
-            >
-              {englishCopy.settings.about.data_link}
-            </a>
-          </div>
-          <Button variant="secondary" className="w-full" onClick={toggleTheme}>
-            {resolved === "dark"
-              ? englishCopy.settings.about.use_light_theme
-              : englishCopy.settings.about.use_dark_theme}
-          </Button>
-        </Card>
-      </section>
+            </Card>
+          </section>
+        </div>
+      </details>
 
       <Sheet
         open={Boolean(removingMember)}

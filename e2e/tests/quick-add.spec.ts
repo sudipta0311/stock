@@ -6,6 +6,7 @@ test("quick add prefills EPF and explains an unreadable note", async ({
 }) => {
   await startReadyAccount(page, "quick-add");
   await gotoApp(page, "/money");
+  await page.getByText("What else do you have?", { exact: true }).click();
   await page.getByLabel("Quick add").fill("EPF 12L");
   await page.getByRole("button", { name: "Add details" }).click();
   await expect(page).toHaveURL(/\/money\/add\/epf$/);
@@ -18,6 +19,7 @@ test("quick add prefills EPF and explains an unreadable note", async ({
   ).toBeVisible();
 
   await gotoApp(page, "/money");
+  await page.getByText("What else do you have?", { exact: true }).click();
   await page.getByLabel("Quick add").fill("random words");
   await page.getByRole("button", { name: "Add details" }).click();
   await expect(

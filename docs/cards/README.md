@@ -55,6 +55,7 @@ Status: ⬜ not started · 🟦 in progress · ✅ accepted · 🔁 rework · �
 | C25 | Docs, cleanup, final plan sync | — | ✅ |
 | C34 | Savings in DKK/EUR; fixes from the mock-data walkthrough (hint, fund check, errors, required marks, quick-add amounts, push on account switch, rate note, onboarding counter) | 3, 8 | ✅ |
 | C35 | US market valuation (S&P 500 look-through P/E from SPY holdings and EDGAR EPS, ~3 years of split-checked monthly history) and a code-decided buy hint on each research idea | 4.9, 5 | ✅ |
+| C36 | A simpler everyday app: Home asks for the monthly amount and shows this week's steps; Ideas open by default with buy hints; shorter Money with one Add-or-update; notes on Home only; Settings in four sections; a waking server keeps the screen | UX | ✅ |
 
 ## Follow-ups and review outcomes
 

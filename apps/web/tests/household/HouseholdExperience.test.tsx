@@ -216,6 +216,20 @@ function householdHandlers(
     http.get(/\/v1\/goals$/, () => HttpResponse.json([])),
     http.get(/\/v1\/imports$/, () => HttpResponse.json([])),
     http.get(/\/v1\/actions$/, () => HttpResponse.json(actions)),
+    http.get(/\/v1\/me\/investing$/, () =>
+      HttpResponse.json({
+        monthly_sip_capacity: "0.00",
+        new_money_this_week: "0.00",
+        existing_sips: [],
+      }),
+    ),
+    http.get(/\/v1\/loans$/, () =>
+      HttpResponse.json({
+        loans: [],
+        remaining_inr: "0.00",
+        monthly_emis_inr: "0.00",
+      }),
+    ),
     http.put(/\/v1\/me\/checklist$/, async ({ request }) =>
       HttpResponse.json(await request.json()),
     ),
@@ -253,7 +267,7 @@ describe("family plan screens", () => {
     );
     expect(ownerCard).toBeDefined();
     if (!ownerCard) throw new Error("The owner's action card was not rendered");
-    await screen.findByText(/As of 28 Oct 2026 · 1 DKK = ₹100\.00/);
+    await screen.findAllByText("DKK 100");
     const freshOwnerCard = screen
       .getAllByRole("article", { name: /Invest now/ })
       .find((card) => card.textContent?.includes("For Test owner"));
@@ -264,9 +278,6 @@ describe("family plan screens", () => {
     expect(within(freshOwnerCard).getByText("DKK 100")).toBeInTheDocument();
     expect(within(freshOwnerCard).getByText(/₹10,000/)).toBeInTheDocument();
     expect(freshOwnerCard).not.toHaveTextContent("For you");
-    expect(
-      screen.getByText(/As of 28 Oct 2026 · 1 DKK = ₹100\.00/),
-    ).toBeInTheDocument();
     await user.click(
       within(freshOwnerCard).getByRole("button", { name: "How to" }),
     );

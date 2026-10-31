@@ -75,9 +75,13 @@ test("required screens have no serious or critical accessibility violations", as
 
   await gotoApp(page, "/money");
   await scan("Money");
-  await page
-    .getByRole("button", { name: "Fixed deposits", exact: true })
-    .click();
+  await page.getByText("What else do you have?", { exact: true }).click();
+  const fixedDeposits = page.getByRole("button", {
+    name: "Fixed deposits",
+    exact: true,
+  });
+  await expect(fixedDeposits).toBeVisible();
+  await fixedDeposits.click();
   await page.getByRole("button", { name: /Continue \(1 selected\)/ }).click();
   await scan("Fixed deposit form");
 

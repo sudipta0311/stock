@@ -1,4 +1,3 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { WalletCards } from "lucide-react";
 import { labelForCode, SLEEVE_LABELS } from "../lib/labels";
@@ -18,7 +17,7 @@ import {
   ScreenLoading,
   useFeatureQuery,
 } from "../features/api";
-import { dismissHighlight, getPlan } from "../planning/api";
+import { getPlan } from "../planning/api";
 import { getNetworth, listAssets, listGoals, listLoans } from "../money/api";
 import type {
   AssetResponse,
@@ -27,7 +26,6 @@ import type {
 } from "../money/api";
 import type { WeeklyPlan } from "../planning/api";
 import { Card, EmptyState, Progress, Term } from "../ui";
-import { Highlights } from "../features/Highlights";
 import { useHousehold } from "../household/HouseholdContext";
 import {
   formatHouseholdAmount,
@@ -933,14 +931,6 @@ export function PlanPage() {
     fxRate,
   } = household;
   const familyView = selectedMemberId === "family";
-  const queryClient = useQueryClient();
-  const hideHighlight = useMutation({
-    mutationFn: dismissHighlight,
-    onSuccess: () =>
-      queryClient.invalidateQueries({
-        queryKey: ["c27b", "plan", selectedHouseholdId, activeMemberId],
-      }),
-  });
   const plan = useFeatureQuery(
     ["c27b", "plan", selectedHouseholdId, activeMemberId],
     "/v1/plan",
@@ -1004,10 +994,6 @@ export function PlanPage() {
       ) : null}
       <AllocationCard rows={rows} empty={noAssets} />
       {!noAssets ? <DebtAnswerCard plan={planValue} /> : null}
-      <Highlights
-        items={planValue.highlights_by_screen?.plan}
-        onDismiss={(key) => hideHighlight.mutate(key)}
-      />
       {!noAssets ? (
         <Link
           to="/money"

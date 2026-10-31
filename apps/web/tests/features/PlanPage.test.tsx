@@ -162,7 +162,7 @@ describe("Plan page", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows the missing year-start account value as one Denmark note", async () => {
+  it("keeps Denmark placement details closed by default", async () => {
     const user = userEvent.setup();
     server.use(
       ...planHandlers({
@@ -200,13 +200,16 @@ describe("Plan page", () => {
       }),
     );
     renderPlan();
-    await user.click(await screen.findByText("Why?"));
+    await screen.findByRole("heading", { name: "Your money vs your plan" });
+    const placementDetails = screen.getByText("Why this?").closest("details");
+    expect(placementDetails).not.toHaveAttribute("open");
+    await user.click(screen.getByText("Why this?"));
+    expect(placementDetails).toHaveAttribute("open");
     expect(
       screen.getByText(
         "Add your share savings account's value on 1 January so we can use it.",
       ),
     ).toBeInTheDocument();
-    expect(screen.getAllByText(/share savings account/).length).toBe(1);
   });
 
   it("shows eligible debt options when their yields are unavailable", async () => {

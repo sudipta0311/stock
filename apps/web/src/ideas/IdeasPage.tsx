@@ -1,4 +1,3 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { Lightbulb } from "lucide-react";
 import { formatInr, formatUsd } from "../lib/money";
@@ -16,20 +15,14 @@ import {
   ScreenLoading,
   useFeatureQuery,
 } from "../features/api";
-import {
-  dismissHighlight,
-  getActions,
-  getPlan,
-  getResearchIdeas,
-} from "../planning/api";
+import { getActions, getPlan, getResearchIdeas } from "../planning/api";
 import type {
   ActionResponse,
   ResearchIdeasResponse,
   WeeklyPlan,
 } from "../planning/api";
-import { Badge, Card, EmptyState, Term } from "../ui";
+import { Card, EmptyState, Term } from "../ui";
 import englishCopy from "../copy/en.json";
-import { Highlights } from "../features/Highlights";
 
 const ENTRY_HINT_REASON_COPY: Record<string, string> = {
   price_far_above_average:
@@ -71,6 +64,7 @@ function DenmarkBuyCard({ plan }: { plan?: WeeklyPlan }) {
   );
   if (residency.country !== "DK" && !hasDkResident && !lines.length)
     return null;
+  if (!lines.length) return null;
   return (
     <Card className="grid gap-3">
       <div>
@@ -346,9 +340,7 @@ function DenmarkBuyCard({ plan }: { plan?: WeeklyPlan }) {
             );
           })}
         </ul>
-      ) : (
-        <p className="text-sm text-muted-foreground">{copy.no_buy}</p>
-      )}
+      ) : null}
     </Card>
   );
 }
@@ -415,45 +407,6 @@ function referencedTranche(
   return null;
 }
 
-function CorePicksCard({
-  actions,
-  plan,
-}: {
-  actions?: ActionResponse[];
-  plan?: WeeklyPlan;
-}) {
-  const picks = corePicks(actions, plan);
-  const copy = englishCopy.ideas;
-  return (
-    <Card className="grid gap-3">
-      <div>
-        <h2 className="text-base font-semibold">
-          {copy.plan_categories_title}
-        </h2>
-      </div>
-      {picks.length ? (
-        <ul className="grid gap-2">
-          {picks.map((pick) => (
-            <li
-              key={pick}
-              className="flex min-h-14 items-center gap-3 border-t border-line pt-2 first:border-0 first:pt-0"
-            >
-              <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground">
-                <Lightbulb aria-hidden="true" className="size-4" />
-              </span>
-              <span className="text-sm">{pick}</span>
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p className="text-sm text-muted-foreground">
-          {copy.plan_categories_empty}
-        </p>
-      )}
-    </Card>
-  );
-}
-
 function SelectorFundName({ name }: { name: string }) {
   if (/\b(?:ETF|iNAV|tracking difference)\b/i.test(name)) {
     return (
@@ -503,26 +456,140 @@ function SelectorFunds({ research }: { research?: ResearchIdeasResponse }) {
   );
 }
 
-function TrackRecord({ research }: { research?: ResearchIdeasResponse }) {
-  const track = asRecord(research?.track_record);
-  const markets = asRecord(track.markets);
-  const summaries = Object.values(markets)
-    .map(asRecord)
-    .filter((market) => market.status === "available")
-    .map((market) => textValue(market.summary))
-    .filter(Boolean);
-  if (!summaries.length) return null;
+function splitIdeasByMarket(ideas: unknown[]): {
+  top: Map<string, unknown[]>;
+  rest: Map<string, unknown[]>;
+} {
+  const top = new Map<string, unknown[]>();
+  const rest = new Map<string, unknown[]>();
+  const counts = new Map<string, number>();
+  for (const raw of ideas) {
+    const market = textValue(asRecord(raw).market, "Other");
+    const count = counts.get(market) ?? 0;
+    const target = count < 3 ? top : rest;
+    target.set(market, [...(target.get(market) ?? []), raw]);
+    counts.set(market, count + 1);
+  }
+  return { top, rest };
+}
+
+function ideaMarketLabel(market: string): string {
+  if (market === "IN") return "India";
+  if (market === "US") return "United States";
+  return market;
+}
+
+function ResearchIdea({
+  raw,
+  actions,
+  index,
+}: {
+  raw: unknown;
+  actions?: ActionResponse[];
+  index: number;
+}) {
+  const idea = asRecord(raw);
+  const symbol = textValue(idea.symbol, "Research idea");
+  const confidence = textValue(idea.confidence);
+  const valuation = textValue(idea.valuation_percentile);
+  const tranche = referencedTranche(idea, actions);
+  const hint = asRecord(idea.entry_hint);
+  const hintCode = textValue(hint.code);
+  const hintParts = Number(hint.parts);
+  const hintLine =
+    hintCode === "wait"
+      ? englishCopy.ideas.entry_hint_wait
+      : hintCode === "buy_in_parts" && hintParts === 6
+        ? englishCopy.ideas.entry_hint_buy_expensive
+        : hintCode === "buy_in_parts" &&
+            Number.isInteger(hintParts) &&
+            hintParts > 0
+          ? englishCopy.ideas.entry_hint_buy_parts
+              .replace("{parts}", String(hintParts))
+              .replace("{months}", String(hintParts))
+          : null;
+  const hintReasons = asArray(hint.reasons)
+    .map((reason) => ENTRY_HINT_REASON_COPY[textValue(reason)])
+    .filter((reason): reason is string => Boolean(reason));
   return (
-    <section aria-labelledby="track-record-title" className="grid gap-1">
-      <h3 id="track-record-title" className="text-sm font-semibold">
-        {englishCopy.ideas.track_record_title}
-      </h3>
-      {summaries.slice(0, 2).map((summary) => (
-        <p key={summary} className="text-sm text-muted-foreground">
-          {summary}
+    <article
+      key={`${symbol}-${index}`}
+      className="flex gap-3 border-t border-line pt-3 first:border-0 first:pt-0"
+    >
+      <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground">
+        <Lightbulb aria-hidden="true" className="size-4" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-start justify-between gap-3">
+          <h3 className="font-semibold" data-security>
+            {symbol}
+          </h3>
+          {confidence ? (
+            <span className="text-right text-xs text-muted-foreground">
+              {labelForCode(confidence)}
+            </span>
+          ) : null}
+        </div>
+        <p className="text-sm text-muted-foreground">
+          {textValue(idea.sector, "Sector unavailable")} ·{" "}
+          {valuationWords(valuation)}
         </p>
+        {tranche ? <p className="mt-1 text-sm font-medium">{tranche}</p> : null}
+        {hintLine ? (
+          <div className="mt-1">
+            <p className="text-sm font-medium">{hintLine}</p>
+            {hintReasons.length ? (
+              <details className="mt-1">
+                <summary className="min-h-9 cursor-pointer py-1 text-xs text-muted-foreground">
+                  {englishCopy.ideas.entry_hint_why}
+                </summary>
+                <ul className="grid gap-1 pb-2 text-xs text-muted-foreground">
+                  {hintReasons.map((reason, reasonIndex) => (
+                    <li key={`${symbol}-hint-${reasonIndex}`}>{reason}</li>
+                  ))}
+                </ul>
+              </details>
+            ) : null}
+          </div>
+        ) : null}
+        {idea.price ? (
+          <p className="mt-1 text-xs text-muted-foreground tabular-nums">
+            Reference price{" "}
+            {textValue(idea.market) === "US"
+              ? formatUsd(textValue(idea.price), 0)
+              : formatInr(textValue(idea.price), "compact")}
+          </p>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
+function IdeaGroups({
+  groups,
+  actions,
+}: {
+  groups: Map<string, unknown[]>;
+  actions?: ActionResponse[];
+}) {
+  return (
+    <div className="grid gap-3">
+      {[...groups].map(([market, ideas]) => (
+        <section key={market} aria-label={ideaMarketLabel(market)}>
+          <h3 className="text-sm font-semibold">{ideaMarketLabel(market)}</h3>
+          <div className="grid gap-3">
+            {ideas.map((raw, index) => (
+              <ResearchIdea
+                key={`${market}-${index}`}
+                raw={raw}
+                actions={actions}
+                index={index}
+              />
+            ))}
+          </div>
+        </section>
       ))}
-    </section>
+    </div>
   );
 }
 
@@ -533,99 +600,27 @@ function ResearchCard({
   ideas: unknown[];
   actions?: ActionResponse[];
 }) {
+  const groups = splitIdeasByMarket(ideas);
+  const hasIdeas = ideas.length > 0;
   return (
     <Card className="grid gap-3">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h2 className="text-base font-semibold">Research ideas</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            For learning and review. These are not product picks.
-          </p>
-        </div>
-        <Badge>Research, not personal advice</Badge>
-      </div>
-      {ideas.length ? (
-        ideas.map((raw, index) => {
-          const idea = asRecord(raw);
-          const symbol = textValue(idea.symbol, "Research idea");
-          const confidence = textValue(idea.confidence);
-          const valuation = textValue(idea.valuation_percentile);
-          const tranche = referencedTranche(idea, actions);
-          const hint = asRecord(idea.entry_hint);
-          const hintCode = textValue(hint.code);
-          const hintParts = Number(hint.parts);
-          const hintLine =
-            hintCode === "wait"
-              ? englishCopy.ideas.entry_hint_wait
-              : hintCode === "buy_in_parts" && hintParts === 6
-                ? englishCopy.ideas.entry_hint_buy_expensive
-                : hintCode === "buy_in_parts" &&
-                    Number.isInteger(hintParts) &&
-                    hintParts > 0
-                  ? englishCopy.ideas.entry_hint_buy_parts
-                      .replace("{parts}", String(hintParts))
-                      .replace("{months}", String(hintParts))
-                  : null;
-          const hintReasons = asArray(hint.reasons)
-            .map((raw) => ENTRY_HINT_REASON_COPY[textValue(raw)])
-            .filter((reason): reason is string => Boolean(reason));
-          return (
-            <article
-              key={`${symbol}-${index}`}
-              className="flex gap-3 border-t border-line pt-3 first:border-0 first:pt-0"
-            >
-              <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground">
-                <Lightbulb aria-hidden="true" className="size-4" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-start justify-between gap-3">
-                  <h3 className="font-semibold" data-security>
-                    {symbol}
-                  </h3>
-                  {confidence ? (
-                    <span className="text-right text-xs text-muted-foreground">
-                      {labelForCode(confidence)}
-                    </span>
-                  ) : null}
-                </div>
-                <p className="text-sm text-muted-foreground">
-                  {textValue(idea.sector, "Sector unavailable")} ·{" "}
-                  {valuationWords(valuation)}
-                </p>
-                {tranche ? (
-                  <p className="mt-1 text-sm font-medium">{tranche}</p>
-                ) : null}
-                {hintLine ? (
-                  <div className="mt-1">
-                    <p className="text-sm font-medium">{hintLine}</p>
-                    {hintReasons.length ? (
-                      <details className="mt-1">
-                        <summary className="min-h-9 cursor-pointer py-1 text-xs text-muted-foreground">
-                          {englishCopy.ideas.entry_hint_why}
-                        </summary>
-                        <ul className="grid gap-1 pb-2 text-xs text-muted-foreground">
-                          {hintReasons.map((reason, reasonIndex) => (
-                            <li key={`${symbol}-hint-${reasonIndex}`}>
-                              {reason}
-                            </li>
-                          ))}
-                        </ul>
-                      </details>
-                    ) : null}
-                  </div>
-                ) : null}
-                {idea.price ? (
-                  <p className="mt-1 text-xs text-muted-foreground tabular-nums">
-                    Reference price{" "}
-                    {textValue(idea.market) === "US"
-                      ? formatUsd(textValue(idea.price), 0)
-                      : formatInr(textValue(idea.price), "compact")}
-                  </p>
-                ) : null}
+      <h2 className="text-base font-semibold">
+        {englishCopy.ideas.weekly_title}
+      </h2>
+      {hasIdeas ? (
+        <>
+          <IdeaGroups groups={groups.top} actions={actions} />
+          {groups.rest.size ? (
+            <details>
+              <summary className="min-h-12 cursor-pointer border-t border-line pt-3 text-sm font-semibold text-brand">
+                {englishCopy.ideas.see_all}
+              </summary>
+              <div className="pt-3">
+                <IdeaGroups groups={groups.rest} actions={actions} />
               </div>
-            </article>
-          );
-        })
+            </details>
+          ) : null}
+        </>
       ) : (
         <EmptyState
           title="No new ideas this week"
@@ -638,12 +633,6 @@ function ResearchCard({
 }
 
 export function IdeasPage() {
-  const queryClient = useQueryClient();
-  const hideHighlight = useMutation({
-    mutationFn: dismissHighlight,
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: ["c22", "plan"] }),
-  });
   const research = useFeatureQuery(
     ["c22", "research-ideas"],
     "/v1/research/ideas",
@@ -658,13 +647,14 @@ export function IdeasPage() {
   if (!research.supported || isMissingFeature(research.error))
     return <ComingSoon title="Research ideas are coming soon" />;
   if (research.isPending) return <ScreenLoading label="Loading ideas" />;
-  if (research.error && !isMissingFeature(research.error))
+  if (research.error && !research.data && !isMissingFeature(research.error))
     return <ScreenError title="Ideas couldn’t load" />;
   const planValue = plan.data as WeeklyPlan | undefined;
   const planMembers = asArray(planValue?.members).map(asRecord);
   const denmarkResident =
     asRecord(planValue?.residency).country === "DK" ||
     planMembers.some((member) => asRecord(member.residency).country === "DK");
+  const denmarkBuyCount = asArray(planValue?.abroad_buy_list).length;
   return (
     <div data-copy-screen="ideas" className="grid gap-4">
       <header>
@@ -673,46 +663,25 @@ export function IdeasPage() {
           Ideas are research to review, not a reason to rush.
         </p>
       </header>
-      {denmarkResident ? (
+      {denmarkResident && denmarkBuyCount ? (
         <DenmarkBuyCard plan={planValue} />
-      ) : (
-        <CorePicksCard actions={actions.data} plan={planValue} />
-      )}
-      <Highlights
-        items={planValue?.highlights_by_screen?.ideas}
-        onDismiss={(key) => hideHighlight.mutate(key)}
+      ) : null}
+      <ResearchCard
+        ideas={asArray(research.data?.ideas)}
+        actions={actions.data}
       />
-      <Link
-        to="/plan"
-        data-primary="true"
-        className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground"
-      >
-        Review your plan
-      </Link>
-      <details className="grid gap-4">
-        <summary className="min-h-12 cursor-pointer py-3 text-sm font-semibold">
-          {englishCopy.ideas.details_title}
-        </summary>
-        <TrackRecord research={research.data} />
-        <SelectorFunds research={research.data} />
-        <ResearchCard
-          ideas={asArray(research.data?.ideas)}
-          actions={actions.data}
-        />
-      </details>
-      <Card className="grid gap-2">
-        <h2 className="text-base font-semibold">Explore the wider picture</h2>
+      {denmarkResident && !denmarkBuyCount ? (
         <p className="text-sm text-muted-foreground">
-          See how common market shocks could affect your current mix and your
-          target plan.
+          {englishCopy.denmark.no_buy_short}
         </p>
-        <Link
-          to="/ideas/world"
-          className="inline-flex min-h-12 items-center gap-2 text-sm font-semibold text-brand"
-        >
-          World & your money <span aria-hidden="true">→</span>
-        </Link>
-      </Card>
+      ) : null}
+      <SelectorFunds research={research.data} />
+      <Link
+        to="/ideas/world"
+        className="min-h-12 py-3 text-sm font-semibold text-brand"
+      >
+        {englishCopy.ideas.wider_link} <span aria-hidden="true">→</span>
+      </Link>
     </div>
   );
 }

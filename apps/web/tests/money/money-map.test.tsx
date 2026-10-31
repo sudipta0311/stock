@@ -1,10 +1,4 @@
-import {
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { MemoryRouter, Route, Routes } from "react-router";
@@ -130,16 +124,19 @@ function renderMap(initial = "/money") {
   );
 }
 
+async function openWhatElse(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByText("What else do you have?"));
+}
+
 describe("Money Map", () => {
   it("shows loan balances and links each row to loan details", async () => {
     server.use(...baseHandlers(networth(), loanSummary()));
     renderMap();
 
-    expect(await screen.findByText("Loans")).toBeInTheDocument();
-    expect(screen.getByText(/Total left/)).toHaveTextContent("per month");
-    const loanLink = screen.getByRole("link", {
+    const loanLink = await screen.findByRole("link", {
       name: /Home loan.*Sample Bank.*Ends Mar 2031/,
     });
+    expect(screen.getByText(/Total left/)).toHaveTextContent("per month");
     expect(loanLink).toHaveAttribute("href", "/money/loan/loan-test-1");
     expect(
       within(loanLink).getByLabelText("Amount repaid"),
@@ -245,6 +242,7 @@ describe("Money Map", () => {
       ),
     );
     renderMap();
+    await openWhatElse(user);
 
     await user.type(
       await screen.findByLabelText("Quick add"),
@@ -313,6 +311,7 @@ describe("Money Map", () => {
         http.post(/\/v1\/assets\/quick-add$/, () => HttpResponse.json(result)),
       );
       renderMap();
+      await openWhatElse(user);
       const input = await screen.findByLabelText("Quick add");
       await user.type(input, phrase);
       await user.click(screen.getByRole("button", { name: "Add details" }));
@@ -344,6 +343,7 @@ describe("Money Map", () => {
       }),
     );
     renderMap();
+    await openWhatElse(user);
     await user.click(await screen.findByRole("button", { name: "NPS" }));
     await user.click(screen.getByRole("button", { name: "Fixed deposits" }));
     await user.click(screen.getByRole("button", { name: "EPF" }));
@@ -382,8 +382,10 @@ describe("Money Map", () => {
   });
 
   it("shows only the percentage when no checklist categories were selected", async () => {
+    const user = userEvent.setup();
     server.use(...baseHandlers());
     renderMap();
+    await openWhatElse(user);
     expect(
       await screen.findByText("Money Map 80% complete"),
     ).toBeInTheDocument();
@@ -394,6 +396,7 @@ describe("Money Map", () => {
   });
 
   it("names the next incomplete category the household selected", async () => {
+    const user = userEvent.setup();
     server.use(
       ...baseHandlers(
         networth({
@@ -406,6 +409,7 @@ describe("Money Map", () => {
       ),
     );
     renderMap();
+    await openWhatElse(user);
 
     expect(
       await screen.findByText("Money Map 0% complete · add Savings to finish"),
@@ -414,6 +418,7 @@ describe("Money Map", () => {
   });
 
   it("shows plain names and whole percentages instead of codes", async () => {
+    const user = userEvent.setup();
     server.use(
       ...baseHandlers(
         networth({
@@ -437,6 +442,7 @@ describe("Money Map", () => {
       ),
     );
     renderMap();
+    await user.click(await screen.findByText("More details"));
 
     expect(await screen.findByText("Loan monthly payment")).toBeInTheDocument();
     expect(screen.queryByText(/loan_payment/)).not.toBeInTheDocument();
@@ -451,7 +457,7 @@ describe("Money Map", () => {
     expect(screen.queryByText(/46\.88/)).not.toBeInTheDocument();
   });
 
-  it("puts one upload action first and closes the completed checklist", async () => {
+  it("shows one Add or update action and keeps rare details closed", async () => {
     server.use(
       ...baseHandlers(
         networth({
@@ -459,18 +465,61 @@ describe("Money Map", () => {
         }),
       ),
     );
+    const user = userEvent.setup();
     const { container } = renderMap();
+    await screen.findByText("Net worth");
     const root = await screen
-      .findByText("Upload your statement")
+      .findByRole("button", { name: "Add or update" })
       .then(() => container.querySelector('[data-copy-screen="money"]'));
-    expect(root?.firstElementChild).toHaveTextContent("Upload your statement");
+    expect(root?.firstElementChild).toHaveTextContent("Net worth");
     expect(root?.querySelectorAll('[data-primary="true"]')).toHaveLength(1);
-    const checklist = Array.from(root?.querySelectorAll("details") ?? []).find(
-      (details) =>
-        details.querySelector("summary")?.textContent ===
-        "What else do you have?",
+    for (const section of [
+      "Imports",
+      "Check an investment",
+      "What else do you have?",
+      "Monthly amounts",
+    ]) {
+      const details = Array.from(root?.querySelectorAll("details") ?? []).find(
+        (item) => item.querySelector("summary")?.textContent === section,
+      );
+      expect(details).not.toHaveAttribute("open");
+    }
+    await user.click(screen.getByRole("button", { name: "Add or update" }));
+    const sheet = screen.getByRole("dialog", { name: "Add or update" });
+    expect(
+      within(sheet).getByRole("link", { name: "Upload a statement" }),
+    ).toBeVisible();
+    expect(
+      within(sheet).getByRole("link", { name: "Get statements from Gmail" }),
+    ).toBeVisible();
+    expect(
+      within(sheet).getByRole("button", { name: "Add one by hand" }),
+    ).toBeVisible();
+  });
+
+  it("opens monthly fund amounts beside the funds list", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(/\/v1\/fund-check$/, () =>
+        HttpResponse.json({
+          details: {
+            funds: [
+              {
+                security_id: "security-fund-test",
+                member_id: memberId,
+                name: "Example index fund",
+              },
+            ],
+            sips: [],
+          },
+        }),
+      ),
+      ...baseHandlers(),
     );
-    expect(checklist).not.toHaveAttribute("open");
+    renderMap();
+
+    await user.click(await screen.findByText("Monthly amounts"));
+    expect(await screen.findByLabelText("Example index fund")).toBeVisible();
   });
 
   it("passes the selected household member as member_id", async () => {
@@ -491,6 +540,9 @@ describe("Money Map", () => {
         return HttpResponse.json(networth());
       }),
       http.get(/\/v1\/plan$/, () => HttpResponse.json({ members: [] })),
+      http.get(/\/v1\/loans$/, () =>
+        HttpResponse.json({ ...loanSummary(), loans: [] }),
+      ),
       http.get(/\/v1\/households$/, () => HttpResponse.json([])),
       http.get(/\/v1\/members$/, () =>
         HttpResponse.json([
@@ -588,13 +640,7 @@ describe("Money Map", () => {
 
   it("has no axe violations on the Money tab", async () => {
     server.use(...baseHandlers());
-    const { container } = render(
-      <main>
-        <MemoryRouter>
-          <MoneyMapPage />
-        </MemoryRouter>
-      </main>,
-    );
+    const { container } = renderMap();
     await screen.findByText("What else do you have?");
     const results = await axe(container);
     expect(results.violations).toEqual([]);
