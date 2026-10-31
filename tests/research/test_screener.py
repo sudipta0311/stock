@@ -5,7 +5,7 @@ import sys
 from decimal import Decimal
 from pathlib import Path
 
-from wealth.research.screener import ScreenerInput, screen_universe
+from wealth.research.screener import ScreenerInput, alternate_markets, screen_universe
 
 
 def _full_factors(value: str = "1") -> dict[str, Decimal]:
@@ -210,3 +210,13 @@ def test_twenty_security_decile_edges_and_three_hand_computed_composites() -> No
     for index in (0, 10, 19):
         expected = (Decimal(index) - Decimal("9.5")) / standard_deviation
         assert abs(picks[f"T{index:02d}"].composite - expected) < Decimal("1e-26")
+
+
+def test_a_capped_research_run_takes_both_markets_in_turn() -> None:
+    picks = {"IN": ["in-1", "in-2", "in-3"], "US": ["us-1", "us-2"]}
+
+    ordered = alternate_markets(picks)
+
+    assert ordered == ["in-1", "us-1", "in-2", "us-2", "in-3"]
+    assert ordered[:4].count("us-1") + ordered[:4].count("us-2") == 2
+    assert alternate_markets({"US": ["us-1"]}) == ["us-1"]

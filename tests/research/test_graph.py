@@ -22,7 +22,7 @@ from wealth.research.agents import (
 )
 from wealth.research.dossier import Dossier, DossierBudget, DossierSecurity, Stage
 from wealth.research.errors import SchemaError
-from wealth.research.graph import build_research_graph
+from wealth.research.graph import build_research_graph, keep_unresearched_markets
 from wealth.research.router import FakeRouter, RunBudget, RunContext
 from wealth.research.rules import ResearchRules
 from wealth.research.tools import ToolRegistry
@@ -620,3 +620,34 @@ def test_a_cio_summary_that_breaks_the_rules_does_not_cancel_approvals() -> None
     assert completed["pack"]["summary"] == (
         "One idea passed every check this week. Open an idea to see why."
     )
+
+
+def test_a_rerun_for_one_market_keeps_the_weeks_ideas_for_the_other() -> None:
+    def idea(market: str, symbol: str) -> dict[str, Any]:
+        return {"market": market, "symbol": symbol}
+
+    previous = {
+        "ideas": [idea("US", "USOLD"), idea("IN", "INOLD")],
+        "idea_outcomes": [{"market": "US", "dossier_id": "2026-W44/US/USOLD"}],
+        "markets": {"US": {"idea_count": 1, "status": "complete"}},
+    }
+    rerun = {
+        "ideas": [idea("IN", "INNEW")],
+        "idea_outcomes": [{"market": "IN", "dossier_id": "2026-W44/IN/INNEW"}],
+        "markets": {
+            "IN": {"idea_count": 1, "status": "complete"},
+            "US": {"idea_count": 0, "status": "complete"},
+        },
+        "summary": "Synthetic rerun.",
+    }
+
+    merged = keep_unresearched_markets(rerun, previous, {"IN"})
+
+    assert [item["symbol"] for item in merged["ideas"]] == ["INNEW", "USOLD"]
+    assert merged["markets"]["US"] == {"idea_count": 1, "status": "complete"}
+    assert [item["dossier_id"] for item in merged["idea_outcomes"]] == [
+        "2026-W44/IN/INNEW",
+        "2026-W44/US/USOLD",
+    ]
+    assert rerun["ideas"] == [idea("IN", "INNEW")]
+    assert keep_unresearched_markets(rerun, previous, {"IN", "US"})["ideas"] == rerun["ideas"]

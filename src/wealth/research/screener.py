@@ -18,6 +18,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
+from itertools import zip_longest
 from pathlib import Path
 from statistics import median
 from typing import Any
@@ -544,6 +545,16 @@ def _load_market_rows(
     return rows_by_market, snapshots
 
 
+def alternate_markets(picks_by_market: dict[str, list[str]]) -> list[str]:
+    """Interleave each market's ranked picks: IN 1, US 1, IN 2, US 2, ...
+
+    A run researches only the first `max_dossiers_per_run` picks, so a plain
+    concatenation gave every slot to India once both markets had full shortlists.
+    """
+    ordered = [picks_by_market.get(market, []) for market in ("IN", "US")]
+    return [pick for group in zip_longest(*ordered) for pick in group if pick is not None]
+
+
 def run_screener(
     engine: Engine, week: str, *, rules: ScreenerRules | None = None
 ) -> dict[str, Any]:
@@ -558,7 +569,7 @@ def run_screener(
         rows_by_market, snapshots = _load_market_rows(session, as_of, selected_rules)
 
     counts: dict[str, int] = {}
-    saved: list[str] = []
+    saved_by_market: dict[str, list[str]] = {}
     for market in ("IN", "US"):
         rows = rows_by_market[market]
         if not rows:
@@ -580,9 +591,14 @@ def run_screener(
                 week=week,
                 as_of=as_of,
             )
-            saved.append(pick.security_id)
+            saved_by_market.setdefault(market, []).append(pick.security_id)
         counts[market] = len(result.shortlist)
-    return {"week": week, "as_of": as_of.isoformat(), "shortlisted": counts, "security_ids": saved}
+    return {
+        "week": week,
+        "as_of": as_of.isoformat(),
+        "shortlisted": counts,
+        "security_ids": alternate_markets(saved_by_market),
+    }
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:

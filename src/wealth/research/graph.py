@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, TypedDict
 from uuid import UUID
@@ -29,6 +30,7 @@ from wealth.research.scorekeeper import run_scorekeeper
 from wealth.research.store import (
     load_latest_prior_pack,
     load_prior_geo_tilts,
+    load_research_pack,
     save_dossier,
     save_macro_geo_pack,
     save_pack_fields,
@@ -175,6 +177,31 @@ def _make_dossier(candidate: dict[str, Any], rules: ResearchRules) -> Dossier:
         calls=dossier.budget.calls,
     )
     return dossier.model_copy(update={"stage": Stage.SCREENED, "budget": budget})
+
+
+def keep_unresearched_markets(
+    pack: dict[str, Any], previous: Mapping[str, Any], researched: set[str]
+) -> dict[str, Any]:
+    """Keep the week's earlier ideas for a market this run did not research.
+
+    The pack is one row per week, so a rerun that researched one market used to erase
+    the other market's ideas.
+    """
+    merged = {**pack, "ideas": list(pack["ideas"]), "idea_outcomes": list(pack["idea_outcomes"])}
+    merged["markets"] = dict(pack["markets"])
+    for market in ("IN", "US"):
+        if market in researched:
+            continue
+        for key in ("ideas", "idea_outcomes"):
+            merged[key].extend(
+                item
+                for item in previous.get(key, [])
+                if isinstance(item, dict) and item.get("market") == market
+            )
+        prior_market = previous.get("markets", {}).get(market)
+        if isinstance(prior_market, dict):
+            merged["markets"][market] = prior_market
+    return merged
 
 
 def build_research_graph(
@@ -621,6 +648,14 @@ def build_research_graph(
             "cio_agenda": state.get("cio_agenda", {}),
         }
         if owner_engine is not None:
+            researched = {
+                str(candidates[dossier_id].get("market"))
+                for dossier_id in shortlist_ids
+                if dossier_id in candidates
+            }
+            pack = keep_unresearched_markets(
+                pack, load_research_pack(owner_engine, week) or {}, researched
+            )
             save_research_pack(owner_engine, week, pack)
             from datetime import date
 
