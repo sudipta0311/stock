@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 import io
 from contextlib import nullcontext
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -526,3 +526,17 @@ def test_overseas_funds_in_indian_amfi_sections_count_as_abroad(
     (row,) = amfi.parse_nav_all(text)
 
     assert row.sleeve == expected_sleeve
+
+
+def test_daily_nse_refresh_rereads_the_last_week(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A late GitHub start lands on the next IST day, before that day's file exists.
+    requested: list[date] = []
+
+    def fake_bhavcopy(day: date) -> list[nse.NseClose]:
+        requested.append(day)
+        return []
+
+    monkeypatch.setattr(refresh_module.nse, "fetch_bhavcopy", fake_bhavcopy)
+
+    assert refresh_module._fetch_recent_bhavcopies(date(2026, 10, 31)) == []
+    assert requested == [date(2026, 10, 25) + timedelta(days=offset) for offset in range(7)]

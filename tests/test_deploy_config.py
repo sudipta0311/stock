@@ -118,7 +118,7 @@ def test_weekly_company_data_loads_stock_lists_before_results_and_before_researc
     loop = next(line for line in script.splitlines() if line.strip().startswith("for source in"))
     sources = loop.split(" in ", 1)[1].removesuffix("; do").split()
 
-    assert sources == ["universes", "edgar", "nse_fundamentals"]
+    assert sources == ["universes", "nse_history", "edgar", "nse_fundamentals"]
     assert set(sources) <= set(_SOURCES)
     assert weekly["on"]["schedule"][0]["cron"] == "0 19 * * 5"
     assert research["on"]["schedule"][0]["cron"] == "0 0 * * 6"

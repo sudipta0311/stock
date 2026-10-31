@@ -22,6 +22,9 @@ SEC_SOURCE = "SEC_EDGAR"
 _REQUEST_INTERVAL_SECONDS = 0.1
 _EMAIL_PATTERN = re.compile(r"[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+")
 _FLOW_METRICS = ("revenue", "net_income", "operating_income", "operating_cash_flow", "capex")
+# Per-share earnings differences approximate a quarter (share counts move a little), which is
+# how a fourth-quarter EPS is usually read from a 10-K that reports only the full year.
+_QUARTERLY_METRICS = (*_FLOW_METRICS, "eps_diluted")
 # Tag choices are ordered from preferred modern concepts to older issuer fallbacks.
 _SIMPLE_TAGS: dict[str, tuple[tuple[str, str], ...]] = {
     "revenue": (
@@ -329,6 +332,70 @@ def _iter_metric_rows(
     return result
 
 
+def _year_to_date_quarters(
+    company_facts: Mapping[str, Any],
+    metric: str,
+    *,
+    source_url: str,
+    cutoff: date,
+    as_of: date,
+) -> list[FundamentalObservation]:
+    """Derive later quarters from year-to-date totals that share a fiscal-year start.
+
+    10-Q cash-flow statements report only 3-, 6- and 9-month totals, so Q2 and Q3 are the
+    differences between consecutive totals. Each total keeps its first filing, and a derived
+    quarter is known once both filings are.
+    """
+    totals: dict[tuple[str, date], dict[date, tuple[datetime, Decimal]]] = defaultdict(dict)
+    for unit, item in _entries(company_facts, _SIMPLE_TAGS[metric], unit_names=_UNITS.get(metric)):
+        start, end = _date(item.get("start")), _date(item.get("end"))
+        filed_at = _filed_at(item.get("filed"))
+        form = str(item.get("form", ""))
+        if start is None or end is None or filed_at is None:
+            continue
+        if not (form.startswith("10-Q") or form.startswith("10-K")):
+            continue
+        if end < cutoff or end > as_of or filed_at.date() > as_of:
+            continue
+        if not 45 <= (end - start).days + 1 <= 290:
+            continue
+        try:
+            value = Decimal(str(item["val"]))
+        except (KeyError, InvalidOperation):
+            continue
+        if not value.is_finite():
+            continue
+        if metric == "capex":
+            value = abs(value)
+        existing = totals[(unit, start)].get(end)
+        if existing is None or filed_at < existing[0]:
+            totals[(unit, start)][end] = (filed_at, value)
+
+    derived: list[FundamentalObservation] = []
+    for (unit, start), by_end in totals.items():
+        ends = sorted(by_end)
+        for previous_end, end in zip(ends, ends[1:], strict=False):
+            if (end - start).days + 1 < 150 or not 70 <= (end - previous_end).days <= 110:
+                continue
+            previous_filed, previous_value = by_end[previous_end]
+            filed_at, value = by_end[end]
+            known_at = max(filed_at, previous_filed)
+            derived.append(
+                FundamentalObservation(
+                    metric=metric,
+                    period_end=end,
+                    period_type="Q",
+                    value=value - previous_value,
+                    unit=unit,
+                    filed_at=known_at,
+                    known_at=known_at,
+                    source=SEC_SOURCE,
+                    source_url=source_url,
+                )
+            )
+    return derived
+
+
 def _add_q4_observations(
     observations: list[FundamentalObservation],
 ) -> list[FundamentalObservation]:
@@ -337,7 +404,7 @@ def _add_q4_observations(
     for observation in observations:
         by_metric[observation.metric].append(observation)
     derived: list[FundamentalObservation] = []
-    for metric in _FLOW_METRICS:
+    for metric in _QUARTERLY_METRICS:
         metric_rows = by_metric.get(metric, [])
         annual_rows = [row for row in metric_rows if row.period_type == "FY"]
         quarters = [row for row in metric_rows if row.period_type == "Q"]
@@ -408,6 +475,17 @@ def parse_company_facts(
             as_of=as_of,
         )
     ]
+    reported_quarters = {
+        (row.metric, row.period_end) for row in observations if row.period_type == "Q"
+    }
+    observations.extend(
+        row
+        for metric in _QUARTERLY_METRICS
+        for row in _year_to_date_quarters(
+            company_facts, metric, source_url=facts_url, cutoff=cutoff, as_of=as_of
+        )
+        if (row.metric, row.period_end) not in reported_quarters
+    )
     observations = _add_q4_observations(observations)
     observations.sort(
         key=lambda row: (

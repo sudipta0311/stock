@@ -141,3 +141,102 @@ def test_universe_parsers_keep_issuer_members_and_survivorship_label() -> None:
     assert universes.SURVIVORSHIP_LABEL == "current constituents only (survivorship bias)"
     assert "ssga.com" in universes.SP500_HOLDINGS_URL
     assert "archives.nseindia.com" in universes.NIFTY500_ARCHIVE_URL
+
+
+def test_spy_files_give_each_holding_a_close_from_weight_and_net_assets() -> None:
+    import io
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["Fund Name:", "Example S&P ETF"])
+    sheet.append([])
+    sheet.append(["Date", "NAV", "Shares Outstanding", "Total Net Assets"])
+    sheet.append(["27-Oct-2026", "500.0", "2000000.0", "1000000000.00"])
+    sheet.append(["26-Oct-2026", "499.0", "2000000.0", "998000000.00"])
+    stream = io.BytesIO()
+    workbook.save(stream)
+    workbook.close()
+
+    assets = universes.parse_spy_total_net_assets(stream.getvalue())
+    holdings = universes.Sp500Holdings(
+        securities=[
+            universes.UniverseSecurity(
+                "EXA", "Example One", weight_pct=Decimal("2.5"), shares_held=Decimal("100000")
+            ),
+            universes.UniverseSecurity("EXB", "Example Two", weight_pct=Decimal("1.0")),
+        ],
+        as_of=date(2026, 10, 27),
+    )
+    stale = universes.Sp500Holdings(holdings.securities, as_of=date(2026, 10, 28))
+
+    # 2.5% of 1,000,000,000 is 25,000,000 across 100,000 shares.
+    assert assets[date(2026, 10, 27)] == Decimal("1000000000.00")
+    assert universes.implied_closes(holdings, assets) == {"EXA": Decimal("250.000000")}
+    assert universes.implied_closes(stale, assets) == {}
+
+
+def test_sp500_sector_table_maps_tickers_to_gics_sectors() -> None:
+    html = """
+    <table class="wikitable"><tr><th>Other</th></tr><tr><td>ignored</td></tr></table>
+    <table id="constituents"><tbody>
+    <tr><th><a>Symbol</a></th><th>Security</th><th><a>GICS</a> Sector</th>
+    <th>GICS Sub-Industry</th><th>Founded</th></tr>
+    <tr><td><a>EXA</a></td><td>Example One</td><td>Industrials</td>
+    <td>Industrial Machinery</td><td>1900</td></tr>
+    <tr><td>EXB-B</td><td>Example Two</td><td>Health Care</td>
+    <td>Life Sciences</td><td>1950</td></tr>
+    <tr><td>-</td><td>Bad row</td><td>Energy</td><td>Oil</td><td>2000</td></tr>
+    </tbody></table>
+    """
+
+    sectors = universes.parse_sp500_sectors(html)
+
+    assert sectors == {
+        "EXA": universes.Sp500Sector("Industrials", "Industrial Machinery"),
+        "EXB.B": universes.Sp500Sector("Health Care", "Life Sciences"),
+    }
+
+
+def test_edgar_turns_year_to_date_cash_flow_and_annual_eps_into_four_quarters() -> None:
+    def fact(start: str, end: str, value: str, form: str, filed: str) -> dict[str, str]:
+        return {"start": start, "end": end, "val": value, "form": form, "filed": filed}
+
+    # Synthetic issuer: 10-Q cash flows are year-to-date; the 10-K reports only the full year.
+    cash_flow = [
+        fact("2025-01-01", "2025-03-31", "10", "10-Q", "2025-05-01"),
+        fact("2025-01-01", "2025-06-30", "25", "10-Q", "2025-08-01"),
+        fact("2025-01-01", "2025-09-30", "45", "10-Q", "2025-11-01"),
+        fact("2025-01-01", "2025-12-31", "70", "10-K", "2026-02-15"),
+    ]
+    eps = [
+        fact("2025-01-01", "2025-03-31", "1.00", "10-Q", "2025-05-01"),
+        fact("2025-04-01", "2025-06-30", "1.10", "10-Q", "2025-08-01"),
+        fact("2025-07-01", "2025-09-30", "1.20", "10-Q", "2025-11-01"),
+        fact("2025-01-01", "2025-12-31", "4.60", "10-K", "2026-02-15"),
+    ]
+    payload = {
+        "cik": 1,
+        "facts": {
+            "us-gaap": {
+                "NetCashProvidedByUsedInOperatingActivities": {"units": {"USD": cash_flow}},
+                "EarningsPerShareDiluted": {"units": {"USD/shares": eps}},
+            }
+        },
+    }
+
+    observations = edgar.parse_company_facts(payload, as_of=date(2026, 3, 31))
+
+    def quarters(metric: str) -> dict[date, tuple[Decimal, date]]:
+        return {
+            row.period_end: (row.value, row.known_at.date())
+            for row in observations
+            if row.metric == metric and row.period_type == "Q"
+        }
+
+    assert quarters("operating_cash_flow") == {
+        date(2025, 3, 31): (Decimal("10"), date(2025, 5, 1)),
+        date(2025, 6, 30): (Decimal("15"), date(2025, 8, 1)),
+        date(2025, 9, 30): (Decimal("20"), date(2025, 11, 1)),
+        date(2025, 12, 31): (Decimal("25"), date(2026, 2, 15)),
+    }
+    assert quarters("eps_diluted")[date(2025, 12, 31)] == (Decimal("1.30"), date(2026, 2, 15))

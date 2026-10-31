@@ -8,8 +8,9 @@ import os
 import re
 import sys
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -50,7 +51,7 @@ from wealth.marketdata.sources.macro_geo import (
 )
 from wealth.marketdata.sources.nse import NseClose, NseSecurity
 from wealth.marketdata.sources.nse_fundamentals import NseIntegratedClient
-from wealth.marketdata.sources.universes import Sp500Holdings
+from wealth.marketdata.sources.universes import Sp500Holdings, Sp500Sector
 
 _SOURCES = (
     "nse",
@@ -59,6 +60,7 @@ _SOURCES = (
     "gold",
     "master",
     "amfi_history",
+    "nse_history",
     "eu_etfs",
     "us_stocks",
     "universes",
@@ -70,6 +72,10 @@ _SOURCES = (
 )
 _RETENTION_DAYS = 400
 _MAX_ABROAD_QUOTES_PER_DAY = 24
+# GitHub can start the 19:00 IST job after midnight IST, and NSE posts the day's file in
+# the evening, so the run date alone is often a missing session. Re-reading the last
+# week fills any gap.
+_NSE_CATCH_UP_DAYS = 7
 
 
 @dataclass(frozen=True)
@@ -99,6 +105,15 @@ class UniverseBatch:
     sp500: Sp500Holdings | None
     nifty500: list[NseSecurity] | None
     errors: dict[str, str]
+    sp500_closes: dict[str, Decimal] = field(default_factory=dict)
+    sp500_sectors: dict[str, Sp500Sector] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class NseHistoryBatch:
+    closes: list[NseClose]
+    requested_sessions: int
+    failed_sessions: int
 
 
 @dataclass(frozen=True)
@@ -148,6 +163,43 @@ def _fetch_missing_amfi_history(session: Session, on: date) -> list[AmfiHistoric
     for start, end in store.missing_amfi_history_windows(session, on):
         records.extend(amfi_history.fetch_nav_history(start, end))
     return records
+
+
+def _fetch_recent_bhavcopies(on: date) -> list[NseClose]:
+    records: list[NseClose] = []
+    for offset in range(_NSE_CATCH_UP_DAYS - 1, -1, -1):
+        records.extend(nse.fetch_bhavcopy(on - timedelta(days=offset)))
+    return records
+
+
+def _fetch_missing_nse_history(session: Session, on: date) -> NseHistoryBatch:
+    """Fetch weekday sessions in the retention window that have no NIFTY 500 closes.
+
+    Momentum and volatility need 200 sessions, so the first run loads about a year of
+    official bhavcopies; later runs only retry gaps (holidays return no file).
+    """
+    start = on - timedelta(days=_RETENTION_DAYS)
+    loaded = store.loaded_nse_sessions(session, start, on)
+    wanted = [
+        start + timedelta(days=offset)
+        for offset in range((on - start).days + 1)
+        if (start + timedelta(days=offset)).weekday() < 5
+        and start + timedelta(days=offset) not in loaded
+    ]
+    candidates = store.nse_price_keys(session)
+    closes: list[NseClose] = []
+    failed = 0
+    for day in wanted:
+        try:
+            rows = nse.fetch_bhavcopy(day)
+        except Exception:
+            failed += 1
+            continue
+        # Keep only rows a stored security can match; a year of full files is ~1M rows.
+        closes.extend(
+            row for row in rows if row.symbol in candidates or (row.isin or "") in candidates
+        )
+    return NseHistoryBatch(closes, len(wanted), failed)
 
 
 def _upsert_curated_security(session: Session, instrument: Mapping[str, Any]) -> tuple[Any, str]:
@@ -349,15 +401,26 @@ def _fetch_universes() -> UniverseBatch:
     sp500: Sp500Holdings | None = None
     nifty500: list[NseSecurity] | None = None
     errors: dict[str, str] = {}
+    sp500_closes: dict[str, Decimal] = {}
+    sp500_sectors: dict[str, Sp500Sector] = {}
     try:
         sp500 = universes.fetch_sp500()
     except Exception as error:
         errors["sp500"] = type(error).__name__
+    if sp500 is not None:
+        try:
+            sp500_closes = universes.fetch_sp500_closes(sp500)
+        except Exception as error:
+            errors["sp500_prices"] = type(error).__name__
+        try:
+            sp500_sectors = universes.fetch_sp500_sectors()
+        except Exception as error:
+            errors["sp500_sectors"] = type(error).__name__
     try:
         nifty500 = universes.fetch_nifty500()
     except Exception as error:
         errors["nifty500"] = type(error).__name__
-    return UniverseBatch(sp500, nifty500, errors)
+    return UniverseBatch(sp500, nifty500, errors, sp500_closes, sp500_sectors)
 
 
 def _default_fetchers(
@@ -366,13 +429,20 @@ def _default_fetchers(
     symbols: tuple[str, ...] | None = None,
 ) -> dict[str, Callable[[], Any]]:
     return {
-        "nse": lambda: nse.fetch_bhavcopy(on),
+        "nse": lambda: _fetch_recent_bhavcopies(on),
         "amfi": amfi.fetch_nav_all,
         "fx": lambda: _fetch_fx(on),
         "gold": lambda: ibja.fetch_gold_rate(on=on),
         "master": _fetch_nse_master,
         "amfi_history": (
             lambda: _fetch_missing_amfi_history(session, on) if session is not None else []
+        ),
+        "nse_history": (
+            lambda: (
+                _fetch_missing_nse_history(session, on)
+                if session is not None
+                else NseHistoryBatch([], 0, 0)
+            )
         ),
         "eu_etfs": lambda: _fetch_abroad_etfs(session, on) if session is not None else [],
         "us_stocks": lambda: _fetch_abroad_us_stocks(session, on) if session is not None else [],
@@ -434,17 +504,40 @@ def _store_source(
             try:
                 with session.begin_nested():
                     security_ids: set[Any] = set()
+                    price_rows: list[dict[str, Any]] = []
                     for row in records.sp500.securities:
                         security_id = store.upsert_us_equity_security(session, row.symbol, row.name)
                         security_ids.add(security_id)
+                        # SSGA now lists every sector as "-"; the GICS table fills the gap.
+                        listed = records.sp500_sectors.get(row.symbol)
+                        sector, industry = (
+                            row.sector or "Unclassified",
+                            row.industry or "Unclassified",
+                        )
+                        if listed is not None and sector == "Unclassified":
+                            sector = listed.sector
+                        if listed is not None and industry == "Unclassified":
+                            industry = listed.industry
                         session.execute(
                             update(Security)
                             .where(Security.id == security_id)
-                            .values(
-                                sector=row.sector or "Unclassified",
-                                industry=row.industry or "Unclassified",
-                            )
+                            .values(sector=sector, industry=industry)
                         )
+                        close = records.sp500_closes.get(row.symbol)
+                        if close is not None:
+                            price_rows.append(
+                                {
+                                    "security_id": security_id,
+                                    "as_of": records.sp500.as_of,
+                                    "close": close,
+                                    "volume": None,
+                                    "traded_value": None,
+                                    "source": universes.SP500_PRICE_SOURCE,
+                                    "source_url": universes.SPY_NAV_HISTORY_URL,
+                                    "fetched_at": fetched_at,
+                                }
+                            )
+                    prices = store.upsert_eod_prices(session, price_rows)
                     membership = store.upsert_universe_members(
                         session,
                         "sp500",
@@ -457,6 +550,10 @@ def _store_source(
                 counts["sp500"] = {
                     **membership,
                     "as_of": records.sp500.as_of.isoformat(),
+                    "prices_eod": prices,
+                    "sectors": sum(
+                        1 for row in records.sp500.securities if row.symbol in records.sp500_sectors
+                    ),
                 }
                 counts["universes_loaded"] += 1
             except Exception as error:
@@ -503,6 +600,17 @@ def _store_source(
             raise TypeError("NSE price adapter returned invalid rows")
         count = store.upsert_nse_closes(session, records, fetched_at=fetched_at)
         return {"prices_eod": count}
+    if source == "nse_history":
+        if not isinstance(records, NseHistoryBatch):
+            raise TypeError("NSE history adapter returned invalid rows")
+        count = store.upsert_nse_closes(session, records.closes, fetched_at=fetched_at)
+        return SourceBatchResult(
+            {
+                "prices_eod": count,
+                "sessions_requested": records.requested_sessions,
+            },
+            {"failed_sessions": str(records.failed_sessions)} if records.failed_sessions else {},
+        )
     if source == "amfi":
         if not isinstance(records, list) or any(not isinstance(item, AmfiNav) for item in records):
             raise TypeError("AMFI adapter returned invalid rows")
@@ -738,6 +846,11 @@ def run_refresh(
                 source in {"edgar", "nse_fundamentals"}
                 and isinstance(counts.get(source), dict)
                 and counts[source].get("symbols", 0) > 0
+            )
+            or (
+                source == "nse_history"
+                and isinstance(counts.get(source), dict)
+                and counts[source].get("prices_eod", 0) > 0
             )
             or (
                 source == "index_pe"

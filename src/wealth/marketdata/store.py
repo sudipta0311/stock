@@ -1006,13 +1006,32 @@ def upsert_gold_price(
     session.execute(statement)
 
 
-def upsert_nse_closes(
-    session: Session,
-    records: list[NseClose],
-    *,
-    fetched_at: datetime | None = None,
-) -> int:
-    """Store NSE closes for held securities, current universes, and index proxies."""
+_PRICE_BATCH_ROWS = 1000
+
+
+def upsert_eod_prices(session: Session, rows: list[dict[str, Any]]) -> int:
+    """Write many daily closes in a few statements; later rows win for a repeated key."""
+    by_key = {(row["security_id"], row["as_of"]): row for row in rows}
+    ordered = list(by_key.values())
+    for index in range(0, len(ordered), _PRICE_BATCH_ROWS):
+        statement = pg_insert(PriceEod).values(ordered[index : index + _PRICE_BATCH_ROWS])
+        session.execute(
+            statement.on_conflict_do_update(
+                index_elements=[PriceEod.security_id, PriceEod.as_of],
+                set_={
+                    "close": statement.excluded.close,
+                    "volume": statement.excluded.volume,
+                    "traded_value": statement.excluded.traded_value,
+                    "source": statement.excluded.source,
+                    "source_url": statement.excluded.source_url,
+                    "fetched_at": statement.excluded.fetched_at,
+                },
+            )
+        )
+    return len(ordered)
+
+
+def _nse_price_candidates(session: Session) -> list[Security]:
     held = set(session.scalars(select(HoldingLot.security_id).distinct()))
     proxy_rows = session.scalars(
         select(Security.id).where(
@@ -1023,37 +1042,96 @@ def upsert_nse_closes(
         select(UniverseMember.security_id).where(UniverseMember.removed_on.is_(None)).distinct()
     )
     allowed_ids = held | set(proxy_rows) | set(universe_rows) | core_candidate_ids(session)
+    if not allowed_ids:
+        return []
+    return list(session.scalars(select(Security).where(Security.id.in_(allowed_ids))))
+
+
+def upsert_nse_closes(
+    session: Session,
+    records: list[NseClose],
+    *,
+    fetched_at: datetime | None = None,
+) -> int:
+    """Store NSE closes for held securities, current universes, and index proxies.
+
+    The candidates load once and match in memory: GitHub runners reach the database across
+    the Atlantic, so a lookup per bhavcopy row took minutes for each trading day.
+    """
+    by_symbol: dict[str, set[UUID]] = {}
+    by_symbol_series: dict[tuple[str, str], set[UUID]] = {}
+    by_isin: dict[str, set[UUID]] = {}
+    for security in _nse_price_candidates(session):
+        for symbol in (security.nse_symbol, security.symbol):
+            if symbol is None:
+                continue
+            by_symbol.setdefault(symbol, set()).add(security.id)
+            if security.series:
+                by_symbol_series.setdefault((symbol, security.series), set()).add(security.id)
+        if security.isin:
+            by_isin.setdefault(security.isin, set()).add(security.id)
+
+    stamp = fetched_at or datetime.now(UTC)
     count = 0
+    rows: list[dict[str, Any]] = []
     for record in records:
         if record.as_of is None:
             continue
         if record.series:
-            clauses = [
-                (Security.nse_symbol == record.symbol) & (Security.series == record.series),
-                (Security.symbol == record.symbol) & (Security.series == record.series),
-            ]
+            matches = set(by_symbol_series.get((record.symbol, record.series), ()))
         else:
-            clauses = [Security.nse_symbol == record.symbol, Security.symbol == record.symbol]
+            matches = set(by_symbol.get(record.symbol, ()))
         if record.isin:
-            clauses.append(Security.isin == record.isin)
-        matches = list(session.scalars(select(Security).where(or_(*clauses))))
-        for security in matches:
-            if security.id in allowed_ids:
-                upsert_eod_price(
-                    session,
-                    security.id,
-                    record.as_of,
-                    record.close,
-                    volume=record.volume,
-                    traded_value=record.traded_value,
-                    source_url=(
+            matches |= by_isin.get(record.isin, set())
+        for security_id in matches:
+            rows.append(
+                {
+                    "security_id": security_id,
+                    "as_of": record.as_of,
+                    "close": record.close,
+                    "volume": record.volume,
+                    "traded_value": record.traded_value,
+                    "source": "NSE",
+                    "source_url": (
                         "https://nsearchives.nseindia.com/content/cm/"
                         f"BhavCopy_NSE_CM_0_0_0_{record.as_of:%Y%m%d}_F_0000.csv.zip"
                     ),
-                    fetched_at=fetched_at,
-                )
-                count += 1
+                    "fetched_at": stamp,
+                }
+            )
+            count += 1
+    upsert_eod_prices(session, rows)
     return count
+
+
+def nse_price_keys(session: Session) -> set[str]:
+    """Symbols and ISINs an NSE close may match, to trim large history downloads."""
+    keys: set[str] = set()
+    for security in _nse_price_candidates(session):
+        keys.update(
+            value
+            for value in (security.nse_symbol, security.symbol, security.isin)
+            if value is not None
+        )
+    return keys
+
+
+def loaded_nse_sessions(session: Session, start: date, end: date) -> set[date]:
+    """Trading days with an NSE close for any current NIFTY 500 member."""
+    return set(
+        session.scalars(
+            select(PriceEod.as_of)
+            .join(UniverseMember, UniverseMember.security_id == PriceEod.security_id)
+            .where(
+                UniverseMember.universe == "nifty500",
+                UniverseMember.removed_on.is_(None),
+                PriceEod.source == "NSE",
+                PriceEod.as_of >= start,
+                PriceEod.as_of <= end,
+            )
+            .distinct()
+        )
+    )
 
 
 def upsert_amfi_navs(
