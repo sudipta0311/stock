@@ -167,7 +167,11 @@ def fetch_official_rate_documents(
     *,
     pause: Any = time.sleep,
 ) -> list[RateDocument]:
-    """Fetch a small set of official pages sequentially with a descriptive User-Agent."""
+    """Fetch a small set of official pages sequentially with a descriptive User-Agent.
+
+    Each page is optional: India Post often times out, and one unreachable site must not
+    hide the others from the rate check.
+    """
     owned_client = client is None
     active_client = client or httpx.Client(
         timeout=httpx.Timeout(20.0, connect=8.0),
@@ -175,65 +179,80 @@ def fetch_official_rate_documents(
         headers={"User-Agent": WATCHER_USER_AGENT, "Accept": "text/html,application/pdf"},
     )
     documents: list[RateDocument] = []
+
+    def fetch(url: str) -> httpx.Response | None:
+        try:
+            return _get(active_client, url)
+        except (httpx.HTTPError, ValueError):
+            return None
+
     try:
-        india_post = _get(active_client, INDIA_POST_RATES_URL)
-        india_text, _india_links = _page(india_post.content)
-        documents.append(
-            RateDocument(
-                "india_post", "Post office savings rates", INDIA_POST_RATES_URL, india_text[:30_000]
-            )
-        )
-        pause(1.0)
-
-        dea_page = _get(active_client, DEA_SMALL_SAVINGS_URL)
-        dea_text, dea_links = _page(dea_page.content)
-        documents.append(
-            RateDocument(
-                "dea_page", "Small-savings notices", DEA_SMALL_SAVINGS_URL, dea_text[:15_000]
-            )
-        )
-        dea_pdf = _latest_pdf_link(
-            dea_links, ("small savings", "small saving"), DEA_SMALL_SAVINGS_URL
-        )
-        if dea_pdf:
-            pause(1.0)
-            response = _get(active_client, dea_pdf)
+        india_post = fetch(INDIA_POST_RATES_URL)
+        if india_post is not None:
+            india_text, _india_links = _page(india_post.content)
             documents.append(
                 RateDocument(
-                    "dea_notice",
-                    "Latest small-savings notice",
-                    dea_pdf,
-                    _pdf_text(response.content),
+                    "india_post",
+                    "Post office savings rates",
+                    INDIA_POST_RATES_URL,
+                    india_text[:30_000],
                 )
             )
         pause(1.0)
 
-        epfo_page = _get(active_client, EPFO_INTEREST_URL)
-        epfo_text, epfo_links = _page(epfo_page.content)
-        documents.append(
-            RateDocument(
-                "epfo_page",
-                "Provident-fund interest notices",
+        dea_page = fetch(DEA_SMALL_SAVINGS_URL)
+        if dea_page is not None:
+            dea_text, dea_links = _page(dea_page.content)
+            documents.append(
+                RateDocument(
+                    "dea_page", "Small-savings notices", DEA_SMALL_SAVINGS_URL, dea_text[:15_000]
+                )
+            )
+            dea_pdf = _latest_pdf_link(
+                dea_links, ("small savings", "small saving"), DEA_SMALL_SAVINGS_URL
+            )
+            if dea_pdf:
+                pause(1.0)
+                response = fetch(dea_pdf)
+                if response is not None:
+                    documents.append(
+                        RateDocument(
+                            "dea_notice",
+                            "Latest small-savings notice",
+                            dea_pdf,
+                            _pdf_text(response.content),
+                        )
+                    )
+        pause(1.0)
+
+        epfo_page = fetch(EPFO_INTEREST_URL)
+        if epfo_page is not None:
+            epfo_text, epfo_links = _page(epfo_page.content)
+            documents.append(
+                RateDocument(
+                    "epfo_page",
+                    "Provident-fund interest notices",
+                    EPFO_INTEREST_URL,
+                    epfo_text[:15_000],
+                )
+            )
+            epfo_pdf = _latest_pdf_link(
+                epfo_links,
+                ("declaration", "interest rate", "interest of", "roi"),
                 EPFO_INTEREST_URL,
-                epfo_text[:15_000],
             )
-        )
-        epfo_pdf = _latest_pdf_link(
-            epfo_links,
-            ("declaration", "interest rate", "interest of", "roi"),
-            EPFO_INTEREST_URL,
-        )
-        if epfo_pdf:
-            pause(1.0)
-            response = _get(active_client, epfo_pdf)
-            documents.append(
-                RateDocument(
-                    "epfo_notice",
-                    "Provident-fund rate notice",
-                    epfo_pdf,
-                    _pdf_text(response.content),
-                )
-            )
+            if epfo_pdf:
+                pause(1.0)
+                response = fetch(epfo_pdf)
+                if response is not None:
+                    documents.append(
+                        RateDocument(
+                            "epfo_notice",
+                            "Provident-fund rate notice",
+                            epfo_pdf,
+                            _pdf_text(response.content),
+                        )
+                    )
         return documents
     finally:
         if owned_client:

@@ -48,7 +48,9 @@ jobs:
           github.event.schedule == '0 0 * * 6'
         run: |
           WEEK=$(date -u +%G-W%V)
-          python -m wealth.research.watchers --week "$WEEK"
+          # Rate and rulebook checks are a side job; their failure must not block research.
+          python -m wealth.research.watchers --week "$WEEK" ||
+            echo "::warning::The rate and rulebook check failed; research continues."
           python -m wealth.research.run start --week "$WEEK" --mode weekly --budget-usd "$RESEARCH_BUDGET_USD"
       - name: Continue the open weekly run
         if: >-

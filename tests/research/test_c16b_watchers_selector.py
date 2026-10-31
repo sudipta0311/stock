@@ -5,6 +5,8 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
 
+import httpx
+
 from wealth.db.models import FeedItem, Security
 from wealth.research.agenda import build_cio_agenda
 from wealth.research.etf_selector import (
@@ -19,12 +21,16 @@ from wealth.research.router import FakeRouter, RunBudget, RunContext
 from wealth.research.rules import ResearchRules
 from wealth.research.rules_admin import apply_proposal_to_rules
 from wealth.research.watchers import (
+    DEA_SMALL_SAVINGS_URL,
+    EPFO_INTEREST_URL,
+    INDIA_POST_RATES_URL,
     FeedFinding,
     RateDocument,
     _exact_rate_quotes,
     _period_from_text,
     build_rate_proposals,
     build_rulebook_proposals,
+    fetch_official_rate_documents,
 )
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -150,6 +156,23 @@ def test_rate_watcher_uses_exact_quote_and_detects_changes() -> None:
         "source_url": "https://www.indiapost.gov.in/savings",
     }
     assert unchanged == []
+
+
+def test_rate_watcher_skips_an_unreachable_official_site_and_keeps_the_others() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == INDIA_POST_RATES_URL:
+            raise httpx.ConnectTimeout("synthetic timeout", request=request)
+        if str(request.url) == DEA_SMALL_SAVINGS_URL:
+            return httpx.Response(503, request=request)
+        return httpx.Response(
+            200, html="<p>Synthetic provident-fund notice page.</p>", request=request
+        )
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        documents = fetch_official_rate_documents(client, pause=lambda _seconds: None)
+
+    assert [(item.kind, item.url) for item in documents] == [("epfo_page", EPFO_INTEREST_URL)]
+    assert "Synthetic provident-fund notice page." in documents[0].text
 
 
 def test_nano_rate_quotes_are_checked_as_exact_source_substrings() -> None:
