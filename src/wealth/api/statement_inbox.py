@@ -42,6 +42,13 @@ from wealth.importer.cas import ParseError
 
 _KEY_PATTERN = re.compile(r"^wsk_[A-Za-z0-9_-]{43}$")
 _SENDER_TYPES = ("cams", "kfintech", "mfcentral", "nsdl", "cdsl", "other")
+# Fund houses also email purchase notes and single-fund statements; only the
+# consolidated account statement (CAS) can be imported.
+_FULL_STATEMENT_SUBJECT = re.compile(
+    r"consolidated\s+account\s+statement|\be-?cas\b", re.IGNORECASE
+)
+_SUBJECT_PREVIEW_CHARS = 140
+_NOT_A_FULL_STATEMENT = "This file isn't a full account statement, so there is nothing to import."
 
 
 class InboxApiModel(BaseModel):
@@ -70,6 +77,8 @@ class StatementInboxItemResponse(InboxApiModel):
     status: Literal["needs_password", "review", "unreadable"]
     error_code: str | None
     import_job_id: UUID | None
+    subject: str = ""
+    full_statement: bool = True
 
 
 class StatementInboxListResponse(InboxApiModel):
@@ -231,6 +240,12 @@ async def _process_item(
             ) from None
         # Keep the PDF (the 30-day cleanup still removes it): a reader fix can then
         # open it on the next try, and Gmail won't send the same statement again.
+        if error.code == "unsupported_format" and item.sender_type != "cdsl":
+            item.error_code = "not_a_full_statement"
+            session.flush()
+            raise _StatementProcessingFailure(
+                422, "not_a_full_statement", _NOT_A_FULL_STATEMENT
+            ) from None
         item.error_code = "unreadable"
         session.flush()
         raise _StatementProcessingFailure(
@@ -561,7 +576,7 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                         saved.last_used_at = datetime.now(UTC)
                     except _StatementProcessingFailure as failure:
                         item.error_code = failure.code
-                        if failure.code == "unreadable":
+                        if failure.code in {"unreadable", "not_a_full_statement"}:
                             item.status = "unreadable"
         return JSONResponse(status_code=202, content={"status": "received"})
 
@@ -589,6 +604,9 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                 status=item.status,
                 error_code=item.error_code,
                 import_job_id=item.import_job_id,
+                subject=item.subject[:_SUBJECT_PREVIEW_CHARS],
+                full_statement=item.error_code != "not_a_full_statement"
+                and bool(_FULL_STATEMENT_SUBJECT.search(item.subject)),
             )
             for item in rows
         ]
@@ -622,7 +640,7 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             return StatementInboxProcessResponse(
                 status="review", job_id=item.import_job_id, password_saved=False
             )
-        if item.status == "unreadable":
+        if item.status == "unreadable" and item.pdf_data is None:
             return _problem(
                 request,
                 422,
@@ -641,6 +659,19 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             )
         except _StatementProcessingFailure as failure:
             return _problem(request, failure.status, failure.code, failure.detail)
+
+    @router.delete("/v1/statement-inbox/items/{item_id}", status_code=204, response_model=None)
+    def remove_item(item_id: UUID, request: Request, user: Any = user_dependency) -> Any:
+        _require_writer(user)
+        removed = user.session.execute(
+            delete(StatementInboxItem).where(
+                StatementInboxItem.user_id == user.household_owner_id,
+                StatementInboxItem.id == item_id,
+            )
+        )
+        if not removed.rowcount:
+            return _problem(request, 404, "not_found", "This statement could not be found.")
+        return None
 
     @router.delete("/v1/statement-inbox/passwords", status_code=204)
     def forget_passwords(user: Any = user_dependency) -> None:

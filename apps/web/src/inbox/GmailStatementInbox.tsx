@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { FormEvent } from "react";
+import type { FormEvent, ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router";
 import { ApiError, apiFetch } from "../api/client";
@@ -16,6 +16,8 @@ interface StatementInboxItem {
   status: ItemStatus;
   error_code: string | null;
   import_job_id: string | null;
+  subject?: string;
+  full_statement?: boolean;
 }
 
 interface StatementInboxData {
@@ -39,6 +41,9 @@ const senderNames: Record<SenderType, string> = {
   other: "your provider",
 };
 
+const NOT_A_FULL_STATEMENT =
+  "This file isn’t a full account statement, so there’s nothing to import.";
+
 function statementDate(value: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
@@ -47,6 +52,15 @@ function statementDate(value: string): string {
         day: "numeric",
         month: "short",
       }).format(date);
+}
+
+// Fund houses also email purchase notes and single-fund statements. Only the full
+// (consolidated) statement can be imported, so the others wait in a closed group.
+function isOtherEmail(item: StatementInboxItem): boolean {
+  return (
+    item.error_code === "not_a_full_statement" ||
+    (item.full_statement === false && item.status !== "review")
+  );
 }
 
 export function GmailStatementInbox() {
@@ -63,6 +77,8 @@ export function GmailStatementInbox() {
   const [remember, setRemember] = useState<Record<string, boolean>>({});
   const [feedback, setFeedback] = useState<Record<string, string>>({});
   const [results, setResults] = useState<Record<string, ProcessResponse>>({});
+  const refresh = () =>
+    queryClient.invalidateQueries({ queryKey: ["statement-inbox", "items"] });
   const processMutation = useMutation({
     mutationFn: ({
       id,
@@ -98,19 +114,36 @@ export function GmailStatementInbox() {
             : ""),
       }));
       setOpenId(null);
-      await queryClient.invalidateQueries({
-        queryKey: ["statement-inbox", "items"],
-      });
+      await refresh();
     },
-    onError: (error, variables) => {
+    onError: async (error, variables) => {
+      const code = error instanceof ApiError ? error.code : "";
       const message =
-        error instanceof ApiError && error.code === "wrong_password"
+        code === "wrong_password"
           ? "That password didn’t work. Please try again."
-          : error instanceof ApiError && error.code === "unreadable"
-            ? "We couldn’t read this file. Upload it in Money instead."
-            : "The statement could not be opened. Try again.";
+          : code === "not_a_full_statement"
+            ? NOT_A_FULL_STATEMENT
+            : code === "unreadable"
+              ? "We couldn’t read this file. Upload it in Money instead."
+              : "The statement could not be opened. Try again.";
       setFeedback((current) => ({ ...current, [variables.id]: message }));
+      if (code === "not_a_full_statement") {
+        setOpenId(null);
+        await refresh();
+      }
     },
+  });
+  const removeMutation = useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/v1/statement-inbox/items/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
+    onSuccess: refresh,
+    onError: (_error, id) =>
+      setFeedback((current) => ({
+        ...current,
+        [id]: "This email couldn’t be removed. Try again.",
+      })),
   });
 
   if (!supported) return null;
@@ -129,6 +162,9 @@ export function GmailStatementInbox() {
   }
   if (query.data.items.length === 0 && !query.data.cleanup_notice) return null;
 
+  const fullItems = query.data.items.filter((item) => !isOtherEmail(item));
+  const otherItems = query.data.items.filter(isOtherEmail);
+
   const submitPassword = (event: FormEvent<HTMLFormElement>, id: string) => {
     event.preventDefault();
     processMutation.mutate({
@@ -136,6 +172,108 @@ export function GmailStatementInbox() {
       password: passwords[id] ?? "",
       rememberPassword: remember[id] ?? false,
     });
+  };
+
+  const passwordForm = (item: StatementInboxItem): ReactNode => (
+    <form
+      className="grid gap-3"
+      onSubmit={(event) => submitPassword(event, item.id)}
+    >
+      <label
+        className="grid gap-1 text-sm font-medium"
+        htmlFor={`statement-password-${item.id}`}
+      >
+        Statement password
+        <input
+          id={`statement-password-${item.id}`}
+          type="password"
+          autoComplete="current-password"
+          required
+          value={passwords[item.id] ?? ""}
+          onChange={(event) => {
+            const value = event.currentTarget.value;
+            setPasswords((current) => ({ ...current, [item.id]: value }));
+          }}
+          className="min-h-12 rounded-xl border border-line bg-surface px-3 text-base"
+        />
+      </label>
+      <Checkbox
+        id={`remember-statement-password-${item.id}`}
+        label={`Remember this password for ${senderNames[item.sender_type]} statements`}
+        checked={remember[item.id] ?? false}
+        onChange={(event) => {
+          const checked = event.currentTarget.checked;
+          setRemember((current) => ({ ...current, [item.id]: checked }));
+        }}
+      />
+      <Button
+        type="submit"
+        className="w-full"
+        loading={processMutation.isPending}
+        disabled={!passwords[item.id]}
+      >
+        Review statement
+      </Button>
+    </form>
+  );
+
+  const openForm = (id: string) => {
+    setOpenId(id);
+    setFeedback((current) => ({ ...current, [id]: "" }));
+  };
+
+  const removeButton = (item: StatementInboxItem): ReactNode => (
+    <Button
+      variant="ghost"
+      onClick={() => removeMutation.mutate(item.id)}
+      loading={removeMutation.isPending && removeMutation.variables === item.id}
+    >
+      Remove
+    </Button>
+  );
+
+  const heading = (item: StatementInboxItem, title: string): ReactNode => {
+    const date = statementDate(item.received_at);
+    return (
+      <div className="min-w-0">
+        <h3 className="text-sm font-semibold">{title}</h3>
+        {item.subject ? (
+          <p className="mt-1 truncate text-xs text-muted-foreground">
+            {item.subject}
+          </p>
+        ) : null}
+        {date ? (
+          <p className="mt-1 text-xs text-muted-foreground">Received {date}</p>
+        ) : null}
+      </div>
+    );
+  };
+
+  const message = (item: StatementInboxItem): ReactNode => {
+    const savedPasswordMessage =
+      item.error_code === "wrong_password"
+        ? "A saved password didn’t work. Enter it to continue."
+        : item.error_code === "parse_timeout"
+          ? "This statement took too long to read. Try again."
+          : item.error_code === "unreadable" && item.status === "needs_password"
+            ? "We couldn’t read this statement before. Try again, or upload it in Money."
+            : "";
+    if (feedback[item.id]) {
+      return (
+        <p role="alert" className="text-sm text-danger-foreground">
+          {feedback[item.id]}
+        </p>
+      );
+    }
+    if (!savedPasswordMessage) return null;
+    return (
+      <p
+        role={item.error_code === "wrong_password" ? "alert" : "status"}
+        className={`text-sm ${item.error_code === "wrong_password" ? "text-danger-foreground" : "text-muted-foreground"}`}
+      >
+        {savedPasswordMessage}
+      </p>
+    );
   };
 
   return (
@@ -159,89 +297,29 @@ export function GmailStatementInbox() {
           {query.data.cleanup_notice}
         </p>
       ) : null}
-      {query.data.items.map((item) => {
-        const title = `New statement from ${senderNames[item.sender_type]}`;
-        const date = statementDate(item.received_at);
+      {fullItems.length === 0 && otherItems.length > 0 ? (
+        <p className="text-sm text-muted-foreground">
+          No full statements yet. Your monthly statement from NSDL, CAMS or
+          KFintech will show here.
+        </p>
+      ) : null}
+      {fullItems.map((item) => {
         const result = results[item.id];
         const jobId = result?.job_id ?? item.import_job_id;
-        const savedPasswordMessage =
-          item.error_code === "wrong_password"
-            ? "A saved password didn’t work. Enter it to continue."
-            : item.error_code === "parse_timeout"
-              ? "This statement took too long to read. Try again."
-              : item.error_code === "unreadable" &&
-                  item.status === "needs_password"
-                ? "We couldn’t read this statement before. Try again, or upload it in Money."
-                : "";
         return (
           <Card key={item.id} className="grid gap-3">
-            <div>
-              <h3 className="text-sm font-semibold">{title}</h3>
-              {date ? (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Received {date}
-                </p>
-              ) : null}
-            </div>
+            {heading(
+              item,
+              `New statement from ${senderNames[item.sender_type]}`,
+            )}
             {item.status === "needs_password" && openId !== item.id ? (
-              <Button
-                className="w-full"
-                onClick={() => {
-                  setOpenId(item.id);
-                  setFeedback((current) => ({ ...current, [item.id]: "" }));
-                }}
-              >
+              <Button className="w-full" onClick={() => openForm(item.id)}>
                 Enter password
               </Button>
             ) : null}
-            {item.status === "needs_password" && openId === item.id ? (
-              <form
-                className="grid gap-3"
-                onSubmit={(event) => submitPassword(event, item.id)}
-              >
-                <label
-                  className="grid gap-1 text-sm font-medium"
-                  htmlFor={`statement-password-${item.id}`}
-                >
-                  Statement password
-                  <input
-                    id={`statement-password-${item.id}`}
-                    type="password"
-                    autoComplete="current-password"
-                    required
-                    value={passwords[item.id] ?? ""}
-                    onChange={(event) => {
-                      const value = event.currentTarget.value;
-                      setPasswords((current) => ({
-                        ...current,
-                        [item.id]: value,
-                      }));
-                    }}
-                    className="min-h-12 rounded-xl border border-line bg-surface px-3 text-base"
-                  />
-                </label>
-                <Checkbox
-                  id={`remember-statement-password-${item.id}`}
-                  label={`Remember this password for ${senderNames[item.sender_type]} statements`}
-                  checked={remember[item.id] ?? false}
-                  onChange={(event) => {
-                    const checked = event.currentTarget.checked;
-                    setRemember((current) => ({
-                      ...current,
-                      [item.id]: checked,
-                    }));
-                  }}
-                />
-                <Button
-                  type="submit"
-                  className="w-full"
-                  loading={processMutation.isPending}
-                  disabled={!passwords[item.id]}
-                >
-                  Review statement
-                </Button>
-              </form>
-            ) : null}
+            {item.status !== "review" && openId === item.id
+              ? passwordForm(item)
+              : null}
             {item.status === "review" && jobId ? (
               <Link
                 className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground"
@@ -250,7 +328,7 @@ export function GmailStatementInbox() {
                 Review
               </Link>
             ) : null}
-            {item.status === "unreadable" ? (
+            {item.status === "unreadable" && openId !== item.id ? (
               <div className="grid gap-2">
                 <p className="text-sm text-muted-foreground">
                   We couldn’t read this file. Upload it in Money instead.
@@ -261,20 +339,15 @@ export function GmailStatementInbox() {
                 >
                   Upload in Money
                 </Link>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="ghost" onClick={() => openForm(item.id)}>
+                    Try again
+                  </Button>
+                  {removeButton(item)}
+                </div>
               </div>
             ) : null}
-            {feedback[item.id] ? (
-              <p role="alert" className="text-sm text-danger-foreground">
-                {feedback[item.id]}
-              </p>
-            ) : savedPasswordMessage ? (
-              <p
-                role={item.error_code === "wrong_password" ? "alert" : "status"}
-                className={`text-sm ${item.error_code === "wrong_password" ? "text-danger-foreground" : "text-muted-foreground"}`}
-              >
-                {savedPasswordMessage}
-              </p>
-            ) : null}
+            {message(item)}
             {result?.job_id && item.status === "needs_password" ? (
               <Button
                 variant="secondary"
@@ -289,6 +362,48 @@ export function GmailStatementInbox() {
           </Card>
         );
       })}
+      {otherItems.length > 0 ? (
+        <details className="rounded-2xl border border-line bg-surface p-4">
+          <summary className="min-h-10 cursor-pointer text-sm font-semibold">
+            Other emails ({otherItems.length})
+          </summary>
+          <p className="mt-2 text-sm text-muted-foreground">
+            These look like purchase notes or single-fund statements, not your
+            full account statement. They can’t be imported.
+          </p>
+          <ul className="mt-2 grid gap-3">
+            {otherItems.map((item) => (
+              <li
+                key={item.id}
+                className="grid gap-2 border-t border-line pt-3"
+              >
+                {heading(item, `From ${senderNames[item.sender_type]}`)}
+                {item.error_code === "not_a_full_statement" ? (
+                  <p className="text-sm text-muted-foreground">
+                    {NOT_A_FULL_STATEMENT}
+                  </p>
+                ) : null}
+                {openId === item.id ? passwordForm(item) : null}
+                {feedback[item.id] &&
+                item.error_code !== "not_a_full_statement" ? (
+                  <p role="alert" className="text-sm text-danger-foreground">
+                    {feedback[item.id]}
+                  </p>
+                ) : null}
+                <div className="flex flex-wrap gap-2">
+                  {item.error_code !== "not_a_full_statement" &&
+                  openId !== item.id ? (
+                    <Button variant="ghost" onClick={() => openForm(item.id)}>
+                      Try it
+                    </Button>
+                  ) : null}
+                  {removeButton(item)}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
     </section>
   );
 }

@@ -1,4 +1,4 @@
-// OpenAPI SHA256: 471f0f1f2e34fab68b978e4a37a70ee26c7c85f7005e6084865860ff20254ea8
+// OpenAPI SHA256: 2e60a233dad9decc2178c0317de0b759b2dc5a4d633cb5bc3b50146eb5ef4c74
 export interface paths {
     "/healthz": {
         parameters: {
@@ -967,6 +967,23 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/statement-inbox/items/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove Item */
+        delete: operations["remove_item_v1_statement_inbox_items__item_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -3539,6 +3556,11 @@ export interface components {
             /** Error Code */
             error_code: string | null;
             /**
+             * Full Statement
+             * @default true
+             */
+            full_statement: boolean;
+            /**
              * Id
              * Format: uuid
              */
@@ -3560,6 +3582,11 @@ export interface components {
              * @enum {string}
              */
             status: "needs_password" | "review" | "unreadable";
+            /**
+             * Subject
+             * @default
+             */
+            subject: string;
         };
         /** StatementInboxKeyCreate */
         StatementInboxKeyCreate: {
@@ -6467,6 +6494,37 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["StatementInboxListResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_item_v1_statement_inbox_items__item_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Household"?: string | null;
+            };
+            path: {
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

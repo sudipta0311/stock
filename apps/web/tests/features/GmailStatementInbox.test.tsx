@@ -100,6 +100,68 @@ describe("Gmail statement inbox", () => {
     ).toHaveAttribute("href", "/import");
   });
 
+  it("keeps other fund-house emails in a closed group that can be cleared", async () => {
+    api.fetch.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (init?.method === "DELETE") return undefined;
+      if (path === "/v1/statement-inbox/items") {
+        return {
+          items: [
+            {
+              id: "synthetic-full-statement",
+              sender_type: "nsdl",
+              received_at: "2026-10-12T08:00:00Z",
+              status: "needs_password",
+              error_code: null,
+              import_job_id: null,
+              subject: "Consolidated Account Statement for September",
+              full_statement: true,
+            },
+            {
+              id: "synthetic-purchase-note",
+              sender_type: "kfintech",
+              received_at: "2026-10-14T08:00:00Z",
+              status: "unreadable",
+              error_code: "not_a_full_statement",
+              import_job_id: null,
+              subject: "Transaction confirmation",
+              full_statement: false,
+            },
+          ],
+          cleanup_notice: null,
+        };
+      }
+      return undefined;
+    });
+
+    renderWithQueries(
+      <MemoryRouter>
+        <GmailStatementInbox />
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByText("New statement from NSDL"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByRole("button", { name: "Enter password" }),
+    ).toHaveLength(1);
+    const group = screen.getByText("Other emails (1)").closest("details");
+    expect(group).not.toHaveAttribute("open");
+    expect(
+      screen.getByText(/isn’t a full account statement/),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try it" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+
+    await waitFor(() =>
+      expect(api.fetch).toHaveBeenCalledWith(
+        "/v1/statement-inbox/items/synthetic-purchase-note",
+        expect.objectContaining({ method: "DELETE" }),
+      ),
+    );
+  });
+
   it("shows a saved wrong password as an error", async () => {
     api.fetch.mockResolvedValue({
       items: [

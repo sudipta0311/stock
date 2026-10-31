@@ -92,11 +92,12 @@ def _upload(
     message_id: str = "synthetic-message-1",
     received_at: datetime | None = None,
     sender: str = "nsdl@example.test",
+    subject: str = "Monthly statement",
 ) -> Any:
     headers = {"Authorization": f"StatementKey {key}"} if key is not None else {}
     form = {
         "sender": sender,
-        "subject": "Monthly statement",
+        "subject": subject,
         "received_at": (received_at or datetime.now(UTC)).isoformat(),
         "message_id": message_id,
     }
@@ -318,6 +319,80 @@ def test_unreadable_pdf_is_kept_for_another_try_and_points_to_manual_upload(
     assert retried.json()["code"] == "unreadable"
     assert client.get("/v1/imports", headers=owner_headers).status_code == 200
     assert client.get("/v1/imports", headers=owner_headers).json() == []
+
+
+def test_inbox_tells_full_statements_from_other_fund_house_emails(
+    inbox_client: tuple[TestClient, str, str, MigratedDatabase],
+) -> None:
+    client, secret, _password_key, database = inbox_client
+    owner_headers, claims = _headers(secret, "statement-kinds")
+    key = _create_key(client, owner_headers)
+    note = build_encrypted_pdf(["Transaction confirmation", "Synthetic Fund units"], _PDF_PASSWORD)
+    assert (
+        _upload(
+            client,
+            key,
+            message_id="full-statement",
+            subject="Consolidated Account Statement for September 2026",
+        ).status_code
+        == 202
+    )
+    assert (
+        _upload(
+            client,
+            key,
+            pdf=note,
+            message_id="purchase-note",
+            sender="donotreply@kfintech.example.test",
+            subject="Transaction confirmation for your purchase",
+        ).status_code
+        == 202
+    )
+    listed = client.get("/v1/statement-inbox/items", headers=owner_headers).json()["items"]
+    by_subject = {item["subject"]: item for item in listed}
+    note_item = by_subject["Transaction confirmation for your purchase"]
+
+    assert by_subject["Consolidated Account Statement for September 2026"]["full_statement"]
+    assert not note_item["full_statement"]
+
+    tried = client.post(
+        f"/v1/statement-inbox/items/{note_item['id']}/process",
+        headers=owner_headers,
+        json={"password": _PDF_PASSWORD, "remember": False},
+    )
+    assert tried.status_code == 422
+    assert tried.json()["code"] == "not_a_full_statement"
+    relisted = client.get("/v1/statement-inbox/items", headers=owner_headers).json()["items"]
+    assert {item["error_code"] for item in relisted if item["id"] == note_item["id"]} == {
+        "not_a_full_statement"
+    }
+
+    removed = client.delete(f"/v1/statement-inbox/items/{note_item['id']}", headers=owner_headers)
+    again = client.delete(f"/v1/statement-inbox/items/{note_item['id']}", headers=owner_headers)
+    remaining = client.get("/v1/statement-inbox/items", headers=owner_headers).json()["items"]
+    assert removed.status_code == 204
+    assert again.status_code == 404
+    assert [item["subject"] for item in remaining] == [
+        "Consolidated Account Statement for September 2026"
+    ]
+
+    # A statement marked unreadable keeps its PDF, so a later reader fix can still open it.
+    owner_id = _household_id(database, claims["sub"])
+    with system_session(database.owner_engine) as session:
+        session.execute(
+            text(
+                "UPDATE statement_inbox_items SET status = 'unreadable', "
+                "error_code = 'unreadable' WHERE user_id = :owner"
+            ),
+            {"owner": owner_id},
+        )
+    retried = client.post(
+        f"/v1/statement-inbox/items/{remaining[0]['id']}/process",
+        headers=owner_headers,
+        json={"password": _PDF_PASSWORD, "remember": False},
+    )
+    assert retried.status_code == 200, retried.text
+    assert retried.json()["status"] == "review"
 
 
 def test_wrong_password_waiting_item_saved_password_and_review_flow(

@@ -6843,6 +6843,11 @@
             ],
             "title": "Error Code"
           },
+          "full_statement": {
+            "default": true,
+            "title": "Full Statement",
+            "type": "boolean"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -6884,6 +6889,11 @@
               "unreadable"
             ],
             "title": "Status",
+            "type": "string"
+          },
+          "subject": {
+            "default": "",
+            "title": "Subject",
             "type": "string"
           }
         },
@@ -12411,6 +12421,60 @@
           }
         ],
         "summary": "List Items"
+      }
+    },
+    "/v1/statement-inbox/items/{item_id}": {
+      "delete": {
+        "operationId": "remove_item_v1_statement_inbox_items__item_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Household",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Household"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Remove Item"
       }
     },
     "/v1/statement-inbox/items/{item_id}/process": {
