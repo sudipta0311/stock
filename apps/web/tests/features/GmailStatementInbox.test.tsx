@@ -162,6 +162,58 @@ describe("Gmail statement inbox", () => {
     );
   });
 
+  it("opens a waiting statement with the saved password", async () => {
+    api.fetch.mockImplementation(async (path: string) => {
+      if (path === "/v1/statement-inbox/items") {
+        return {
+          items: [
+            {
+              id: "synthetic-saved-item",
+              sender_type: "nsdl",
+              received_at: "2026-10-16T08:00:00Z",
+              status: "needs_password",
+              error_code: null,
+              import_job_id: null,
+              subject: "Your NSDL CAS - September",
+              full_statement: true,
+              saved_password: true,
+            },
+          ],
+          cleanup_notice: null,
+        };
+      }
+      return {
+        status: "review",
+        job_id: "synthetic-saved-job",
+        password_saved: false,
+        notice: null,
+      };
+    });
+
+    renderWithQueries(
+      <MemoryRouter>
+        <GmailStatementInbox />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Open with saved password" }),
+    );
+
+    await waitFor(() =>
+      expect(api.fetch).toHaveBeenCalledWith(
+        "/v1/statement-inbox/items/synthetic-saved-item/process",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ use_saved_password: true }),
+        }),
+      ),
+    );
+    expect(
+      screen.getByRole("button", { name: "Enter password" }),
+    ).toBeInTheDocument();
+  });
+
   it("shows a saved wrong password as an error", async () => {
     api.fetch.mockResolvedValue({
       items: [

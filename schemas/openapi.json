@@ -6870,6 +6870,11 @@
             "title": "Received At",
             "type": "string"
           },
+          "saved_password": {
+            "default": false,
+            "title": "Saved Password",
+            "type": "boolean"
+          },
           "sender_type": {
             "enum": [
               "cams",
@@ -7039,20 +7044,29 @@
         "additionalProperties": false,
         "properties": {
           "password": {
-            "maxLength": 256,
-            "minLength": 1,
-            "title": "Password",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
           },
           "remember": {
             "default": false,
             "title": "Remember",
             "type": "boolean"
+          },
+          "use_saved_password": {
+            "default": false,
+            "title": "Use Saved Password",
+            "type": "boolean"
           }
         },
-        "required": [
-          "password"
-        ],
         "title": "StatementInboxProcessRequest",
         "type": "object"
       },

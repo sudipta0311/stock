@@ -18,6 +18,7 @@ interface StatementInboxItem {
   import_job_id: string | null;
   subject?: string;
   full_statement?: boolean;
+  saved_password?: boolean;
 }
 
 interface StatementInboxData {
@@ -84,17 +85,23 @@ export function GmailStatementInbox() {
       id,
       password,
       rememberPassword,
+      useSaved = false,
     }: {
       id: string;
       password: string;
       rememberPassword: boolean;
+      useSaved?: boolean;
     }) =>
       apiFetch<ProcessResponse>(
         `/v1/statement-inbox/items/${encodeURIComponent(id)}/process`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ password, remember: rememberPassword }),
+          body: JSON.stringify(
+            useSaved
+              ? { use_saved_password: true }
+              : { password, remember: rememberPassword },
+          ),
         },
       ),
     onSuccess: async (result, variables) => {
@@ -120,12 +127,16 @@ export function GmailStatementInbox() {
       const code = error instanceof ApiError ? error.code : "";
       const message =
         code === "wrong_password"
-          ? "That password didn’t work. Please try again."
-          : code === "not_a_full_statement"
-            ? NOT_A_FULL_STATEMENT
-            : code === "unreadable"
-              ? "We couldn’t read this file. Upload it in Money instead."
-              : "The statement could not be opened. Try again.";
+          ? variables.useSaved
+            ? "The saved password didn’t work. Enter it to continue."
+            : "That password didn’t work. Please try again."
+          : code === "no_saved_password"
+            ? "There’s no saved password for these statements. Enter it instead."
+            : code === "not_a_full_statement"
+              ? NOT_A_FULL_STATEMENT
+              : code === "unreadable"
+                ? "We couldn’t read this file. Upload it in Money instead."
+                : "The statement could not be opened. Try again.";
       setFeedback((current) => ({ ...current, [variables.id]: message }));
       if (code === "not_a_full_statement") {
         setOpenId(null);
@@ -312,7 +323,32 @@ export function GmailStatementInbox() {
               item,
               `New statement from ${senderNames[item.sender_type]}`,
             )}
-            {item.status === "needs_password" && openId !== item.id ? (
+            {item.status === "needs_password" &&
+            openId !== item.id &&
+            item.saved_password ? (
+              <div className="grid gap-2">
+                <Button
+                  className="w-full"
+                  loading={
+                    processMutation.isPending &&
+                    processMutation.variables?.id === item.id
+                  }
+                  onClick={() =>
+                    processMutation.mutate({
+                      id: item.id,
+                      password: "",
+                      rememberPassword: false,
+                      useSaved: true,
+                    })
+                  }
+                >
+                  Open with saved password
+                </Button>
+                <Button variant="ghost" onClick={() => openForm(item.id)}>
+                  Enter password
+                </Button>
+              </div>
+            ) : item.status === "needs_password" && openId !== item.id ? (
               <Button className="w-full" onClick={() => openForm(item.id)}>
                 Enter password
               </Button>

@@ -395,6 +395,75 @@ def test_inbox_tells_full_statements_from_other_fund_house_emails(
     assert retried.json()["status"] == "review"
 
 
+def test_a_statement_from_before_a_password_was_saved_can_use_it(
+    inbox_client: tuple[TestClient, str, str, MigratedDatabase],
+) -> None:
+    client, secret, _password_key, _database = inbox_client
+    owner_headers, _claims = _headers(secret, "use-saved-password")
+    key = _create_key(client, owner_headers)
+    assert _upload(client, key, message_id="earlier-statement").status_code == 202
+    earlier = client.get("/v1/statement-inbox/items", headers=owner_headers).json()["items"][0]
+    assert earlier["saved_password"] is False
+
+    no_saved = client.post(
+        f"/v1/statement-inbox/items/{earlier['id']}/process",
+        headers=owner_headers,
+        json={"use_saved_password": True},
+    )
+    assert no_saved.status_code == 422
+    assert no_saved.json()["code"] == "no_saved_password"
+
+    # A later statement is opened by hand and its password remembered.
+    later_pdf = _pdf()
+    assert (
+        _upload(client, key, pdf=later_pdf + b"\n", message_id="later-statement").status_code == 202
+    )
+    later = next(
+        item
+        for item in client.get("/v1/statement-inbox/items", headers=owner_headers).json()["items"]
+        if item["id"] != earlier["id"]
+    )
+    remembered = client.post(
+        f"/v1/statement-inbox/items/{later['id']}/process",
+        headers=owner_headers,
+        json={"password": _PDF_PASSWORD, "remember": True},
+    )
+    assert remembered.status_code == 200, remembered.text
+    assert remembered.json()["password_saved"] is True
+
+    listed = client.get("/v1/statement-inbox/items", headers=owner_headers).json()["items"]
+    assert {item["id"]: item["saved_password"] for item in listed}[earlier["id"]] is True
+    opened = client.post(
+        f"/v1/statement-inbox/items/{earlier['id']}/process",
+        headers=owner_headers,
+        json={"use_saved_password": True},
+    )
+    assert opened.status_code == 200, opened.text
+    assert opened.json()["status"] == "review"
+    assert _PDF_PASSWORD not in opened.text
+    # Another provider has no saved password, so its statement still waits.
+    assert (
+        _upload(
+            client,
+            key,
+            pdf=later_pdf + b"\n\n",
+            message_id="third",
+            sender="donotreply@cams.example.test",
+        ).status_code
+        == 202
+    )
+    third = next(
+        item
+        for item in client.get("/v1/statement-inbox/items", headers=owner_headers).json()["items"]
+        if item["status"] == "needs_password"
+    )
+    missing = client.post(
+        f"/v1/statement-inbox/items/{third['id']}/process", headers=owner_headers, json={}
+    )
+    assert missing.status_code == 422
+    assert missing.json()["code"] == "password_required"
+
+
 def test_wrong_password_waiting_item_saved_password_and_review_flow(
     inbox_client: tuple[TestClient, str, str, MigratedDatabase],
 ) -> None:

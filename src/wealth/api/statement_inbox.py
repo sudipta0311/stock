@@ -79,6 +79,7 @@ class StatementInboxItemResponse(InboxApiModel):
     import_job_id: UUID | None
     subject: str = ""
     full_statement: bool = True
+    saved_password: bool = False
 
 
 class StatementInboxListResponse(InboxApiModel):
@@ -93,8 +94,10 @@ class StatementInboxUploadResponse(InboxApiModel):
 class StatementInboxProcessRequest(InboxApiModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True, str_strip_whitespace=True)
 
-    password: str = Field(min_length=1, max_length=256)
+    password: str | None = Field(default=None, min_length=1, max_length=256)
     remember: bool = False
+    # Statements that arrived before a password was saved can still use it.
+    use_saved_password: bool = False
 
 
 class StatementInboxProcessResponse(InboxApiModel):
@@ -596,6 +599,13 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             .where(StatementInboxItem.user_id == user.household_owner_id)
             .order_by(StatementInboxItem.received_at.desc())
         )
+        saved_senders = set(
+            user.session.scalars(
+                select(StatementSavedPassword.sender_type).where(
+                    StatementSavedPassword.user_id == user.household_owner_id
+                )
+            )
+        )
         items = [
             StatementInboxItemResponse(
                 id=item.id,
@@ -607,6 +617,7 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                 subject=item.subject[:_SUBJECT_PREVIEW_CHARS],
                 full_statement=item.error_code != "not_a_full_statement"
                 and bool(_FULL_STATEMENT_SUBJECT.search(item.subject)),
+                saved_password=item.sender_type in saved_senders,
             )
             for item in rows
         ]
@@ -648,17 +659,43 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                 "We couldn't read this file. Try uploading it in Money.",
             )
         password_key = request.app.state.settings.statement_password_key_value
+        password = body.password
+        saved: StatementSavedPassword | None = None
+        if body.use_saved_password:
+            saved = user.session.scalar(
+                select(StatementSavedPassword).where(
+                    StatementSavedPassword.user_id == user.household_owner_id,
+                    StatementSavedPassword.sender_type == item.sender_type,
+                )
+            )
+            password = (
+                _saved_password(saved, item.user_id, password_key)
+                if saved is not None and password_key is not None
+                else None
+            )
+            if password is None:
+                return _problem(
+                    request,
+                    422,
+                    "no_saved_password",
+                    "There's no saved password for these statements. Enter it instead.",
+                )
+        if not password:
+            return _problem(request, 422, "password_required", "Enter the statement password.")
         try:
-            return await _process_item(
+            response = await _process_item(
                 user.session,
                 item,
-                body.password,
+                password,
                 max_mb=getattr(request.app.state.settings, "max_upload_mb", MAX_UPLOAD_MB),
                 password_key=password_key,
-                remember=body.remember,
+                remember=body.remember and not body.use_saved_password,
             )
         except _StatementProcessingFailure as failure:
             return _problem(request, failure.status, failure.code, failure.detail)
+        if saved is not None:
+            saved.last_used_at = datetime.now(UTC)
+        return response
 
     @router.delete("/v1/statement-inbox/items/{item_id}", status_code=204, response_model=None)
     def remove_item(item_id: UUID, request: Request, user: Any = user_dependency) -> Any:

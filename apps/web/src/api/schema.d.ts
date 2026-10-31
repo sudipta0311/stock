@@ -1,4 +1,4 @@
-// OpenAPI SHA256: 2e60a233dad9decc2178c0317de0b759b2dc5a4d633cb5bc3b50146eb5ef4c74
+// OpenAPI SHA256: bebba645d02b12c67d86c5aec7c952b4adf19f858be4f5e3670f5a2b982d921c
 export interface paths {
     "/healthz": {
         parameters: {
@@ -3573,6 +3573,11 @@ export interface components {
              */
             received_at: string;
             /**
+             * Saved Password
+             * @default false
+             */
+            saved_password: boolean;
+            /**
              * Sender Type
              * @enum {string}
              */
@@ -3639,12 +3644,17 @@ export interface components {
         /** StatementInboxProcessRequest */
         StatementInboxProcessRequest: {
             /** Password */
-            password: string;
+            password?: string | null;
             /**
              * Remember
              * @default false
              */
             remember: boolean;
+            /**
+             * Use Saved Password
+             * @default false
+             */
+            use_saved_password: boolean;
         };
         /** StatementInboxProcessResponse */
         StatementInboxProcessResponse: {
