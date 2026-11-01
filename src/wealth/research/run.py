@@ -18,8 +18,14 @@ from sqlalchemy.engine import make_url
 
 from wealth.db.models import PriceEod, Security
 from wealth.db.session import make_engine, system_session
-from wealth.research.dossier import Dossier
-from wealth.research.graph import build_research_graph
+from wealth.research.dossier import Dossier, Stage
+from wealth.research.graph import (
+    DECIDED_DOSSIER_STAGES,
+    build_research_graph,
+    build_week_pack_content,
+    keep_market_statuses,
+    merge_week_decisions,
+)
 from wealth.research.router import BudgetExceeded, ModelRouter, RunBudget, RunContext
 from wealth.research.rules import ResearchRules
 from wealth.research.screener import run_screener
@@ -27,6 +33,8 @@ from wealth.research.store import (
     create_run,
     get_open_run_for_week,
     get_run,
+    load_research_pack,
+    save_research_pack,
     update_run,
 )
 from wealth.research.tools import ToolRegistry
@@ -69,57 +77,89 @@ def _json_print(value: dict[str, Any]) -> None:
 def load_shortlist_candidates(
     engine: Any,
     week: str,
-    security_ids: Sequence[str],
+    security_ids: Sequence[str] | None = None,
     *,
-    maximum: int,
+    maximum: int | None = None,
+    stages: Sequence[Stage | str] = (Stage.SCREENED,),
+    allow_incomplete: bool = False,
 ) -> list[dict[str, Any]]:
-    """Load persisted screener rows in rank order and attach their source snapshots."""
+    """Load persisted dossiers and attach their stored screener snapshots."""
     candidates: list[dict[str, Any]] = []
     as_of = date.fromisocalendar(int(week[:4]), int(week[-2:]), 5)
+    stage_values = list(dict.fromkeys(Stage(stage).value for stage in stages))
+    if not stage_values:
+        return candidates
+    stage_params = {f"stage_{index}": stage for index, stage in enumerate(stage_values)}
+    stage_clause = ", ".join(f":{name}" for name in stage_params)
     with system_session(engine) as session:
-        for raw_security_id in security_ids[:maximum]:
+        dossier_rows: list[Any] = []
+        if security_ids is None:
+            dossier_rows = list(
+                session.execute(
+                    text(
+                        "SELECT id, security_id, json FROM dossiers "
+                        f"WHERE week = :week AND stage IN ({stage_clause}) ORDER BY id"
+                    ),
+                    {"week": week, **stage_params},
+                ).all()
+            )
+        else:
+            selected_ids = security_ids if maximum is None else security_ids[:maximum]
+            for raw_security_id in selected_ids:
+                try:
+                    security_id = UUID(str(raw_security_id))
+                except ValueError:
+                    continue
+                security = session.scalar(select(Security).where(Security.id == security_id))
+                if security is None or not security.symbol or security.market not in {"IN", "US"}:
+                    continue
+                dossier_id = f"{week}/{security.market}/{security.symbol}"
+                row = session.execute(
+                    text(
+                        "SELECT id, security_id, json FROM dossiers "
+                        f"WHERE id = :dossier_id AND week = :week AND stage IN ({stage_clause})"
+                    ),
+                    {"dossier_id": dossier_id, "week": week, **stage_params},
+                ).one_or_none()
+                if row is not None:
+                    dossier_rows.append(row)
+
+        for dossier_row in dossier_rows:
+            dossier_id = str(dossier_row.id)
             try:
-                security_id = UUID(str(raw_security_id))
-            except ValueError:
+                security_id = UUID(str(dossier_row.security_id))
+            except (TypeError, ValueError):
                 continue
             security = session.scalar(select(Security).where(Security.id == security_id))
             if security is None or not security.symbol or security.market not in {"IN", "US"}:
                 continue
-            dossier_id = f"{week}/{security.market}/{security.symbol}"
-            raw_dossier = session.scalar(
-                text(
-                    "SELECT json FROM dossiers "
-                    "WHERE id = :dossier_id AND week = :week AND stage = 'SCREENED'"
-                ),
-                {"dossier_id": dossier_id, "week": week},
-            )
-            if raw_dossier is None:
-                continue
+            raw_dossier = dossier_row.json
             dossier = Dossier.model_validate(raw_dossier)
             evidence = next(
                 (item for claim in dossier.claims for item in claim.evidence if item.tool_call_id),
                 None,
             )
-            if evidence is None:
-                continue
-            try:
-                call_uuid = UUID(evidence.tool_call_id)
-            except ValueError:
-                continue
-            snapshot_row = session.execute(
-                text(
-                    "SELECT result_json, source_url, retrieved_at "
-                    "FROM tool_calls WHERE tool_call_id = :tool_call_id"
-                ),
-                {"tool_call_id": call_uuid},
-            ).one_or_none()
-            if snapshot_row is None:
-                continue
-            snapshot = snapshot_row.result_json
-            if isinstance(snapshot, str):
-                snapshot = json.loads(snapshot)
-            if not isinstance(snapshot, dict):
-                continue
+            snapshot: dict[str, Any] = {}
+            snapshot_row = None
+            if evidence is not None:
+                try:
+                    call_uuid = UUID(evidence.tool_call_id)
+                except ValueError:
+                    call_uuid = None
+                if call_uuid is not None:
+                    snapshot_row = session.execute(
+                        text(
+                            "SELECT result_json, source_url, retrieved_at "
+                            "FROM tool_calls WHERE tool_call_id = :tool_call_id"
+                        ),
+                        {"tool_call_id": call_uuid},
+                    ).one_or_none()
+                    if snapshot_row is not None:
+                        raw_snapshot = snapshot_row.result_json
+                        if isinstance(raw_snapshot, str):
+                            raw_snapshot = json.loads(raw_snapshot)
+                        if isinstance(raw_snapshot, dict):
+                            snapshot = raw_snapshot
             price = snapshot.get("price_used_for_value")
             if price is None:
                 price = session.scalar(
@@ -131,9 +171,33 @@ def load_shortlist_candidates(
                     .order_by(PriceEod.as_of.desc())
                     .limit(1)
                 )
-            if price is None or Decimal(str(price)) <= 0:
+            try:
+                parsed_price = Decimal(str(price)) if price is not None else None
+            except (ArithmeticError, TypeError, ValueError):
+                parsed_price = None
+            if parsed_price is not None and (not parsed_price.is_finite() or parsed_price <= 0):
+                parsed_price = None
+            tool_results: dict[str, dict[str, Any]] = {}
+            if evidence is not None and snapshot_row is not None:
+                tool_id = evidence.tool_call_id
+                tool_results[tool_id] = {
+                    "tool_call_id": tool_id,
+                    "result": snapshot,
+                    "source_url": snapshot_row.source_url,
+                    "retrieved_at": snapshot_row.retrieved_at.isoformat(),
+                }
+            try:
+                quant_decile = int(snapshot["decile"]) if "decile" in snapshot else None
+            except (TypeError, ValueError):
+                quant_decile = None
+            if not allow_incomplete and (
+                evidence is None
+                or snapshot_row is None
+                or not snapshot
+                or parsed_price is None
+                or quant_decile is None
+            ):
                 continue
-            tool_id = evidence.tool_call_id
             candidates.append(
                 {
                     "dossier_id": dossier_id,
@@ -143,18 +207,11 @@ def load_shortlist_candidates(
                     "market": security.market,
                     "sector": str(snapshot.get("sector") or security.sector),
                     "as_of": str(snapshot.get("as_of") or as_of.isoformat()),
-                    "price": format(Decimal(str(price)), "f"),
-                    "quant_decile": int(snapshot.get("decile", 0)),
+                    "price": format(parsed_price, "f") if parsed_price is not None else None,
+                    "quant_decile": quant_decile,
                     "composite": str(snapshot.get("composite", "0")),
                     "dossier": dossier.model_dump(mode="json", by_alias=True),
-                    "tool_results": {
-                        tool_id: {
-                            "tool_call_id": tool_id,
-                            "result": snapshot,
-                            "source_url": snapshot_row.source_url,
-                            "retrieved_at": snapshot_row.retrieved_at.isoformat(),
-                        }
-                    },
+                    "tool_results": tool_results,
                 }
             )
     return candidates
@@ -381,6 +438,76 @@ def _run_status(args: argparse.Namespace) -> int:
         engine.dispose()
 
 
+def _run_repack(args: argparse.Namespace) -> int:
+    if not _valid_week(args.week):
+        _json_print({"status": "failed", "error": "invalid_week"})
+        return 3
+    try:
+        engine = make_engine(_owner_url())
+    except (ValueError, RuntimeError):
+        _json_print({"status": "failed", "error": "database_unavailable"})
+        return 3
+
+    try:
+        previous = load_research_pack(engine, args.week)
+        stored_candidates = load_shortlist_candidates(
+            engine,
+            args.week,
+            stages=DECIDED_DOSSIER_STAGES,
+            allow_incomplete=True,
+        )
+        has_approved = any(
+            Dossier.model_validate(candidate["dossier"]).stage == Stage.APPROVED
+            for candidate in stored_candidates
+        )
+        if previous is None and not has_approved:
+            _json_print(
+                {
+                    "status": "failed",
+                    "error": "empty_week",
+                    "message": f"No pack or approved dossiers were found for {args.week}.",
+                }
+            )
+            return 3
+
+        dossiers, candidates = merge_week_decisions([], {}, stored_candidates)
+        as_of = date.fromisocalendar(int(args.week[:4]), int(args.week[-2:]), 5)
+        from wealth.research.agents.macro_geo import MacroGeoToolbox
+
+        index_percentiles, index_history = MacroGeoToolbox(engine, as_of).policy_index_percentiles()
+        content = build_week_pack_content(
+            dossiers,
+            candidates,
+            index_percentiles=index_percentiles,
+            index_history=index_history,
+        )
+        pack = {
+            **(previous or {}),
+            **content,
+            "index_valuation_percentiles": index_percentiles,
+        }
+        pack.setdefault("summary", "No ideas passed the checks this week.")
+        pack.setdefault("run_id", "")
+        pack.setdefault("cio_agenda", {})
+        pack.setdefault("macro", {})
+        pack = keep_market_statuses(pack, previous or {})
+        save_research_pack(engine, args.week, pack)
+        _json_print(
+            {
+                "week": args.week,
+                "idea_count": {
+                    market: content["markets"][market]["idea_count"] for market in ("IN", "US")
+                },
+            }
+        )
+        return 0
+    except Exception as error:
+        _json_print({"status": "failed", "error": type(error).__name__})
+        return 3
+    finally:
+        engine.dispose()
+
+
 def _default_budget() -> str:
     return os.getenv("RESEARCH_BUDGET_USD", "5")
 
@@ -401,6 +528,9 @@ def build_parser() -> argparse.ArgumentParser:
     status = subparsers.add_parser("status")
     status.add_argument("--run-id", required=True)
     status.set_defaults(handler=_run_status)
+    repack = subparsers.add_parser("repack")
+    repack.add_argument("--week", required=True)
+    repack.set_defaults(handler=_run_repack)
     return parser
 
 

@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       step:
-        description: Start this week's run, or continue the open one
+        description: Start, continue, or rebuild this week's pack
         type: choice
-        options: [start, continue]
+        options: [start, continue, repack]
         default: start
 
 permissions:
@@ -44,7 +44,7 @@ jobs:
       - run: python -m pip install --no-cache-dir -e ".[api,importer,research]"
       - name: Start the weekly run
         if: >-
-          (github.event_name == 'workflow_dispatch' && inputs.step != 'continue') ||
+          (github.event_name == 'workflow_dispatch' && inputs.step == 'start') ||
           github.event.schedule == '0 0 * * 6'
         run: |
           WEEK=$(date -u +%G-W%V)
@@ -59,3 +59,8 @@ jobs:
         run: |
           WEEK=$(date -u +%G-W%V)
           python -m wealth.research.run continue --week "$WEEK"
+      - name: Rebuild the weekly pack
+        if: github.event_name == 'workflow_dispatch' && inputs.step == 'repack'
+        run: |
+          WEEK=$(date -u +%G-W%V)
+          python -m wealth.research.run repack --week "$WEEK"

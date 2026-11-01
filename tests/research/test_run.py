@@ -20,6 +20,7 @@ def test_cli_matches_scheduled_workflow_week_selectors() -> None:
     continue_by_run_id = parser.parse_args(
         ["continue", "--run-id", "00000000-0000-0000-0000-000000000045"]
     )
+    repack = parser.parse_args(["repack", "--week", "2026-W45"])
     workflow = (
         Path(__file__).resolve().parents[2] / ".github" / "workflows" / "research-weekly.yml"
     ).read_text(encoding="utf-8")
@@ -27,11 +28,15 @@ def test_cli_matches_scheduled_workflow_week_selectors() -> None:
     assert start.command == "start" and start.week == "2026-W45" and start.mode == "weekly"
     assert continue_by_week.command == "continue" and continue_by_week.week == "2026-W45"
     assert continue_by_run_id.command == "continue" and continue_by_run_id.run_id is not None
+    assert repack.command == "repack" and repack.week == "2026-W45"
     assert 'start --week "$WEEK" --mode weekly' in workflow
     assert 'continue --week "$WEEK"' in workflow
+    assert "options: [start, continue, repack]" in workflow
     assert "vars.RESEARCH_ENABLED == 'true'" in workflow
-    assert "github.event_name == 'workflow_dispatch' && inputs.step != 'continue'" in workflow
+    assert "github.event_name == 'workflow_dispatch' && inputs.step == 'start'" in workflow
     assert "github.event_name == 'workflow_dispatch' && inputs.step == 'continue'" in workflow
+    assert "github.event_name == 'workflow_dispatch' && inputs.step == 'repack'" in workflow
+    assert 'repack --week "$WEEK"' in workflow
 
 
 def test_cli_returns_exit_code_two_when_the_run_budget_is_exceeded(

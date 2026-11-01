@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, TypedDict
@@ -39,6 +39,10 @@ from wealth.research.store import (
     save_research_pack,
 )
 from wealth.research.tools import ToolRegistry
+
+DECIDED_DOSSIER_STAGES = (Stage.APPROVED, Stage.VETOED, Stage.UNRESOLVED)
+_DECIDED_STATUSES = {"APPROVED", "VETOED", "UNRESOLVED"}
+_MARKET_PRIORITY = {"IN": 0, "US": 1}
 
 
 class ResearchState(TypedDict, total=False):
@@ -120,6 +124,159 @@ def _stored_dist_from_200dma(
             if value.is_finite():
                 return value
     return None
+
+
+def merge_week_decisions(
+    current_dossiers: Sequence[Dossier],
+    current_candidates: Mapping[str, Mapping[str, Any]],
+    stored_candidates: Sequence[Mapping[str, Any]],
+) -> tuple[list[Dossier], dict[str, dict[str, Any]]]:
+    """Combine this run with the week's stored decisions, letting this run win by id."""
+    dossier_by_id: dict[str, Dossier] = {}
+    candidates: dict[str, dict[str, Any]] = {}
+    for candidate in stored_candidates:
+        dossier_id = str(candidate.get("dossier_id", ""))
+        raw_dossier = candidate.get("dossier")
+        if dossier_id and isinstance(raw_dossier, Mapping):
+            dossier = Dossier.model_validate(raw_dossier)
+            dossier_by_id[dossier.dossier_id] = dossier
+            candidates[dossier_id] = dict(candidate)
+    for dossier in current_dossiers:
+        dossier_by_id[dossier.dossier_id] = dossier
+    for dossier_id, candidate in current_candidates.items():
+        candidates[str(dossier_id)] = dict(candidate)
+    return list(dossier_by_id.values()), candidates
+
+
+def _composite(candidate: Mapping[str, Any]) -> Decimal:
+    try:
+        value = Decimal(str(candidate.get("composite", "0")))
+    except (ArithmeticError, TypeError, ValueError):
+        return Decimal(0)
+    return value if value.is_finite() else Decimal(0)
+
+
+def _idea_sort_key(
+    item: Mapping[str, Any], candidates: Mapping[str, Mapping[str, Any]]
+) -> tuple[int, Decimal, str]:
+    dossier_id = str(item.get("dossier_id", item.get("_dossier_id", "")))
+    candidate = candidates.get(dossier_id, {})
+    return (
+        _MARKET_PRIORITY.get(str(item.get("market", "")), 2),
+        -_composite(candidate),
+        dossier_id,
+    )
+
+
+def build_week_pack_content(
+    dossiers: Sequence[Dossier],
+    candidates: Mapping[str, Mapping[str, Any]],
+    *,
+    tool_results_by_dossier: Mapping[str, Any] | None = None,
+    index_percentiles: Mapping[str, Any],
+    index_history: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Build the deterministic ideas and outcomes from the latest decided dossiers."""
+    latest_by_id = {dossier.dossier_id: dossier for dossier in dossiers}
+    decided = [dossier for dossier in latest_by_id.values() if dossier.status in _DECIDED_STATUSES]
+    ideas: list[dict[str, Any]] = []
+    idea_outcomes: list[dict[str, Any]] = []
+    active_tool_results = tool_results_by_dossier or {}
+    for dossier in decided:
+        candidate = candidates.get(dossier.dossier_id, {})
+        red_team = dossier.verdicts.red_team
+        idea_outcomes.append(
+            {
+                "dossier_id": dossier.dossier_id,
+                "security_id": dossier.security.id,
+                "market": dossier.security.market,
+                "symbol": str(candidate.get("symbol", dossier.dossier_id.rsplit("/", 1)[-1])),
+                "status": dossier.status,
+                "confidence": (
+                    "HIGH"
+                    if dossier.confidence >= Decimal("0.8")
+                    else "MEDIUM"
+                    if dossier.confidence >= Decimal("0.5")
+                    else "LOW"
+                ),
+                "red_team_falsifier": red_team.falsifier if red_team is not None else None,
+            }
+        )
+        if dossier.status != "APPROVED":
+            continue
+        if not candidate or candidate.get("price") is None or candidate.get("quant_decile") is None:
+            raise RuntimeError(
+                f"Approved dossier is missing its screener snapshot: {dossier.dossier_id}"
+            )
+        value = {
+            "security_id": dossier.security.id,
+            "symbol": str(candidate["symbol"]),
+            "market": dossier.security.market,
+            "sector": str(candidate["sector"]),
+            # Implied US closes carry six places; the policy takes prices to the cent.
+            "price": format(
+                Decimal(str(candidate["price"])).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP),
+                "f",
+            ),
+            "quant_decile": int(candidate["quant_decile"]),
+            "dossier_status": "APPROVED",
+            "valuation_percentile": format(dossier.valuation_percentile or Decimal("50"), "f"),
+            "confidence": (
+                "HIGH"
+                if dossier.confidence >= Decimal("0.8")
+                else "MEDIUM"
+                if dossier.confidence >= Decimal("0.5")
+                else "LOW"
+            ),
+        }
+        idea = SatelliteIdea.model_validate(value)
+        idea_json = idea.model_dump(mode="json", exclude_unset=True)
+        idea_json["why"] = pack_idea_why(dossier)
+        raw_tool_results = active_tool_results.get(dossier.dossier_id, {})
+        market_history = index_history.get(dossier.security.market, {})
+        history_label = market_history.get("history_label")
+        idea_json["entry_hint"] = entry_hint(
+            market=dossier.security.market,
+            dist_from_200dma=_stored_dist_from_200dma(
+                candidate,
+                dossier,
+                raw_tool_results if isinstance(raw_tool_results, Mapping) else {},
+            ),
+            market_percentile=index_percentiles.get(dossier.security.market),
+            market_history_label=(history_label if isinstance(history_label, str) else None),
+        )
+        idea_json["_dossier_id"] = dossier.dossier_id
+        ideas.append(idea_json)
+
+    ideas.sort(key=lambda item: _idea_sort_key(item, candidates))
+    idea_outcomes.sort(key=lambda item: _idea_sort_key(item, candidates))
+    for idea in ideas:
+        idea.pop("_dossier_id", None)
+    markets = {
+        market: {
+            "idea_count": sum(1 for idea in ideas if idea["market"] == market),
+            "status": "complete",
+        }
+        for market in ("IN", "US")
+    }
+    return {"ideas": ideas, "idea_outcomes": idea_outcomes, "markets": markets}
+
+
+def keep_market_statuses(
+    pack: dict[str, Any],
+    previous: Mapping[str, Any],
+    markets: set[str] | None = None,
+) -> dict[str, Any]:
+    """Retain status labels that cannot be rebuilt from dossier rows."""
+    merged = {**pack, "markets": dict(pack["markets"])}
+    prior_markets = previous.get("markets", {})
+    selected = {"IN", "US"} if markets is None else markets
+    for market in selected:
+        prior_market = prior_markets.get(market) if isinstance(prior_markets, Mapping) else None
+        if not isinstance(prior_market, Mapping) or "status" not in prior_market:
+            continue
+        merged["markets"].setdefault(market, {"idea_count": 0})["status"] = prior_market["status"]
+    return merged
 
 
 def _budget_for(dossier: Dossier, rules: ResearchRules, context: RunContext) -> None:
@@ -223,31 +380,6 @@ def _make_dossier(candidate: dict[str, Any], rules: ResearchRules) -> Dossier:
         calls=dossier.budget.calls,
     )
     return dossier.model_copy(update={"stage": Stage.SCREENED, "budget": budget})
-
-
-def keep_unresearched_markets(
-    pack: dict[str, Any], previous: Mapping[str, Any], researched: set[str]
-) -> dict[str, Any]:
-    """Keep the week's earlier ideas for a market this run did not research.
-
-    The pack is one row per week, so a rerun that researched one market used to erase
-    the other market's ideas.
-    """
-    merged = {**pack, "ideas": list(pack["ideas"]), "idea_outcomes": list(pack["idea_outcomes"])}
-    merged["markets"] = dict(pack["markets"])
-    for market in ("IN", "US"):
-        if market in researched:
-            continue
-        for key in ("ideas", "idea_outcomes"):
-            merged[key].extend(
-                item
-                for item in previous.get(key, [])
-                if isinstance(item, dict) and item.get("market") == market
-            )
-        prior_market = previous.get("markets", {}).get(market)
-        if isinstance(prior_market, dict):
-            merged["markets"][market] = prior_market
-    return merged
 
 
 def pack_idea_why(dossier: Dossier) -> dict[str, Any]:
@@ -637,8 +769,10 @@ def build_research_graph(
         }
 
     def pack_node(state: ResearchState) -> dict[str, Any]:
-        candidates = _candidate_map(state)
-        dossiers = _load_dossiers(state)
+        current_candidates = _candidate_map(state)
+        current_dossiers = _load_dossiers(state)
+        candidates = current_candidates
+        dossiers = current_dossiers
         week = str(state.get("week", ""))
         as_of = _week_as_of(week)
         index_percentiles: dict[str, str | None] = {"IN": None, "US": None}
@@ -653,100 +787,46 @@ def build_research_graph(
                 owner_engine, as_of
             ).policy_index_percentiles()
         shortlist_ids = set(state.get("shortlist_ids", []))
-        approved_ids = {dossier.dossier_id for dossier in dossiers if dossier.status == "APPROVED"}
-        if not approved_ids <= shortlist_ids:
-            raise RuntimeError("Approved ideas must be a subset of the screener shortlist")
-        ideas: list[dict[str, Any]] = []
-        idea_outcomes: list[dict[str, Any]] = []
-        for dossier in dossiers:
-            candidate = candidates.get(dossier.dossier_id, {})
-            red_team = dossier.verdicts.red_team
-            idea_outcomes.append(
-                {
-                    "dossier_id": dossier.dossier_id,
-                    "security_id": dossier.security.id,
-                    "market": dossier.security.market,
-                    "symbol": str(candidate.get("symbol", dossier.dossier_id.rsplit("/", 1)[-1])),
-                    "status": dossier.status,
-                    "confidence": (
-                        "HIGH"
-                        if dossier.confidence >= Decimal("0.8")
-                        else "MEDIUM"
-                        if dossier.confidence >= Decimal("0.5")
-                        else "LOW"
-                    ),
-                    "red_team_falsifier": red_team.falsifier if red_team is not None else None,
-                }
+        if owner_engine is not None:
+            from wealth.research.run import load_shortlist_candidates
+
+            stored_candidates = load_shortlist_candidates(
+                owner_engine,
+                week,
+                stages=DECIDED_DOSSIER_STAGES,
+                allow_incomplete=True,
             )
-            if dossier.dossier_id not in approved_ids:
-                continue
-            candidate = candidates[dossier.dossier_id]
-            value = {
-                "security_id": dossier.security.id,
-                "symbol": str(candidate["symbol"]),
-                "market": dossier.security.market,
-                "sector": str(candidate["sector"]),
-                # Implied US closes carry six places; the policy takes prices to the cent.
-                "price": format(
-                    Decimal(str(candidate["price"])).quantize(
-                        Decimal("0.01"), rounding=ROUND_HALF_UP
-                    ),
-                    "f",
-                ),
-                "quant_decile": int(candidate["quant_decile"]),
-                "dossier_status": "APPROVED",
-                "valuation_percentile": format(dossier.valuation_percentile or Decimal("50"), "f"),
-                "confidence": (
-                    "HIGH"
-                    if dossier.confidence >= Decimal("0.8")
-                    else "MEDIUM"
-                    if dossier.confidence >= Decimal("0.5")
-                    else "LOW"
-                ),
-            }
-            idea = SatelliteIdea.model_validate(value)
-            idea_json = idea.model_dump(mode="json", exclude_unset=True)
-            idea_json["why"] = pack_idea_why(dossier)
-            raw_tool_results = state.get("tool_results_by_dossier", {}).get(dossier.dossier_id, {})
-            market_history = index_history.get(dossier.security.market, {})
-            history_label = market_history.get("history_label")
-            idea_json["entry_hint"] = entry_hint(
-                market=dossier.security.market,
-                dist_from_200dma=_stored_dist_from_200dma(
-                    candidate,
-                    dossier,
-                    raw_tool_results if isinstance(raw_tool_results, Mapping) else {},
-                ),
-                market_percentile=index_percentiles.get(dossier.security.market),
-                market_history_label=(history_label if isinstance(history_label, str) else None),
+            dossiers, candidates = merge_week_decisions(
+                current_dossiers,
+                current_candidates,
+                stored_candidates,
             )
-            ideas.append(idea_json)
+        content = build_week_pack_content(
+            dossiers,
+            candidates,
+            tool_results_by_dossier=state.get("tool_results_by_dossier", {}),
+            index_percentiles=index_percentiles,
+            index_history=index_history,
+        )
         run_id = str(state.get("run_id", ""))
-        markets = {
-            market: {
-                "idea_count": sum(1 for idea in ideas if idea["market"] == market),
-                "status": "complete",
-            }
-            for market in ("IN", "US")
-        }
         pack = {
-            "ideas": ideas,
-            "idea_outcomes": idea_outcomes,
+            **content,
             "summary": str(state.get("summary", "No ideas passed the checks this week.")),
             "run_id": run_id,
-            "markets": markets,
             "cio_agenda": state.get("cio_agenda", {}),
             "index_valuation_percentiles": index_percentiles,
             "macro": {"index_valuation_history": index_history},
         }
         if owner_engine is not None:
             researched = {
-                str(candidates[dossier_id].get("market"))
+                str(current_candidates[dossier_id].get("market"))
                 for dossier_id in shortlist_ids
-                if dossier_id in candidates
+                if dossier_id in current_candidates
             }
-            pack = keep_unresearched_markets(
-                pack, load_research_pack(owner_engine, week) or {}, researched
+            pack = keep_market_statuses(
+                pack,
+                load_research_pack(owner_engine, week) or {},
+                {"IN", "US"} - researched,
             )
             save_research_pack(owner_engine, week, pack)
             from wealth.research.agents.macro_geo import (
@@ -797,7 +877,7 @@ def build_research_graph(
             score_result = run_scorekeeper(
                 owner_engine,
                 week=week,
-                idea_outcomes=idea_outcomes,
+                idea_outcomes=content["idea_outcomes"],
                 dossiers=[_serialise_dossier(item) for item in dossiers],
                 router=router,
                 run_ctx=context,

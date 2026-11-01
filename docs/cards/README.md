@@ -58,6 +58,7 @@ Status: ⬜ not started · 🟦 in progress · ✅ accepted · 🔁 rework · �
 | C36 | A simpler everyday app: Home asks for the monthly amount and shows this week's steps; Ideas open by default with buy hints; shorter Money with one Add-or-update; notes on Home only; Settings in four sections; a waking server keeps the screen | UX | ✅ |
 | C37 | Clearer screens: Money shows the real count and plain unit lines (codes only in Details); Ideas say "Looks cheap" or "Fairly priced" with a closed "Why this idea?"; Plan draws now vs plan with the biggest gap and a matching button; the family picker sits in the header; Home takes the amount in kr or ₹ | UX | ✅ |
 | C38 | NSE fundamentals skip a filing whose XBRL file is gone (404/410) and count it, so ADANIENT, LT and UPL keep their readable filings | data | ✅ |
+| C39 | The weekly pack keeps every approved idea of the week (any run; the latest verdict wins), ordered by market and screener score; a no-model `repack` step rebuilds it | research | ✅ |
 
 ## Follow-ups and review outcomes
 
