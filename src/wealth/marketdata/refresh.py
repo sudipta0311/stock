@@ -510,6 +510,13 @@ def _store_source(
         errors = dict(records.errors)
         inserted = 0
         stored_symbols = 0
+        edgar_securities = (
+            _securities_for_symbols(
+                session, "US", [ticker.upper() for ticker in records.observations]
+            )
+            if source == "edgar"
+            else {}
+        )
         for ticker, observations in records.observations.items():
             try:
                 with session.begin_nested():
@@ -517,7 +524,12 @@ def _store_source(
                         company = (records.companies or {}).get(ticker)
                         if company is None:
                             raise ValueError("TickerNotFound")
-                        security_id = store.upsert_us_equity_security(session, ticker, company.name)
+                        security = edgar_securities.get(ticker.upper())
+                        security_id = (
+                            security.id
+                            if security is not None
+                            else store.upsert_us_equity_security(session, ticker, company.name)
+                        )
                     else:
                         security = _securities_for_symbols(session, "IN", [ticker]).get(
                             ticker.upper()

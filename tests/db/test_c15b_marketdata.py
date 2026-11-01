@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
@@ -11,7 +11,8 @@ from tests.db.conftest import MigratedDatabase
 
 from wealth.db.models import MarketdataRun, PriceEod, Security, UniverseMember
 from wealth.marketdata import refresh, store
-from wealth.marketdata.refresh import UniverseBatch, run_refresh
+from wealth.marketdata.refresh import FundamentalsBatch, UniverseBatch, run_refresh
+from wealth.marketdata.sources.edgar import EdgarCompany
 from wealth.marketdata.sources.nse import NseClose, NseSecurity
 from wealth.marketdata.sources.universes import (
     SURVIVORSHIP_LABEL,
@@ -173,6 +174,48 @@ def test_sp500_refresh_fills_missing_sectors_and_stores_implied_closes(
     assert classification == ("Health Care", "Life Sciences Tools")
     assert price.close == Decimal("123.456789")
     assert price.source == "SSGA_SPY_IMPLIED"
+
+
+def test_edgar_refresh_keeps_constituent_names_and_inserts_missing_names(
+    migrated_database: MigratedDatabase,
+) -> None:
+    on = date(2026, 10, 28)
+    fetched_at = datetime(2026, 10, 28, tzinfo=UTC)
+    universes = UniverseBatch(
+        sp500=Sp500Holdings(
+            securities=[UniverseSecurity(symbol="SYNTHD", name="SYNTHETIC CAPITALIZED NAME D")],
+            as_of=on,
+        ),
+        nifty500=None,
+        errors={},
+        sp500_sectors={
+            "SYNTHD": Sp500Sector("Industrials", "Synthetic Industry", "Synthetic Listed Name")
+        },
+    )
+    edgar = FundamentalsBatch(
+        observations={"SYNTHD": [], "SYNTHE": []},
+        errors={},
+        companies={
+            "SYNTHD": EdgarCompany("SYNTHD", "0000000001", "SEC CAPITALIZED NAME D"),
+            "SYNTHE": EdgarCompany("SYNTHE", "0000000002", "SEC CAPITALIZED NAME E"),
+        },
+    )
+
+    with Session(migrated_database.owner_engine) as session, session.begin():
+        refresh._store_source(session, "universes", universes, on=on, fetched_at=fetched_at)
+        refresh._store_source(session, "edgar", edgar, on=on, fetched_at=fetched_at)
+        names = dict(
+            session.execute(
+                select(Security.symbol, Security.name).where(
+                    Security.market == "US", Security.symbol.in_(("SYNTHD", "SYNTHE"))
+                )
+            ).all()
+        )
+
+    assert names == {
+        "SYNTHD": "Synthetic Listed Name",
+        "SYNTHE": "SEC CAPITALIZED NAME E",
+    }
 
 
 def test_nse_history_loads_only_missing_weekdays_and_commits_each_day(
