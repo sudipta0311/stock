@@ -108,6 +108,7 @@ class FundamentalsBatch:
     observations: dict[str, list[FundamentalObservation]]
     errors: dict[str, str]
     companies: dict[str, EdgarCompany] | None = None
+    xbrl_missing: int = 0
 
 
 @dataclass(frozen=True)
@@ -351,6 +352,7 @@ def _fetch_nse_fundamentals(
     securities = _securities_for_symbols(session, "IN", target_symbols)
     observations: dict[str, list[FundamentalObservation]] = {}
     errors: dict[str, str] = {}
+    xbrl_missing = 0
     with NseIntegratedClient() as client:  # type: ignore[attr-defined]
         for symbol in target_symbols:
             security = securities.get(symbol.upper())
@@ -359,15 +361,20 @@ def _fetch_nse_fundamentals(
                 continue
             try:
                 after = store.latest_fundamental_filed_at(session, security.id, "NSE_XBRL")
-                observations[symbol] = nse_fundamentals.fetch_symbol_fundamentals(
+                result = nse_fundamentals.fetch_symbol_fundamentals(
                     client,
                     symbol,
                     as_of=on,
                     after=after,
                 )
+                xbrl_missing += result.xbrl_missing
+                if result.xbrl_missing and not result.readable_filings:
+                    errors[symbol] = "XbrlMissing"
+                    continue
+                observations[symbol] = result.observations
             except Exception as error:
                 errors[symbol] = type(error).__name__
-    return FundamentalsBatch(observations, errors)
+    return FundamentalsBatch(observations, errors, xbrl_missing=xbrl_missing)
 
 
 def _fetch_us_index_pe(session: Session, on: date) -> us_index_pe.UsIndexPeBatch:
@@ -528,7 +535,10 @@ def _store_source(
                 stored_symbols += 1
             except Exception as error:
                 errors[ticker] = type(error).__name__
-        return SourceBatchResult({"fundamentals_pit": inserted, "symbols": stored_symbols}, errors)
+        counts = {"fundamentals_pit": inserted, "symbols": stored_symbols}
+        if source == "nse_fundamentals":
+            counts["xbrl_missing"] = records.xbrl_missing
+        return SourceBatchResult(counts, errors)
     if source == "universes":
         if not isinstance(records, UniverseBatch):
             raise TypeError("universe adapter returned invalid rows")

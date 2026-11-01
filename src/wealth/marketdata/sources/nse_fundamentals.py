@@ -65,6 +65,13 @@ class NseFiling:
     submission_type: str
 
 
+@dataclass(frozen=True)
+class NseFundamentalsResult:
+    observations: list[FundamentalObservation]
+    xbrl_missing: int
+    readable_filings: int
+
+
 class NseIntegratedClient:
     """Session client for NSE's public filings page, JSON index and XBRL archives."""
 
@@ -422,12 +429,21 @@ def fetch_symbol_fundamentals(
     *,
     as_of: date,
     after: datetime | None = None,
-) -> list[FundamentalObservation]:
+) -> NseFundamentalsResult:
     observations: list[FundamentalObservation] = []
+    xbrl_missing = 0
+    readable_filings = 0
     for filing in _select_recent(client.filings_for_symbol(symbol), as_of=as_of, after=after):
-        xml_data = client.fetch_xbrl(filing.xbrl_url)
+        try:
+            xml_data = client.fetch_xbrl(filing.xbrl_url)
+        except httpx.HTTPStatusError as error:
+            if error.response.status_code in {404, 410}:
+                xbrl_missing += 1
+                continue
+            raise
+        readable_filings += 1
         observations.extend(parse_xbrl_filing(xml_data, filing, as_of=as_of))
-    return observations
+    return NseFundamentalsResult(observations, xbrl_missing, readable_filings)
 
 
 def survivorship_label() -> str:

@@ -1,18 +1,78 @@
 from __future__ import annotations
 
 import json
+from contextlib import nullcontext
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
+from uuid import uuid4
 
+import httpx
 import pytest
 from openpyxl import Workbook
 
+from wealth.marketdata import refresh as refresh_module
 from wealth.marketdata.sources import edgar, nse_fundamentals, universes
 from wealth.marketdata.sources.nse_fundamentals import NseFiling
 from wealth.research.factors import trailing_twelve_month_eps_for_period
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "marketdata"
+_NSE_AS_OF = date(2026, 2, 1)
+
+
+def _mock_nse_client(
+    monkeypatch: pytest.MonkeyPatch,
+    filings: list[tuple[str, int | str | None]],
+) -> nse_fundamentals.NseIntegratedClient:
+    monkeypatch.setattr(nse_fundamentals, "_REQUEST_INTERVAL_SECONDS", 0)
+    rows = [
+        {
+            "symbol": "SAMPLE",
+            "qe_Date": "31-Dec-2025",
+            "broadcast_Date": f"{28 + index:02d}-Jan-2026 12:00:00",
+            "xbrl": f"https://nsearchives.nseindia.com/corporate/xbrl/{name}",
+            "consolidated": "Consolidated",
+            "type_Sub": "Original",
+        }
+        for index, (name, _outcome) in enumerate(filings)
+    ]
+    outcomes = {name: outcome for name, outcome in filings}
+    xml_data = (FIXTURES / "nse_xbrl_excerpt.xml").read_bytes()
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/companies-listing/corporate-integrated-filing":
+            return httpx.Response(200, text="NSE filing page", request=request)
+        if request.url.path == "/api/integrated-filing-results":
+            return httpx.Response(
+                200,
+                json={"data": rows, "totalCount": len(rows)},
+                request=request,
+            )
+        name = request.url.path.rsplit("/", 1)[-1]
+        outcome = outcomes[name]
+        if outcome == "timeout":
+            raise httpx.ReadTimeout("synthetic timeout", request=request)
+        if isinstance(outcome, int):
+            return httpx.Response(outcome, request=request)
+        return httpx.Response(200, content=xml_data, request=request)
+
+    return nse_fundamentals.NseIntegratedClient(transport=httpx.MockTransport(respond))
+
+
+def _fetch_nse_batch(
+    monkeypatch: pytest.MonkeyPatch,
+    client: nse_fundamentals.NseIntegratedClient,
+) -> refresh_module.FundamentalsBatch:
+    monkeypatch.setattr(refresh_module, "_universe_symbols", lambda *_args: ["SAMPLE"])
+    monkeypatch.setattr(
+        refresh_module,
+        "_securities_for_symbols",
+        lambda *_args: {"SAMPLE": SimpleNamespace(id="synthetic-security")},
+    )
+    monkeypatch.setattr(refresh_module.store, "latest_fundamental_filed_at", lambda *_args: None)
+    monkeypatch.setattr(refresh_module, "NseIntegratedClient", lambda: client)
+    return refresh_module._fetch_nse_fundamentals(object(), _NSE_AS_OF, ("SAMPLE",))
 
 
 def test_edgar_parser_maps_fallback_tags_and_uses_filing_date_for_known_at() -> None:
@@ -74,6 +134,102 @@ def test_nse_xbrl_parser_extracts_quarterly_and_instant_facts() -> None:
     assert by_metric["total_debt"].value == Decimal("400")
     assert all(row.known_at == filing.filed_at for row in observations)
     assert all(row.source_url == filing.xbrl_url for row in observations)
+
+
+def test_nse_skips_missing_xbrl_and_keeps_readable_filings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _mock_nse_client(
+        monkeypatch,
+        [("readable-before.xml", None), ("missing.xml", 404), ("readable-after.xml", None)],
+    )
+    with client:
+        result = nse_fundamentals.fetch_symbol_fundamentals(client, "SAMPLE", as_of=_NSE_AS_OF)
+
+    assert result.xbrl_missing == 1
+    assert result.readable_filings == 2
+    assert result.observations
+    assert all(not row.source_url.endswith("missing.xml") for row in result.observations)
+
+
+def test_nse_410_is_counted_as_a_missing_xbrl_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _mock_nse_client(monkeypatch, [("removed.xml", 410), ("readable.xml", None)])
+    with client:
+        result = nse_fundamentals.fetch_symbol_fundamentals(client, "SAMPLE", as_of=_NSE_AS_OF)
+
+    assert result.xbrl_missing == 1
+    assert result.readable_filings == 1
+    assert result.observations
+
+
+def test_nse_all_missing_xbrl_files_record_symbol_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _mock_nse_client(monkeypatch, [("missing-one.xml", 404), ("missing-two.xml", 404)])
+
+    batch = _fetch_nse_batch(monkeypatch, client)
+
+    assert batch.observations == {}
+    assert batch.errors == {"SAMPLE": "XbrlMissing"}
+    assert batch.xbrl_missing == 2
+
+
+@pytest.mark.parametrize(
+    ("outcome", "error_name"),
+    [(500, "HTTPStatusError"), ("timeout", "ReadTimeout")],
+)
+def test_nse_refresh_records_other_xbrl_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    outcome: int | str,
+    error_name: str,
+) -> None:
+    client = _mock_nse_client(monkeypatch, [("unavailable.xml", outcome)])
+
+    batch = _fetch_nse_batch(monkeypatch, client)
+
+    assert batch.errors == {"SAMPLE": error_name}
+    assert batch.xbrl_missing == 0
+
+
+def test_nse_xbrl_missing_count_is_in_refresh_run_counts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _mock_nse_client(monkeypatch, [("readable.xml", None), ("missing.xml", 404)])
+    batch = _fetch_nse_batch(monkeypatch, client)
+
+    class FakeSession:
+        def add(self, row: object) -> None:
+            row.id = uuid4()
+
+        def flush(self) -> None:
+            return None
+
+        def begin_nested(self) -> object:
+            return nullcontext()
+
+    monkeypatch.setattr(
+        refresh_module,
+        "_securities_for_symbols",
+        lambda *_args: {"SAMPLE": SimpleNamespace(id="synthetic-security")},
+    )
+    monkeypatch.setattr(refresh_module.store, "upsert_fundamentals", lambda *_args, **_kwargs: 1)
+    for method_name in (
+        "prune_fundamentals",
+        "prune_feed_items",
+        "prune_index_valuations",
+        "prune_macro_series",
+    ):
+        monkeypatch.setattr(refresh_module.store, method_name, lambda *_args, **_kwargs: 0)
+
+    result = refresh_module.run_refresh(
+        FakeSession(),
+        _NSE_AS_OF,
+        only=("nse_fundamentals",),
+        fetchers={"nse_fundamentals": lambda: batch},
+        fetched_at=datetime(2026, 2, 1, tzinfo=UTC),
+    )
+
+    assert result["counts"]["nse_fundamentals"]["xbrl_missing"] == 1
+    assert result["counts"]["nse_fundamentals"]["symbols"] == 1
+    assert result["errors"] == {}
 
 
 def test_nse_filing_index_prefers_consolidated_rows_for_a_submission_day() -> None:
