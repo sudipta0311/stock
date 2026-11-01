@@ -18,6 +18,7 @@ import {
   useFeatureQuery,
 } from "../features/api";
 import { getPlan } from "../planning/api";
+import { addPathForCategory } from "../money/config";
 import { getNetworth, listAssets, listGoals, listLoans } from "../money/api";
 import type {
   AssetResponse,
@@ -62,6 +63,44 @@ interface AllocationRow {
   targetAmount: string;
   gapAmount: string;
 }
+
+type PlanGapKey = "equity_india" | "equity_global" | "debt" | "cash" | "gold";
+
+interface PlanGap {
+  row: AllocationRow;
+  amount: string;
+}
+
+const PLAN_GAP_COPY: Record<PlanGapKey, { button: string; name: string }> = {
+  equity_india: {
+    button: englishCopy.plan_ui.gaps.equity_india.button,
+    name: englishCopy.plan_ui.gaps.equity_india.name,
+  },
+  equity_global: {
+    button: englishCopy.plan_ui.gaps.equity_global.button,
+    name: englishCopy.plan_ui.gaps.equity_global.name,
+  },
+  debt: {
+    button: englishCopy.plan_ui.gaps.debt.button,
+    name: englishCopy.plan_ui.gaps.debt.name,
+  },
+  cash: {
+    button: englishCopy.plan_ui.gaps.cash.button,
+    name: englishCopy.plan_ui.gaps.cash.name,
+  },
+  gold: {
+    button: englishCopy.plan_ui.gaps.gold.button,
+    name: englishCopy.plan_ui.gaps.gold.name,
+  },
+};
+
+const PLAN_GAP_KEYS = new Set<PlanGapKey>([
+  "equity_india",
+  "equity_global",
+  "debt",
+  "cash",
+  "gold",
+]);
 
 type PlanMember = NonNullable<WeeklyPlan["members"]>[number];
 
@@ -414,6 +453,69 @@ function safePercent(value: string): number {
   return Number.isFinite(parsed) ? Math.min(100, Math.max(0, parsed)) : 0;
 }
 
+function amountMinorUnits(value: string): bigint {
+  const match = /^(-?)(\d+)(?:\.(\d+))?$/.exec(value.trim());
+  if (!match) return 0n;
+  const fraction = (match[3] ?? "").slice(0, 2).padEnd(2, "0");
+  const amount = BigInt(match[2] ?? "0") * 100n + BigInt(fraction || "0");
+  return match[1] === "-" ? -amount : amount;
+}
+
+function amountFromMinorUnits(value: bigint): string {
+  const sign = value < 0n ? "-" : "";
+  const magnitude = value < 0n ? -value : value;
+  return `${sign}${magnitude / 100n}.${(magnitude % 100n)
+    .toString()
+    .padStart(2, "0")}`;
+}
+
+function percentageParts(value: string): { value: bigint; places: number } {
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(value.trim());
+  if (!match) return { value: 0n, places: 0 };
+  const fraction = match[2] ?? "";
+  return {
+    value: BigInt(`${match[1] ?? "0"}${fraction}`),
+    places: fraction.length,
+  };
+}
+
+function isAtLeastFivePointsBelowPlan(row: AllocationRow): boolean {
+  const actual = percentageParts(row.actualPct);
+  const target = percentageParts(row.targetPct);
+  const places = Math.max(actual.places, target.places);
+  const scale = 10n ** BigInt(places);
+  const difference =
+    target.value * 10n ** BigInt(places - target.places) -
+    actual.value * 10n ** BigInt(places - actual.places);
+  return difference >= 5n * scale;
+}
+
+function largestPlanGap(rows: AllocationRow[]): PlanGap | null {
+  let largest: { row: AllocationRow; amount: string; minor: bigint } | null =
+    null;
+  for (const row of rows) {
+    if (!PLAN_GAP_KEYS.has(row.key as PlanGapKey)) continue;
+    if (!isAtLeastFivePointsBelowPlan(row)) continue;
+    const minor =
+      amountMinorUnits(row.targetAmount) - amountMinorUnits(row.actualAmount);
+    if (minor > 0n && (!largest || minor > largest.minor)) {
+      largest = { row, amount: amountFromMinorUnits(minor), minor };
+    }
+  }
+  return largest;
+}
+
+function addPathForPlanGap(key: string): string {
+  if (key === "equity_india") return "/import";
+  const category = {
+    equity_global: "us_investments",
+    debt: "fd",
+    gold: "gold",
+    cash: "savings",
+  }[key];
+  return category ? addPathForCategory(category) : "/money";
+}
+
 function AllocationCard({
   rows,
   empty,
@@ -421,6 +523,7 @@ function AllocationCard({
   rows: AllocationRow[];
   empty: boolean;
 }) {
+  const { fxRate, primaryCurrency } = useHousehold();
   if (empty) {
     return (
       <EmptyState
@@ -446,15 +549,7 @@ function AllocationCard({
     "var(--chart-gold)",
     "var(--chart-cash)",
   ];
-  const safeMoney = rows.find((row) => row.key === "debt");
-  const current = safePercent(safeMoney?.actualPct ?? "0");
-  const target = safePercent(safeMoney?.targetPct ?? "0");
-  const summary =
-    current > target + 5
-      ? "A bit more is in safe money than your plan suggests."
-      : current + 5 < target
-        ? "Your plan suggests keeping more in safe money."
-        : "Your safe money is close to your plan.";
+  const gap = largestPlanGap(rows);
   return (
     <Card className="grid gap-3">
       <div>
@@ -467,29 +562,48 @@ function AllocationCard({
           >
             Money mix
           </Term>
-          <p className="text-sm text-muted-foreground">{summary}</p>
         </div>
       </div>
-      <div
-        role="img"
-        aria-label={rows
-          .map((row) => `${row.label}: ${safePercent(row.actualPct)}%`)
-          .join(", ")}
-        className="flex h-3 gap-0.5 overflow-hidden rounded-full bg-muted"
-      >
-        {rows.map((row, index) => (
-          <span
-            key={row.key}
-            className="min-w-0 rounded-full"
-            title={row.label}
-            style={{
-              flexGrow: safePercent(row.actualPct),
-              flexBasis: 0,
-              backgroundColor: colors[index] ?? "var(--chart-debt)",
-            }}
-          />
+      <div className="grid gap-2">
+        {[
+          { label: englishCopy.plan_ui.now, field: "actualPct" as const },
+          { label: englishCopy.plan_ui.plan, field: "targetPct" as const },
+        ].map(({ label, field }) => (
+          <div key={label} className="grid gap-1">
+            <span className="text-xs font-medium text-muted-foreground">
+              {label}
+            </span>
+            <div
+              role="img"
+              aria-label={`${label}: ${rows
+                .map((row) => `${row.label} ${safePercent(row[field])}%`)
+                .join(", ")}`}
+              className="flex h-2 gap-0.5 overflow-hidden rounded-full bg-muted"
+            >
+              {rows.map((row, index) => (
+                <span
+                  key={row.key}
+                  className="min-w-0 rounded-full"
+                  title={row.label}
+                  style={{
+                    flexGrow: safePercent(row[field]),
+                    flexBasis: 0,
+                    backgroundColor: colors[index] ?? "var(--chart-debt)",
+                  }}
+                />
+              ))}
+            </div>
+          </div>
         ))}
       </div>
+      <p className="text-sm">
+        {gap
+          ? englishCopy.plan_ui.gap_sentence.replace(
+              "{name}",
+              PLAN_GAP_COPY[gap.row.key as PlanGapKey].name,
+            )
+          : englishCopy.plan_ui.close_to_plan}
+      </p>
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
         {rows.map((row, index) => (
           <span key={row.key} className="inline-flex items-center gap-1.5">
@@ -506,6 +620,16 @@ function AllocationCard({
         <summary className="cursor-pointer text-sm font-medium text-brand">
           Show amounts
         </summary>
+        {gap ? (
+          <p className="mt-3 text-sm">
+            {englishCopy.plan_ui.gap_amount_sentence
+              .replace("{name}", PLAN_GAP_COPY[gap.row.key as PlanGapKey].name)
+              .replace(
+                "{amount}",
+                formatHouseholdAmount(gap.amount, primaryCurrency, fxRate),
+              )}
+          </p>
+        ) : null}
         <dl className="mt-3 grid gap-2 text-sm">
           {rows.map((row) => (
             <div
@@ -515,11 +639,13 @@ function AllocationCard({
               <dt className="font-medium">{row.label}</dt>
               <dd className="flex flex-wrap justify-between gap-2 text-muted-foreground">
                 <span>
-                  Now: <MoneyValue amountInr={row.actualAmount} />
+                  {englishCopy.plan_ui.now}:{" "}
+                  <MoneyValue amountInr={row.actualAmount} />
                   {` (${row.actualPct}%)`}
                 </span>
                 <span>
-                  Plan: <MoneyValue amountInr={row.targetAmount} />
+                  {englishCopy.plan_ui.plan}:{" "}
+                  <MoneyValue amountInr={row.targetAmount} />
                   {` (${row.targetPct}%)`}
                 </span>
               </dd>
@@ -898,10 +1024,12 @@ function GoalsCard({ goals }: { goals: GoalResponse[] }) {
                   By {goal.target_year}
                 </span>
               </div>
-              <p className="text-sm text-muted-foreground">
-                Target <MoneyValue amountInr={goal.target_amount} />
-                {progress ? ` · ${progress}% complete` : ""}
-              </p>
+              <div className="flex justify-between gap-3 text-sm text-muted-foreground">
+                <span>
+                  Target <MoneyValue amountInr={goal.target_amount} />
+                </span>
+                {progress ? <span>{progress}% complete</span> : null}
+              </div>
               {progress ? (
                 <Progress
                   value={safePercent(progress)}
@@ -958,6 +1086,7 @@ export function PlanPage() {
   );
   const planValue = plan.data as WeeklyPlan | undefined;
   const rows = allocationRows(planValue);
+  const gap = largestPlanGap(rows);
   const selectedPlanMember = planValue?.members?.find(
     (member) => member.id === activeMemberId,
   );
@@ -996,11 +1125,13 @@ export function PlanPage() {
       {!noAssets ? <DebtAnswerCard plan={planValue} /> : null}
       {!noAssets ? (
         <Link
-          to="/money"
+          to={gap ? addPathForPlanGap(gap.row.key) : "/money"}
           data-primary="true"
           className="motion-safe:active:scale-[.98] inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground transition"
         >
-          Update your money
+          {gap
+            ? PLAN_GAP_COPY[gap.row.key as PlanGapKey].button
+            : englishCopy.plan_ui.update_money}
         </Link>
       ) : null}
       <details>

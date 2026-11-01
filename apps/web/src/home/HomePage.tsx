@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   CalendarDays,
@@ -59,9 +59,12 @@ function actionTitle(action: ActionResponse): string {
     const of = textValue(tranche.of, "3");
     return `${actionLabel(kind)} (part ${part} of ${of})`;
   }
-  const title = actionLabel(kind);
-  const category = textValue(payload.instrument_category);
-  return category ? `${title} · ${instrumentLabel(category)}` : title;
+  return actionLabel(kind);
+}
+
+function actionCategory(action: ActionResponse): string {
+  const category = textValue(payloadFor(action).instrument_category);
+  return category ? instrumentLabel(category) : "";
 }
 
 function rawActionAmount(action: ActionResponse): string {
@@ -271,12 +274,10 @@ function upcomingMaturities(
 type InvestingAmountCurrency = "INR" | "DKK";
 
 function amountEntryCurrency(
-  primaryCurrency: "INR" | "DKK",
+  isDanishMember: boolean,
   fxRate: DkkInrRate | undefined,
 ): InvestingAmountCurrency {
-  return primaryCurrency === "DKK" && fxRate && inrToDkk("0.01", fxRate)
-    ? "DKK"
-    : "INR";
+  return isDanishMember && fxRate && inrToDkk("0.01", fxRate) ? "DKK" : "INR";
 }
 
 function amountInEntryCurrency(
@@ -349,11 +350,12 @@ function ActionCard({
     : "";
   const cardLabel = [
     actionTitle(action),
+    actionCategory(action),
     actionOwner,
     action.status === "done" ? englishCopy.household_ui.completed : "",
   ]
     .filter(Boolean)
-    .join(" · ");
+    .join(", ");
   return (
     <article
       className="grid gap-3 border-t border-line py-3 first:border-0 first:pt-0"
@@ -366,6 +368,11 @@ function ActionCard({
         <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
           <div className="min-w-0">
             <h3 className="text-sm font-semibold">{actionTitle(action)}</h3>
+            {actionCategory(action) ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {actionCategory(action)}
+              </p>
+            ) : null}
             {actionOwner ? (
               <p className="mt-1 text-sm text-muted-foreground">
                 {actionOwner}
@@ -427,7 +434,33 @@ export function HomePage() {
     primaryCurrency,
     fxRate,
   } = useHousehold();
-  const amountCurrency = amountEntryCurrency(primaryCurrency, fxRate);
+  const isDanishSignedInMember = members.some(
+    (member) => member.id === meMemberId && member.residency.country === "DK",
+  );
+  const preferredAmountCurrency = amountEntryCurrency(
+    isDanishSignedInMember,
+    fxRate,
+  );
+  const [amountCurrency, setAmountCurrency] = useState<InvestingAmountCurrency>(
+    preferredAmountCurrency,
+  );
+  useEffect(() => {
+    setAmountCurrency(preferredAmountCurrency);
+  }, [preferredAmountCurrency]);
+  const canUseDkk = Boolean(fxRate && inrToDkk("0.01", fxRate));
+
+  function changeAmountCurrency(next: InvestingAmountCurrency) {
+    if (next === amountCurrency || (next === "DKK" && !canUseDkk)) return;
+    if (!fxRate) return;
+    setAmountDraft((current) => {
+      if (!current) return current;
+      return next === "DKK"
+        ? (inrToDkk(current, fxRate) ?? current)
+        : (dkkToInr(current, fxRate) ?? current);
+    });
+    setAmountCurrency(next);
+    setAmountMessage("");
+  }
   const networth = useFeatureQuery(
     ["c27b", "networth", selectedHouseholdId, activeMemberId],
     "/v1/networth",
@@ -599,20 +632,16 @@ export function HomePage() {
                 {englishCopy.home.amount_question}
               </p>
             ) : null}
-            <label
-              className="grid gap-1 text-sm font-medium"
-              htmlFor="home-investing-amount"
-            >
-              {editorMode === "weekly"
-                ? englishCopy.home.weekly_amount
-                : englishCopy.home.monthly_amount}
-              <span className="relative">
-                <span
-                  aria-hidden="true"
-                  className={`pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm text-muted-foreground ${amountCurrency === "DKK" ? "" : "text-base"}`}
-                >
-                  {amountCurrency === "DKK" ? "DKK" : "₹"}
-                </span>
+            <div className="grid gap-1">
+              <label
+                className="text-sm font-medium"
+                htmlFor="home-investing-amount"
+              >
+                {editorMode === "weekly"
+                  ? englishCopy.home.weekly_amount
+                  : englishCopy.home.monthly_amount}
+              </label>
+              <div className="flex items-center gap-2">
                 <input
                   id="home-investing-amount"
                   type="number"
@@ -623,10 +652,40 @@ export function HomePage() {
                   onChange={(event) =>
                     setAmountDraft(event.currentTarget.value)
                   }
-                  className={`min-h-12 w-full rounded-xl border border-line bg-surface pr-3 text-base tabular-nums ${amountCurrency === "DKK" ? "pl-14" : "pl-9"}`}
+                  className="min-h-12 min-w-0 flex-1 rounded-xl border border-line bg-surface px-3 text-base tabular-nums"
                 />
-              </span>
-            </label>
+                <div
+                  role="radiogroup"
+                  aria-label={englishCopy.home.amount_currency}
+                  className="flex shrink-0 rounded-xl border border-line bg-surface p-0.5"
+                >
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={amountCurrency === "DKK"}
+                    disabled={!canUseDkk}
+                    onClick={() => changeAmountCurrency("DKK")}
+                    className={`min-h-11 min-w-11 rounded-lg px-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 ${amountCurrency === "DKK" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
+                  >
+                    kr
+                  </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={amountCurrency === "INR"}
+                    onClick={() => changeAmountCurrency("INR")}
+                    className={`min-h-11 min-w-11 rounded-lg px-2 text-sm font-medium ${amountCurrency === "INR" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
+                  >
+                    ₹
+                  </button>
+                </div>
+              </div>
+              {!canUseDkk ? (
+                <p className="text-xs text-muted-foreground">
+                  {englishCopy.home.dkk_rate_missing}
+                </p>
+              ) : null}
+            </div>
             <Button
               type="submit"
               loading={saveAmount.isPending}

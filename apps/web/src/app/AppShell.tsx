@@ -39,6 +39,16 @@ function titleForPath(pathname: string): string {
   );
 }
 
+function showHouseholdPicker(pathname: string): boolean {
+  return (
+    pathname === "/" ||
+    pathname === "/money" ||
+    pathname.startsWith("/money/") ||
+    pathname === "/plan" ||
+    pathname.startsWith("/plan/")
+  );
+}
+
 export function AppShell() {
   return <AppShellLayout />;
 }
@@ -47,6 +57,7 @@ function AppShellLayout() {
   const location = useLocation();
   const { me } = useHousehold();
   const title = titleForPath(location.pathname);
+  const showPicker = showHouseholdPicker(location.pathname);
 
   return (
     <div className="min-h-screen bg-background pb-[calc(5.5rem+env(safe-area-inset-bottom))] text-foreground">
@@ -59,9 +70,12 @@ function AppShellLayout() {
               aria-hidden="true"
               className="size-6 shrink-0"
             />
-            <h1 className="truncate text-page-title font-semibold">{title}</h1>
+            <h1 className="truncate whitespace-nowrap text-page-title font-semibold">
+              {title}
+            </h1>
           </div>
           <div className="flex shrink-0 items-center gap-1">
+            {showPicker ? <HouseholdControls variant="compact" /> : null}
             <Link
               to={`/help#${helpArticleForPath(location.pathname)}`}
               aria-label={`Help with ${title}`}
@@ -78,7 +92,6 @@ function AppShellLayout() {
         <InstallExperience />
       </Suspense>
       <main className="mx-auto grid w-full max-w-3xl gap-4 px-4 py-4 sm:px-6 sm:py-6">
-        <HouseholdControls />
         <Outlet />
       </main>
       <BottomNavigation />

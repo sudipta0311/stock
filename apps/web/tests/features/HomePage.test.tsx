@@ -38,6 +38,12 @@ function renderDkkHome(
     markFxRequested = resolve;
   });
   server.use(
+    http.get(/\/v1\/me$/, () =>
+      HttpResponse.json({
+        id: "user-test",
+        me_member_id: "member-dk-test",
+      }),
+    ),
     ...baseHomeHandlers([], investingPrefs),
     http.get(/\/v1\/members$/, () =>
       HttpResponse.json([
@@ -194,9 +200,12 @@ describe("Home this week", () => {
     const amount = screen.getByRole("spinbutton", {
       name: new RegExp(englishCopy.home.monthly_amount),
     });
-    expect(
-      await within(amount.closest("label")!).findByText("DKK"),
-    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("radio", { name: "kr" })).toHaveAttribute(
+        "aria-checked",
+        "true",
+      ),
+    );
     await user.type(amount, "5000");
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() =>
@@ -233,9 +242,10 @@ describe("Home this week", () => {
       name: new RegExp(englishCopy.home.weekly_amount),
     });
     expect(amount).toHaveValue(5000);
-    expect(
-      within(amount.closest("label")!).getByText("DKK"),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "kr" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
     await user.clear(amount);
     await user.type(amount, "5000");
     await user.click(screen.getByRole("button", { name: "Save" }));
@@ -276,13 +286,50 @@ describe("Home this week", () => {
     const amount = screen.getByRole("spinbutton", {
       name: new RegExp(englishCopy.home.monthly_amount),
     });
-    expect(
-      within(amount.closest("label")!).getByText("\u20b9"),
-    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole("radio", { name: "kr" })).toBeDisabled(),
+    );
+    expect(screen.getByText(englishCopy.home.dkk_rate_missing)).toBeVisible();
+    expect(screen.getByRole("radio", { name: "₹" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
     await user.type(amount, "5000");
     await user.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() =>
       expect(saved).toMatchObject({ monthly_sip_capacity: "5000" }),
+    );
+  });
+
+  it("converts the amount when switching between kroner and rupees", async () => {
+    const user = userEvent.setup();
+    let saved: Record<string, unknown> | null = null;
+    renderDkkHome(
+      { monthly_sip_capacity: "0.00", new_money_this_week: "0.00" },
+      "12.5",
+    );
+    server.use(
+      http.put(/\/v1\/me\/investing$/, async ({ request }) => {
+        saved = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(saved);
+      }),
+    );
+
+    const amount = await screen.findByRole("spinbutton", {
+      name: new RegExp(englishCopy.home.monthly_amount),
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("radio", { name: "kr" })).toHaveAttribute(
+        "aria-checked",
+        "true",
+      ),
+    );
+    await user.type(amount, "5000");
+    await user.click(screen.getByRole("radio", { name: "₹" }));
+    expect(amount).toHaveValue(62500);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(saved).toMatchObject({ monthly_sip_capacity: "62500.00" }),
     );
   });
 
@@ -378,8 +425,12 @@ describe("Home this week", () => {
     renderHome();
     const articles = await screen.findAllByRole("article");
     expect(articles).toHaveLength(3);
-    const emergencyFundLabel = `${englishCopy.labels.action_kinds.BUILD_EMERGENCY_FUND} · ${englishCopy.labels.instrument_categories.sweep_fd}`;
-    expect(articles[2]).toHaveTextContent(emergencyFundLabel);
+    expect(articles[2]).toHaveTextContent(
+      englishCopy.labels.action_kinds.BUILD_EMERGENCY_FUND,
+    );
+    expect(articles[2]).toHaveTextContent(
+      englishCopy.labels.instrument_categories.sweep_fd,
+    );
     expect(screen.queryByText("action-four")).not.toBeInTheDocument();
   });
 

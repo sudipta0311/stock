@@ -74,7 +74,7 @@ export function Stat({
 }: {
   label: ReactNode;
   value: string;
-  detail?: string;
+  detail?: ReactNode;
 }) {
   return (
     <div className="space-y-1">

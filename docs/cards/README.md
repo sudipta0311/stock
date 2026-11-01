@@ -56,6 +56,7 @@ Status: ⬜ not started · 🟦 in progress · ✅ accepted · 🔁 rework · �
 | C34 | Savings in DKK/EUR; fixes from the mock-data walkthrough (hint, fund check, errors, required marks, quick-add amounts, push on account switch, rate note, onboarding counter) | 3, 8 | ✅ |
 | C35 | US market valuation (S&P 500 look-through P/E from SPY holdings and EDGAR EPS, ~3 years of split-checked monthly history) and a code-decided buy hint on each research idea | 4.9, 5 | ✅ |
 | C36 | A simpler everyday app: Home asks for the monthly amount and shows this week's steps; Ideas open by default with buy hints; shorter Money with one Add-or-update; notes on Home only; Settings in four sections; a waking server keeps the screen | UX | ✅ |
+| C37 | Clearer screens: Money shows the real count and plain unit lines (codes only in Details); Ideas say "Looks cheap" or "Fairly priced" with a closed "Why this idea?"; Plan draws now vs plan with the biggest gap and a matching button; the family picker sits in the header; Home takes the amount in kr or ₹ | UX | ✅ |
 
 ## Follow-ups and review outcomes
 

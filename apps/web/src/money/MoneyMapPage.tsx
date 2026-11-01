@@ -191,7 +191,7 @@ function assetLabel(asset: AssetResponse): string {
     asset.details.bank ?? asset.details.insurer ?? asset.details.institution;
   const typeLabel = assetTitles[asset.asset_type] ?? asset.asset_type;
   return typeof bank === "string" && bank
-    ? `${typeLabel} · ${bank}`
+    ? `${typeLabel} at ${bank}`
     : typeLabel;
 }
 
@@ -273,12 +273,12 @@ function LoansGroup({
   if (!summary?.loans.length) return null;
   return (
     <Card className="grid gap-1">
-      <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+      <div className="mb-1 grid gap-1">
         <h3 className="text-sm font-semibold text-muted-foreground">Loans</h3>
-        <p className="text-xs text-muted-foreground">
-          Total left {shownAmount(summary.remaining_inr)} ·{" "}
-          {shownAmount(summary.monthly_emis_inr)} per month
-        </p>
+        <div className="grid gap-0.5 text-xs text-muted-foreground">
+          <p>Total left {shownAmount(summary.remaining_inr)}</p>
+          <p>Monthly payments {shownAmount(summary.monthly_emis_inr)}</p>
+        </div>
       </div>
       {summary.loans.map((loan) => {
         const payoff = loan.payoff_month
@@ -300,10 +300,12 @@ function LoansGroup({
                 <WalletCards aria-hidden="true" className="size-4" />
               </span>
               <span className="min-w-0 flex-1">
-                <strong className="block truncate text-sm">
-                  {loan.name}
-                  {loan.lender ? ` · ${loan.lender}` : ""}
-                </strong>
+                <strong className="block truncate text-sm">{loan.name}</strong>
+                {loan.lender ? (
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {loan.lender}
+                  </span>
+                ) : null}
                 <span className="block truncate text-xs text-muted-foreground">
                   {loan.never_pays_off
                     ? "Monthly payment may not cover interest"
@@ -377,7 +379,6 @@ function HoldingsGroup({
                     <span data-security>{holding.name}</span>
                   </strong>
                   <span className="block truncate text-xs text-muted-foreground">
-                    <span data-security>{holding.symbol}</span> ·{" "}
                     {quantityLabel(holding.quantity, holding.security_type)}
                   </span>
                 </span>
@@ -715,6 +716,10 @@ export function MoneyMapPage() {
   const assets = useMemo(() => assetsQuery.data ?? [], [assetsQuery.data]);
   const importJobs = importsQuery.data ?? [];
   const networth = networthQuery.data ?? null;
+  const listedItemCount =
+    assetsQuery.data && networth
+      ? assets.length + networth.holdings.length
+      : null;
   const loanSummary = loansQuery.data ?? null;
   const plan = (planQuery.data as WeeklyPlan | undefined) ?? null;
   const loading = networthQuery.isPending;
@@ -797,8 +802,6 @@ export function MoneyMapPage() {
       tickedCategories.includes(tile.category) &&
       !networth?.completeness.done.includes(tile.category),
   )?.category;
-  const completenessText = `Money Map ${completenessPct}% complete${nextCategory ? ` · add ${categoryLabel(nextCategory)} to finish` : tickedCategories.length ? " · everything is up to date" : ""}`;
-
   async function toggleCategory(category: string) {
     if (isViewer) return;
     const updated = checklist.includes(category)
@@ -915,7 +918,23 @@ export function MoneyMapPage() {
                   </Term>
                 }
                 value={shownAmount(totals.netWorth)}
-                detail={`${secondaryAmount(totals.netWorth) ? `${secondaryAmount(totals.netWorth)} · ` : ""}Updated ${networth?.as_of ? new Intl.DateTimeFormat("en-IN", { day: "numeric", month: "short", year: "numeric" }).format(new Date(`${networth.as_of}T00:00:00`)) : "recently"}`}
+                detail={
+                  <span className="grid gap-0.5">
+                    {secondaryAmount(totals.netWorth) ? (
+                      <span>{secondaryAmount(totals.netWorth)}</span>
+                    ) : null}
+                    <span>
+                      Updated{" "}
+                      {networth?.as_of
+                        ? new Intl.DateTimeFormat("en-IN", {
+                            day: "numeric",
+                            month: "short",
+                            year: "numeric",
+                          }).format(new Date(`${networth.as_of}T00:00:00`))
+                        : "recently"}
+                    </span>
+                  </span>
+                }
               />
             </div>
             {selectedMemberId === "family" && familyMembers.length > 0 ? (
@@ -970,7 +989,9 @@ export function MoneyMapPage() {
           <h2 id="assets-heading" className="text-lg font-semibold">
             Your money
           </h2>
-          {!offlineSummaryOnly ? <Badge>{assets.length} items</Badge> : null}
+          {!offlineSummaryOnly && listedItemCount !== null ? (
+            <Badge>{listedItemCount} items</Badge>
+          ) : null}
         </div>
         {offlineSummaryOnly ? (
           <Card>
@@ -1126,9 +1147,14 @@ export function MoneyMapPage() {
               anytime.
             </p>
             {networth ? (
-              <p className="text-xs text-muted-foreground">
-                {completenessText}
-              </p>
+              <div className="grid gap-1 text-xs text-muted-foreground">
+                <p>Money Map {completenessPct}% complete</p>
+                {nextCategory ? (
+                  <p>Add {categoryLabel(nextCategory)} to finish</p>
+                ) : tickedCategories.length ? (
+                  <p>Everything is up to date</p>
+                ) : null}
+              </div>
             ) : null}
             <div className="grid grid-cols-2 gap-2 [@media(min-width:360px)]:grid-cols-3">
               {checklistTiles.map((tile) => {
@@ -1185,8 +1211,11 @@ export function MoneyMapPage() {
                     className="flex min-h-10 items-center justify-between gap-3 border-t border-line pt-2 text-sm"
                   >
                     <span>{row.label}</span>
-                    <span className="tabular-nums">
-                      {shownAmount(row.amount)} · {plainPercent(row.pct)}
+                    <span className="flex gap-3 tabular-nums">
+                      <span>{shownAmount(row.amount)}</span>
+                      <span className="text-muted-foreground">
+                        {plainPercent(row.pct)}
+                      </span>
                     </span>
                   </div>
                 ))}

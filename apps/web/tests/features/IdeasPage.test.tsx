@@ -4,6 +4,7 @@ import { HttpResponse, http } from "msw";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 import { axe } from "vitest-axe";
+import englishCopy from "../../src/copy/en.json";
 import { IdeasPage } from "../../src/ideas/IdeasPage";
 import { WorldPage } from "../../src/ideas/WorldPage";
 import { action, networth, weeklyPlan } from "./fixtures";
@@ -25,7 +26,15 @@ function ideaHandlers(plan = weeklyPlan()) {
             quant_decile: 8,
             dossier_status: "APPROVED",
             valuation_percentile: "35",
+            valuation_label: "fair",
             confidence: "HIGH",
+            why: {
+              reasons: [
+                "A durable business has steady demand.",
+                "Its balance sheet is manageable.",
+              ],
+              risk: "Costs could rise faster than sales.",
+            },
           },
         ],
       }),
@@ -48,11 +57,49 @@ function ideaHandlers(plan = weeklyPlan()) {
     ),
     http.get(/\/v1\/plan$/, () => HttpResponse.json(plan)),
     http.get(/\/v1\/networth$/, () => HttpResponse.json(networth())),
+    http.get(/\/v1\/me\/investing$/, () =>
+      HttpResponse.json({ monthly_sip_capacity: "0.00" }),
+    ),
   ];
 }
 
 describe("Ideas page", () => {
-  it("shows research ideas, confidence, valuation words, and the disclaimer", async () => {
+  it("offers to set a monthly amount when Denmark has nothing to buy", async () => {
+    server.use(
+      ...ideaHandlers(
+        weeklyPlan({
+          residency: {
+            status: "NRI",
+            country: "DK",
+            settle_plan: "undecided",
+            us_person: false,
+            planned_return_year: null,
+          },
+          abroad_buy_list: [],
+        }),
+      ),
+      http.get(/\/v1\/research\/ideas$/, () =>
+        HttpResponse.json({ week: "2026-W44", ideas: [] }),
+      ),
+    );
+
+    renderWithQueries(
+      <MemoryRouter>
+        <IdeasPage />
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByText(englishCopy.denmark.no_buy_short),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", {
+        name: englishCopy.denmark.set_monthly_amount,
+      }),
+    ).toHaveAttribute("href", "/");
+  });
+
+  it("shows ideas and confidence details in plain words", async () => {
     server.use(...ideaHandlers());
     const { container } = renderWithQueries(
       <MemoryRouter>
@@ -60,9 +107,15 @@ describe("Ideas page", () => {
       </MemoryRouter>,
     );
     expect(await screen.findByText("DEMO")).toBeInTheDocument();
-    expect(screen.getByText("Energy · Below the middle")).toBeInTheDocument();
-    expect(screen.getByText("How sure we are: High")).toBeInTheDocument();
+    expect(screen.getByText("Energy")).toBeInTheDocument();
+    expect(screen.getByText("Fairly priced")).toBeInTheDocument();
+    expect(screen.getByText("Higher confidence")).toBeInTheDocument();
     expect(screen.getByText("Part 1 of 3")).toBeInTheDocument();
+    const ideaWhy = screen.getByText("Why this idea?").closest("details");
+    expect(ideaWhy).not.toHaveAttribute("open");
+    expect(
+      screen.getByText("A durable business has steady demand."),
+    ).not.toBeVisible();
     expect(
       screen.getByText("Ideas are research to review, not a reason to rush."),
     ).toBeInTheDocument();
@@ -86,6 +139,7 @@ describe("Ideas page", () => {
               quant_decile: 8,
               dossier_status: "APPROVED",
               valuation_percentile: "35",
+              valuation_label: "fair",
               confidence: "HIGH",
               entry_hint: {
                 code: "buy_in_parts",
@@ -102,6 +156,7 @@ describe("Ideas page", () => {
               quant_decile: 8,
               dossier_status: "APPROVED",
               valuation_percentile: "85",
+              valuation_label: "expensive",
               confidence: "HIGH",
               entry_hint: {
                 code: "buy_in_parts",
@@ -121,6 +176,7 @@ describe("Ideas page", () => {
               quant_decile: 8,
               dossier_status: "APPROVED",
               valuation_percentile: "45",
+              valuation_label: "fair",
               confidence: "MEDIUM",
               entry_hint: {
                 code: "wait",
@@ -145,6 +201,9 @@ describe("Ideas page", () => {
       screen.getByText("Buy in 6 parts. Markets look expensive."),
     ).toBeVisible();
     expect(screen.getByText("Wait for a better price")).toBeVisible();
+    const waitIdea = screen.getByText("WAIT").closest("article");
+    expect(waitIdea).not.toBeNull();
+    expect(within(waitIdea!).queryByText(/confidence/i)).toBeNull();
 
     const whyDetails = screen
       .getAllByText("Why?")
@@ -179,6 +238,7 @@ describe("Ideas page", () => {
               quant_decile: 10,
               dossier_status: "APPROVED",
               valuation_percentile: "35",
+              valuation_label: "fair",
               confidence: "MEDIUM",
             },
           ],
@@ -258,6 +318,7 @@ describe("Ideas page", () => {
         quant_decile: 8,
         dossier_status: "APPROVED",
         valuation_percentile: "35",
+        valuation_label: "fair",
         confidence: "HIGH",
       }),
     );

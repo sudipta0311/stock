@@ -16,7 +16,7 @@ import type { NetworthResponse } from "./api";
 import { getPlan } from "../planning/api";
 import type { WeeklyPlan } from "../planning/api";
 import { Badge, Card } from "../ui";
-import { quantityLabel } from "./quantity";
+import { exactQuantity, quantityLabel } from "./quantity";
 
 function statusIcon(status: string) {
   if (status === "ok")
@@ -199,11 +199,8 @@ export function HoldingPage() {
   return (
     <div className="grid gap-4">
       <header>
-        <h2 className="text-xl font-semibold">
-          {holding.name || holding.symbol}
-        </h2>
+        <h2 className="text-xl font-semibold">{holding.name || "Holding"}</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          {holding.symbol} ·{" "}
           {quantityLabel(holding.quantity, holding.security_type)}
         </p>
       </header>
@@ -248,6 +245,27 @@ export function HoldingPage() {
           </p>
         </div>
       </Card>
+      <details className="rounded-xl border border-line px-3">
+        <summary className="min-h-12 cursor-pointer py-3 text-sm font-semibold">
+          Details
+        </summary>
+        <dl className="grid gap-2 border-t border-line py-3 text-sm">
+          <div className="flex justify-between gap-3">
+            <dt className="text-muted-foreground">Code</dt>
+            <dd className="text-right">{holding.symbol}</dd>
+          </div>
+          <div className="flex justify-between gap-3">
+            <dt className="text-muted-foreground">Quantity</dt>
+            <dd className="text-right">{exactQuantity(holding.quantity)}</dd>
+          </div>
+          {textValue(extra.isin) ? (
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted-foreground">Other code</dt>
+              <dd className="text-right">{textValue(extra.isin)}</dd>
+            </div>
+          ) : null}
+        </dl>
+      </details>
       {/* Without a review there is nothing to show; a placeholder only adds noise. */}
       {card ? <ExitCard value={card} /> : null}
     </div>

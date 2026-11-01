@@ -136,6 +136,8 @@ def test_research_ideas_reads_selector_and_track_record_from_existing_pack(
     payload = response.json()
     assert payload["ideas"][0]["symbol"] == "OLD"
     assert payload["ideas"][0]["entry_hint"] is None
+    assert payload["ideas"][0]["valuation_label"] == "fair"
+    assert payload["ideas"][0]["why"] is None
     assert payload["core_picks"]["in_nifty50"][0]["symbol"] == "SYNTH"
     assert payload["track_record"]["markets"]["IN"]["status"] == "available"
 

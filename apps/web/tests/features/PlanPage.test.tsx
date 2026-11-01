@@ -10,6 +10,15 @@ import { loanSummary, networth, weeklyPlan } from "./fixtures";
 import { renderWithQueries } from "./render";
 import { server } from "../msw";
 
+const PLAN_GAP_KEYS = [
+  "equity_india",
+  "equity_global",
+  "debt",
+  "cash",
+  "gold",
+] as const;
+type PlanGapKey = (typeof PLAN_GAP_KEYS)[number];
+
 function policyAsset() {
   return {
     id: "policy-test",
@@ -44,6 +53,32 @@ function renderPlan() {
       <PlanPage />
     </MemoryRouter>,
   );
+}
+
+function allocationWithSingleGap(
+  gapKey: PlanGapKey,
+  currentPct: string,
+): WeeklyPlan["allocation"] {
+  const allocation = { ...weeklyPlan().allocation };
+  for (const key of PLAN_GAP_KEYS) {
+    allocation[key] = {
+      ...allocation[key],
+      target: "100000.00",
+      current: "100000.00",
+      gap: "0.00",
+      target_pct: "20",
+      current_pct: "20",
+    };
+  }
+  allocation[gapKey] = {
+    ...allocation[gapKey],
+    target: "1200000.00",
+    current: "0.00",
+    gap: "1200000.00",
+    target_pct: "20",
+    current_pct: currentPct,
+  };
+  return allocation;
 }
 
 function planHandlers(planOverrides: Partial<WeeklyPlan> = {}) {
@@ -94,8 +129,15 @@ describe("Plan page", () => {
     expect(
       await screen.findByRole("heading", { name: "Your money vs your plan" }),
     ).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /^Now:/ })).toBeVisible();
+    expect(screen.getByRole("img", { name: /^Plan:/ })).toBeVisible();
     expect(
-      screen.getByText("A bit more is in safe money than your plan suggests."),
+      screen.getByRole("link", { name: "Add money abroad" }),
+    ).toHaveAttribute("href", "/money/add/us_investments");
+    expect(
+      screen.getByText(
+        "Your money abroad is below plan. New money goes there first.",
+      ),
     ).toBeInTheDocument();
     expect(screen.getByText(/Your safe money target is/)).toBeInTheDocument();
     expect(
@@ -109,6 +151,9 @@ describe("Plan page", () => {
     ).not.toBeVisible();
 
     await user.click(screen.getByText("Show amounts"));
+    expect(
+      screen.getByText(/Your money abroad is .* below plan\./),
+    ).toBeInTheDocument();
     expect(document.body).toHaveTextContent(/Now: ₹3.8 L \(38%\)/);
     expect(document.body).toHaveTextContent(/Plan: ₹4.5 L \(45%\)/);
     await user.click(screen.getByText("Details"));
@@ -123,6 +168,70 @@ describe("Plan page", () => {
     ).toBeInTheDocument();
     expect(screen.queryByText(/may be subject to estate tax/i)).toBeNull();
   });
+
+  it.each([
+    ["below", "15.01", false],
+    ["at", "15", true],
+    ["above", "14.99", true],
+  ])(
+    "shows the gap note only at or above five percentage points (%s)",
+    async (_position, currentPct, hasGap) => {
+      const user = userEvent.setup();
+      server.use(
+        ...planHandlers({
+          allocation: allocationWithSingleGap("debt", currentPct),
+        }),
+      );
+      renderPlan();
+
+      expect(
+        await screen.findByRole("heading", { name: "Your money vs your plan" }),
+      ).toBeInTheDocument();
+      if (hasGap) {
+        expect(
+          screen.getByText(
+            "Your safe money is below plan. New money goes there first.",
+          ),
+        ).toBeInTheDocument();
+        expect(
+          screen.getByRole("link", { name: "Add safe money" }),
+        ).toHaveAttribute("href", "/money/add/fd");
+        await user.click(screen.getByText("Show amounts"));
+        expect(
+          screen.getByText("Your safe money is ₹12 L below plan."),
+        ).toBeInTheDocument();
+      } else {
+        expect(
+          screen.getByText("Your money is close to your plan."),
+        ).toBeInTheDocument();
+        expect(
+          screen.getByRole("link", { name: "Update your money" }),
+        ).toHaveAttribute("href", "/money");
+      }
+    },
+  );
+
+  it.each([
+    ["equity_india", "Add Indian shares", "/import"],
+    ["equity_global", "Add money abroad", "/money/add/us_investments"],
+    ["debt", "Add safe money", "/money/add/fd"],
+    ["cash", "Add cash", "/money/add/savings"],
+    ["gold", "Add gold", "/money/add/gold"],
+  ] as const)(
+    "routes the %s gap to its matching add flow",
+    async (gapKey, buttonCopy, href) => {
+      server.use(
+        ...planHandlers({
+          allocation: allocationWithSingleGap(gapKey, "10"),
+        }),
+      );
+      renderPlan();
+
+      expect(
+        await screen.findByRole("link", { name: buttonCopy }),
+      ).toHaveAttribute("href", href);
+    },
+  );
 
   it("shows the plan for money that came only from a statement", async () => {
     server.use(

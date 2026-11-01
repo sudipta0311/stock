@@ -1,11 +1,11 @@
 import { Link } from "react-router";
 import { Lightbulb } from "lucide-react";
 import { formatInr, formatUsd } from "../lib/money";
-import { labelForCode } from "../lib/labels";
 import {
   asArray,
   asRecord,
   instrumentLabel,
+  isPositiveAmount,
   textValue,
 } from "../features/data";
 import {
@@ -16,6 +16,7 @@ import {
   useFeatureQuery,
 } from "../features/api";
 import { getActions, getPlan, getResearchIdeas } from "../planning/api";
+import { getInvestingPrefs } from "../settings/api";
 import type {
   ActionResponse,
   ResearchIdeasResponse,
@@ -133,12 +134,14 @@ function DenmarkBuyCard({ plan }: { plan?: WeeklyPlan }) {
                     : textValue(line.account) === "pension"
                       ? copy.account_pension
                       : copy.account_ordinary}
-                  {" · "}
-                  {copy.broker}:{" "}
-                  {textValue(asRecord(copy.brokers)[broker], broker)}
-                  {" · "}
-                  {textValue(instrument.currency)}
                 </p>
+                <div className="flex flex-wrap justify-between gap-x-3 text-xs text-muted-foreground">
+                  <span>
+                    {copy.broker}:{" "}
+                    {textValue(asRecord(copy.brokers)[broker], broker)}
+                  </span>
+                  <span>{textValue(instrument.currency)}</span>
+                </div>
                 <details>
                   <summary className="cursor-pointer text-sm font-semibold text-brand">
                     {copy.how}
@@ -378,13 +381,17 @@ export function corePicks(
   return [...values];
 }
 
-function valuationWords(value: string): string {
-  const percentile = Number(value);
-  if (!Number.isFinite(percentile)) return "Valuation range unavailable";
-  if (percentile <= 20) return "Lower valuation range";
-  if (percentile <= 50) return "Below the middle";
-  if (percentile <= 80) return "Above the middle";
-  return "Upper valuation range";
+function valuationWords(value: string): string | null {
+  if (value === "cheap") return englishCopy.ideas.valuation_cheap;
+  if (value === "fair") return englishCopy.ideas.valuation_fair;
+  if (value === "expensive") return englishCopy.ideas.valuation_expensive;
+  return null;
+}
+
+function confidenceWords(value: string): string | null {
+  if (value.toUpperCase() === "HIGH") return englishCopy.ideas.confidence_high;
+  if (value.toUpperCase() === "LOW") return englishCopy.ideas.confidence_low;
+  return null;
 }
 
 function referencedTranche(
@@ -490,9 +497,15 @@ function ResearchIdea({
 }) {
   const idea = asRecord(raw);
   const symbol = textValue(idea.symbol, "Research idea");
-  const confidence = textValue(idea.confidence);
-  const valuation = textValue(idea.valuation_percentile);
+  const confidence = confidenceWords(textValue(idea.confidence));
+  const valuation = valuationWords(textValue(idea.valuation_label));
   const tranche = referencedTranche(idea, actions);
+  const why = asRecord(idea.why);
+  const whyReasons = asArray(why.reasons)
+    .slice(0, 2)
+    .map((reason) => textValue(reason))
+    .filter(Boolean);
+  const whyRisk = textValue(why.risk);
   const hint = asRecord(idea.entry_hint);
   const hintCode = textValue(hint.code);
   const hintParts = Number(hint.parts);
@@ -525,16 +538,11 @@ function ResearchIdea({
             {symbol}
           </h3>
           {confidence ? (
-            <span className="text-right text-xs text-muted-foreground">
-              {labelForCode(confidence)}
+            <span className="shrink-0 rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
+              {confidence}
             </span>
           ) : null}
         </div>
-        <p className="text-sm text-muted-foreground">
-          {textValue(idea.sector, "Sector unavailable")} ·{" "}
-          {valuationWords(valuation)}
-        </p>
-        {tranche ? <p className="mt-1 text-sm font-medium">{tranche}</p> : null}
         {hintLine ? (
           <div className="mt-1">
             <p className="text-sm font-medium">{hintLine}</p>
@@ -552,6 +560,41 @@ function ResearchIdea({
             ) : null}
           </div>
         ) : null}
+        <div className="mt-1 flex items-baseline justify-between gap-3">
+          <p className="min-w-0 truncate text-sm text-muted-foreground">
+            {textValue(idea.sector, "Sector unavailable")}
+          </p>
+          {valuation ? (
+            <p className="shrink-0 text-right text-sm text-muted-foreground">
+              {valuation}
+            </p>
+          ) : null}
+        </div>
+        {whyReasons.length || whyRisk ? (
+          <details className="mt-1">
+            <summary className="min-h-9 cursor-pointer py-1 text-sm text-muted-foreground">
+              {englishCopy.ideas.why_this_idea}
+            </summary>
+            <div className="grid gap-2 pb-2 text-sm text-muted-foreground">
+              {whyReasons.length ? (
+                <ul className="grid gap-1">
+                  {whyReasons.map((reason, reasonIndex) => (
+                    <li key={`${symbol}-reason-${reasonIndex}`}>{reason}</li>
+                  ))}
+                </ul>
+              ) : null}
+              {whyRisk ? (
+                <p>
+                  <strong className="font-medium text-foreground">
+                    {englishCopy.ideas.main_risk}:{" "}
+                  </strong>
+                  {whyRisk}
+                </p>
+              ) : null}
+            </div>
+          </details>
+        ) : null}
+        {tranche ? <p className="mt-1 text-sm font-medium">{tranche}</p> : null}
         {idea.price ? (
           <p className="mt-1 text-xs text-muted-foreground tabular-nums">
             Reference price{" "}
@@ -607,6 +650,14 @@ function ResearchCard({
       <h2 className="text-base font-semibold">
         {englishCopy.ideas.weekly_title}
       </h2>
+      <details className="border-b border-line pb-2">
+        <summary className="min-h-9 cursor-pointer py-1 text-sm font-medium text-muted-foreground">
+          {englishCopy.ideas.term_prompt}
+        </summary>
+        <p className="pb-1 text-sm text-muted-foreground">
+          {englishCopy.ideas.confidence_help}
+        </p>
+      </details>
       {hasIdeas ? (
         <>
           <IdeaGroups groups={groups.top} actions={actions} />
@@ -644,6 +695,11 @@ export function IdeasPage() {
     getActions,
   );
   const plan = useFeatureQuery(["c22", "plan"], "/v1/plan", getPlan);
+  const investing = useFeatureQuery(
+    ["c22", "investing"],
+    "/v1/me/investing",
+    getInvestingPrefs,
+  );
   if (!research.supported || isMissingFeature(research.error))
     return <ComingSoon title="Research ideas are coming soon" />;
   if (research.isPending) return <ScreenLoading label="Loading ideas" />;
@@ -671,9 +727,16 @@ export function IdeasPage() {
         actions={actions.data}
       />
       {denmarkResident && !denmarkBuyCount ? (
-        <p className="text-sm text-muted-foreground">
-          {englishCopy.denmark.no_buy_short}
-        </p>
+        <div className="grid gap-1 text-sm text-muted-foreground">
+          <p>{englishCopy.denmark.no_buy_short}</p>
+          {!investing.isPending &&
+          Boolean(investing.data) &&
+          !isPositiveAmount(investing.data?.monthly_sip_capacity) ? (
+            <Link to="/" className="min-h-9 w-fit py-1 font-medium text-brand">
+              {englishCopy.denmark.set_monthly_amount}
+            </Link>
+          ) : null}
+        </div>
       ) : null}
       <SelectorFunds research={research.data} />
       <Link

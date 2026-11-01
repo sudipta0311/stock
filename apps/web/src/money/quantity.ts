@@ -7,12 +7,43 @@ function groupIndian(value: string): string {
   return fraction ? `${grouped}.${fraction}` : grouped;
 }
 
+function roundedWhole(quantity: string): string {
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(quantity);
+  if (!match) return quantity;
+  const whole = BigInt(match[1] ?? "0");
+  const fraction = match[2] ?? "";
+  return (whole + ((fraction[0] ?? "0") >= "5" ? 1n : 0n)).toString();
+}
+
+function roundedSubUnit(quantity: string): string {
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(quantity);
+  if (!match) return quantity;
+  const fraction = match[2] ?? "";
+  const thousandths =
+    BigInt(match[1] ?? "0") * 1000n +
+    BigInt(fraction.slice(0, 3).padEnd(3, "0") || "0") +
+    ((fraction[3] ?? "0") >= "5" ? 1n : 0n);
+  if (thousandths === 0n && /[1-9]/.test(quantity)) return "<0.001";
+  const whole = thousandths / 1000n;
+  const decimals = (thousandths % 1000n).toString().padStart(3, "0");
+  const trimmedDecimals = decimals.replace(/0+$/, "");
+  return trimmedDecimals ? `${whole}.${trimmedDecimals}` : whole.toString();
+}
+
+/** Exact quantity for closed holding details, with insignificant zeros removed. */
+export function exactQuantity(quantity: string): string {
+  return quantity.includes(".") ? quantity.replace(/\.?0+$/, "") : quantity;
+}
+
 /** "82 units" for funds, "1,200 shares" for stocks, without trailing zeros. */
 export function quantityLabel(quantity: string, securityType: string): string {
-  const trimmed = quantity.includes(".")
-    ? quantity.replace(/\.?0+$/, "")
-    : quantity;
-  const unit =
-    securityType === "mf" || securityType === "etf" ? "units" : "shares";
+  const isUnitCount = ["mf", "etf", "bond", "sgb"].includes(securityType);
+  const isSubUnit = /^(?:0\.\d*[1-9]\d*|0\.0*[1-9]\d*)$/.test(quantity);
+  const trimmed = isUnitCount
+    ? isSubUnit
+      ? roundedSubUnit(quantity)
+      : roundedWhole(quantity)
+    : exactQuantity(quantity);
+  const unit = isUnitCount ? "units" : "shares";
   return `${/^\d+(?:\.\d+)?$/.test(trimmed) ? groupIndian(trimmed) : trimmed} ${unit}`;
 }

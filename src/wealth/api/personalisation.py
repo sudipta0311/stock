@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import date, datetime
+from decimal import Decimal
+from functools import lru_cache
+from pathlib import Path as FilePath
 from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
+import yaml
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, text
@@ -76,6 +80,11 @@ class EntryHintSummary(ApiModel):
     reasons: list[str]
 
 
+class ResearchIdeaWhy(ApiModel):
+    reasons: list[str] = Field(default_factory=list)
+    risk: str
+
+
 class ResearchIdeaSummary(ApiModel):
     security_id: str
     symbol: str
@@ -85,8 +94,10 @@ class ResearchIdeaSummary(ApiModel):
     quant_decile: int
     dossier_status: str
     valuation_percentile: str
+    valuation_label: Literal["cheap", "fair", "expensive"]
     confidence: str
     entry_hint: EntryHintSummary | None = None
+    why: ResearchIdeaWhy | None = None
 
 
 class ResearchIdeasResponse(ApiModel):
@@ -95,6 +106,28 @@ class ResearchIdeasResponse(ApiModel):
     core_picks: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
     track_record: dict[str, Any] | None = None
     amc_international_suspended: bool | None = None
+
+
+_RESEARCH_RULES_PATH = FilePath(__file__).resolve().parents[3] / "rules" / "research.yaml"
+
+
+@lru_cache(maxsize=1)
+def _valuation_percentile_thresholds() -> tuple[Decimal, Decimal]:
+    raw = yaml.safe_load(_RESEARCH_RULES_PATH.read_text(encoding="utf-8"))
+    valuation = raw["valuation"]
+    return (
+        Decimal(str(valuation["cheap_pe_percentile_max"])),
+        Decimal(str(valuation["expensive_pe_percentile_min"])),
+    )
+
+
+def valuation_label(percentile: Decimal) -> Literal["cheap", "fair", "expensive"]:
+    cheap_max, expensive_min = _valuation_percentile_thresholds()
+    if percentile <= cheap_max:
+        return "cheap"
+    if percentile >= expensive_min:
+        return "expensive"
+    return "fair"
 
 
 def current_week(on: date) -> str:
@@ -393,8 +426,13 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                 continue
             raw_hint = raw.get("entry_hint")
             idea = SatelliteIdea.model_validate(
-                {key: value for key, value in raw.items() if key != "entry_hint"}
+                {
+                    key: value
+                    for key, value in raw.items()
+                    if key not in {"entry_hint", "why", "valuation_label"}
+                }
             )
+            raw_why = raw.get("why")
             ideas.append(
                 ResearchIdeaSummary(
                     security_id=idea.security_id,
@@ -405,10 +443,16 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                     quant_decile=idea.quant_decile,
                     dossier_status=idea.dossier_status,
                     valuation_percentile=format(idea.valuation_percentile, "f"),
+                    valuation_label=valuation_label(idea.valuation_percentile),
                     confidence=idea.confidence,
                     entry_hint=(
                         EntryHintSummary.model_validate(raw_hint)
                         if isinstance(raw_hint, dict)
+                        else None
+                    ),
+                    why=(
+                        ResearchIdeaWhy.model_validate(raw_why)
+                        if isinstance(raw_why, dict)
                         else None
                     ),
                 )

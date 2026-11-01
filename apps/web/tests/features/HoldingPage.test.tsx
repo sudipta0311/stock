@@ -1,4 +1,5 @@
 import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { describe, expect, it } from "vitest";
@@ -11,6 +12,7 @@ import { server } from "../msw";
 
 describe("holding Exit Card", () => {
   it("shows the holding, trigger rows, tax estimate, and plain-language action", async () => {
+    const user = userEvent.setup();
     const networthQueries: string[] = [];
     server.use(
       http.get(/\/v1\/networth$/, ({ request }) => {
@@ -22,8 +24,8 @@ describe("holding Exit Card", () => {
                 security_id: "security-test",
                 name: "Demo Company",
                 symbol: "DEMO",
-                security_type: "equity",
-                quantity: "10.000",
+                security_type: "mf",
+                quantity: "0.423700",
                 value: "20000.00",
                 value_usd: null,
                 currency: "INR",
@@ -60,7 +62,7 @@ describe("holding Exit Card", () => {
                     threshold: "Trim above 90",
                   },
                 },
-                quantity: "10.000",
+                quantity: "0.423700",
                 lots_to_sell: [],
                 tax_estimate: {
                   estimated_tax: "250.00",
@@ -90,9 +92,14 @@ describe("holding Exit Card", () => {
     ).toBeInTheDocument();
     // The household view, never a stray "member_id=[object Object]" filter.
     expect(networthQueries.every((query) => query === "")).toBe(true);
-    expect(screen.getByText(/DEMO/).parentElement).toHaveTextContent(
-      "10 shares",
-    );
+    expect(screen.getByText("0.424 units")).toBeVisible();
+    expect(screen.queryByText("DEMO")).not.toBeVisible();
+    expect(screen.queryByText("0.4237")).not.toBeVisible();
+    const details = screen.getByText("Details").closest("details");
+    expect(details).not.toHaveAttribute("open");
+    await user.click(screen.getByText("Details"));
+    expect(screen.getByText("DEMO")).toBeVisible();
+    expect(screen.getByText("0.4237")).toBeVisible();
     expect(screen.getByText("Exit Card")).toBeInTheDocument();
     const thesisLabel = englishCopy.labels.trigger_keys.thesis_break;
     expect(screen.getByText(thesisLabel)).toBeInTheDocument();

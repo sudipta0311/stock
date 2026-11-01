@@ -301,6 +301,9 @@ household:
   family: "Family"
   you: "You"
   member_switcher: "View"
+  picker_label: "Choose family or person"
+  picker_people_label: "People"
+  picker_households_label: "Family plans"
   household_switcher: "Family plan"
   your_household: "Your family plan"
   role_partner: "Partner"
@@ -442,6 +445,7 @@ denmark:
   buy_intro: "We use your share savings account first when it fits."
   no_buy: "Nothing to buy this week. When there's money to invest, the fund to buy shows here."
   no_buy_short: "Nothing to buy from Denmark this week"
+  set_monthly_amount: "Set your monthly amount"
   how: "How?"
   why: "Why?"
   term_prompt: "What's this?"
@@ -626,6 +630,14 @@ ideas:
   entry_hint_buy_parts: "Buy in {parts} parts over {months} months"
   entry_hint_buy_expensive: "Buy in 6 parts. Markets look expensive."
   entry_hint_why: "Why?"
+  valuation_cheap: "Looks cheap"
+  valuation_fair: "Fairly priced"
+  valuation_expensive: "Looks expensive"
+  confidence_high: "Higher confidence"
+  confidence_low: "Lower confidence"
+  confidence_help: "Confidence reflects how much evidence supports an idea. Medium is the usual level. Higher means more checks agree; lower means more questions remain."
+  why_this_idea: "Why this idea?"
+  main_risk: "Main risk"
 settings:
   title: "Settings"
   sections:
@@ -799,6 +811,8 @@ home:
   nothing_to_do: "Nothing to do this week"
   nothing_to_buy: "Nothing to buy this week"
   amount_question: "How much can you invest each month?"
+  amount_currency: "Amount currency"
+  dkk_rate_missing: "No current DKK rate. Use rupees for now."
   monthly_amount: "Monthly amount"
   weekly_amount: "New money this week"
   amount_save: "Save"
@@ -807,10 +821,33 @@ home:
   amount_required: "Enter an amount above zero."
   amount_not_set: "No monthly amount is set yet."
   extra_money_link: "I have extra money this week"
-  money_summary: "Money · {amount}"
-  money_summary_empty: "Money · Add items to see your total"
+  money_summary: "Money: {amount}"
+  money_summary_empty: "Money: Add items to see your total"
   plan_empty: "Add what you have to see your plan"
   add_money: "Add your money"
+plan_ui:
+  now: "Now"
+  plan: "Plan"
+  close_to_plan: "Your money is close to your plan."
+  gap_sentence: "{name} is below plan. New money goes there first."
+  gap_amount_sentence: "{name} is {amount} below plan."
+  update_money: "Update your money"
+  gaps:
+    equity_india:
+      button: "Add Indian shares"
+      name: "Your money in Indian shares"
+    equity_global:
+      button: "Add money abroad"
+      name: "Your money abroad"
+    debt:
+      button: "Add safe money"
+      name: "Your safe money"
+    cash:
+      button: "Add cash"
+      name: "Your cash"
+    gold:
+      button: "Add gold"
+      name: "Your gold"
 money_ui:
   add_update: "Add or update"
   upload_statement: "Upload a statement"

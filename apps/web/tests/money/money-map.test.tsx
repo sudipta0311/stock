@@ -136,7 +136,7 @@ describe("Money Map", () => {
     const loanLink = await screen.findByRole("link", {
       name: /Home loan.*Sample Bank.*Ends Mar 2031/,
     });
-    expect(screen.getByText(/Total left/)).toHaveTextContent("per month");
+    expect(screen.getByText(/Monthly payments/)).toBeInTheDocument();
     expect(loanLink).toHaveAttribute("href", "/money/loan/loan-test-1");
     expect(
       within(loanLink).getByLabelText("Amount repaid"),
@@ -412,8 +412,9 @@ describe("Money Map", () => {
     await openWhatElse(user);
 
     expect(
-      await screen.findByText("Money Map 0% complete · add Savings to finish"),
+      await screen.findByText("Money Map 0% complete"),
     ).toBeInTheDocument();
+    expect(screen.getByText("Add Savings to finish")).toBeInTheDocument();
     expect(screen.queryByText(/add EPF to finish/)).not.toBeInTheDocument();
   });
 
@@ -453,7 +454,7 @@ describe("Money Map", () => {
     const split = screen.getByRole("heading", { name: "Split by type" })
       .parentElement as HTMLElement;
     expect(within(split).queryByText("Gold")).not.toBeInTheDocument();
-    expect(screen.getByText(/· 47%/)).toBeInTheDocument();
+    expect(screen.getByText("47%")).toBeInTheDocument();
     expect(screen.queryByText(/46\.88/)).not.toBeInTheDocument();
   });
 
@@ -546,7 +547,49 @@ describe("Money Map", () => {
       for (const name of names) {
         expect(within(group).getByText(name)).toBeVisible();
       }
+      expect(within(group).queryByText(/^TEST\d+$/)).toBeNull();
     }
+    expect(screen.getByText("6 items")).toBeVisible();
+  });
+
+  it("counts listed assets and holdings and shows a plain unit line", async () => {
+    server.use(
+      ...baseHandlers(
+        networth({
+          holdings: [
+            {
+              currency: "INR",
+              fx_as_of: null,
+              fx_missing: false,
+              name: "Synthetic index fund",
+              price_as_of: null,
+              price_source: "test",
+              quantity: "38647.6",
+              security_id: "security-synthetic-fund",
+              security_type: "mf",
+              status: "priced",
+              symbol: "SYNTHETIC-INDEX-CODE",
+              value: "10000.00",
+              value_usd: null,
+            },
+          ],
+        }),
+      ),
+    );
+    server.use(
+      http.get(/\/v1\/assets$/, () =>
+        HttpResponse.json([
+          savedAsset({ asset_type: "fd", label: "Synthetic deposit" }),
+        ]),
+      ),
+    );
+    renderMap();
+
+    expect(await screen.findByText("2 items")).toBeVisible();
+    const fundName = await screen.findByText("Synthetic index fund");
+    const row = fundName.closest("a");
+    expect(row).toHaveTextContent("38,648 units");
+    expect(row).not.toHaveTextContent("SYNTHETIC-INDEX-CODE");
   });
 
   it("opens monthly fund amounts beside the funds list", async () => {

@@ -250,6 +250,23 @@ def keep_unresearched_markets(
     return merged
 
 
+def pack_idea_why(dossier: Dossier) -> dict[str, Any]:
+    """Copy concise, compliance-checked reasons and the main risk into an idea."""
+
+    def truncate(text: str) -> str:
+        cleaned = text.strip()
+        if len(cleaned) <= 160:
+            return cleaned
+        boundary = cleaned.rfind(" ", 0, 160)
+        return cleaned[: boundary if boundary > 0 else 160].rstrip()
+
+    reasons = [truncate(text) for text in dossier.drivers if text.strip()][:2]
+    risk = next((text for text in dossier.risks if text.strip()), "")
+    if not risk and dossier.verdicts.red_team is not None:
+        risk = dossier.verdicts.red_team.falsifier
+    return {"reasons": reasons, "risk": truncate(risk)}
+
+
 def build_research_graph(
     router: ModelRouter | FakeRouter,
     *,
@@ -689,6 +706,7 @@ def build_research_graph(
             }
             idea = SatelliteIdea.model_validate(value)
             idea_json = idea.model_dump(mode="json", exclude_unset=True)
+            idea_json["why"] = pack_idea_why(dossier)
             raw_tool_results = state.get("tool_results_by_dossier", {}).get(dossier.dossier_id, {})
             market_history = index_history.get(dossier.security.market, {})
             history_label = market_history.get("history_label")

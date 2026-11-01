@@ -6446,9 +6446,28 @@
             "title": "Symbol",
             "type": "string"
           },
+          "valuation_label": {
+            "enum": [
+              "cheap",
+              "fair",
+              "expensive"
+            ],
+            "title": "Valuation Label",
+            "type": "string"
+          },
           "valuation_percentile": {
             "title": "Valuation Percentile",
             "type": "string"
+          },
+          "why": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchIdeaWhy"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -6460,9 +6479,31 @@
           "quant_decile",
           "dossier_status",
           "valuation_percentile",
+          "valuation_label",
           "confidence"
         ],
         "title": "ResearchIdeaSummary",
+        "type": "object"
+      },
+      "ResearchIdeaWhy": {
+        "additionalProperties": false,
+        "properties": {
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reasons",
+            "type": "array"
+          },
+          "risk": {
+            "title": "Risk",
+            "type": "string"
+          }
+        },
+        "required": [
+          "risk"
+        ],
+        "title": "ResearchIdeaWhy",
         "type": "object"
       },
       "ResearchIdeasResponse": {

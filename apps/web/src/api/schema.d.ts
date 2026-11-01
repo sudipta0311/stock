@@ -1,4 +1,4 @@
-// OpenAPI SHA256: 5c8a80ae216e45ee31b1fd669157cb6fb6f5eee30aea5b1e1cd5b977cba9dbc5
+// OpenAPI SHA256: 01100542690e15442528c275c9d76ae35df050bf18f369da6c56f5660b958b0f
 export interface paths {
     "/healthz": {
         parameters: {
@@ -3380,8 +3380,21 @@ export interface components {
             security_id: string;
             /** Symbol */
             symbol: string;
+            /**
+             * Valuation Label
+             * @enum {string}
+             */
+            valuation_label: "cheap" | "fair" | "expensive";
             /** Valuation Percentile */
             valuation_percentile: string;
+            why?: components["schemas"]["ResearchIdeaWhy"] | null;
+        };
+        /** ResearchIdeaWhy */
+        ResearchIdeaWhy: {
+            /** Reasons */
+            reasons?: string[];
+            /** Risk */
+            risk: string;
         };
         /** ResearchIdeasResponse */
         ResearchIdeasResponse: {

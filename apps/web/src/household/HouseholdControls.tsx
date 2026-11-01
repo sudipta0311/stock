@@ -1,7 +1,11 @@
 import englishCopy from "../copy/en.json";
 import { useHousehold } from "./HouseholdContext";
 
-export function HouseholdControls() {
+export function HouseholdControls({
+  variant = "default",
+}: {
+  variant?: "default" | "compact";
+}) {
   const {
     me,
     members,
@@ -18,6 +22,54 @@ export function HouseholdControls() {
   const hasHouseholdSwitch = households.length > 1;
 
   if (!hasMemberSwitch && !hasHouseholdSwitch) return null;
+
+  if (variant === "compact") {
+    const currentValue =
+      selectedHouseholdId && selectedHouseholdId !== ownHouseholdId
+        ? `household:${selectedHouseholdId}`
+        : `member:${selectedMemberId}`;
+    return (
+      <select
+        id="header-member-filter"
+        aria-label={englishCopy.household.picker_label}
+        value={currentValue}
+        onChange={(event) => {
+          const value = event.currentTarget.value;
+          if (value.startsWith("household:")) {
+            const id = value.slice("household:".length);
+            selectHousehold(id === ownHouseholdId ? null : id);
+          } else {
+            selectMember(value.slice("member:".length));
+          }
+        }}
+        className="min-h-9 max-w-24 truncate rounded-full border border-line bg-background px-2 text-xs font-medium"
+      >
+        <optgroup label={englishCopy.household.picker_people_label}>
+          <option value="member:family">{englishCopy.household.family}</option>
+          {members.map((member) => (
+            <option key={member.id} value={`member:${member.id}`}>
+              {memberLabel(member)}
+            </option>
+          ))}
+        </optgroup>
+        {hasHouseholdSwitch ? (
+          <optgroup label={englishCopy.household.picker_households_label}>
+            {households
+              .filter((household) => household.owner_id !== ownHouseholdId)
+              .map((household) => (
+                <option
+                  key={household.owner_id}
+                  value={`household:${household.owner_id}`}
+                >
+                  {household.owner_name ??
+                    englishCopy.household.owner_name_fallback}
+                </option>
+              ))}
+          </optgroup>
+        ) : null}
+      </select>
+    );
+  }
 
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
