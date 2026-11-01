@@ -553,7 +553,9 @@ function ResearchIdea({
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center justify-between gap-3">
           <h3
-            className="min-w-0 flex-1 truncate font-semibold"
+            // A one-line clamp, not `truncate`: nowrap text sets the whole list's minimum
+            // width, so a long company name pushed the page past a phone screen.
+            className="line-clamp-1 min-w-0 flex-1 font-semibold [overflow-wrap:anywhere]"
             data-security
             title={displayName}
           >
