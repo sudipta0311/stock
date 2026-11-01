@@ -652,7 +652,7 @@ export function HomePage() {
                   onChange={(event) =>
                     setAmountDraft(event.currentTarget.value)
                   }
-                  className="min-h-12 min-w-0 flex-1 rounded-xl border border-line bg-surface px-3 text-base tabular-nums"
+                  className="min-h-12 w-0 min-w-0 flex-1 rounded-xl border border-line bg-surface px-3 text-base tabular-nums"
                 />
                 <div
                   role="radiogroup"
