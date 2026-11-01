@@ -31,7 +31,7 @@ from wealth.db.models import (
 )
 from wealth.marketdata import store
 from wealth.marketdata.provider import DbPriceProvider
-from wealth.policy.actions import SatelliteIdea
+from wealth.policy.actions import SatelliteIdea, satellite_idea_from_pack
 from wealth.policy.debt_yields import load_debt_yields
 from wealth.policy.global_split import GeoTilts
 from wealth.policy.household import MemberProfile
@@ -399,9 +399,7 @@ def _research_pack(session: Session, week: str) -> ResearchPack | None:
     for item in document.get("ideas", []):
         if not isinstance(item, dict):
             continue
-        idea = SatelliteIdea.model_validate(
-            {key: value for key, value in item.items() if key != "entry_hint"}
-        )
+        idea = satellite_idea_from_pack(item)
         if idea.market == "US":
             try:
                 security = session.get(Security, UUID(idea.security_id))

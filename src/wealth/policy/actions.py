@@ -117,6 +117,17 @@ class SatelliteIdea(BaseModel):
     currency: str | None = None
 
 
+# Packs also carry display-only fields (`why`, `entry_hint`, ...); the policy reads only these.
+_PACK_IDEA_FIELDS = frozenset(SatelliteIdea.model_fields) - {"name", "exchange", "isin", "currency"}
+
+
+def satellite_idea_from_pack(item: Mapping[str, Any]) -> SatelliteIdea:
+    """Read a research-pack idea's policy fields, ignoring fields added for display."""
+    return SatelliteIdea.model_validate(
+        {key: value for key, value in item.items() if key in _PACK_IDEA_FIELDS}
+    )
+
+
 class WeekInput(BaseModel):
     """Inputs from the allocation, foundation, research, and route engines."""
 

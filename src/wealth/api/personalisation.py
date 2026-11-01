@@ -26,7 +26,7 @@ from wealth.db.models import (
     Security,
 )
 from wealth.marketdata import store
-from wealth.policy.actions import SatelliteIdea, load_buying_rules
+from wealth.policy.actions import SatelliteIdea, load_buying_rules, satellite_idea_from_pack
 from wealth.policy.data import load_policy_inputs
 from wealth.policy.denmark_picks import global_fund_ideas
 from wealth.policy.highlights import (
@@ -551,13 +551,7 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             if not isinstance(raw, dict):
                 continue
             raw_hint = raw.get("entry_hint")
-            idea = SatelliteIdea.model_validate(
-                {
-                    key: value
-                    for key, value in raw.items()
-                    if key not in {"entry_hint", "why", "valuation_label"}
-                }
-            )
+            idea = satellite_idea_from_pack(raw)
             try:
                 security_id = UUID(idea.security_id)
             except ValueError:
