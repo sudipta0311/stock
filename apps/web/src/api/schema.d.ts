@@ -1,4 +1,4 @@
-// OpenAPI SHA256: ade13468f5fd9ccfa6cbec693f417ad1adb9f614704d348df0a33b05a174ba8e
+// OpenAPI SHA256: 81e135bf939a356a4734f0843baed8c97b17b466a4bec76763449e1d4c09426b
 export interface paths {
     "/healthz": {
         parameters: {
@@ -3648,6 +3648,8 @@ export interface components {
              * @enum {string}
              */
             sender_type: "cams" | "kfintech" | "mfcentral" | "nsdl" | "cdsl" | "other";
+            /** Statement Month */
+            statement_month: string | null;
             /**
              * Status
              * @enum {string}

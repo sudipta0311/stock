@@ -98,7 +98,9 @@ test("partner and viewer access share the same family values", async ({
     const viewerLink = await createInvite(page, viewer.email, "viewer");
     await acceptInvite(viewerPage, viewerLink, viewer);
     await gotoApp(viewerPage, "/money");
-    await viewerPage.getByText("What else do you have?", { exact: true }).click();
+    await viewerPage
+      .getByText("What else do you have?", { exact: true })
+      .click();
     await expect(
       viewerPage.getByRole("button", { name: "Fixed deposits", exact: true }),
     ).toBeDisabled();

@@ -25,6 +25,7 @@ from wealth.db.models import (
     HouseholdMember,
     NavDaily,
     PriceEod,
+    ResearchPackRecord,
     Security,
     User,
 )
@@ -185,6 +186,77 @@ def _seed_action(email: str) -> int:
         engine.dispose()
 
 
+def _seed_research_pack() -> int:
+    engine, _schema_name = _owner_engine()
+    iso = date.today().isocalendar()
+    week = f"{iso.year}-W{iso.week:02}"
+    scenarios = [
+        ("IN", "C43-IN-ONE", "Synthetic Long Company Name for Phone Layouts", "INR", "123.45"),
+        ("IN", "C43-IN-TWO", "Synthetic India Test Company", "INR", "88.10"),
+        ("US", "C43-US-ONE", "Synthetic US Test Company One", "USD", "45.67"),
+        ("US", "C43-US-TWO", "Synthetic US Test Company Two", "USD", "72.30"),
+    ]
+    try:
+        with Session(engine) as session, session.begin():
+            session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+                {"lock_key": "c43-e2e-research-pack"},
+            )
+            ideas: list[dict[str, object]] = []
+            for market, symbol, name, currency, price in scenarios:
+                security = session.scalar(
+                    select(Security).where(
+                        Security.market == market,
+                        Security.symbol == symbol,
+                    )
+                )
+                if security is None:
+                    security = Security(
+                        market=market,
+                        symbol=symbol,
+                        name=name,
+                        security_type="equity",
+                        currency=currency,
+                        sleeve="equity_india" if market == "IN" else "equity_global",
+                        sector="Technology",
+                        industry="Software",
+                    )
+                    session.add(security)
+                    session.flush()
+                else:
+                    security.name = name
+                ideas.append(
+                    {
+                        "security_id": str(security.id),
+                        "symbol": symbol,
+                        "market": market,
+                        "sector": "Technology",
+                        "price": price,
+                        "quant_decile": 7,
+                        "dossier_status": "APPROVED",
+                        "valuation_percentile": "60",
+                        "confidence": "HIGH",
+                        "why": {
+                            "reasons": ["Synthetic research note for layout coverage."],
+                            "risk": "Synthetic risk note.",
+                        },
+                        "entry_hint": {
+                            "code": "buy_in_parts",
+                            "parts": 3,
+                            "reasons": ["regular_entry_schedule"],
+                        },
+                    }
+                )
+            pack = session.get(ResearchPackRecord, week)
+            if pack is None:
+                session.add(ResearchPackRecord(week=week, pack={"ideas": ideas}))
+            else:
+                pack.pack = {"ideas": ideas}
+        return 0
+    finally:
+        engine.dispose()
+
+
 def _verify_deleted(email: str) -> int:
     engine, _schema_name = _owner_engine()
     try:
@@ -203,9 +275,14 @@ def main(argv: list[str] | None = None) -> int:
         return _setup_stack()
     if len(args) == 2 and args[0] == "seed-action":
         return _seed_action(args[1])
+    if args == ["seed-research-pack"]:
+        return _seed_research_pack()
     if len(args) == 2 and args[0] == "verify-deleted":
         return _verify_deleted(args[1])
-    print("Use setup, seed-action <synthetic-email>, or verify-deleted <synthetic-email>.")
+    print(
+        "Use setup, seed-action <synthetic-email>, seed-research-pack, "
+        "or verify-deleted <synthetic-email>."
+    )
     return 2
 
 

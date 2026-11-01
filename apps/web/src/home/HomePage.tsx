@@ -715,7 +715,7 @@ export function HomePage() {
           <Button
             type="button"
             variant="ghost"
-            className="justify-start text-sm font-medium text-muted-foreground"
+            className="min-h-11 w-fit justify-start px-0 py-2 text-sm font-medium text-brand hover:bg-transparent hover:underline"
             onClick={() => {
               setAmountDraft(
                 amountInEntryCurrency(
@@ -840,19 +840,7 @@ export function HomePage() {
             </span>
           </Link>
         </Card>
-      ) : (
-        <details className="rounded-xl border border-line px-4">
-          <summary
-            id="coming-up-heading"
-            className="min-h-12 cursor-pointer py-3 text-sm font-semibold"
-          >
-            Coming up
-          </summary>
-          <p className="pb-3 text-sm text-muted-foreground">
-            Nothing is due in the next 30 days.
-          </p>
-        </details>
-      )}
+      ) : null}
 
       {sheetAction
         ? (() => {

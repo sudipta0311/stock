@@ -15,7 +15,10 @@ import { CHECKLIST_STORAGE_KEY } from "../../src/money/config";
 import { server } from "../msw";
 import { renderWithQueries } from "../features/render";
 import { loanSummary } from "../features/fixtures";
-import { HouseholdProvider } from "../../src/household/HouseholdContext";
+import {
+  HouseholdProvider,
+  PRIMARY_CURRENCY_STORAGE_KEY,
+} from "../../src/household/HouseholdContext";
 import { HouseholdControls } from "../../src/household/HouseholdControls";
 
 const memberId = "member-test-1";
@@ -550,6 +553,94 @@ describe("Money Map", () => {
       expect(within(group).queryByText(/^TEST\d+$/)).toBeNull();
     }
     expect(screen.getByText("6 items")).toBeVisible();
+  });
+
+  it("formats a group total using every holding, including hidden rows", async () => {
+    window.localStorage.clear();
+    window.localStorage.setItem(PRIMARY_CURRENCY_STORAGE_KEY, "DKK");
+    const holdings: NetworthResponse["holdings"] = [
+      ...Array.from({ length: 8 }, (_value, index) => ({
+        currency: "INR",
+        fx_as_of: null,
+        fx_missing: false,
+        name: `Visible fund ${index + 1}`,
+        price_as_of: null,
+        price_source: "test",
+        quantity: "1",
+        security_id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+        security_type: "mf",
+        status: "priced" as const,
+        symbol: `SYNTHETIC-FUND-${index + 1}`,
+        value: "1000.00",
+        value_usd: null,
+      })),
+      {
+        currency: "INR",
+        fx_as_of: null,
+        fx_missing: false,
+        name: "Hidden fund",
+        price_as_of: null,
+        price_source: "test",
+        quantity: "1",
+        security_id: "00000000-0000-4000-8000-000000000099",
+        security_type: "mf",
+        status: "priced" as const,
+        symbol: "SYNTHETIC-HIDDEN-FUND",
+        value: "125.00",
+        value_usd: null,
+      },
+    ];
+    server.use(
+      http.get(/\/v1\/members$/, () =>
+        HttpResponse.json([
+          {
+            id: memberId,
+            display_name: "Test member",
+            created_at: "2026-10-28T00:00:00Z",
+            is_self: true,
+            relationship: "self",
+            residency: { country: "DK" },
+          },
+        ]),
+      ),
+      ...baseHandlers(networth({ holdings })),
+      http.get(/\/v1\/fx\/dkk-inr$/, () =>
+        HttpResponse.json({ date: "2026-10-28", rate: "12.5" }),
+      ),
+    );
+    renderMap();
+
+    const group = await screen.findByRole("region", { name: "Funds" });
+    expect(await within(group).findByText("DKK 650")).toBeVisible();
+    expect(
+      within(group).getByRole("button", { name: "Show all 9" }),
+    ).toBeVisible();
+    expect(within(group).queryByText("Hidden fund")).not.toBeInTheDocument();
+  });
+
+  it("formats deposit group totals with the household money formatter", async () => {
+    window.localStorage.clear();
+    const deposits = [
+      {
+        ...savedAsset({ asset_type: "fd", label: "Synthetic deposit one" }),
+        value_cached: "125000.00",
+      },
+      {
+        ...savedAsset(
+          { asset_type: "fd", label: "Synthetic deposit two" },
+          "asset-deposit-two",
+        ),
+        value_cached: "250000.00",
+      },
+    ];
+    server.use(...baseHandlers());
+    server.use(http.get(/\/v1\/assets$/, () => HttpResponse.json(deposits)));
+    renderMap();
+
+    expect(
+      await screen.findByRole("heading", { name: "Deposits" }),
+    ).toBeVisible();
+    expect(screen.getByText("₹3.75 L")).toBeVisible();
   });
 
   it("counts listed assets and holdings and shows a plain unit line", async () => {

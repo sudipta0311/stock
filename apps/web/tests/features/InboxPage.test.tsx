@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { axe } from "vitest-axe";
 import { apiPathAvailable } from "../../src/api/feature-support";
 import { BriefPage, InboxPage } from "../../src/inbox/InboxPage";
+import * as englishCopy from "../../src/copy/sections/index";
 import { renderWithQueries } from "./render";
 import { server } from "../msw";
 
@@ -122,6 +123,78 @@ describe("Inbox and brief", () => {
       "https://example.test/brief",
     );
     expect((await axe(container)).violations).toEqual([]);
+  });
+
+  it("shows the updates heading and a statement month without the raw subject", async () => {
+    const rawSubject =
+      "Your provider statement for September 2026 (reference note)";
+    server.use(
+      http.get(/\/v1\/inbox$/, () => HttpResponse.json({})),
+      http.get(/\/v1\/statement-inbox\/items$/, () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: "statement-month-demo",
+              sender_type: "nsdl",
+              received_at: "2026-10-16T08:00:00Z",
+              status: "needs_password",
+              error_code: null,
+              import_job_id: null,
+              subject: rawSubject,
+              statement_month: "2026-09",
+              full_statement: true,
+              saved_password: false,
+            },
+          ],
+          cleanup_notice: null,
+        }),
+      ),
+    );
+    renderInbox(true);
+
+    expect(
+      await screen.findByRole("heading", {
+        name: englishCopy.inbox.updates_heading,
+      }),
+    ).toBeVisible();
+    expect(
+      await screen.findByText("Statement for September 2026"),
+    ).toBeVisible();
+    expect(screen.getByText("Received 16 Oct")).toBeVisible();
+    expect(screen.queryByText(rawSubject)).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Inbox" })).toBeNull();
+  });
+
+  it("hides the statement subject line when no month is available", async () => {
+    const rawSubject = "A provider statement with no month";
+    server.use(
+      http.get(/\/v1\/inbox$/, () => HttpResponse.json({})),
+      http.get(/\/v1\/statement-inbox\/items$/, () =>
+        HttpResponse.json({
+          items: [
+            {
+              id: "statement-no-month-demo",
+              sender_type: "nsdl",
+              received_at: "2026-10-16T08:00:00Z",
+              status: "needs_password",
+              error_code: null,
+              import_job_id: null,
+              subject: rawSubject,
+              statement_month: null,
+              full_statement: true,
+              saved_password: false,
+            },
+          ],
+          cleanup_notice: null,
+        }),
+      ),
+    );
+    renderInbox(true);
+
+    await screen.findByRole("button", { name: "Enter password" });
+    expect(screen.queryByText(rawSubject)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Statement for /)).not.toBeInTheDocument();
+    expect(screen.getByText("Received 16 Oct")).toBeVisible();
   });
 
   it("does not inject API strings as HTML anywhere in the app source", () => {

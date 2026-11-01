@@ -4,7 +4,7 @@ import { HttpResponse, http } from "msw";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 import { axe } from "vitest-axe";
-import englishCopy from "../../src/copy/en.json";
+import * as englishCopy from "../../src/copy/sections/index";
 import {
   HouseholdProvider,
   PRIMARY_CURRENCY_STORAGE_KEY,
@@ -126,6 +126,9 @@ describe("Home this week", () => {
     ).toBeVisible();
     expect(screen.getByRole("button", { name: "Save" })).toBeVisible();
     expect(
+      screen.getByRole("button", { name: englishCopy.home.extra_money_link }),
+    ).toHaveClass("min-h-11", "w-fit", "px-0");
+    expect(
       screen.queryByText(englishCopy.home.nothing_to_buy),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Money/ })).toBeVisible();
@@ -137,6 +140,16 @@ describe("Home this week", () => {
     expect(
       root?.querySelectorAll(":scope > section").length,
     ).toBeLessThanOrEqual(4);
+  });
+
+  it("hides Coming up when there are no due items", async () => {
+    server.use(...baseHomeHandlers([]));
+    renderHome();
+
+    await screen.findByText(englishCopy.home.amount_question);
+    expect(
+      screen.queryByRole("heading", { name: "Coming up" }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows the positive no-buy state after a monthly amount is set", async () => {

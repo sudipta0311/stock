@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { Link } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronDown } from "lucide-react";
 import { Badge, Button, Card, Checkbox, Field, Select, Sheet } from "../ui";
 import * as englishCopy from "../copy/sections/index";
 import { ApiError, apiFetch } from "../api/client";
@@ -66,6 +67,29 @@ const emptyConsents: ConsentValues = {
   push: false,
   urgent_alerts: false,
 };
+
+function SettingsSectionSummary({
+  title,
+  summary,
+}: {
+  title: string;
+  summary: string;
+}) {
+  return (
+    <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-3 py-3 [&::-webkit-details-marker]:hidden">
+      <span className="min-w-0">
+        <span className="block text-base font-semibold">{title}</span>
+        <span className="block text-sm font-normal text-muted-foreground">
+          {summary}
+        </span>
+      </span>
+      <ChevronDown
+        aria-hidden="true"
+        className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180"
+      />
+    </summary>
+  );
+}
 
 type SipDraft = {
   sleeve: "equity_india" | "equity_global" | "debt" | "gold" | "cash";
@@ -652,15 +676,11 @@ export function SettingsPage() {
 
   return (
     <div data-copy-screen="settings" className="grid gap-4">
-      <details className="rounded-xl border border-line px-3">
-        <summary className="min-h-14 cursor-pointer py-3">
-          <span className="block text-base font-semibold">
-            {sectionCopy.family_title}
-          </span>
-          <span className="block text-sm font-normal text-muted-foreground">
-            {familySummary}
-          </span>
-        </summary>
+      <details className="group rounded-xl border border-line px-3">
+        <SettingsSectionSummary
+          title={sectionCopy.family_title}
+          summary={familySummary}
+        />
         <div className="grid gap-4 pb-3">
           <section
             aria-labelledby="settings-family-heading"
@@ -842,15 +862,11 @@ export function SettingsPage() {
           <HouseholdSharingPanel />
         </div>
       </details>
-      <details className="rounded-xl border border-line px-3">
-        <summary className="min-h-14 cursor-pointer py-3">
-          <span className="block text-base font-semibold">
-            {sectionCopy.plan_title}
-          </span>
-          <span className="block text-sm font-normal text-muted-foreground">
-            {planSummary}
-          </span>
-        </summary>
+      <details className="group rounded-xl border border-line px-3">
+        <SettingsSectionSummary
+          title={sectionCopy.plan_title}
+          summary={planSummary}
+        />
         <section className="grid gap-3 pb-3">
           <Card className="grid gap-4">
             <details className="border-t border-line pt-3">
@@ -1218,15 +1234,11 @@ export function SettingsPage() {
           </Card>
         </section>
       </details>
-      <details className="rounded-xl border border-line px-3">
-        <summary className="min-h-14 cursor-pointer py-3">
-          <span className="block text-base font-semibold">
-            {sectionCopy.statements_title}
-          </span>
-          <span className="block text-sm font-normal text-muted-foreground">
-            {sectionCopy.statements_summary}
-          </span>
-        </summary>
+      <details className="group rounded-xl border border-line px-3">
+        <SettingsSectionSummary
+          title={sectionCopy.statements_title}
+          summary={sectionCopy.statements_summary}
+        />
         <div className="pb-3">
           <section aria-labelledby="settings-statements-heading">
             <Card className="grid gap-3">
@@ -1250,15 +1262,11 @@ export function SettingsPage() {
           </section>
         </div>
       </details>
-      <details className="rounded-xl border border-line px-3">
-        <summary className="min-h-14 cursor-pointer py-3">
-          <span className="block text-base font-semibold">
-            {sectionCopy.app_title}
-          </span>
-          <span className="block text-sm font-normal text-muted-foreground">
-            {appSummary}
-          </span>
-        </summary>
+      <details className="group rounded-xl border border-line px-3">
+        <SettingsSectionSummary
+          title={sectionCopy.app_title}
+          summary={appSummary}
+        />
         <div className="grid gap-4 pb-3">
           <Card className="grid gap-3">
             <h3 className="text-sm font-semibold">

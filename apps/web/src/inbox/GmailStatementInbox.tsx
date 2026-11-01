@@ -5,6 +5,7 @@ import { Link, useNavigate } from "react-router";
 import { ApiError, apiFetch } from "../api/client";
 import { apiPathAvailable } from "../api/feature-support";
 import { Button, Card, Checkbox } from "../ui";
+import * as englishCopy from "../copy/sections/index";
 
 type SenderType = "cams" | "kfintech" | "mfcentral" | "nsdl" | "cdsl" | "other";
 type ItemStatus = "needs_password" | "review" | "unreadable";
@@ -16,7 +17,7 @@ interface StatementInboxItem {
   status: ItemStatus;
   error_code: string | null;
   import_job_id: string | null;
-  subject?: string;
+  statement_month?: string | null;
   full_statement?: boolean;
   saved_password?: boolean;
 }
@@ -53,6 +54,19 @@ function statementDate(value: string): string {
         day: "numeric",
         month: "short",
       }).format(date);
+}
+
+function statementMonthLabel(value: string | null | undefined): string | null {
+  const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(value ?? "");
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const monthAndYear = new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(year, month - 1, 1)));
+  return englishCopy.inbox.statement_for_month.replace("{month}", monthAndYear);
 }
 
 // Fund houses also email purchase notes and single-fund statements. Only the full
@@ -245,13 +259,12 @@ export function GmailStatementInbox() {
 
   const heading = (item: StatementInboxItem, title: string): ReactNode => {
     const date = statementDate(item.received_at);
+    const statementMonth = statementMonthLabel(item.statement_month);
     return (
       <div className="min-w-0">
         <h3 className="text-sm font-semibold">{title}</h3>
-        {item.subject ? (
-          <p className="mt-1 truncate text-xs text-muted-foreground">
-            {item.subject}
-          </p>
+        {statementMonth ? (
+          <p className="mt-1 text-xs text-muted-foreground">{statementMonth}</p>
         ) : null}
         {date ? (
           <p className="mt-1 text-xs text-muted-foreground">Received {date}</p>

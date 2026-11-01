@@ -47,6 +47,37 @@ _SENDER_TYPES = ("cams", "kfintech", "mfcentral", "nsdl", "cdsl", "other")
 _FULL_STATEMENT_SUBJECT = re.compile(
     r"consolidated\s+account\s+statement|\b(?:e-?)?cas\b", re.IGNORECASE
 )
+_MONTH_NUMBERS = {
+    "january": 1,
+    "jan": 1,
+    "february": 2,
+    "feb": 2,
+    "march": 3,
+    "mar": 3,
+    "april": 4,
+    "apr": 4,
+    "may": 5,
+    "june": 6,
+    "jun": 6,
+    "july": 7,
+    "jul": 7,
+    "august": 8,
+    "aug": 8,
+    "september": 9,
+    "sep": 9,
+    "october": 10,
+    "oct": 10,
+    "november": 11,
+    "nov": 11,
+    "december": 12,
+    "dec": 12,
+}
+_MONTH_NAMES = "|".join(sorted(_MONTH_NUMBERS, key=len, reverse=True))
+_STATEMENT_MONTH = re.compile(
+    rf"\b(?:(?P<month>{_MONTH_NAMES})\.?(?:\s*[-,./]\s*|\s+)(?P<year>\d{{4}})|"
+    rf"(?P<year_first>\d{{4}})(?:\s*[-,./]\s*|\s+)(?P<month_last>{_MONTH_NAMES})\.?)\b",
+    re.IGNORECASE,
+)
 _SUBJECT_PREVIEW_CHARS = 140
 _NOT_A_FULL_STATEMENT = "This file isn't a full account statement, so there is nothing to import."
 
@@ -78,6 +109,7 @@ class StatementInboxItemResponse(InboxApiModel):
     error_code: str | None
     import_job_id: UUID | None
     subject: str = ""
+    statement_month: str | None
     full_statement: bool = True
     saved_password: bool = False
 
@@ -149,6 +181,17 @@ def _require_writer(user: Any) -> None:
 def _sender_type(sender: str, subject: str) -> str:
     value = f"{sender} {subject}".casefold()
     return next((name for name in _SENDER_TYPES[:-1] if name in value), "other")
+
+
+def _statement_month(subject: str) -> str | None:
+    match = _STATEMENT_MONTH.search(subject)
+    if match is None:
+        return None
+    month_name = match.group("month") or match.group("month_last")
+    year = match.group("year") or match.group("year_first")
+    if month_name is None or year is None:
+        return None
+    return f"{year}-{_MONTH_NUMBERS[month_name.casefold()]:02d}"
 
 
 def _parse_received_at(value: str) -> datetime | None:
@@ -615,6 +658,7 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                 error_code=item.error_code,
                 import_job_id=item.import_job_id,
                 subject=item.subject[:_SUBJECT_PREVIEW_CHARS],
+                statement_month=_statement_month(item.subject),
                 full_statement=item.error_code != "not_a_full_statement"
                 and bool(_FULL_STATEMENT_SUBJECT.search(item.subject)),
                 saved_password=item.sender_type in saved_senders,

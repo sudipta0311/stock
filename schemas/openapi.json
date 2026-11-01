@@ -7101,6 +7101,17 @@
             "title": "Sender Type",
             "type": "string"
           },
+          "statement_month": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Statement Month"
+          },
           "status": {
             "enum": [
               "needs_password",
@@ -7122,7 +7133,8 @@
           "received_at",
           "status",
           "error_code",
-          "import_job_id"
+          "import_job_id",
+          "statement_month"
         ],
         "title": "StatementInboxItemResponse",
         "type": "object"

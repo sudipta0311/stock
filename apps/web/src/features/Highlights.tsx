@@ -1,5 +1,5 @@
 import { CircleHelp, Info, TriangleAlert } from "lucide-react";
-import { Button, Card } from "../ui";
+import { Button } from "../ui";
 import * as englishCopy from "../copy/sections/index";
 
 export type HighlightCardModel = {
@@ -89,7 +89,7 @@ export function Highlights({
   const visibleItems = items.slice(0, 2);
   const remainingItems = items.slice(2);
   return (
-    <Card className="grid gap-3" aria-label="Helpful notes">
+    <section className="grid gap-3" aria-label="Helpful notes">
       <h2 className="text-sm font-semibold">Helpful notes</h2>
       <ul className="grid gap-3">
         {visibleItems.map((item) => (
@@ -111,6 +111,6 @@ export function Highlights({
           </ul>
         </details>
       ) : null}
-    </Card>
+    </section>
   );
 }

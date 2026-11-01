@@ -62,6 +62,7 @@ Status: ⬜ not started · 🟦 in progress · ✅ accepted · 🔁 rework · �
 | C40 | US and world funds on Ideas for a Denmark household: the world, S&P 500 and Nasdaq 100 funds the plan would pick, a code-decided US market line (cheap/fair/expensive vs ~3 years) and the plan's parts for extra money | UX, 4.9 | ✅ |
 | C41 | Ideas show company names (S&P 500 names from the constituents table) with the ticker, one closed "Why this idea?" with the timing reason inside, and funds findable at the broker (listed name and search code behind "Find it at your broker") | UX | ✅ |
 | C42 | Each screen loads its own words: `gen:copy` emits one module per copy section, and the budget check fails if route-only copy reaches the initial chunk (initial JS 169.65 → 150.68 KB) | PWA perf | ✅ |
+| C43 | Polish round 3: Home notes without card-in-card and no empty "Coming up"; Money group totals; Settings chevrons on the title line; Inbox "Updates" and "Statement for September 2026" (API `statement_month`); an e2e Ideas journey with long names and the funds card | UX | ✅ |
 
 ## Follow-ups and review outcomes
 

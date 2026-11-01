@@ -12,6 +12,7 @@ import {
   ScreenLoading,
 } from "../features/api";
 import { Badge, Card, EmptyState } from "../ui";
+import * as englishCopy from "../copy/sections/index";
 
 interface InboxEntry {
   id?: string;
@@ -103,7 +104,9 @@ export function InboxPage({
         <GmailStatementInbox />
       </Suspense>
       <header>
-        <h2 className="text-xl font-semibold">Inbox</h2>
+        <h2 className="text-xl font-semibold">
+          {englishCopy.inbox.updates_heading}
+        </h2>
         <p className="mt-1 text-sm text-muted-foreground">
           Briefs, reminders and updates, newest first.
         </p>

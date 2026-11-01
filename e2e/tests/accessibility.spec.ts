@@ -2,6 +2,7 @@ import AxeBuilder from "@axe-core/playwright";
 import {
   completeMinimalOnboarding,
   expect,
+  expectFitsScreen,
   gotoApp,
   makeIdentity,
   signIn,
@@ -101,8 +102,10 @@ test("required screens have no serious or critical accessibility violations", as
   await gotoApp(page, "/ideas");
   await scan("Ideas");
   await gotoApp(page, "/inbox");
+  await expectFitsScreen(page);
   await scan("Inbox");
   await gotoApp(page, "/settings");
+  await expectFitsScreen(page);
   await scan("Settings");
 
   await writeReport("axe", "all", {

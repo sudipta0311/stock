@@ -6,7 +6,7 @@ import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { axe } from "vitest-axe";
 import { server } from "../msw";
-import englishCopy from "../../src/copy/en.json";
+import * as englishCopy from "../../src/copy/sections/index";
 import { SettingsPage, deleteWarning } from "../../src/settings/SettingsPage";
 import { downloadSettingsExport } from "../../src/settings/api";
 import { ThemeProvider } from "../../src/ui/theme";
@@ -304,10 +304,19 @@ describe("Settings", () => {
       englishCopy.settings.sections.app_title,
     ];
     for (const title of sectionTitles) {
-      expect(screen.getByText(title).closest("details")).not.toHaveAttribute(
-        "open",
+      const titleText = screen.getByText(title);
+      const details = titleText.closest("details");
+      const summary = titleText.closest("summary");
+      expect(details).not.toHaveAttribute("open");
+      expect(summary).toHaveClass("flex", "list-none");
+      expect(summary?.querySelector("svg")).toHaveClass(
+        "group-open:rotate-180",
       );
     }
+    expect(
+      await screen.findByText("2 people, shared with your partner"),
+    ).toBeVisible();
+    expect(screen.getByText("Currency: INR, alerts off")).toBeVisible();
     await openSection(user, englishCopy.settings.sections.family_title);
     expect(
       screen.getByRole("heading", {

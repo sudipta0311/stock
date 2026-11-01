@@ -274,11 +274,15 @@ function LoansGroup({
   return (
     <Card className="grid gap-1">
       <div className="mb-1 grid gap-1">
-        <h3 className="text-sm font-semibold text-muted-foreground">Loans</h3>
-        <div className="grid gap-0.5 text-xs text-muted-foreground">
-          <p>Total left {shownAmount(summary.remaining_inr)}</p>
-          <p>Monthly payments {shownAmount(summary.monthly_emis_inr)}</p>
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-sm font-semibold text-muted-foreground">Loans</h3>
+          <span className="shrink-0 text-right text-sm font-semibold tabular-nums">
+            {shownAmount(summary.remaining_inr)}
+          </span>
         </div>
+        <p className="text-xs text-muted-foreground">
+          Monthly payments {shownAmount(summary.monthly_emis_inr)}
+        </p>
       </div>
       {summary.loans.map((loan) => {
         const payoff = loan.payoff_month
@@ -340,6 +344,42 @@ function LoansGroup({
   );
 }
 
+function sumKnownValues(
+  values: readonly (string | null | undefined)[],
+): string | null {
+  const knownValues = values.filter(
+    (value): value is string => typeof value === "string",
+  );
+  return knownValues.length ? sumInr(knownValues) : null;
+}
+
+function GroupAmount({
+  amount,
+  primaryCurrency,
+  fxQuote,
+  showSecondary,
+}: {
+  amount: string | null;
+  primaryCurrency: "INR" | "DKK";
+  fxQuote: DkkInrRate | undefined;
+  showSecondary: boolean;
+}) {
+  return (
+    <span className="shrink-0 text-right text-sm font-semibold tabular-nums">
+      {amount ? (
+        <AmountLabel
+          amount={amount}
+          primaryCurrency={primaryCurrency}
+          fxQuote={fxQuote}
+          showSecondary={showSecondary}
+        />
+      ) : (
+        englishCopy.money_ui.group_total_unavailable
+      )}
+    </span>
+  );
+}
+
 function HoldingsGroup({
   title,
   holdings,
@@ -361,7 +401,15 @@ function HoldingsGroup({
   return (
     <section className="grid gap-2" aria-label={title}>
       <Card className="grid gap-2">
-        <h2 className="text-sm font-semibold">{title}</h2>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold">{title}</h2>
+          <GroupAmount
+            amount={sumKnownValues(holdings.map((holding) => holding.value))}
+            primaryCurrency={primaryCurrency}
+            fxQuote={fxQuote}
+            showSecondary={showSecondary}
+          />
+        </div>
         {byValue(holdings)
           .slice(0, showAll ? undefined : HOLDINGS_SHOWN)
           .map((holding) => (
@@ -1047,9 +1095,19 @@ export function MoneyMapPage() {
         {visibleGroups.length ? (
           visibleGroups.map(([sleeve, items]) => (
             <Card key={sleeve} className="grid gap-1">
-              <h3 className="mb-1 text-sm font-semibold text-muted-foreground">
-                {sleeve}
-              </h3>
+              <div className="mb-1 flex items-center justify-between gap-3">
+                <h3 className="text-sm font-semibold text-muted-foreground">
+                  {sleeve}
+                </h3>
+                <GroupAmount
+                  amount={sumKnownValues(
+                    items.map((asset) => asset.value_cached),
+                  )}
+                  primaryCurrency={primaryCurrency}
+                  fxQuote={fxQuote}
+                  showSecondary={hasDanishMember}
+                />
+              </div>
               {items.map((asset) => (
                 <Link
                   key={asset.id}

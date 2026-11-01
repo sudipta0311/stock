@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { Highlights } from "../../src/features/Highlights";
@@ -16,9 +16,20 @@ describe("policy highlights", () => {
           learn_more_key: "plan_details",
           severity: "info" as const,
         }))}
+        onDismiss={() => undefined}
       />,
     );
 
+    const notes = screen.getByRole("region", { name: "Helpful notes" });
+    const heading = within(notes).getByRole("heading", {
+      name: "Helpful notes",
+    });
+    expect(heading.parentElement).toBe(notes);
+    expect(within(notes).getAllByRole("list")[0]?.parentElement).toBe(notes);
+    expect(within(notes).getAllByText("Why?")[0]).toBeVisible();
+    expect(
+      within(notes).getByRole("button", { name: "Hide: Note 1" }),
+    ).toBeVisible();
     expect(screen.getByText("Note 1")).toBeVisible();
     expect(screen.getByText("Note 2")).toBeVisible();
     expect(screen.getByText("Note 3")).not.toBeVisible();

@@ -11,6 +11,7 @@ const section = {
   "savings": "Savings",
   "loans": "Loans",
   "other": "Other",
+  "group_total_unavailable": "Not available",
   "more_details": "More details"
 };
 
