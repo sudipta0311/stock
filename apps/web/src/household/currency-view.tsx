@@ -1,4 +1,4 @@
-import englishCopy from "../copy/en.json";
+import * as englishCopy from "../copy/sections/index";
 import { formatHouseholdAmount, formatSecondaryAmount } from "./currency";
 import { useHousehold } from "./HouseholdContext";
 import { formatDkk, dkkToInr } from "./fx";

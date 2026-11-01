@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "react-router";
-import englishCopy from "../copy/en.json";
+import * as englishCopy from "../copy/sections/index";
 import { Button, Card, Sheet } from "../ui";
 import {
   hasValueMoment,

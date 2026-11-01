@@ -40,7 +40,7 @@ import type { ChecklistWorkflow } from "./config";
 import { listImports } from "../imports/api";
 import { ImportHistorySheet } from "../imports/ImportHistorySheet";
 import { markValueMoment } from "../pwa/install";
-import englishCopy from "../copy/en.json";
+import * as englishCopy from "../copy/sections/index";
 import { apiPathAvailable } from "../api/feature-support";
 import { useHousehold } from "../household/HouseholdContext";
 import { quantityLabel } from "./quantity";

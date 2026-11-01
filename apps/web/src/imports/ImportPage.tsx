@@ -46,7 +46,7 @@ import {
 } from "./progress";
 import { takeSharedFile } from "./share-target";
 import { markValueMoment } from "../pwa/install";
-import englishCopy from "../copy/en.json";
+import * as englishCopy from "../copy/sections/index";
 
 const sourceCopy: Record<
   ImportFormat,

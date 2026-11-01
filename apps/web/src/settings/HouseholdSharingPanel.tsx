@@ -15,7 +15,7 @@ import {
 } from "../household/api";
 import type { HouseholdInviteCreated, HouseholdRole } from "../household/api";
 import { Button, Card, Select } from "../ui";
-import englishCopy from "../copy/en.json";
+import * as englishCopy from "../copy/sections/index";
 
 export function HouseholdSharingPanel() {
   const queryClient = useQueryClient();

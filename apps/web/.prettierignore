@@ -1,3 +1,4 @@
 src/api/schema.d.ts
 src/**/*.generated.ts
 src/copy/*.json
+src/copy/sections/*.ts

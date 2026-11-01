@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import yaml from "js-yaml";
@@ -21,6 +21,9 @@ const bannedTermsOutputPath = fileURLToPath(
 const helpOutputPath = fileURLToPath(
   new URL("../src/copy/help.en.json", import.meta.url),
 );
+const sectionsDirectory = fileURLToPath(
+  new URL("../src/copy/sections/", import.meta.url),
+);
 const source = await readFile(sourcePath, "utf8");
 const document = yaml.load(source);
 const bannedTermsSource = await readFile(bannedTermsSourcePath, "utf8");
@@ -38,6 +41,36 @@ if (
 
 await mkdir(path.dirname(outputPath), { recursive: true });
 await writeFile(outputPath, `${JSON.stringify(document, null, 2)}\n`, "utf8");
+
+const sectionNames = Object.keys(document);
+if (sectionNames.some((name) => !/^[A-Za-z_$][\w$]*$/.test(name))) {
+  throw new TypeError("English copy section names must be valid identifiers.");
+}
+await mkdir(sectionsDirectory, { recursive: true });
+const sectionFiles = await readdir(sectionsDirectory);
+for (const file of sectionFiles) {
+  const sectionName = file.replace(/\.ts$/, "");
+  if (
+    file.endsWith(".ts") &&
+    sectionName !== "index" &&
+    !sectionNames.includes(sectionName)
+  ) {
+    await unlink(path.join(sectionsDirectory, file));
+  }
+}
+for (const name of sectionNames) {
+  const sectionOutputPath = path.join(sectionsDirectory, `${name}.ts`);
+  const sectionModule = `const section = ${JSON.stringify(document[name], null, 2)};\n\nexport default section;\n`;
+  await writeFile(sectionOutputPath, sectionModule, "utf8");
+}
+const sectionExports = sectionNames
+  .map((name) => `export { default as ${name} } from "./${name}";`)
+  .join("\n");
+await writeFile(
+  path.join(sectionsDirectory, "index.ts"),
+  `${sectionExports}\n`,
+  "utf8",
+);
 if (
   typeof bannedTerms !== "object" ||
   bannedTerms === null ||

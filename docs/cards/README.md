@@ -60,6 +60,7 @@ Status: ⬜ not started · 🟦 in progress · ✅ accepted · 🔁 rework · �
 | C38 | NSE fundamentals skip a filing whose XBRL file is gone (404/410) and count it, so ADANIENT, LT and UPL keep their readable filings | data | ✅ |
 | C39 | The weekly pack keeps every approved idea of the week (any run; the latest verdict wins), ordered by market and screener score; a no-model `repack` step rebuilds it | research | ✅ |
 | C40 | US and world funds on Ideas for a Denmark household: the world, S&P 500 and Nasdaq 100 funds the plan would pick, a code-decided US market line (cheap/fair/expensive vs ~3 years) and the plan's parts for extra money | UX, 4.9 | ✅ |
+| C42 | Each screen loads its own words: `gen:copy` emits one module per copy section, and the budget check fails if route-only copy reaches the initial chunk (initial JS 169.65 → 150.68 KB) | PWA perf | ✅ |
 
 ## Follow-ups and review outcomes
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiFetch } from "../api/client";
-import englishCopy from "../copy/en.json";
+import * as englishCopy from "../copy/sections/index";
 import { useHousehold } from "../household/HouseholdContext";
 import { Button, Card } from "../ui";
 

@@ -5,7 +5,7 @@ import type { MemberPatch, SettingsMember } from "./api";
 import { updateSettingsMember } from "./api";
 import { useHousehold } from "../household/HouseholdContext";
 import { Button, Field, Select, Sheet } from "../ui";
-import englishCopy from "../copy/en.json";
+import * as englishCopy from "../copy/sections/index";
 
 type ResidenceStatus = "RI" | "NRI" | "RNOR";
 type Relationship = MemberPatch["relationship"];

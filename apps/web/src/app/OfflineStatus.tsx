@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import englishCopy from "../copy/en.json";
+import * as englishCopy from "../copy/sections/index";
 import { getOfflineSnapshotTime } from "../pwa/offline-cache";
 import { listQueuedAssetWrites } from "../money/offline-queue";
 import { CHECKLIST_PENDING_KEY } from "../money/config";

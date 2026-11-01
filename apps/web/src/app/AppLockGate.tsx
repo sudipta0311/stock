@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import englishCopy from "../copy/en.json";
+import * as englishCopy from "../copy/sections/index";
 import {
   APP_LOCK_BACKGROUND_MS,
   appLockEnabled,

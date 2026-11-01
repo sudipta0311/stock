@@ -1,0 +1,26 @@
+const section = {
+  "sell_quantity": "Quantity: {quantity} shares",
+  "estimated_tax": "Estimated tax {amount}",
+  "triggered_rows": "Why this is suggested",
+  "net_worth_as_of": "As of {date}",
+  "net_worth_as_of_today": "As of today",
+  "nothing_to_do": "Nothing to do this week",
+  "nothing_to_buy": "Nothing to buy this week",
+  "amount_question": "How much can you invest each month?",
+  "amount_currency": "Amount currency",
+  "dkk_rate_missing": "No current DKK rate. Use rupees for now.",
+  "monthly_amount": "Monthly amount",
+  "weekly_amount": "New money this week",
+  "amount_save": "Save",
+  "amount_saved": "Saved. Your plan is refreshing.",
+  "amount_error": "Enter an amount with up to two decimal places.",
+  "amount_required": "Enter an amount above zero.",
+  "amount_not_set": "No monthly amount is set yet.",
+  "extra_money_link": "I have extra money this week",
+  "money_summary": "Money: {amount}",
+  "money_summary_empty": "Money: Add items to see your total",
+  "plan_empty": "Add what you have to see your plan",
+  "add_money": "Add your money"
+};
+
+export default section;

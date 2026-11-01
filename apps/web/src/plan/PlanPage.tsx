@@ -38,7 +38,7 @@ import {
   MoneyValue,
 } from "../household/currency-view";
 import type { MemberResponse, NetworthResponse } from "../money/api";
-import englishCopy from "../copy/en.json";
+import * as englishCopy from "../copy/sections/index";
 
 const SLEEVES = [
   "equity_india",

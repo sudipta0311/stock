@@ -33,7 +33,7 @@ import { queueAssetWrite } from "./offline-queue";
 import { useHousehold } from "../household/HouseholdContext";
 import { getPlan } from "../planning/api";
 import { apiPathAvailable } from "../api/feature-support";
-import englishCopy from "../copy/en.json";
+import * as englishCopy from "../copy/sections/index";
 import { helpArticleForAssetType } from "../help/context";
 
 type PlanMember = components["schemas"]["PlanMember"];

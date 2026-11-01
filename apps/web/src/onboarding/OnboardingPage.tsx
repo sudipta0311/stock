@@ -36,7 +36,7 @@ import {
   updateSettingsMember,
 } from "../settings/api";
 import type { MemberWrite, SettingsMember } from "../settings/api";
-import englishCopy from "../copy/en.json";
+import * as englishCopy from "../copy/sections/index";
 
 const STEPS = [
   "welcome",

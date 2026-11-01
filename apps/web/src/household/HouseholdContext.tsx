@@ -14,7 +14,7 @@ import {
 } from "../api/client";
 import { apiPathAvailable } from "../api/feature-support";
 import { queryClient } from "../api/query-client";
-import englishCopy from "../copy/en.json";
+import * as englishCopy from "../copy/sections/index";
 import { getMe, listMembers } from "../money/api";
 import type { MeResponse, MemberResponse } from "../money/api";
 import { listHouseholds } from "./api";

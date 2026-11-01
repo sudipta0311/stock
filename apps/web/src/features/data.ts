@@ -1,4 +1,4 @@
-import englishCopy from "../copy/en.json";
+import * as englishCopy from "../copy/sections/index";
 import { instrumentLabel as sharedInstrumentLabel } from "../lib/labels";
 
 export type JsonRecord = Record<string, unknown>;

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { LoaderCircle } from "lucide-react";
-import englishCopy from "../copy/en.json";
+import * as englishCopy from "../copy/sections/index";
 
 export function WakeIndicator() {
   const [waking, setWaking] = useState(false);

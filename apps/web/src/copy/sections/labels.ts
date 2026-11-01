@@ -1,0 +1,101 @@
+const section = {
+  "instrument_categories": {
+    "mutual_fund": "Indian fund",
+    "abroad_etf": "European fund",
+    "us_stock": "US company share",
+    "sweep_fd": "Sweep-in FD",
+    "liquid_fund": "Liquid fund",
+    "bank_fd": "Bank FD",
+    "po_td_1y": "1-year Post Office deposit",
+    "po_td_2y": "2-year Post Office deposit",
+    "po_td_3y": "3-year Post Office deposit",
+    "po_td_5y": "5-year Post Office deposit",
+    "arbitrage_fund": "Arbitrage fund",
+    "target_maturity_fund": "Target-maturity bond fund",
+    "gsec_rbi_retail_direct": "Government bonds via RBI Retail Direct",
+    "nsc": "National Savings Certificate",
+    "ppf": "Public Provident Fund",
+    "vpf": "Voluntary Provident Fund",
+    "scss": "Senior Citizen Savings Scheme",
+    "pomis": "Post Office Monthly Income Scheme",
+    "rbi_frsb": "RBI floating-rate bond",
+    "high_interest_debt": "Costly loan",
+    "in_core_index": "Indian index fund",
+    "in_equity_direct_core": "Direct Indian equities (core basket)",
+    "us_listed_india_etf": "US-listed India fund",
+    "ucits_global_etf": "Ireland-listed international fund",
+    "us_broad_market_etf": "Broad US share fund",
+    "local_bank_deposit": "Local DKK/EUR bank deposit",
+    "nre_fd": "NRE fixed deposit",
+    "fcnr_b": "FCNR(B) foreign-currency deposit",
+    "nro_fd": "NRO fixed deposit",
+    "in_international_index_fund": "International index fund in rupees",
+    "in_listed_international_etf": "India-listed international fund",
+    "ucits_etf": "Ireland-listed international fund",
+    "us_etf": "US-listed index fund",
+    "gold_etf": "Gold fund",
+    "monthly_sip": "Monthly investment",
+    "stock": "Company shares",
+    "equity_holding": "Shares"
+  },
+  "action_kinds": {
+    "BUY_ABROAD": "Buy from Denmark",
+    "BUY_LUMPSUM": "Invest now",
+    "BUY_STP": "Invest in parts",
+    "BUY_STOCK_TRANCHE": "Buy shares",
+    "REBALANCE_SIPS": "Change your monthly investments",
+    "BUILD_EMERGENCY_FUND": "Build your emergency fund",
+    "PAY_DOWN_DEBT": "Pay off costly debt",
+    "PAY_EXTRA_ON_LOAN": "Pay extra on a loan",
+    "SELL_EXIT": "Exit",
+    "SELL_TRIM": "Take some profit",
+    "REVIEW_EXIT": "Review, likely exit",
+    "SWAP": "Swap for better",
+    "SWITCH_TO_DIRECT": "Switch to a lower-cost plan",
+    "REDIRECT_SIP": "Change a monthly investment",
+    "CONSOLIDATE_FUNDS": "Review similar funds",
+    "REVIEW_FUND": "Review this fund"
+  },
+  "exit_actions": {
+    "KEEP": "Keep",
+    "TRIM_TO_TARGET": "Take some profit",
+    "EXIT": "Exit",
+    "REVIEW_THEN_EXIT": "Review, likely exit",
+    "SWAP": "Swap for better",
+    "WAIT_FOR_LONG_TERM": "Wait for lower tax",
+    "GLIDE_TO_DEBT": "Move to safer money"
+  },
+  "trigger_keys": {
+    "drift": "Grown above its planned share",
+    "valuation_stretch": "Priced well above its usual range",
+    "thesis_break": "Business results weakening",
+    "governance_break": "Governance red flag",
+    "geopolitical_break": "Hit by a geopolitical event",
+    "risk_stop": "Large fall below cost",
+    "goal_approach": "Goal is near",
+    "swap": "Better alternative available",
+    "tax_wait": "Tax timing"
+  },
+  "trigger_states": {
+    "ok": "On track",
+    "watch": "Watch closely",
+    "triggered": "Act now",
+    "unknown": "Not enough data"
+  },
+  "confidence": {
+    "HIGH": "How sure we are: High",
+    "MEDIUM": "How sure we are: Medium",
+    "LOW": "How sure we are: Low"
+  },
+  "sleeves": {
+    "equity_india": "Indian shares",
+    "equity_global": "Global shares",
+    "equity_global_nri": "Shares where you live / global",
+    "debt": "Debt & deposits",
+    "gold": "Gold",
+    "cash": "Cash"
+  },
+  "unknown_code": "Details will be available when we know more."
+};
+
+export default section;

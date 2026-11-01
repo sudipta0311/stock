@@ -3,7 +3,7 @@ import type { FormEvent } from "react";
 import { Link } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge, Button, Card, Checkbox, Field, Select, Sheet } from "../ui";
-import englishCopy from "../copy/en.json";
+import * as englishCopy from "../copy/sections/index";
 import { ApiError, apiFetch } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { clearAuthToken } from "../auth/token";

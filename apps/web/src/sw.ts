@@ -8,7 +8,7 @@ import { ExpirationPlugin } from "workbox-expiration";
 import { NetworkFirst } from "workbox-strategies";
 import { handleShareTargetPost, storeSharedFile } from "./imports/share-target";
 import { notificationTarget } from "./pwa/notification-routing";
-import englishCopy from "./copy/en.json";
+import * as englishCopy from "./copy/sections/index";
 
 declare const self: ServiceWorkerGlobalScope & { __WB_MANIFEST: Array<never> };
 

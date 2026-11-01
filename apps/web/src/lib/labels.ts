@@ -1,4 +1,4 @@
-import englishCopy from "../copy/en.json";
+import * as englishCopy from "../copy/sections/index";
 
 const labels = englishCopy.labels;
 

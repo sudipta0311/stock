@@ -1,0 +1,91 @@
+const section = {
+  "buy_title": "Buy from Denmark",
+  "buy_intro": "We use your share savings account first when it fits.",
+  "no_buy": "Nothing to buy this week. When there's money to invest, the fund to buy shows here.",
+  "no_buy_short": "Nothing to buy from Denmark this week",
+  "set_monthly_amount": "Set your monthly amount",
+  "how": "How?",
+  "why": "Why?",
+  "term_prompt": "What's this?",
+  "fund_fallback": "European fund",
+  "fund_code_label": "Fund code",
+  "fund_code_help": "This code helps you find the fund at your broker.",
+  "broker": "Broker",
+  "nri_account": "I have an Indian share account.",
+  "pension_account": "I have a Danish pension I can invest.",
+  "stock_picks_opt_in": "Include company shares from the US.",
+  "stock_picks_pct": "Share of new money for these shares (%)",
+  "brokers": {
+    "nordnet": "Nordnet",
+    "saxo": "Saxo",
+    "danske_bank": "Danske Bank",
+    "other": "your broker"
+  },
+  "other_broker": "Other",
+  "account_ask": "Share savings account",
+  "ask_start_value_label": "Value of your share savings account on 1 January",
+  "ask_start_value_hint": "Your broker's year-end statement shows it. Leave empty if you opened it this year.",
+  "ask_start_value_missing": "Add your share savings account's value on 1 January so we can use it.",
+  "account_ordinary": "Ordinary account",
+  "account_pension": "Pension account",
+  "unverified": "Tax details still need a check.",
+  "why_ranked": "This fund ranked well on fees, size, and trading currency.",
+  "alternative_reason": "Other funds had higher fees or ranked lower.",
+  "comparison_summary_more": "Costs about {difference}% a year more than the US version.",
+  "comparison_summary_less": "Costs about {difference}% a year less than the US version.",
+  "broker_availability_unchecked": "Check that your broker offers this fund.",
+  "buy_for_member": "For {name}",
+  "sources": "Sources",
+  "factsheet": "Fund factsheet",
+  "tax_list": "Danish tax list",
+  "share_savings_rules": "Share savings account rules",
+  "fee_source": "US fund fee",
+  "dividend_source": "Dividend estimate",
+  "us_stock_form": "W-8BEN",
+  "us_stock_form_help": "A form used to claim a lower US tax rate on some payments.",
+  "us_stock_dividend_before": "The ",
+  "us_stock_dividend_after": " form may reduce US dividend withholding to {rate}%. Denmark may credit eligible tax within limits.",
+  "us_stock_situs_total": "Recorded US investments total USD {current}. This buy may raise the total to USD {projected}. Compare it with the USD {threshold} estate filing threshold.",
+  "us_stock_situs_unavailable": "A full value for your US investments is unavailable. Review them against the USD {threshold} filing threshold.",
+  "us_stock_estate_treaty": "The Denmark-US estate treaty may change the calculation.",
+  "us_stock_estate_source": "US estate rules",
+  "us_stock_dividend_source": "Dividend rules",
+  "us_stock_credit_source": "Danish tax relief",
+  "us_stock_treaty_source": "Estate treaty",
+  "us_comparison_advantage_one": "This fund appears on Denmark's 2026 tax list and may fit your share savings account.",
+  "us_comparison_advantage_two": "It has no US estate exposure and needs no US tax form.",
+  "held_us_etf": "You can keep {symbol}. New buys use its European version: {name}.",
+  "pension_note": "You told us you have a Danish pension account. Ask your provider about eligible funds.",
+  "how_to": {
+    "nordnet": [
+      "Open Nordnet.",
+      "Choose your Aktiesparekonto (share savings account) or your ordinary account.",
+      "Search the fund code.",
+      "Check the currency and fees.",
+      "Place your order."
+    ],
+    "saxo": [
+      "Open Saxo.",
+      "Choose your Aktiesparekonto (share savings account) or your ordinary account.",
+      "Search the fund code.",
+      "Check the currency and fees.",
+      "Place your order."
+    ],
+    "danske_bank": [
+      "Open Danske Bank.",
+      "Choose your Aktiesparekonto (share savings account) or your ordinary account.",
+      "Search the fund code.",
+      "Check the currency and fees.",
+      "Place your order."
+    ],
+    "other": [
+      "Open your broker.",
+      "Choose your Aktiesparekonto (share savings account) or your ordinary account.",
+      "Search the fund code.",
+      "Check the currency and fees.",
+      "Place your order."
+    ]
+  }
+};
+
+export default section;

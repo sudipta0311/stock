@@ -34,7 +34,7 @@ import {
 import type { ActionResponse, WeeklyPlan } from "../planning/api";
 import { Button, Card, Sheet } from "../ui";
 import { Highlights } from "../features/Highlights";
-import englishCopy from "../copy/en.json";
+import * as englishCopy from "../copy/sections/index";
 import { useHousehold } from "../household/HouseholdContext";
 import { MoneyValue } from "../household/currency-view";
 import { formatHouseholdAmount } from "../household/currency";

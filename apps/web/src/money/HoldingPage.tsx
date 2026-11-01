@@ -3,7 +3,7 @@ import { useParams } from "react-router";
 import { formatInr } from "../lib/money";
 import { exitLabel, labelForCode, triggerKeyLabel } from "../lib/labels";
 import { asArray, asRecord, reasonCopy, textValue } from "../features/data";
-import englishCopy from "../copy/en.json";
+import * as englishCopy from "../copy/sections/index";
 import {
   ComingSoon,
   isMissingFeature,

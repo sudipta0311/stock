@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { getMe, listAssets } from "../money/api";
 import { Button, Card, Checkbox } from "../ui";
-import englishCopy from "../copy/en.json";
+import * as englishCopy from "../copy/sections/index";
 import { ApiError, persistSelectedHouseholdId } from "../api/client";
 import { joinHousehold } from "./api";
 

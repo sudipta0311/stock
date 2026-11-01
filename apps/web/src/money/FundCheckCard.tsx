@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { apiFetch } from "../api/client";
-import englishCopy from "../copy/en.json";
+import * as englishCopy from "../copy/sections/index";
 import { useHousehold } from "../household/HouseholdContext";
 import { formatInr } from "../lib/money";
 import { Button, Card } from "../ui";

@@ -59,11 +59,21 @@ console.log(
 
 const routeModules = [
   ["Home", /home[\\/]HomePage\.tsx$/],
+  ["Money", /money[\\/]MoneyMapPage\.tsx$/],
   ["Plan", /plan[\\/]PlanPage\.tsx$/],
   ["Ideas", /ideas[\\/]IdeasPage\.tsx$/],
+  ["Settings", /settings[\\/]SettingsPage\.tsx$/],
   ["World & your money", /ideas[\\/]WorldPage\.tsx$/],
   ["Inbox", /inbox[\\/]InboxPage\.tsx$/],
   ["Holding", /money[\\/]HoldingPage\.tsx$/],
+];
+
+const routeGuards = [
+  ["Ideas", /ideas[\\/]IdeasPage\.tsx$/, "Why this idea?"],
+  ["Plan", /plan[\\/]PlanPage\.tsx$/, "Your money is close to your plan."],
+  ["Money", /money[\\/]MoneyMapPage\.tsx$/, "Add or update"],
+  ["Settings", /settings[\\/]SettingsPage\.tsx$/, "Delete my account"],
+  ["Help", /help[\\/]HelpPage\.tsx$/, "Start with a rough picture"],
 ];
 
 for (const [label, pattern] of routeModules) {
@@ -78,6 +88,47 @@ for (const [label, pattern] of routeModules) {
   ).byteLength;
   console.log(
     `${label} route chunk: ${(routeBytes / 1024).toFixed(2)} KB gzipped.`,
+  );
+}
+
+function collectClosure(entry, visited = new Set()) {
+  if (visited.has(entry)) return visited;
+  visited.add(entry);
+  for (const imported of manifest[entry]?.imports ?? []) {
+    if (manifest[imported]) collectClosure(imported, visited);
+  }
+  return visited;
+}
+
+const initialContents = await Promise.all(
+  [...initialFiles].map((file) => readFile(path.join(dist, file), "utf8")),
+);
+for (const [label, pattern, guardText] of routeGuards) {
+  const route = Object.entries(manifest).find(
+    ([key, entry]) => entry.isDynamicEntry && pattern.test(key),
+  );
+  if (!route) throw new Error(`${label} must have a dynamic route entry.`);
+  if (initialContents.some((contents) => contents.includes(guardText))) {
+    throw new Error(`${label} route copy leaked into initial JavaScript.`);
+  }
+  const routeChunks = [...collectClosure(route[0])]
+    .map((key) => manifest[key].file)
+    .filter((file) => file.endsWith(".js"));
+  let matchingChunk;
+  for (const file of routeChunks) {
+    const contents = await readFile(path.join(dist, file), "utf8");
+    if (contents.includes(guardText)) {
+      matchingChunk = file;
+      break;
+    }
+  }
+  if (!matchingChunk) {
+    throw new Error(
+      `${label} route copy guard string is missing from its chunks.`,
+    );
+  }
+  console.log(
+    `${label} copy guard: ${JSON.stringify(guardText)} in ${matchingChunk}.`,
   );
 }
 

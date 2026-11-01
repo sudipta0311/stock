@@ -1,6 +1,6 @@
 import { CircleHelp, Info, TriangleAlert } from "lucide-react";
 import { Button, Card } from "../ui";
-import englishCopy from "../copy/en.json";
+import * as englishCopy from "../copy/sections/index";
 
 export type HighlightCardModel = {
   key: string;

@@ -23,7 +23,7 @@ import type {
   WeeklyPlan,
 } from "../planning/api";
 import { Card, EmptyState, Term } from "../ui";
-import englishCopy from "../copy/en.json";
+import * as englishCopy from "../copy/sections/index";
 
 const ENTRY_HINT_REASON_COPY: Record<string, string> = {
   price_far_above_average:
