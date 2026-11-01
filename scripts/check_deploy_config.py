@@ -24,6 +24,7 @@ _E2E_DEV_AUTH_REFERENCE = re.compile(r"\bVITE_E2E_DEV_AUTH\b")
 _REQUIRED_WORKFLOWS = {
     "alerts-weekly.yml",
     "ci.yml",
+    "data-health.yml",
     "db-migrate.yml",
     "marketdata-abroad.yml",
     "marketdata-daily.yml",
@@ -133,6 +134,17 @@ def _workflow_issues(root: Path, workflow: Path, document: Any) -> list[str]:
     for name, job in jobs.items():
         if not isinstance(job, dict) or not str(job.get("timeout-minutes", "")).isdigit():
             issues.append(f"{relative}: job {name} needs timeout-minutes")
+
+    if workflow.name == "data-health.yml":
+        health_job = jobs.get("health", {})
+        health_env = health_job.get("env", {}) if isinstance(health_job, dict) else {}
+        required_secrets = {
+            "OWNER_DATABASE_URL": "${{ secrets.OWNER_DATABASE_URL }}",
+            "EMAIL_PROVIDER": "${{ secrets.EMAIL_PROVIDER }}",
+        }
+        for key, secret_reference in required_secrets.items():
+            if not isinstance(health_env, dict) or health_env.get(key) != secret_reference:
+                issues.append(f"{relative}: jobs.health.env.{key} must reference its GitHub secret")
 
     # Workflows that only call a URL (the keep-awake ping) need no Python.
     if re.search(r"\bpython\b(?!-version)", raw):

@@ -18,6 +18,37 @@ def test_current_render_and_github_files_pass_the_deployment_checker() -> None:
     assert validate_deployment() == []
 
 
+def test_daily_data_health_workflow_is_registered_and_uses_manual_now_input() -> None:
+    workflows = Path(__file__).resolve().parents[1] / ".github" / "workflows"
+    workflow = yaml.load((workflows / "data-health.yml").read_text("utf-8"), Loader=yaml.BaseLoader)
+
+    assert workflow["on"]["schedule"][0]["cron"] == "0 9 * * *"
+    assert workflow["on"]["workflow_dispatch"]["inputs"]["now"]["required"] == "false"
+    assert workflow["permissions"]["contents"] == "read"
+    assert workflow["jobs"]["health"]["timeout-minutes"] == "10"
+    assert workflow["jobs"]["health"]["env"]["OWNER_DATABASE_URL"] == (
+        "${{ secrets.OWNER_DATABASE_URL }}"
+    )
+    assert workflow["jobs"]["health"]["env"]["EMAIL_PROVIDER"] == ("${{ secrets.EMAIL_PROVIDER }}")
+
+
+def test_data_health_workflow_requires_email_provider_secret(tmp_path: Path) -> None:
+    workflow = tmp_path / ".github" / "workflows" / "data-health.yml"
+    workflow.parent.mkdir(parents=True)
+    workflow.write_text(
+        "name: health\non:\n  schedule:\n    - cron: '0 9 * * *'\n"
+        "permissions:\n  contents: read\nconcurrency:\n  group: health\n"
+        "jobs:\n  health:\n    timeout-minutes: 10\n    env:\n"
+        "      OWNER_DATABASE_URL: ${{ secrets.OWNER_DATABASE_URL }}\n",
+        encoding="utf-8",
+    )
+    document = yaml.load(workflow.read_text("utf-8"), Loader=yaml.BaseLoader)
+
+    issues = _workflow_issues(tmp_path, workflow, document)
+
+    assert any("jobs.health.env.EMAIL_PROVIDER" in issue for issue in issues)
+
+
 def test_cron_checker_accepts_the_scheduled_job_expressions() -> None:
     assert _valid_cron("30 13 * * 1-5")
     assert _valid_cron("0 2-20/2 * * 6")

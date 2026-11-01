@@ -63,6 +63,8 @@ Status: ⬜ not started · 🟦 in progress · ✅ accepted · 🔁 rework · �
 | C41 | Ideas show company names (S&P 500 names from the constituents table) with the ticker, one closed "Why this idea?" with the timing reason inside, and funds findable at the broker (listed name and search code behind "Find it at your broker") | UX | ✅ |
 | C42 | Each screen loads its own words: `gen:copy` emits one module per copy section, and the budget check fails if route-only copy reaches the initial chunk (initial JS 169.65 → 150.68 KB) | PWA perf | ✅ |
 | C43 | Polish round 3: Home notes without card-in-card and no empty "Coming up"; Money group totals; Settings chevrons on the title line; Inbox "Updates" and "Statement for September 2026" (API `statement_month`); an e2e Ideas journey with long names and the funds card | UX | ✅ |
+| C44 | Daily data health check: `python -m wealth.alerts.health` reads what the database actually holds (prices, NAVs, FX, weekly data runs, research pack, plans, weekly email) and a `data-health` workflow fails red with plain annotations when something is missing, old or empty | ops | ✅ |
+| C45 | "I bought it": Done on a buy step records what was bought (filled in from the step), it counts as owned at once, this week's money is spent once (no repeat suggestions on rebuild), and statement imports match and replace recorded buys | 4.8, 3.3, 8 | ⬜ |
 
 ## Follow-ups and review outcomes
 

@@ -33,3 +33,15 @@
 7. **Check privacy before inviting anyone.** Keep the API and database in EU regions. Accept the data agreements from Render, Neon, and the email provider. Azure AI Foundry (`stockllm`, East US) receives market facts only. The CI guard `test_research_model_calls_do_not_read_personal_records_or_prompt_fields` blocks personal record fields in research model calls. The PWA notice must explain why data is used, the legal basis, how long it is kept, service providers, and access, correction, export, and deletion rights. Email must be opt-in. Device storage is for app functions only; do not add tracking cookies. Replace the breach-contact placeholder before launch.
 
 8. **Plan for growth and launch.** Upgrade the API if sleep delays or slow imports become a problem. Upgrade Neon if storage or compute limits are reached. Move jobs if GitHub Actions minutes run out. EU investment recommendations may require MiFID II authorisation or a regulated partner in Denmark. The app is information-only; get regulatory advice before a public launch.
+
+## When the daily data check fails
+
+- `india_prices` — rerun **Daily market data**.
+- `india_fund_prices` — rerun **Daily market data**.
+- `abroad_prices` — rerun **Overseas market data**.
+- `fx` — rerun **Daily market data**.
+- `weekly_data` — rerun **Weekly company data**.
+- `failed_runs` — rerun the market data workflow named in the check message.
+- `research_pack` — rerun **Weekly research**.
+- `weekly_plans` — rerun **Weekly household plans**.
+- `weekly_email` — rerun **Weekly local-time email**.
