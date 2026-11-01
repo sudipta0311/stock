@@ -12,7 +12,7 @@ import jwt
 import pytest
 from alembic import command
 from fastapi.testclient import TestClient
-from sqlalchemy import func, inspect, select, text, update
+from sqlalchemy import event, func, inspect, select, text, update
 from sqlalchemy.orm import Session
 
 from conftest import MigratedDatabase
@@ -30,6 +30,7 @@ from wealth.db.models import (
 )
 from wealth.db.models import WeeklyPlan as WeeklyPlanRow
 from wealth.db.session import user_session
+from wealth.marketdata import store
 from wealth.policy.personalise import WeeklyPlan
 from wealth.policy.store import save_weekly_plan
 
@@ -140,6 +141,78 @@ def test_research_ideas_reads_selector_and_track_record_from_existing_pack(
     assert payload["ideas"][0]["why"] is None
     assert payload["core_picks"]["in_nifty50"][0]["symbol"] == "SYNTH"
     assert payload["track_record"]["markets"]["IN"]["status"] == "available"
+
+
+def test_research_ideas_loads_all_company_names_in_one_query(
+    api_client: tuple[TestClient, str, object],
+    migrated_database: MigratedDatabase,
+) -> None:
+    client, secret, _application = api_client
+    headers, _subject = _auth(secret, "idea-company-names")
+    with Session(migrated_database.owner_engine) as session, session.begin():
+        first_id = store.upsert_us_equity_security(session, "SYNTHA", "Synthetic Company Alpha")
+        second_id = store.upsert_us_equity_security(session, "SYNTHB", "Synthetic Company Beta")
+        session.add(
+            ResearchPackRecord(
+                week="2026-W42",
+                pack={
+                    "ideas": [
+                        {
+                            "security_id": str(first_id),
+                            "symbol": "SYNTHA",
+                            "market": "US",
+                            "sector": "Industrials",
+                            "price": "100.00",
+                            "quant_decile": 8,
+                            "dossier_status": "APPROVED",
+                            "valuation_percentile": "45",
+                            "confidence": "HIGH",
+                        },
+                        {
+                            "security_id": str(second_id),
+                            "symbol": "SYNTHB",
+                            "market": "US",
+                            "sector": "Industrials",
+                            "price": "100.00",
+                            "quant_decile": 7,
+                            "dossier_status": "APPROVED",
+                            "valuation_percentile": "55",
+                            "confidence": "MEDIUM",
+                        },
+                    ]
+                },
+            )
+        )
+
+    security_queries: list[str] = []
+
+    def count_security_query(
+        _connection: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        if "from securities" in statement.lower():
+            security_queries.append(statement)
+
+    event.listen(migrated_database.api_engine, "before_cursor_execute", count_security_query)
+    try:
+        response = client.get(
+            "/v1/research/ideas",
+            params={"week": "2026-W42"},
+            headers=headers,
+        )
+    finally:
+        event.remove(migrated_database.api_engine, "before_cursor_execute", count_security_query)
+
+    assert response.status_code == 200
+    assert [idea["name"] for idea in response.json()["ideas"]] == [
+        "Synthetic Company Alpha",
+        "Synthetic Company Beta",
+    ]
+    assert len(security_queries) == 1
 
 
 def test_investing_preferences_validate_and_round_trip(

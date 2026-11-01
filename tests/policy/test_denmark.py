@@ -68,7 +68,8 @@ def test_ask_room_uses_start_value_and_nets_calendar_year_withdrawals() -> None:
 
 
 def test_displayed_fund_name_uses_plain_language() -> None:
-    assert plain_fund_name("SPDR MSCI World UCITS ETF (Acc)") == "SPDR MSCI World fund (Acc)"
+    assert plain_fund_name("SPDR MSCI World UCITS ETF USD (Acc)") == "SPDR MSCI World fund"
+    assert plain_fund_name("Example fund USD") == "Example fund"
 
 
 def test_ranked_etfs_apply_availability_abis_and_ordering() -> None:

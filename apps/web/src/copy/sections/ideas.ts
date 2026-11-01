@@ -30,7 +30,6 @@ const section = {
   "entry_hint_wait": "Wait for a better price",
   "entry_hint_buy_parts": "Buy in {parts} parts over {months} months",
   "entry_hint_buy_expensive": "Buy in 6 parts. Markets look expensive.",
-  "entry_hint_why": "Why?",
   "valuation_cheap": "Looks cheap",
   "valuation_fair": "Fairly priced",
   "valuation_expensive": "Looks expensive",
@@ -38,7 +37,11 @@ const section = {
   "confidence_low": "Lower confidence",
   "confidence_help": "Confidence reflects how much evidence supports an idea. Medium is the usual level. Higher means more checks agree; lower means more questions remain.",
   "why_this_idea": "Why this idea?",
-  "main_risk": "Main risk"
+  "main_risk": "Main risk",
+  "about_timing": "About the timing",
+  "index_find_it_at_broker": "Find it at your broker",
+  "index_search_code_label": "Search code",
+  "index_reinvests_dividends": "It reinvests dividends for you."
 };
 
 export default section;

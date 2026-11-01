@@ -38,6 +38,9 @@ class GlobalFundIdea:
     role: Literal["plan_main", "option"]
     id: str
     name: str
+    listed_name: str
+    isin: str
+    accumulating: bool
     currency: str
     brokers: tuple[str, ...]
     ask_eligible: bool
@@ -50,7 +53,8 @@ _BROKER_ORDER = ("nordnet", "saxo", "danske_bank", "other")
 
 def plain_fund_name(name: str) -> str:
     """Hide provider jargon in names shown to people while keeping source names in rules."""
-    return re.sub(r"\bUCITS\s+ETF\b", "fund", name, flags=re.IGNORECASE)
+    plain = re.sub(r"\bUCITS\s+ETF\b", "fund", name, flags=re.IGNORECASE)
+    return re.sub(r"(?:\s+(?:USD|\(Acc\)))+$", "", plain, flags=re.IGNORECASE).strip()
 
 
 @lru_cache(maxsize=1)
@@ -217,6 +221,9 @@ def global_fund_ideas(
                 role="plan_main" if exposure == core_exposure else "option",
                 id=str(instrument.get("id", "")),
                 name=plain_fund_name(str(instrument.get("name", "Fund name unavailable"))),
+                listed_name=str(instrument.get("name", "Fund name unavailable")),
+                isin=str(instrument.get("isin", "")),
+                accumulating=instrument.get("distribution") == "accumulating",
                 currency=pick.currency,
                 brokers=brokers,
                 ask_eligible=instrument.get("ask_eligible") is True,

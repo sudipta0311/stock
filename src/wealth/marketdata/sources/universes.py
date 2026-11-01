@@ -54,6 +54,7 @@ class Sp500Holdings:
 class Sp500Sector:
     sector: str
     industry: str
+    name: str | None = None
 
 
 def _key(value: str) -> str:
@@ -264,7 +265,7 @@ class _ConstituentsTable(HTMLParser):
 
 
 def parse_sp500_sectors(html: str) -> dict[str, Sp500Sector]:
-    """Read GICS sectors by ticker from the public S&P 500 constituents table."""
+    """Read company names and GICS sectors by ticker from the public constituents table."""
     table = _ConstituentsTable()
     table.feed(html)
     if not table.rows:
@@ -276,16 +277,24 @@ def parse_sp500_sectors(html: str) -> dict[str, Sp500Sector]:
         industry_at = header.index("gicssubindustry")
     except ValueError as error:
         raise ValueError("S&P 500 constituents table has unexpected columns") from error
+    security_at = header.index("security") if "security" in header else None
     result: dict[str, Sp500Sector] = {}
     for row in table.rows[1:]:
-        if len(row) <= max(symbol_at, sector_at, industry_at):
+        columns = [symbol_at, sector_at, industry_at]
+        if security_at is not None:
+            columns.append(security_at)
+        if len(row) <= max(columns):
             continue
         symbol = row[symbol_at].upper().replace("-", ".")
         if not _TICKER_PATTERN.fullmatch(symbol):
             continue
+        name: str | None = None
+        if security_at is not None:
+            name = row[security_at].strip()[:160] or None
         result[symbol] = Sp500Sector(
             sector=_classification_label(row[sector_at] or None, 80),
             industry=_classification_label(row[industry_at] or None, 120),
+            name=name,
         )
     if not result:
         raise ValueError("S&P 500 constituents table has no rows")

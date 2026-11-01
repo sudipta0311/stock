@@ -132,13 +132,18 @@ def test_sp500_refresh_fills_missing_sectors_and_stores_implied_closes(
     as_of = date(2026, 10, 28)
     batch = UniverseBatch(
         sp500=Sp500Holdings(
-            securities=[UniverseSecurity(symbol="SYNTHB", name="Synthetic US Equity B")],
+            securities=[
+                UniverseSecurity(symbol="SYNTHB", name="SYNTHETIC CAPITALIZED COMPANY B"),
+                UniverseSecurity(symbol="SYNTHC", name="SYNTHETIC CAPITALIZED COMPANY C"),
+            ],
             as_of=as_of,
         ),
         nifty500=None,
         errors={},
         sp500_closes={"SYNTHB": Decimal("123.456789")},
-        sp500_sectors={"SYNTHB": Sp500Sector("Health Care", "Life Sciences Tools")},
+        sp500_sectors={
+            "SYNTHB": Sp500Sector("Health Care", "Life Sciences Tools", "Synthetic Company B")
+        },
     )
     with Session(migrated_database.owner_engine) as session, session.begin():
         result = run_refresh(
@@ -152,6 +157,10 @@ def test_sp500_refresh_fills_missing_sectors_and_stores_implied_closes(
         )
         assert security is not None
         classification = (security.sector, security.industry)
+        listed_name = security.name
+        missing_table_name = session.scalar(
+            select(Security.name).where(Security.market == "US", Security.symbol == "SYNTHC")
+        )
         price = session.execute(
             select(PriceEod.close, PriceEod.source).where(
                 PriceEod.security_id == security.id, PriceEod.as_of == as_of
@@ -159,6 +168,8 @@ def test_sp500_refresh_fills_missing_sectors_and_stores_implied_closes(
         ).one()
 
     assert result["counts"]["universes"]["sp500"]["prices_eod"] == 1
+    assert listed_name == "Synthetic Company B"
+    assert missing_table_name == "SYNTHETIC CAPITALIZED COMPANY C"
     assert classification == ("Health Care", "Life Sciences Tools")
     assert price.close == Decimal("123.456789")
     assert price.source == "SSGA_SPY_IMPLIED"

@@ -4,14 +4,17 @@ import { HttpResponse, http } from "msw";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 import { axe } from "vitest-axe";
-import englishCopy from "../../src/copy/en.json";
+import * as englishCopy from "../../src/copy/sections/index";
 import { IdeasPage } from "../../src/ideas/IdeasPage";
 import { WorldPage } from "../../src/ideas/WorldPage";
 import { action, networth, weeklyPlan } from "./fixtures";
 import { renderWithQueries } from "./render";
 import { server } from "../msw";
 
-function ideaHandlers(plan = weeklyPlan()) {
+function ideaHandlers(
+  plan = weeklyPlan(),
+  name: string | null = "Example Company",
+) {
   return [
     http.get(/\/v1\/research\/ideas$/, () =>
       HttpResponse.json({
@@ -20,6 +23,7 @@ function ideaHandlers(plan = weeklyPlan()) {
           {
             security_id: "security-demo",
             symbol: "DEMO",
+            name,
             market: "IN",
             sector: "Energy",
             price: "100.00",
@@ -28,6 +32,11 @@ function ideaHandlers(plan = weeklyPlan()) {
             valuation_percentile: "35",
             valuation_label: "fair",
             confidence: "HIGH",
+            entry_hint: {
+              code: "buy_in_parts",
+              parts: 3,
+              reasons: ["us_price_history_unavailable"],
+            },
             why: {
               reasons: [
                 "A durable business has steady demand.",
@@ -71,6 +80,9 @@ function indexFundRows() {
       instrument: {
         id: "world-fund",
         name: "Example world fund",
+        listed_name: "Example world listing",
+        isin: "TEST00000001",
+        accumulating: true,
         currency: "EUR",
         brokers: ["nordnet", "saxo"],
         ask_eligible: true,
@@ -82,7 +94,10 @@ function indexFundRows() {
       role: "option",
       instrument: {
         id: "sp500-fund",
-        name: "Example large-company fund",
+        name: "iShares Core S&P 500 fund",
+        listed_name: "iShares Core S&P 500 UCITS ETF USD (Acc)",
+        isin: "TEST00000002",
+        accumulating: true,
         currency: "EUR",
         brokers: ["nordnet"],
         ask_eligible: true,
@@ -95,6 +110,9 @@ function indexFundRows() {
       instrument: {
         id: "nasdaq-fund",
         name: "Example technology fund",
+        listed_name: "Example technology listing",
+        isin: "TEST00000003",
+        accumulating: false,
         currency: "EUR",
         brokers: ["saxo"],
         ask_eligible: false,
@@ -164,15 +182,36 @@ describe("Ideas page", () => {
       </MemoryRouter>,
     );
     expect(await screen.findByText("DEMO")).toBeInTheDocument();
+    const ideaHeading = screen.getByRole("heading", {
+      name: "Example Company",
+    });
+    expect(ideaHeading.parentElement).toHaveTextContent("DEMO");
     expect(screen.getByText("Energy")).toBeInTheDocument();
     expect(screen.getByText("Fairly priced")).toBeInTheDocument();
     expect(screen.getByText("Higher confidence")).toBeInTheDocument();
     expect(screen.getByText("Part 1 of 3")).toBeInTheDocument();
-    const ideaWhy = screen.getByText("Why this idea?").closest("details");
+    const ideaArticle = ideaHeading.closest("article");
+    if (!(ideaArticle instanceof HTMLElement))
+      throw new Error("Expected the research idea row");
+    expect(ideaArticle.querySelectorAll("details")).toHaveLength(1);
+    const ideaWhy = within(ideaArticle)
+      .getByText("Why this idea?")
+      .closest("details");
     expect(ideaWhy).not.toHaveAttribute("open");
     expect(
       screen.getByText("A durable business has steady demand."),
     ).not.toBeVisible();
+    expect(
+      within(ideaArticle).getByText(
+        (_, element) =>
+          element?.tagName === "P" &&
+          element.textContent?.includes(
+            "We have under a year of US prices, so we skip the trend check.",
+          ) === true,
+      ),
+    ).not.toBeVisible();
+    expect(within(ideaArticle).queryByText("Why?")).not.toBeInTheDocument();
+    expect(screen.getByText("Buy in 3 parts over 3 months")).toBeVisible();
     expect(
       screen.getByText("Ideas are research to review, not a reason to rush."),
     ).toBeInTheDocument();
@@ -180,6 +219,18 @@ describe("Ideas page", () => {
       screen.queryByRole("heading", { name: "Ideas" }),
     ).not.toBeInTheDocument();
     expect((await axe(container)).violations).toEqual([]);
+  });
+
+  it("uses the ticker as the title when the company name is missing", async () => {
+    server.use(...ideaHandlers(weeklyPlan(), null));
+    renderWithQueries(
+      <MemoryRouter>
+        <IdeasPage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "DEMO" })).toBeVisible();
+    expect(screen.queryByText("Example Company")).not.toBeInTheDocument();
   });
 
   it("shows the Denmark index funds in three visible rows", async () => {
@@ -208,12 +259,31 @@ describe("Ideas page", () => {
       screen.getByRole("heading", { name: "Nasdaq 100 fund" }),
     ).toBeVisible();
     expect(screen.getByText(englishCopy.ideas.index_plan_main)).toBeVisible();
+    expect(screen.getByText("iShares Core S&P 500 fund")).toBeVisible();
     expect(
       screen.getByText("Share savings account, Nordnet, Saxo"),
     ).toBeVisible();
     expect(screen.getByText("Share savings account, Nordnet")).toBeVisible();
     const why = screen.getByText(englishCopy.ideas.index_why);
     expect(why.closest("details")).not.toHaveAttribute("open");
+    const sp500Row = screen
+      .getByRole("heading", { name: "S&P 500 fund" })
+      .closest("li");
+    if (!(sp500Row instanceof HTMLElement))
+      throw new Error("Expected the S&P 500 fund row");
+    const findAtBroker = within(sp500Row).getByText(
+      englishCopy.ideas.index_find_it_at_broker,
+    );
+    expect(findAtBroker.closest("details")).not.toHaveAttribute("open");
+    expect(
+      within(sp500Row).getByText("iShares Core S&P 500 UCITS ETF USD (Acc)"),
+    ).not.toBeVisible();
+    expect(
+      within(sp500Row).getByText("Search code: TEST00000002"),
+    ).not.toBeVisible();
+    expect(
+      within(sp500Row).getByText("It reinvests dividends for you."),
+    ).not.toBeVisible();
   });
 
   it.each([
@@ -396,16 +466,20 @@ describe("Ideas page", () => {
     expect(within(waitIdea!).queryByText(/confidence/i)).toBeNull();
 
     const whyDetails = screen
-      .getAllByText("Why?")
+      .getAllByText(englishCopy.ideas.why_this_idea)
       .map((summary) => summary.closest("details"));
     expect(whyDetails).toHaveLength(3);
     expect(whyDetails.every((details) => details && !details.open)).toBe(true);
+    expect(screen.queryByText("Why?")).not.toBeInTheDocument();
     expect(
       screen.getByText("The price is far above its recent average."),
     ).not.toBeVisible();
     const waitCard = screen.getByText("WAIT").closest("article");
     if (!waitCard) throw new Error("Expected the wait idea card");
-    await user.click(within(waitCard).getByText("Why?"));
+    expect(waitCard.querySelectorAll("details")).toHaveLength(1);
+    await user.click(
+      within(waitCard).getByText(englishCopy.ideas.why_this_idea),
+    );
     expect(
       screen.getByText("The price is far above its recent average."),
     ).toBeVisible();
@@ -551,10 +625,12 @@ describe("Ideas page", () => {
               account: "ask",
               broker: "nordnet",
               instrument: {
-                name: "Example UCITS ETF Fund",
+                name: "Example world fund",
+                listed_name: "Example World UCITS ETF USD (Acc)",
                 ticker: "WLDX",
                 exchange: "Xetra",
                 isin: "IE00ABC00001",
+                accumulating: true,
                 currency: "EUR",
               },
               amount_dkk: "10000",
@@ -582,14 +658,22 @@ describe("Ideas page", () => {
     expect(
       await screen.findByRole("heading", { name: "Buy from Denmark" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Example UCITS ETF Fund")).toBeInTheDocument();
+    expect(screen.getByText("Example world fund")).toBeVisible();
     expect(
       screen.getByText("We use your share savings account first when it fits."),
     ).toBeInTheDocument();
     expect(screen.queryByText("Core picks for you")).not.toBeInTheDocument();
     expect(screen.getByText("DKK 10,000")).toBeInTheDocument();
     expect(screen.getByText(/Share savings account/)).toBeInTheDocument();
-    expect(screen.getByText("IE00ABC00001")).toBeInTheDocument();
+    const findAtBroker = screen.getByText("Find it at your broker");
+    expect(findAtBroker.closest("details")).not.toHaveAttribute("open");
+    expect(
+      screen.getByText("Example World UCITS ETF USD (Acc)"),
+    ).not.toBeVisible();
+    expect(screen.getByText("Search code: IE00ABC00001")).not.toBeVisible();
+    expect(
+      screen.getByText("It reinvests dividends for you."),
+    ).not.toBeVisible();
     expect(screen.getByText("How?")).toBeInTheDocument();
     expect(
       screen.getByText(

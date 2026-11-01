@@ -139,3 +139,7 @@ def test_api_index_funds_follow_the_danish_members_broker_choice() -> None:
         ("global_nasdaq100", "option"),
     ]
     assert funds[0].instrument.id == global_fund_ideas("DK", "saxo")[0].id
+    expected = global_fund_ideas("DK", "saxo")[0]
+    assert funds[0].instrument.isin == expected.isin
+    assert funds[0].instrument.listed_name == expected.listed_name
+    assert funds[0].instrument.accumulating is expected.accumulating

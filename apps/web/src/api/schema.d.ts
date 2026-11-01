@@ -1,4 +1,4 @@
-// OpenAPI SHA256: 142505051501a98f8cce16973cb2f10f7210027087dda7d949b8b9e0586fbb5d
+// OpenAPI SHA256: ade13468f5fd9ccfa6cbec693f417ad1adb9f614704d348df0a33b05a174ba8e
 export interface paths {
     "/healthz": {
         parameters: {
@@ -3367,6 +3367,8 @@ export interface components {
              * @enum {string}
              */
             market: "IN" | "US";
+            /** Name */
+            name?: string | null;
             /**
              * Price
              * Format: decimal
@@ -3436,6 +3438,8 @@ export interface components {
         };
         /** ResearchIndexFundInstrument */
         ResearchIndexFundInstrument: {
+            /** Accumulating */
+            accumulating: boolean;
             /** Ask Eligible */
             ask_eligible: boolean;
             /** Brokers */
@@ -3444,6 +3448,10 @@ export interface components {
             currency: string;
             /** Id */
             id: string;
+            /** Isin */
+            isin: string;
+            /** Listed Name */
+            listed_name: string;
             /** Name */
             name: string;
         };

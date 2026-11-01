@@ -6423,6 +6423,17 @@
             "title": "Market",
             "type": "string"
           },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
           "price": {
             "format": "decimal",
             "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
@@ -6627,6 +6638,10 @@
       "ResearchIndexFundInstrument": {
         "additionalProperties": false,
         "properties": {
+          "accumulating": {
+            "title": "Accumulating",
+            "type": "boolean"
+          },
           "ask_eligible": {
             "title": "Ask Eligible",
             "type": "boolean"
@@ -6646,6 +6661,14 @@
             "title": "Id",
             "type": "string"
           },
+          "isin": {
+            "title": "Isin",
+            "type": "string"
+          },
+          "listed_name": {
+            "title": "Listed Name",
+            "type": "string"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -6654,6 +6677,9 @@
         "required": [
           "id",
           "name",
+          "isin",
+          "listed_name",
+          "accumulating",
           "currency",
           "brokers",
           "ask_eligible"

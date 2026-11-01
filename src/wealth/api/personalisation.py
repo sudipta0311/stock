@@ -23,6 +23,7 @@ from wealth.db.models import (
     HouseholdMember,
     Profile,
     ResearchPackRecord,
+    Security,
 )
 from wealth.marketdata import store
 from wealth.policy.actions import SatelliteIdea, load_buying_rules
@@ -97,6 +98,7 @@ class ResearchIdeaWhy(ApiModel):
 class ResearchIdeaSummary(ApiModel):
     security_id: str
     symbol: str
+    name: str | None = None
     market: Literal["IN", "US"]
     sector: str
     price: Rupees
@@ -112,6 +114,9 @@ class ResearchIdeaSummary(ApiModel):
 class ResearchIndexFundInstrument(ApiModel):
     id: str
     name: str
+    isin: str
+    listed_name: str
+    accumulating: bool
     currency: str
     brokers: list[str]
     ask_eligible: bool
@@ -205,6 +210,9 @@ def _index_funds_for_household(session: Any, household_owner_id: UUID) -> list[R
             instrument=ResearchIndexFundInstrument(
                 id=idea.id,
                 name=idea.name,
+                isin=idea.isin,
+                listed_name=idea.listed_name,
+                accumulating=idea.accumulating,
                 currency=idea.currency,
                 brokers=list(idea.brokers),
                 ask_eligible=idea.ask_eligible,
@@ -538,7 +546,7 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                 index_funds=index_funds,
                 us_market=us_market,
             )
-        ideas: list[ResearchIdeaSummary] = []
+        prepared_ideas: list[tuple[SatelliteIdea, Any, Any, UUID | None]] = []
         for raw in record.pack.get("ideas", []):
             if not isinstance(raw, dict):
                 continue
@@ -550,11 +558,29 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                     if key not in {"entry_hint", "why", "valuation_label"}
                 }
             )
-            raw_why = raw.get("why")
+            try:
+                security_id = UUID(idea.security_id)
+            except ValueError:
+                security_id = None
+            prepared_ideas.append((idea, raw_hint, raw.get("why"), security_id))
+        security_ids = {security_id for _, _, _, security_id in prepared_ideas if security_id}
+        names_by_id = (
+            {
+                str(security_id): name
+                for security_id, name in user.session.execute(
+                    select(Security.id, Security.name).where(Security.id.in_(security_ids))
+                ).all()
+            }
+            if security_ids
+            else {}
+        )
+        ideas: list[ResearchIdeaSummary] = []
+        for idea, raw_hint, raw_why, security_id in prepared_ideas:
             ideas.append(
                 ResearchIdeaSummary(
                     security_id=idea.security_id,
                     symbol=idea.symbol,
+                    name=names_by_id.get(str(security_id)) if security_id else None,
                     market=idea.market,
                     sector=idea.sector,
                     price=idea.price,

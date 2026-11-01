@@ -351,8 +351,8 @@ def test_sp500_sector_table_maps_tickers_to_gics_sectors() -> None:
     sectors = universes.parse_sp500_sectors(html)
 
     assert sectors == {
-        "EXA": universes.Sp500Sector("Industrials", "Industrial Machinery"),
-        "EXB.B": universes.Sp500Sector("Health Care", "Life Sciences"),
+        "EXA": universes.Sp500Sector("Industrials", "Industrial Machinery", "Example One"),
+        "EXB.B": universes.Sp500Sector("Health Care", "Life Sciences", "Example Two"),
     }
 
 

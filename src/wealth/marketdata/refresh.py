@@ -550,10 +550,11 @@ def _store_source(
                     security_ids: set[Any] = set()
                     price_rows: list[dict[str, Any]] = []
                     for row in records.sp500.securities:
-                        security_id = store.upsert_us_equity_security(session, row.symbol, row.name)
+                        listed = records.sp500_sectors.get(row.symbol)
+                        name = listed.name if listed is not None and listed.name else row.name
+                        security_id = store.upsert_us_equity_security(session, row.symbol, name)
                         security_ids.add(security_id)
                         # SSGA now lists every sector as "-"; the GICS table fills the gap.
-                        listed = records.sp500_sectors.get(row.symbol)
                         sector, industry = (
                             row.sector or "Unclassified",
                             row.industry or "Unclassified",

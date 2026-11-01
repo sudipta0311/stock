@@ -80,6 +80,14 @@ function DenmarkBuyCard({ plan }: { plan?: WeeklyPlan }) {
             const member = members.find((item) => item.id === line.member_id);
             const broker = textValue(line.broker, "other");
             const howTo = asArray(asRecord(copy.how_to)[broker]);
+            const listedName = textValue(
+              instrument.listed_name,
+              textValue(instrument.name, copy.fund_fallback),
+            );
+            const searchCode = textValue(
+              instrument.isin,
+              textValue(instrument.ticker),
+            );
             const heldNotes = asArray(details.held_us_etf_notes).map(asRecord);
             const alternatives = asArray(details.alternatives_considered).map(
               asRecord,
@@ -117,17 +125,24 @@ function DenmarkBuyCard({ plan }: { plan?: WeeklyPlan }) {
                     )}
                   </p>
                 ) : null}
-                <div className="text-xs">
-                  {copy.fund_code_label}:{" "}
-                  <Term
-                    code
-                    explanation={copy.fund_code_help}
-                    prompt={copy.term_prompt}
-                    learnMoreHref="/help#term-isin"
-                  >
-                    {textValue(instrument.isin)}
-                  </Term>
-                </div>
+                {listedName || searchCode ? (
+                  <details>
+                    <summary className="cursor-pointer text-sm font-semibold text-brand">
+                      {copy.find_it_at_broker}
+                    </summary>
+                    <div className="mt-2 grid gap-1 text-sm text-muted-foreground">
+                      {listedName ? <p>{listedName}</p> : null}
+                      {searchCode ? (
+                        <p>
+                          {copy.fund_code_label}: {searchCode}
+                        </p>
+                      ) : null}
+                      {instrument.accumulating ? (
+                        <p>{copy.reinvests_dividends}</p>
+                      ) : null}
+                    </div>
+                  </details>
+                ) : null}
                 <p className="text-xs text-muted-foreground">
                   {textValue(line.account) === "ask"
                     ? copy.account_ask
@@ -497,6 +512,8 @@ function ResearchIdea({
 }) {
   const idea = asRecord(raw);
   const symbol = textValue(idea.symbol, "Research idea");
+  const name = textValue(idea.name);
+  const displayName = name || symbol;
   const confidence = confidenceWords(textValue(idea.confidence));
   const valuation = valuationWords(textValue(idea.valuation_label));
   const tranche = referencedTranche(idea, actions);
@@ -523,7 +540,8 @@ function ResearchIdea({
           : null;
   const hintReasons = asArray(hint.reasons)
     .map((reason) => ENTRY_HINT_REASON_COPY[textValue(reason)])
-    .filter((reason): reason is string => Boolean(reason));
+    .filter((reason): reason is string => Boolean(reason))
+    .slice(0, 2);
   return (
     <article
       key={`${symbol}-${index}`}
@@ -533,32 +551,29 @@ function ResearchIdea({
         <Lightbulb aria-hidden="true" className="size-4" />
       </span>
       <div className="min-w-0 flex-1">
-        <div className="flex items-start justify-between gap-3">
-          <h3 className="font-semibold" data-security>
-            {symbol}
+        <div className="flex min-w-0 items-center justify-between gap-3">
+          <h3
+            className="min-w-0 flex-1 truncate font-semibold"
+            data-security
+            title={displayName}
+          >
+            {displayName}
           </h3>
-          {confidence ? (
-            <span className="shrink-0 rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
-              {confidence}
-            </span>
-          ) : null}
-        </div>
-        {hintLine ? (
-          <div className="mt-1">
-            <p className="text-sm font-medium">{hintLine}</p>
-            {hintReasons.length ? (
-              <details className="mt-1">
-                <summary className="min-h-9 cursor-pointer py-1 text-xs text-muted-foreground">
-                  {englishCopy.ideas.entry_hint_why}
-                </summary>
-                <ul className="grid gap-1 pb-2 text-xs text-muted-foreground">
-                  {hintReasons.map((reason, reasonIndex) => (
-                    <li key={`${symbol}-hint-${reasonIndex}`}>{reason}</li>
-                  ))}
-                </ul>
-              </details>
+          <div className="flex shrink-0 items-center gap-2">
+            {name ? (
+              <span className="text-xs text-muted-foreground" data-security>
+                {symbol}
+              </span>
+            ) : null}
+            {confidence ? (
+              <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
+                {confidence}
+              </span>
             ) : null}
           </div>
+        </div>
+        {hintLine ? (
+          <p className="mt-1 text-sm font-medium">{hintLine}</p>
         ) : null}
         <div className="mt-1 flex items-baseline justify-between gap-3">
           <p className="min-w-0 truncate text-sm text-muted-foreground">
@@ -570,7 +585,7 @@ function ResearchIdea({
             </p>
           ) : null}
         </div>
-        {whyReasons.length || whyRisk ? (
+        {whyReasons.length || whyRisk || hintReasons.length ? (
           <details className="mt-1">
             <summary className="min-h-9 cursor-pointer py-1 text-sm text-muted-foreground">
               {englishCopy.ideas.why_this_idea}
@@ -589,6 +604,14 @@ function ResearchIdea({
                     {englishCopy.ideas.main_risk}:{" "}
                   </strong>
                   {whyRisk}
+                </p>
+              ) : null}
+              {hintReasons.length ? (
+                <p>
+                  <strong className="font-medium text-foreground">
+                    {englishCopy.ideas.about_timing}:{" "}
+                  </strong>
+                  {hintReasons.join(" ")}
                 </p>
               ) : null}
             </div>
@@ -728,6 +751,8 @@ function IndexFundsCard({
         {funds.map((fund) => {
           const exposure = textValue(fund.exposure);
           const instrument = asRecord(fund.instrument);
+          const listedName = textValue(instrument.listed_name);
+          const searchCode = textValue(instrument.isin);
           const brokers = asArray(instrument.brokers)
             .map((broker) => textValue(broker))
             .map((broker) => textValue(brokerNames[broker], broker));
@@ -757,6 +782,24 @@ function IndexFundsCard({
                 <p className="mt-1 text-xs text-muted-foreground">
                   {secondLine}
                 </p>
+              ) : null}
+              {listedName || searchCode ? (
+                <details>
+                  <summary className="min-h-9 cursor-pointer py-1 text-sm text-muted-foreground">
+                    {copy.index_find_it_at_broker}
+                  </summary>
+                  <div className="grid gap-1 pb-1 text-sm text-muted-foreground">
+                    {listedName ? <p>{listedName}</p> : null}
+                    {searchCode ? (
+                      <p>
+                        {copy.index_search_code_label}: {searchCode}
+                      </p>
+                    ) : null}
+                    {instrument.accumulating ? (
+                      <p>{copy.index_reinvests_dividends}</p>
+                    ) : null}
+                  </div>
+                </details>
               ) : null}
             </li>
           );

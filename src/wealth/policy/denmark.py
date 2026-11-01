@@ -86,9 +86,11 @@ def account_lines(
             "broker": broker,
             "instrument": {
                 "name": plain_fund_name(str(pick.instrument["name"])),
+                "listed_name": str(pick.instrument["name"]),
                 "ticker": pick.ticker,
                 "exchange": pick.exchange,
                 "isin": pick.instrument["isin"],
+                "accumulating": pick.instrument.get("distribution") == "accumulating",
                 "currency": pick.currency,
             },
             "amount_dkk": format(displayed_amount, "f"),
