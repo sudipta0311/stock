@@ -1,4 +1,4 @@
-// OpenAPI SHA256: 01100542690e15442528c275c9d76ae35df050bf18f369da6c56f5660b958b0f
+// OpenAPI SHA256: 142505051501a98f8cce16973cb2f10f7210027087dda7d949b8b9e0586fbb5d
 export interface paths {
     "/healthz": {
         parameters: {
@@ -3408,12 +3408,44 @@ export interface components {
             };
             /** Ideas */
             ideas: components["schemas"]["ResearchIdeaSummary"][];
+            /** Index Funds */
+            index_funds?: components["schemas"]["ResearchIndexFund"][];
             /** Track Record */
             track_record?: {
                 [key: string]: unknown;
             } | null;
+            us_market?: components["schemas"]["UsMarketSummary"] | null;
             /** Week */
             week: string;
+        };
+        /** ResearchIndexFund */
+        ResearchIndexFund: {
+            /**
+             * Exposure
+             * @enum {string}
+             */
+            exposure: "global_all_world" | "global_sp500" | "global_nasdaq100";
+            instrument: components["schemas"]["ResearchIndexFundInstrument"];
+            /** Market */
+            market: "US" | null;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "plan_main" | "option";
+        };
+        /** ResearchIndexFundInstrument */
+        ResearchIndexFundInstrument: {
+            /** Ask Eligible */
+            ask_eligible: boolean;
+            /** Brokers */
+            brokers: string[];
+            /** Currency */
+            currency: string;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
         };
         /**
          * Residency
@@ -3859,6 +3891,20 @@ export interface components {
              * @enum {string}
              */
             reason: "price_needed" | "rate_needed" | "fx_needed";
+        };
+        /** UsMarketSummary */
+        UsMarketSummary: {
+            /** Extra Money Parts */
+            extra_money_parts: number;
+            /**
+             * History Label
+             * @enum {string}
+             */
+            history_label: "long_history" | "short_history";
+            /** Label */
+            label: ("cheap" | "fair" | "expensive") | null;
+            /** Percentile */
+            percentile: string | null;
         };
         /** ValidationError */
         ValidationError: {

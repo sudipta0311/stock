@@ -683,6 +683,108 @@ function ResearchCard({
   );
 }
 
+function IndexFundsCard({
+  research,
+  showSetMonthlyAmount,
+}: {
+  research?: ResearchIdeasResponse;
+  showSetMonthlyAmount: boolean;
+}) {
+  const funds = asArray(research?.index_funds).map(asRecord);
+  if (!funds.length) return null;
+
+  const copy = englishCopy.ideas;
+  const market = asRecord(research?.us_market);
+  const marketLabel = textValue(market.label);
+  const marketLine =
+    marketLabel === "cheap"
+      ? copy.index_market_cheap
+      : marketLabel === "fair"
+        ? copy.index_market_fair
+        : marketLabel === "expensive"
+          ? copy.index_market_expensive
+          : copy.index_market_unavailable;
+  const extraMoneyParts = Number(market.extra_money_parts);
+  const brokerNames = asRecord(englishCopy.denmark.brokers);
+  const rowLabels: Record<string, string> = {
+    global_all_world: copy.index_world_fund,
+    global_sp500: copy.index_sp500_fund,
+    global_nasdaq100: copy.index_nasdaq100_fund,
+  };
+
+  return (
+    <Card className="grid gap-3">
+      <h2 className="text-base font-semibold">{copy.index_funds_title}</h2>
+      <div className="grid gap-1 text-sm">
+        <p>{marketLine}</p>
+        {Number.isInteger(extraMoneyParts) && extraMoneyParts > 0 ? (
+          <p>
+            {copy.index_extra_parts.replace("{parts}", String(extraMoneyParts))}
+          </p>
+        ) : null}
+        <p>{copy.index_monthly_buying}</p>
+      </div>
+      <ul className="grid gap-3">
+        {funds.map((fund) => {
+          const exposure = textValue(fund.exposure);
+          const instrument = asRecord(fund.instrument);
+          const brokers = asArray(instrument.brokers)
+            .map((broker) => textValue(broker))
+            .map((broker) => textValue(brokerNames[broker], broker));
+          const secondLine = [
+            instrument.ask_eligible ? englishCopy.denmark.account_ask : null,
+            brokers.length ? brokers.join(", ") : null,
+          ]
+            .filter(Boolean)
+            .join(", ");
+          return (
+            <li
+              key={exposure}
+              className="border-t border-line pt-3 first:border-0 first:pt-0"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-sm font-semibold">
+                  {textValue(rowLabels[exposure], copy.index_world_fund)}
+                </h3>
+                {textValue(fund.role) === "plan_main" ? (
+                  <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
+                    {copy.index_plan_main}
+                  </span>
+                ) : null}
+              </div>
+              <p className="mt-1 text-sm">{textValue(instrument.name)}</p>
+              {secondLine ? (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {secondLine}
+                </p>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+      <details>
+        <summary className="min-h-9 cursor-pointer py-1 text-sm text-muted-foreground">
+          {copy.index_why}
+        </summary>
+        <div className="grid gap-2 pb-1 text-sm text-muted-foreground">
+          <p>{copy.index_world_reason_one}</p>
+          <p>{copy.index_world_reason_two}</p>
+          <p>{copy.index_us_reason_one}</p>
+          <p>{copy.index_us_reason_two}</p>
+        </div>
+      </details>
+      {showSetMonthlyAmount ? (
+        <Link
+          to="/"
+          className="min-h-9 w-fit py-1 text-sm font-medium text-muted-foreground"
+        >
+          {englishCopy.denmark.set_monthly_amount}
+        </Link>
+      ) : null}
+    </Card>
+  );
+}
+
 export function IdeasPage() {
   const research = useFeatureQuery(
     ["c22", "research-ideas"],
@@ -711,12 +813,16 @@ export function IdeasPage() {
     asRecord(planValue?.residency).country === "DK" ||
     planMembers.some((member) => asRecord(member.residency).country === "DK");
   const denmarkBuyCount = asArray(planValue?.abroad_buy_list).length;
+  const showSetMonthlyAmount =
+    denmarkResident &&
+    !investing.isPending &&
+    Boolean(investing.data) &&
+    !isPositiveAmount(investing.data?.monthly_sip_capacity);
   return (
     <div data-copy-screen="ideas" className="grid gap-4">
       <header>
-        <h2 className="text-xl font-semibold">Ideas</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Ideas are research to review, not a reason to rush.
+          {englishCopy.ideas.intro}
         </p>
       </header>
       {denmarkResident && denmarkBuyCount ? (
@@ -726,16 +832,13 @@ export function IdeasPage() {
         ideas={asArray(research.data?.ideas)}
         actions={actions.data}
       />
+      <IndexFundsCard
+        research={research.data}
+        showSetMonthlyAmount={showSetMonthlyAmount}
+      />
       {denmarkResident && !denmarkBuyCount ? (
         <div className="grid gap-1 text-sm text-muted-foreground">
           <p>{englishCopy.denmark.no_buy_short}</p>
-          {!investing.isPending &&
-          Boolean(investing.data) &&
-          !isPositiveAmount(investing.data?.monthly_sip_capacity) ? (
-            <Link to="/" className="min-h-9 w-fit py-1 font-medium text-brand">
-              {englishCopy.denmark.set_monthly_amount}
-            </Link>
-          ) : null}
         </div>
       ) : null}
       <SelectorFunds research={research.data} />

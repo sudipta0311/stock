@@ -59,6 +59,7 @@ Status: ⬜ not started · 🟦 in progress · ✅ accepted · 🔁 rework · �
 | C37 | Clearer screens: Money shows the real count and plain unit lines (codes only in Details); Ideas say "Looks cheap" or "Fairly priced" with a closed "Why this idea?"; Plan draws now vs plan with the biggest gap and a matching button; the family picker sits in the header; Home takes the amount in kr or ₹ | UX | ✅ |
 | C38 | NSE fundamentals skip a filing whose XBRL file is gone (404/410) and count it, so ADANIENT, LT and UPL keep their readable filings | data | ✅ |
 | C39 | The weekly pack keeps every approved idea of the week (any run; the latest verdict wins), ordered by market and screener score; a no-model `repack` step rebuilds it | research | ✅ |
+| C40 | US and world funds on Ideas for a Denmark household: the world, S&P 500 and Nasdaq 100 funds the plan would pick, a code-decided US market line (cheap/fair/expensive vs ~3 years) and the plan's parts for extra money | UX, 4.9 | ✅ |
 
 ## Follow-ups and review outcomes
 

@@ -17,9 +17,17 @@ from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from wealth.db.models import Action as ActionRow
-from wealth.db.models import AuditLog, HighlightDismissal, Profile, ResearchPackRecord
-from wealth.policy.actions import SatelliteIdea
+from wealth.db.models import (
+    AuditLog,
+    HighlightDismissal,
+    HouseholdMember,
+    Profile,
+    ResearchPackRecord,
+)
+from wealth.marketdata import store
+from wealth.policy.actions import SatelliteIdea, load_buying_rules
 from wealth.policy.data import load_policy_inputs
+from wealth.policy.denmark_picks import global_fund_ideas
 from wealth.policy.highlights import (
     Highlight,
     HighlightContext,
@@ -27,6 +35,7 @@ from wealth.policy.highlights import (
     highlight_fingerprint,
     highlights,
 )
+from wealth.policy.market_timing import map_us_market_timing
 from wealth.policy.personalise import WeeklyPlan, personalise
 from wealth.policy.store import actions_for_week, latest_plan, save_weekly_plan
 from wealth.schemas.common import Rupees
@@ -100,12 +109,36 @@ class ResearchIdeaSummary(ApiModel):
     why: ResearchIdeaWhy | None = None
 
 
+class ResearchIndexFundInstrument(ApiModel):
+    id: str
+    name: str
+    currency: str
+    brokers: list[str]
+    ask_eligible: bool
+
+
+class ResearchIndexFund(ApiModel):
+    exposure: Literal["global_all_world", "global_sp500", "global_nasdaq100"]
+    role: Literal["plan_main", "option"]
+    instrument: ResearchIndexFundInstrument
+    market: Literal["US"] | None
+
+
+class UsMarketSummary(ApiModel):
+    percentile: Decimal | None
+    history_label: Literal["long_history", "short_history"]
+    label: Literal["cheap", "fair", "expensive"] | None
+    extra_money_parts: int
+
+
 class ResearchIdeasResponse(ApiModel):
     week: str
     ideas: list[ResearchIdeaSummary]
     core_picks: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
     track_record: dict[str, Any] | None = None
     amc_international_suspended: bool | None = None
+    index_funds: list[ResearchIndexFund] = Field(default_factory=list)
+    us_market: UsMarketSummary | None = None
 
 
 _RESEARCH_RULES_PATH = FilePath(__file__).resolve().parents[3] / "rules" / "research.yaml"
@@ -123,11 +156,87 @@ def _valuation_percentile_thresholds() -> tuple[Decimal, Decimal]:
 
 def valuation_label(percentile: Decimal) -> Literal["cheap", "fair", "expensive"]:
     cheap_max, expensive_min = _valuation_percentile_thresholds()
-    if percentile <= cheap_max:
-        return "cheap"
-    if percentile >= expensive_min:
-        return "expensive"
-    return "fair"
+    from wealth.policy.market_timing import valuation_label as classify_valuation
+
+    return classify_valuation(
+        percentile,
+        cheap_pe_percentile_max=cheap_max,
+        expensive_pe_percentile_min=expensive_min,
+    )
+
+
+def _denmark_fund_member(session: Any, household_owner_id: UUID) -> tuple[str, str] | None:
+    profile = session.scalar(select(Profile).where(Profile.user_id == household_owner_id))
+    members = list(
+        session.scalars(
+            select(HouseholdMember)
+            .where(HouseholdMember.user_id == household_owner_id)
+            .order_by(
+                HouseholdMember.is_self.desc(),
+                HouseholdMember.created_at,
+                HouseholdMember.id,
+            )
+        ).all()
+    )
+    for member in members:
+        residency = dict(member.residency or {})
+        if residency.get("country") != "DK":
+            continue
+        investing = dict(member.investing or {})
+        if member.is_self and profile is not None and not investing:
+            investing = dict(profile.investing or {})
+        return "DK", InvestingPrefs.model_validate(investing).broker
+    if not members and profile is not None:
+        residency = dict(profile.residency or {})
+        if residency.get("country") == "DK":
+            return "DK", InvestingPrefs.model_validate(profile.investing or {}).broker
+    return None
+
+
+def _index_funds_for_household(session: Any, household_owner_id: UUID) -> list[ResearchIndexFund]:
+    member = _denmark_fund_member(session, household_owner_id)
+    if member is None:
+        return []
+    country, broker = member
+    return [
+        ResearchIndexFund(
+            exposure=idea.exposure,
+            role=idea.role,
+            instrument=ResearchIndexFundInstrument(
+                id=idea.id,
+                name=idea.name,
+                currency=idea.currency,
+                brokers=list(idea.brokers),
+                ask_eligible=idea.ask_eligible,
+            ),
+            market=idea.market,
+        )
+        for idea in global_fund_ideas(country, broker)
+    ]
+
+
+def _us_market_summary(
+    valuation: store.IndexValuationPercentile | None,
+) -> UsMarketSummary | None:
+    if valuation is None:
+        return None
+    cheap_max, expensive_min = _valuation_percentile_thresholds()
+    lumpsum = load_buying_rules()["lumpsum"]
+    timing = map_us_market_timing(
+        valuation.percentile,
+        valuation.history_label,
+        cheap_pe_percentile_max=cheap_max,
+        expensive_pe_percentile_min=expensive_min,
+        expensive_valuation_percentile=Decimal(str(lumpsum["expensive_valuation_percentile"])),
+        stp_tranches_normal=int(lumpsum["stp_tranches_normal"]),
+        stp_tranches_expensive=int(lumpsum["stp_tranches_expensive"]),
+    )
+    return UsMarketSummary(
+        percentile=timing.percentile,
+        history_label=timing.history_label,  # type: ignore[arg-type]
+        label=timing.label,
+        extra_money_parts=timing.extra_money_parts,
+    )
 
 
 def current_week(on: date) -> str:
@@ -417,9 +526,18 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
         selected_week = week or current_week(today)
         if not _valid_week(selected_week):
             raise HTTPException(status_code=422, detail="The requested ISO week is invalid.")
+        index_funds = _index_funds_for_household(user.session, user.household_owner_id)
+        us_market = _us_market_summary(
+            store.latest_index_valuation_percentile(user.session, "S&P 500", today)
+        )
         record = user.session.get(ResearchPackRecord, selected_week)
         if record is None:
-            return ResearchIdeasResponse(week=selected_week, ideas=[])
+            return ResearchIdeasResponse(
+                week=selected_week,
+                ideas=[],
+                index_funds=index_funds,
+                us_market=us_market,
+            )
         ideas: list[ResearchIdeaSummary] = []
         for raw in record.pack.get("ideas", []):
             if not isinstance(raw, dict):
@@ -476,6 +594,8 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             core_picks=core_picks,
             track_record=track_record,
             amc_international_suspended=suspended if isinstance(suspended, bool) else None,
+            index_funds=index_funds,
+            us_market=us_market,
         )
 
     return router

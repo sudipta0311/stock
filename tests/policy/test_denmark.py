@@ -15,6 +15,7 @@ from wealth.policy.denmark import (
 from wealth.policy.denmark_picks import (
     EtfPick,
     approved_us_stock_buys,
+    global_fund_ideas,
     pick_india_vehicle,
     plain_fund_name,
     ranked_etfs,
@@ -107,6 +108,19 @@ def test_ranked_etfs_can_apply_the_same_order_without_a_broker_filter() -> None:
         pick.instrument["id"]
         for pick in ranked_etfs("global_all_world", "other", broker_filter=False, rules=rules)
     ] == ["nordnet_only"]
+
+
+def test_global_fund_ideas_follow_rules_order_and_mark_the_plan_fund() -> None:
+    ideas = global_fund_ideas("DK", "nordnet")
+
+    assert [(idea.exposure, idea.role, idea.market) for idea in ideas] == [
+        ("global_all_world", "plan_main", None),
+        ("global_sp500", "option", "US"),
+        ("global_nasdaq100", "option", "US"),
+    ]
+    assert all(idea.id and idea.name and idea.currency and idea.brokers for idea in ideas)
+    assert all(idea.ask_eligible for idea in ideas)
+    assert global_fund_ideas("IN", "nordnet") == ()
 
 
 def test_comparison_direction_is_separate_from_rounded_absolute_cost() -> None:
@@ -357,16 +371,29 @@ def test_unconfirmed_broker_availability_is_flagged_on_the_buy_line(
     }
     pick = EtfPick(instrument, "Xetra", "WLDX", "EUR")
 
-    def ranked(_exposure, _broker, *, ask_only=False, broker_filter=True, rules=None):
-        del ask_only, rules
-        return [] if broker_filter else [pick]
+    def ranked(_exposure, _broker, *, ask_first=False, rules=None):
+        del ask_first, rules
+        return [pick], True
 
-    monkeypatch.setattr(personalise, "ranked_etfs", ranked)
+    monkeypatch.setattr(personalise, "ranked_etfs_for_member", ranked)
     member = _dk_member(broker="other")
     _actions, lines, _carry, _notes = _run_abroad(
         [_global_buy(amount_inr="125000", account_type="ORDINARY")], member, Decimal(0)
     )
     assert "broker_availability_unchecked" in lines[0]["reason_codes"]
+
+
+def test_index_fund_idea_matches_the_personalise_pick_for_the_same_member() -> None:
+    member = _dk_member(broker="nordnet")
+    world_fund = global_fund_ideas("DK", member.investing.broker)[0]
+
+    _actions, lines, _carry, _notes = _run_abroad(
+        [_global_buy(amount_inr="125000", account_type="ASK")],
+        member,
+        Decimal("10000"),
+    )
+
+    assert lines[0]["instrument"]["name"] == world_fund.name
 
 
 def test_ask_display_rounds_down_and_split_dust_is_merged() -> None:

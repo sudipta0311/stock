@@ -63,23 +63,75 @@ function ideaHandlers(plan = weeklyPlan()) {
   ];
 }
 
+function indexFundRows() {
+  return [
+    {
+      exposure: "global_all_world",
+      role: "plan_main",
+      instrument: {
+        id: "world-fund",
+        name: "Example world fund",
+        currency: "EUR",
+        brokers: ["nordnet", "saxo"],
+        ask_eligible: true,
+      },
+      market: null,
+    },
+    {
+      exposure: "global_sp500",
+      role: "option",
+      instrument: {
+        id: "sp500-fund",
+        name: "Example large-company fund",
+        currency: "EUR",
+        brokers: ["nordnet"],
+        ask_eligible: true,
+      },
+      market: "US",
+    },
+    {
+      exposure: "global_nasdaq100",
+      role: "option",
+      instrument: {
+        id: "nasdaq-fund",
+        name: "Example technology fund",
+        currency: "EUR",
+        brokers: ["saxo"],
+        ask_eligible: false,
+      },
+      market: "US",
+    },
+  ];
+}
+
+function indexFundResearch(usMarket: unknown = null) {
+  return {
+    week: "2026-W44",
+    ideas: [],
+    index_funds: indexFundRows(),
+    us_market: usMarket,
+  };
+}
+
+function denmarkPlan() {
+  return weeklyPlan({
+    residency: {
+      status: "NRI",
+      country: "DK",
+      settle_plan: "undecided",
+      us_person: false,
+      planned_return_year: null,
+    },
+    abroad_buy_list: [],
+  });
+}
+
 describe("Ideas page", () => {
   it("offers to set a monthly amount when Denmark has nothing to buy", async () => {
+    server.use(...ideaHandlers(denmarkPlan()));
     server.use(
-      ...ideaHandlers(
-        weeklyPlan({
-          residency: {
-            status: "NRI",
-            country: "DK",
-            settle_plan: "undecided",
-            us_person: false,
-            planned_return_year: null,
-          },
-          abroad_buy_list: [],
-        }),
-      ),
       http.get(/\/v1\/research\/ideas$/, () =>
-        HttpResponse.json({ week: "2026-W44", ideas: [] }),
+        HttpResponse.json(indexFundResearch()),
       ),
     );
 
@@ -97,6 +149,11 @@ describe("Ideas page", () => {
         name: englishCopy.denmark.set_monthly_amount,
       }),
     ).toHaveAttribute("href", "/");
+    expect(
+      screen.getAllByRole("link", {
+        name: englishCopy.denmark.set_monthly_amount,
+      }),
+    ).toHaveLength(1);
   });
 
   it("shows ideas and confidence details in plain words", async () => {
@@ -119,7 +176,140 @@ describe("Ideas page", () => {
     expect(
       screen.getByText("Ideas are research to review, not a reason to rush."),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Ideas" }),
+    ).not.toBeInTheDocument();
     expect((await axe(container)).violations).toEqual([]);
+  });
+
+  it("shows the Denmark index funds in three visible rows", async () => {
+    server.use(...ideaHandlers(denmarkPlan()));
+    server.use(
+      http.get(/\/v1\/research\/ideas$/, () =>
+        HttpResponse.json(indexFundResearch()),
+      ),
+    );
+    renderWithQueries(
+      <MemoryRouter>
+        <IdeasPage />
+      </MemoryRouter>,
+    );
+
+    const title = await screen.findByRole("heading", {
+      name: englishCopy.ideas.index_funds_title,
+    });
+    const card = title.closest("div.grid");
+    if (!(card instanceof HTMLElement))
+      throw new Error("Expected the index fund card");
+    expect(within(card).getAllByRole("listitem")).toHaveLength(3);
+    expect(screen.getByRole("heading", { name: "World fund" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "S&P 500 fund" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "Nasdaq 100 fund" }),
+    ).toBeVisible();
+    expect(screen.getByText(englishCopy.ideas.index_plan_main)).toBeVisible();
+    expect(
+      screen.getByText("Share savings account, Nordnet, Saxo"),
+    ).toBeVisible();
+    expect(screen.getByText("Share savings account, Nordnet")).toBeVisible();
+    const why = screen.getByText(englishCopy.ideas.index_why);
+    expect(why.closest("details")).not.toHaveAttribute("open");
+  });
+
+  it.each([
+    [
+      "cheap",
+      "33.00",
+      "US shares look cheap compared with the last 3 years.",
+      3,
+    ],
+    [
+      "fair",
+      "50.00",
+      "US shares look fairly priced compared with the last 3 years.",
+      3,
+    ],
+    [
+      "expensive",
+      "80.00",
+      "US shares look expensive compared with the last 3 years.",
+      6,
+    ],
+  ])(
+    "shows the %s US market message and extra-buy parts",
+    async (label, percentile, message, parts) => {
+      server.use(...ideaHandlers(denmarkPlan()));
+      server.use(
+        http.get(/\/v1\/research\/ideas$/, () =>
+          HttpResponse.json(
+            indexFundResearch({
+              percentile,
+              history_label: "long_history",
+              label,
+              extra_money_parts: parts,
+            }),
+          ),
+        ),
+      );
+      renderWithQueries(
+        <MemoryRouter>
+          <IdeasPage />
+        </MemoryRouter>,
+      );
+
+      expect(await screen.findByText(message)).toBeVisible();
+      expect(
+        screen.getByText(`Extra money: buy in ${parts} parts.`),
+      ).toBeVisible();
+      expect(screen.getByText("Monthly buying: keep going.")).toBeVisible();
+    },
+  );
+
+  it("shows the missing US market reading without extra parts", async () => {
+    server.use(...ideaHandlers(denmarkPlan()));
+    server.use(
+      http.get(/\/v1\/research\/ideas$/, () =>
+        HttpResponse.json(indexFundResearch(null)),
+      ),
+    );
+    renderWithQueries(
+      <MemoryRouter>
+        <IdeasPage />
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByText(englishCopy.ideas.index_market_unavailable),
+    ).toBeVisible();
+    expect(screen.queryByText(/Extra money:/)).not.toBeInTheDocument();
+  });
+
+  it("hides the index fund card for households without a Denmark resident", async () => {
+    server.use(...ideaHandlers());
+    server.use(
+      http.get(/\/v1\/research\/ideas$/, () =>
+        HttpResponse.json({
+          week: "2026-W44",
+          ideas: [],
+          index_funds: [],
+          us_market: null,
+        }),
+      ),
+    );
+    renderWithQueries(
+      <MemoryRouter>
+        <IdeasPage />
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByText(englishCopy.ideas.weekly_title),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("heading", {
+        name: englishCopy.ideas.index_funds_title,
+      }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows buy timing lines and keeps each explanation closed", async () => {

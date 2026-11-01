@@ -6538,6 +6538,13 @@
             "title": "Ideas",
             "type": "array"
           },
+          "index_funds": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchIndexFund"
+            },
+            "title": "Index Funds",
+            "type": "array"
+          },
           "track_record": {
             "anyOf": [
               {
@@ -6550,6 +6557,16 @@
             ],
             "title": "Track Record"
           },
+          "us_market": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UsMarketSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "week": {
             "title": "Week",
             "type": "string"
@@ -6560,6 +6577,88 @@
           "ideas"
         ],
         "title": "ResearchIdeasResponse",
+        "type": "object"
+      },
+      "ResearchIndexFund": {
+        "additionalProperties": false,
+        "properties": {
+          "exposure": {
+            "enum": [
+              "global_all_world",
+              "global_sp500",
+              "global_nasdaq100"
+            ],
+            "title": "Exposure",
+            "type": "string"
+          },
+          "instrument": {
+            "$ref": "#/components/schemas/ResearchIndexFundInstrument"
+          },
+          "market": {
+            "anyOf": [
+              {
+                "const": "US",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market"
+          },
+          "role": {
+            "enum": [
+              "plan_main",
+              "option"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "exposure",
+          "role",
+          "instrument",
+          "market"
+        ],
+        "title": "ResearchIndexFund",
+        "type": "object"
+      },
+      "ResearchIndexFundInstrument": {
+        "additionalProperties": false,
+        "properties": {
+          "ask_eligible": {
+            "title": "Ask Eligible",
+            "type": "boolean"
+          },
+          "brokers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Brokers",
+            "type": "array"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "currency",
+          "brokers",
+          "ask_eligible"
+        ],
+        "title": "ResearchIndexFundInstrument",
         "type": "object"
       },
       "Residency": {
@@ -7659,6 +7758,58 @@
           "reason"
         ],
         "title": "UnvaluedAssetResponse",
+        "type": "object"
+      },
+      "UsMarketSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "extra_money_parts": {
+            "title": "Extra Money Parts",
+            "type": "integer"
+          },
+          "history_label": {
+            "enum": [
+              "long_history",
+              "short_history"
+            ],
+            "title": "History Label",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "enum": [
+                  "cheap",
+                  "fair",
+                  "expensive"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "percentile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percentile"
+          }
+        },
+        "required": [
+          "percentile",
+          "history_label",
+          "label",
+          "extra_money_parts"
+        ],
+        "title": "UsMarketSummary",
         "type": "object"
       },
       "ValidationError": {

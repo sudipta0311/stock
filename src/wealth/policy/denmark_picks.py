@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 
@@ -28,6 +28,24 @@ class EtfPick:
     exchange: str
     ticker: str
     currency: str
+
+
+@dataclass(frozen=True)
+class GlobalFundIdea:
+    """One rulebook fund selected for the Ideas page."""
+
+    exposure: Literal["global_all_world", "global_sp500", "global_nasdaq100"]
+    role: Literal["plan_main", "option"]
+    id: str
+    name: str
+    currency: str
+    brokers: tuple[str, ...]
+    ask_eligible: bool
+    market: Literal["US"] | None
+
+
+_GLOBAL_IDEA_EXPOSURES = ("global_all_world", "global_sp500", "global_nasdaq100")
+_BROKER_ORDER = ("nordnet", "saxo", "danske_bank", "other")
 
 
 def plain_fund_name(name: str) -> str:
@@ -126,6 +144,86 @@ def ranked_etfs(
         eligible.append((key, EtfPick(row, exchange, ticker, currency)))
     eligible.sort(key=lambda item: item[0])
     return [pick for _key, pick in eligible]
+
+
+def ranked_etfs_for_member(
+    exposure: str,
+    broker: str,
+    *,
+    ask_first: bool,
+    rules: Mapping[str, Any] | None = None,
+) -> tuple[list[EtfPick], bool]:
+    """Apply the same account, broker, and ABIS fallbacks used by Personalise."""
+    selected = rules or load_eu_etfs()
+    picks = ranked_etfs(exposure, broker, ask_only=ask_first, rules=selected)
+    if not picks and ask_first:
+        picks = ranked_etfs(exposure, broker, rules=selected)
+
+    broker_availability_unchecked = False
+    if not picks:
+        broker_availability_unchecked = True
+        picks = ranked_etfs(
+            exposure,
+            broker,
+            ask_only=ask_first,
+            broker_filter=False,
+            rules=selected,
+        )
+        if not picks and ask_first:
+            picks = ranked_etfs(
+                exposure,
+                broker,
+                broker_filter=False,
+                rules=selected,
+            )
+    return picks, broker_availability_unchecked
+
+
+def global_fund_ideas(
+    country: str,
+    broker: str,
+    *,
+    rules: Mapping[str, Any] | None = None,
+) -> tuple[GlobalFundIdea, ...]:
+    """Build the three plain-language global fund choices for a Denmark resident."""
+    if country != "DK":
+        return ()
+    selected = rules or load_eu_etfs()
+    selection = selected.get("selection", {})
+    configured_exposures = selection.get("global_exposures", [])
+    if not isinstance(configured_exposures, list):
+        return ()
+    core_exposure = selection.get("global_core_exposure")
+    ask_first = selection.get("ask_first") is True
+    ideas: list[GlobalFundIdea] = []
+    for exposure in _GLOBAL_IDEA_EXPOSURES:
+        if exposure not in configured_exposures:
+            continue
+        picks, _broker_availability_unchecked = ranked_etfs_for_member(
+            exposure,
+            broker,
+            ask_first=ask_first,
+            rules=selected,
+        )
+        if not picks:
+            continue
+        pick = picks[0]
+        instrument = pick.instrument
+        available_at = instrument.get("available_at", [])
+        brokers = tuple(name for name in _BROKER_ORDER if name in available_at)
+        ideas.append(
+            GlobalFundIdea(
+                exposure=exposure,  # type: ignore[arg-type]
+                role="plan_main" if exposure == core_exposure else "option",
+                id=str(instrument.get("id", "")),
+                name=plain_fund_name(str(instrument.get("name", "Fund name unavailable"))),
+                currency=pick.currency,
+                brokers=brokers,
+                ask_eligible=instrument.get("ask_eligible") is True,
+                market="US" if exposure in {"global_sp500", "global_nasdaq100"} else None,
+            )
+        )
+    return tuple(ideas)
 
 
 def pick_india_vehicle(

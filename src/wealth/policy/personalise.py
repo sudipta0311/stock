@@ -39,7 +39,7 @@ from wealth.policy.denmark_picks import (
     load_eu_etfs,
     pick_india_vehicle,
     plain_fund_name,
-    ranked_etfs,
+    ranked_etfs_for_member,
 )
 from wealth.policy.exits import ExitCard, HoldingFacts, build_exit_card, load_exit_rules
 from wealth.policy.foundation import FoundationItem, FoundationReport, foundation_check
@@ -468,24 +468,11 @@ def _abroad_action_rows(
         ask_room = running_ask_room[member.id] if requested_account != "ORDINARY" else Decimal(0)
         total_dkk = dkk_from_inr(action.amount, inr_per_dkk)
         ask_only = ask_room > 0
-        picks = ranked_etfs(exposure, member.investing.broker, ask_only=ask_only)
-        if not picks and ask_only:
-            picks = ranked_etfs(exposure, member.investing.broker)
-        broker_availability_unchecked = False
-        if not picks:
-            broker_availability_unchecked = True
-            picks = ranked_etfs(
-                exposure,
-                member.investing.broker,
-                ask_only=ask_only,
-                broker_filter=False,
-            )
-            if not picks and ask_only:
-                picks = ranked_etfs(
-                    exposure,
-                    member.investing.broker,
-                    broker_filter=False,
-                )
+        picks, broker_availability_unchecked = ranked_etfs_for_member(
+            exposure,
+            member.investing.broker,
+            ask_first=ask_only,
+        )
         if not picks:
             carried += action.amount
             notes.append("abroad_etf_unavailable")
