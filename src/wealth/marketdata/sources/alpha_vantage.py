@@ -23,13 +23,25 @@ class DailyClose:
     close: Decimal
 
 
+class RateLimitResponse(ValueError):
+    """Alpha Vantage returned a free-tier rate-limit response."""
+
+
+class UnknownSymbolResponse(ValueError):
+    """Alpha Vantage did not recognize the requested symbol."""
+
+
+class NoSeriesResponse(ValueError):
+    """Alpha Vantage returned no usable daily series."""
+
+
 def parse_daily_series(payload: object, symbol: str) -> DailyClose:
     """Parse the newest valid close from a recorded daily-series response."""
     if not isinstance(payload, dict):
-        raise ValueError("Alpha Vantage returned an invalid response")
+        raise NoSeriesResponse("Alpha Vantage returned an invalid response")
     series = payload.get("Time Series (Daily)")
     if not isinstance(series, dict) or not series:
-        raise ValueError("Alpha Vantage returned no daily time series")
+        raise NoSeriesResponse("Alpha Vantage returned no daily time series")
     valid: list[DailyClose] = []
     for raw_date, values in series.items():
         if not isinstance(raw_date, str) or not isinstance(values, dict):
@@ -42,11 +54,17 @@ def parse_daily_series(payload: object, symbol: str) -> DailyClose:
         if close.is_finite() and close > 0:
             valid.append(DailyClose(symbol=symbol, as_of=as_of, close=close))
     if not valid:
-        raise ValueError("Alpha Vantage returned no valid daily close")
+        raise NoSeriesResponse("Alpha Vantage returned no valid daily close")
     return max(valid, key=lambda item: item.as_of)
 
 
-def fetch_daily(symbol: str, api_key: str) -> DailyClose:
+def fetch_daily(
+    symbol: str,
+    api_key: str,
+    *,
+    timeout: float = 30.0,
+    retries: int = 3,
+) -> DailyClose:
     """Fetch one compact global daily series without exposing the key in errors."""
     if not api_key.strip():
         raise ValueError("Alpha Vantage API key is not configured")
@@ -54,13 +72,14 @@ def fetch_daily(symbol: str, api_key: str) -> DailyClose:
         f"{API_URL}?function=TIME_SERIES_DAILY&symbol={quote(symbol, safe='')}&outputsize=compact"
         f"&apikey={quote(api_key, safe='')}"
     )
-    response = http.get(url)
+    response = http.get(url, timeout=timeout, retries=retries)
     try:
         payload = response.json()
     except ValueError as error:
-        raise ValueError("Alpha Vantage returned invalid JSON") from error
-    if isinstance(payload, dict) and any(
-        key in payload for key in ("Note", "Information", "Error Message")
-    ):
-        raise ValueError("Alpha Vantage did not return a daily series")
+        raise NoSeriesResponse("Alpha Vantage returned invalid JSON") from error
+    if isinstance(payload, dict):
+        if "Note" in payload or "Information" in payload:
+            raise RateLimitResponse("Alpha Vantage request was rate limited")
+        if "Error Message" in payload:
+            raise UnknownSymbolResponse("Alpha Vantage did not recognize the symbol")
     return parse_daily_series(payload, symbol)

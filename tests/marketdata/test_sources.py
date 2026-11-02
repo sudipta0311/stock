@@ -436,7 +436,7 @@ def test_fx_refresh_cli_returns_partial_exit_code_after_currency_errors(
     engine = SimpleNamespace(dispose=lambda: None)
     monkeypatch.delenv("OWNER_DATABASE_URL", raising=False)
     monkeypatch.setenv("TEST_DATABASE_URL", "sqlite://")
-    monkeypatch.setattr(refresh_module, "make_engine", lambda _url: engine)
+    monkeypatch.setattr(refresh_module, "make_engine", lambda _url, **_kwargs: engine)
     monkeypatch.setattr(refresh_module, "system_session", lambda _engine: nullcontext(object()))
     monkeypatch.setattr(
         refresh_module,

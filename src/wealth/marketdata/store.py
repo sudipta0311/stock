@@ -26,6 +26,7 @@ from wealth.db.models import (
     NavDaily,
     NavMonthly,
     PriceEod,
+    RecordedBuy,
     Security,
     UniverseMember,
 )
@@ -46,6 +47,7 @@ if TYPE_CHECKING:
 
 _INDEX_PROXIES = ("NIFTYBEES", "JUNIORBEES", "GOLDBEES")
 _ETF_CATEGORIES_PATH = Path(__file__).resolve().parents[3] / "rules" / "etf_categories.yaml"
+_EU_ETFS_RULES_PATH = Path(__file__).resolve().parents[3] / "rules" / "eu_etfs.yaml"
 
 
 def _normalised(value: str) -> str:
@@ -1245,7 +1247,7 @@ def latest_market_data_as_of(session: Session, on: date) -> date | None:
 
 
 def prune(session: Session, on: date, *, retention_days: int = 400) -> dict[str, int]:
-    """Remove old daily rows, preserving prices for held securities and index proxies."""
+    """Remove unneeded daily rows while retaining active research and purchase prices."""
     cutoff = on - timedelta(days=retention_days)
     held_ids = set(session.scalars(select(HoldingLot.security_id).distinct()))
     proxy_ids = set(
@@ -1262,7 +1264,32 @@ def prune(session: Session, on: date, *, retention_days: int = 400) -> dict[str,
             select(UniverseMember.security_id).where(UniverseMember.removed_on.is_(None)).distinct()
         )
     )
-    keep_ids = held_ids | proxy_ids | universe_ids | core_candidate_ids(session)
+    rules = yaml.safe_load(_EU_ETFS_RULES_PATH.read_text(encoding="utf-8"))
+    curated_isins = {
+        instrument.get("isin")
+        for instrument in rules.get("instruments", [])
+        if isinstance(instrument, dict) and isinstance(instrument.get("isin"), str)
+    }
+    curated_ids = (
+        set(session.scalars(select(Security.id).where(Security.isin.in_(curated_isins))))
+        if curated_isins
+        else set()
+    )
+    waiting_buy_ids = set(
+        session.scalars(
+            select(RecordedBuy.security_id)
+            .where(RecordedBuy.status == "waiting", RecordedBuy.security_id.is_not(None))
+            .distinct()
+        )
+    )
+    keep_ids = (
+        held_ids
+        | proxy_ids
+        | universe_ids
+        | core_candidate_ids(session)
+        | curated_ids
+        | waiting_buy_ids
+    )
     price_delete = delete(PriceEod).where(PriceEod.as_of < cutoff)
     nav_delete = delete(NavDaily).where(NavDaily.as_of < cutoff)
     if keep_ids:

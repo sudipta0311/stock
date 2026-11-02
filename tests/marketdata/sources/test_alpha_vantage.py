@@ -33,7 +33,7 @@ def test_fetch_daily_uses_fixture_and_source_url_has_no_key(
 
     requested: list[str] = []
 
-    def fake_get(url: str) -> FakeResponse:
+    def fake_get(url: str, **_kwargs: object) -> FakeResponse:
         requested.append(url)
         return FakeResponse()
 
@@ -48,7 +48,31 @@ def test_fetch_daily_rejects_missing_key_before_network(monkeypatch: pytest.Monk
     monkeypatch.setattr(
         alpha_vantage.http,
         "get",
-        lambda _url: (_ for _ in ()).throw(AssertionError("network must not be called")),
+        lambda _url, **_kwargs: (_ for _ in ()).throw(AssertionError("network must not be called")),
     )
     with pytest.raises(ValueError, match="not configured"):
         alpha_vantage.fetch_daily("WLDX.LON", "")
+
+
+@pytest.mark.parametrize(
+    ("payload", "error_type"),
+    [
+        ({"Note": "synthetic limit response"}, alpha_vantage.RateLimitResponse),
+        ({"Information": "synthetic limit response"}, alpha_vantage.RateLimitResponse),
+        ({"Error Message": "synthetic unknown symbol"}, alpha_vantage.UnknownSymbolResponse),
+        ({"Meta Data": {}}, alpha_vantage.NoSeriesResponse),
+    ],
+)
+def test_fetch_daily_classifies_recorded_provider_responses(
+    monkeypatch: pytest.MonkeyPatch,
+    payload: dict[str, str],
+    error_type: type[ValueError],
+) -> None:
+    class FakeResponse:
+        def json(self) -> dict[str, str]:
+            return payload
+
+    monkeypatch.setattr(alpha_vantage.http, "get", lambda *_args, **_kwargs: FakeResponse())
+
+    with pytest.raises(error_type):
+        alpha_vantage.fetch_daily("SYNTHETIC", "fixture-key")

@@ -35,7 +35,14 @@ jobs:
             exit 0
           fi
           if python -c "import sys; from wealth.marketdata import refresh; sys.exit(0 if {'eu_etfs', 'us_stocks'} <= set(refresh._SOURCES) else 78)"; then
-            python -m wealth.marketdata.refresh --only eu_etfs,us_stocks
+            python -m wealth.marketdata.refresh --only eu_etfs,us_stocks > refresh-abroad.json || true
+            cat refresh-abroad.json
+            status=$(jq -r '.status' refresh-abroad.json 2>/dev/null || true)
+            case "${status:-failed}" in
+              succeeded) ;;
+              partial) echo "::warning::Overseas market data refreshed with some gaps." ;;
+              *) echo "::error::Overseas market data refresh failed."; exit 2 ;;
+            esac
           else
             result=$?
             if [ "$result" -ne 78 ]; then exit "$result"; fi

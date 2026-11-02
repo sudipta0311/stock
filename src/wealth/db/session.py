@@ -23,12 +23,12 @@ def normalize_database_url(url: str) -> str:
     return parsed.render_as_string(hide_password=False)
 
 
-def make_engine(url: str | None = None) -> Engine:
+def make_engine(url: str | None = None, *, pool_pre_ping: bool = True) -> Engine:
     """Create a SQLAlchemy engine from an explicit URL or ``DATABASE_URL``."""
     database_url = url or os.getenv("DATABASE_URL")
     if not database_url:
         raise ValueError("Set DATABASE_URL before creating a database engine")
-    return create_engine(normalize_database_url(database_url), pool_pre_ping=True)
+    return create_engine(normalize_database_url(database_url), pool_pre_ping=pool_pre_ping)
 
 
 def api_engine(url: str | None = None) -> Engine:

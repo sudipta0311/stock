@@ -11,6 +11,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from time import sleep as sleep_for
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -82,6 +83,22 @@ _SOURCES = (
 )
 _RETENTION_DAYS = 400
 _MAX_ABROAD_QUOTES_PER_DAY = 24
+# Alpha Vantage identifies 5 free-tier calls per minute and 25 per day; 12 seconds stays below it.
+# https://www.alphavantage.co/stock-price-tracker-website-python-django/
+# https://www.alphavantage.co/support/
+_ALPHA_VANTAGE_REQUEST_SPACING_SECONDS = 12
+_ALPHA_VANTAGE_REQUEST_TIMEOUT_SECONDS = 20.0
+_ALPHA_VANTAGE_REQUEST_RETRIES = 1
+# Alpha Vantage global symbols include exchange suffixes (for example, TSCO.LON).
+# https://www.alphavantage.co/documentation/#weekly
+_ALPHA_VANTAGE_EXCHANGE_SUFFIXES = {"LSE_USD": ".LON", "Xetra": ".DEX"}
+_ABROAD_SKIP_REASONS = (
+    "rate_limited",
+    "no_supported_listing",
+    "unknown_symbol",
+    "no_series",
+    "http_error",
+)
 # GitHub can start the 19:00 IST job after midnight IST, and NSE posts the day's file in
 # the evening, so the run date alone is often a missing session. Re-reading the last
 # week fills any gap.
@@ -94,6 +111,44 @@ class AbroadPrice:
 
     security_id: Any
     close: DailyClose
+
+
+@dataclass(frozen=True)
+class CuratedListing:
+    exchange: str
+    symbol: str
+    currency: str
+    provider_symbol: str
+
+
+@dataclass(frozen=True)
+class CuratedAbroadPrice:
+    instrument: Mapping[str, Any]
+    listing: CuratedListing
+    close: DailyClose
+
+
+@dataclass(frozen=True)
+class AbroadBatch:
+    records: list[AbroadPrice | CuratedAbroadPrice]
+    requested: int
+    skipped: dict[str, int]
+
+
+@dataclass
+class AbroadRequestBudget:
+    used: int = 0
+
+    @property
+    def remaining(self) -> int:
+        return max(0, _MAX_ABROAD_QUOTES_PER_DAY - self.used)
+
+
+@dataclass(frozen=True)
+class NseFundamentalTarget:
+    symbol: str
+    security_id: Any
+    after: datetime | None
 
 
 @dataclass(frozen=True)
@@ -163,8 +218,14 @@ def _fetch_nse_master() -> NseMasterBatch:
 
 
 def _fetch_missing_amfi_history(session: Session, on: date) -> list[AmfiHistoricalNav]:
+    return _fetch_amfi_history_windows(store.missing_amfi_history_windows(session, on))
+
+
+def _fetch_amfi_history_windows(
+    windows: list[tuple[date, date]],
+) -> list[AmfiHistoricalNav]:
     records: list[AmfiHistoricalNav] = []
-    for start, end in store.missing_amfi_history_windows(session, on):
+    for start, end in windows:
         records.extend(amfi_history.fetch_nav_history(start, end))
     return records
 
@@ -176,100 +237,182 @@ def _fetch_recent_bhavcopies(on: date) -> list[NseClose]:
     return records
 
 
-def _upsert_curated_security(session: Session, instrument: Mapping[str, Any]) -> tuple[Any, str]:
+def _choose_curated_listing(instrument: Mapping[str, Any]) -> CuratedListing | None:
     tickers = instrument.get("tickers", {})
     if not isinstance(tickers, Mapping):
-        raise ValueError("curated ETF has no sourced listing")
-    choices: list[tuple[int, str, str, str]] = []
-    currency_rank = {"EUR": 0, "GBP": 1, "USD": 2, "DKK": 3}
-    for exchange, listing in tickers.items():
-        if not isinstance(exchange, str) or not isinstance(listing, Mapping):
+        return None
+    for exchange in ("LSE_USD", "Xetra"):
+        listing = tickers.get(exchange)
+        if not isinstance(listing, Mapping):
             continue
+        currency = "USD" if exchange == "LSE_USD" else "EUR"
         symbol = listing.get("symbol")
-        currency = listing.get("currency")
-        if isinstance(symbol, str) and currency in currency_rank:
-            choices.append((currency_rank[currency], exchange, symbol, currency))
-    if not choices:
-        raise ValueError("curated ETF has no supported listing")
-    london = [choice for choice in choices if choice[1].startswith("LSE_")]
-    london_usd = [choice for choice in london if choice[1] == "LSE_USD" and choice[3] == "USD"]
-    if london and not london_usd:
-        raise ValueError("curated ETF has no USD-quoted London listing")
-    _rank, exchange, symbol, currency = min(london_usd or choices)
-    market = "GB" if exchange.startswith("LSE_") else "EU"
+        if isinstance(symbol, str) and symbol.strip() and listing.get("currency") == currency:
+            return CuratedListing(
+                exchange=exchange,
+                symbol=symbol.strip(),
+                currency=currency,
+                provider_symbol=f"{symbol.strip()}{_ALPHA_VANTAGE_EXCHANGE_SUFFIXES[exchange]}",
+            )
+    return None
+
+
+def _upsert_curated_security(
+    session: Session,
+    instrument: Mapping[str, Any],
+    listing: CuratedListing | None = None,
+) -> tuple[Any, str]:
+    selected = listing or _choose_curated_listing(instrument)
+    if selected is None:
+        raise ValueError("curated ETF has no supported USD London or EUR Xetra listing")
+    market = "GB" if selected.exchange == "LSE_USD" else "EU"
     security_id = session.scalar(
         select(
             func.app_upsert_security_by_symbol(
                 market,
-                symbol,
-                exchange,
+                selected.symbol,
+                selected.exchange,
                 str(instrument["name"]),
                 "etf",
-                currency,
+                selected.currency,
                 str(instrument["isin"]),
                 "equity_india" if instrument.get("exposure") == "india_equity" else "equity_global",
                 f"ucits:{instrument.get('exposure', 'global_all_world')}",
             )
         )
     )
-    return security_id, f"{symbol}.LON" if exchange.startswith("LSE_") else symbol
+    return security_id, selected.provider_symbol
 
 
-def _fetch_abroad_etfs(session: Session, on: date) -> list[AbroadPrice]:
+def _fetch_alpha_vantage_daily(
+    symbol: str,
+    api_key: str,
+    *,
+    sleeper: Callable[[float], None] = sleep_for,
+    request_budget: AbroadRequestBudget | None = None,
+) -> DailyClose:
+    for attempt in range(2):
+        if request_budget is not None:
+            if request_budget.remaining == 0:
+                raise RuntimeError("Alpha Vantage daily request budget exhausted")
+            request_budget.used += 1
+        sleeper(_ALPHA_VANTAGE_REQUEST_SPACING_SECONDS)
+        try:
+            return alpha_vantage.fetch_daily(
+                symbol,
+                api_key,
+                timeout=_ALPHA_VANTAGE_REQUEST_TIMEOUT_SECONDS,
+                retries=_ALPHA_VANTAGE_REQUEST_RETRIES,
+            )
+        except alpha_vantage.RateLimitResponse:
+            if attempt == 1:
+                raise
+    raise RuntimeError("Alpha Vantage retry loop ended without a response")
+
+
+def _abroad_skip_reason(error: Exception) -> str:
+    if isinstance(error, alpha_vantage.RateLimitResponse):
+        return "rate_limited"
+    if isinstance(error, alpha_vantage.UnknownSymbolResponse):
+        return "unknown_symbol"
+    if isinstance(error, alpha_vantage.NoSeriesResponse):
+        return "no_series"
+    return "http_error"
+
+
+def _new_abroad_skip_counts() -> dict[str, int]:
+    return dict.fromkeys(_ABROAD_SKIP_REASONS, 0)
+
+
+def _fetch_abroad_etfs(
+    on: date,
+    *,
+    sleeper: Callable[[float], None] = sleep_for,
+    request_budget: AbroadRequestBudget | None = None,
+) -> list[AbroadPrice | CuratedAbroadPrice] | AbroadBatch:
     api_key = os.getenv("PRICE_API_KEY", "")
     if not api_key:
         return []
+    budget = request_budget or AbroadRequestBudget()
     from wealth.policy.denmark_picks import load_eu_etfs
 
-    records: list[AbroadPrice] = []
+    records: list[AbroadPrice | CuratedAbroadPrice] = []
+    skipped = _new_abroad_skip_counts()
     instruments = load_eu_etfs()["instruments"][:_MAX_ABROAD_QUOTES_PER_DAY]
     for instrument in instruments:
-        try:
-            security_id, provider_symbol = _upsert_curated_security(session, instrument)
-            if security_id is None:
-                continue
-            close = alpha_vantage.fetch_daily(provider_symbol, api_key)
-            if close.as_of <= on:
-                records.append(AbroadPrice(security_id, close))
-        except Exception:
+        listing = _choose_curated_listing(instrument)
+        if listing is None:
+            skipped["no_supported_listing"] += 1
             continue
-    return records
+        try:
+            close = _fetch_alpha_vantage_daily(
+                listing.provider_symbol,
+                api_key,
+                sleeper=sleeper,
+                request_budget=budget,
+            )
+            if close.as_of <= on:
+                records.append(CuratedAbroadPrice(instrument, listing, close))
+        except Exception as error:
+            skipped[_abroad_skip_reason(error)] += 1
+    return AbroadBatch(records, len(instruments), skipped)
 
 
-def _fetch_abroad_us_stocks(session: Session, on: date) -> list[AbroadPrice]:
-    api_key = os.getenv("PRICE_API_KEY", "")
-    if not api_key:
+def _fetch_abroad_us_stocks(
+    securities: list[tuple[Any, str]],
+    on: date,
+    *,
+    curated_count: int,
+    api_key: str | None = None,
+    sleeper: Callable[[float], None] = sleep_for,
+    request_budget: AbroadRequestBudget | None = None,
+) -> list[AbroadPrice] | AbroadBatch:
+    selected_api_key = api_key if api_key is not None else os.getenv("PRICE_API_KEY", "")
+    if not selected_api_key:
         return []
-    from wealth.policy.denmark_picks import load_eu_etfs
-
-    curated_count = min(
-        _MAX_ABROAD_QUOTES_PER_DAY,
-        len(load_eu_etfs()["instruments"]),
-    )
-    securities = session.scalars(
-        select(Security)
-        .join(HoldingLot, HoldingLot.security_id == Security.id)
-        .where(Security.market == "US", Security.security_type == "equity")
-        .distinct()
-        .order_by(Security.symbol, Security.id)
+    budget = request_budget or AbroadRequestBudget(
+        used=_MAX_ABROAD_QUOTES_PER_DAY - _remaining_abroad_quote_slots(curated_count)
     )
     records: list[AbroadPrice] = []
-    for security in list(securities)[: _remaining_abroad_quote_slots(curated_count)]:
-        if not security.symbol:
-            continue
+    skipped = _new_abroad_skip_counts()
+    selected = securities[: budget.remaining]
+    for security_id, symbol in selected:
         try:
-            close = alpha_vantage.fetch_daily(security.symbol, api_key)
-        except Exception:
-            continue
-        if close.as_of <= on:
-            records.append(AbroadPrice(security.id, close))
-    return records
+            close = _fetch_alpha_vantage_daily(
+                symbol,
+                selected_api_key,
+                sleeper=sleeper,
+                request_budget=budget,
+            )
+            if close.as_of <= on:
+                records.append(AbroadPrice(security_id, close))
+        except Exception as error:
+            skipped[_abroad_skip_reason(error)] += 1
+    return AbroadBatch(records, len(selected), skipped)
 
 
 def _remaining_abroad_quote_slots(curated_count: int) -> int:
     """Reserve one free-tier call for each curated fund, capped at 24 calls daily."""
     reserved = min(_MAX_ABROAD_QUOTES_PER_DAY, max(0, curated_count))
     return _MAX_ABROAD_QUOTES_PER_DAY - reserved
+
+
+def _held_us_stock_keys(session: Session) -> list[tuple[Any, str]]:
+    return [
+        (security_id, symbol)
+        for security_id, symbol in session.execute(
+            select(Security.id, Security.symbol)
+            .join(HoldingLot, HoldingLot.security_id == Security.id)
+            .where(
+                Security.market == "US",
+                Security.security_type == "equity",
+                Security.symbol.is_not(None),
+            )
+            .distinct()
+            .order_by(Security.symbol, Security.id)
+        )
+        if symbol
+    ]
 
 
 def _universe_symbols(
@@ -300,9 +443,12 @@ def _fetch_edgar(
 ) -> FundamentalsBatch:
     if session is None:
         raise ValueError("EDGAR refresh requires a database session")
+    return _fetch_edgar_for_symbols(on, _universe_symbols(session, "US", "sp500", symbols))
+
+
+def _fetch_edgar_for_symbols(on: date, target_symbols: list[str]) -> FundamentalsBatch:
     client = edgar.SecEdgarClient()
     companies = edgar.fetch_company_tickers(client)
-    target_symbols = _universe_symbols(session, "US", "sp500", symbols)
     if not target_symbols:
         return FundamentalsBatch({}, {"universe": "NoSymbols"}, {})
     observations: dict[str, list[FundamentalObservation]] = {}
@@ -350,22 +496,37 @@ def _fetch_nse_fundamentals(
     if not target_symbols:
         return FundamentalsBatch({}, {"universe": "NoSymbols"})
     securities = _securities_for_symbols(session, "IN", target_symbols)
+    targets = [
+        NseFundamentalTarget(
+            symbol=symbol,
+            security_id=security.id,
+            after=store.latest_fundamental_filed_at(session, security.id, "NSE_XBRL"),
+        )
+        for symbol in target_symbols
+        if (security := securities.get(symbol.upper())) is not None
+    ]
+    missing = [symbol for symbol in target_symbols if symbol.upper() not in securities]
+    return _fetch_nse_fundamental_targets(on, targets, missing)
+
+
+def _fetch_nse_fundamental_targets(
+    on: date,
+    targets: list[NseFundamentalTarget],
+    missing: list[str] | None = None,
+) -> FundamentalsBatch:
     observations: dict[str, list[FundamentalObservation]] = {}
     errors: dict[str, str] = {}
     xbrl_missing = 0
+    errors.update({symbol: "SecurityNotFound" for symbol in missing or []})
     with NseIntegratedClient() as client:  # type: ignore[attr-defined]
-        for symbol in target_symbols:
-            security = securities.get(symbol.upper())
-            if security is None:
-                errors[symbol] = "SecurityNotFound"
-                continue
+        for target in targets:
+            symbol = target.symbol
             try:
-                after = store.latest_fundamental_filed_at(session, security.id, "NSE_XBRL")
                 result = nse_fundamentals.fetch_symbol_fundamentals(
                     client,
                     symbol,
                     as_of=on,
-                    after=after,
+                    after=target.after,
                 )
                 xbrl_missing += result.xbrl_missing
                 if result.xbrl_missing and not result.readable_filings:
@@ -382,6 +543,24 @@ def _fetch_us_index_pe(session: Session, on: date) -> us_index_pe.UsIndexPeBatch
     holdings = universes.fetch_sp500()
     workbook = universes.get(universes.SPY_NAV_HISTORY_URL).content
     nav_history = universes.parse_spy_nav_history(workbook)
+    return _build_us_index_pe(session, on, holdings, nav_history)
+
+
+def _fetch_us_index_pe_for_engine(engine: Engine, on: date) -> us_index_pe.UsIndexPeBatch:
+    """Download public inputs before opening the short database read transaction."""
+    holdings = universes.fetch_sp500()
+    workbook = universes.get(universes.SPY_NAV_HISTORY_URL).content
+    nav_history = universes.parse_spy_nav_history(workbook)
+    with system_session(engine) as session:
+        return _build_us_index_pe(session, on, holdings, nav_history)
+
+
+def _build_us_index_pe(
+    session: Session,
+    on: date,
+    holdings: Sp500Holdings,
+    nav_history: dict[date, Decimal],
+) -> us_index_pe.UsIndexPeBatch:
     symbols = {member.symbol for member in holdings.securities}
     security_rows = session.execute(
         select(Security.id, Security.symbol)
@@ -474,7 +653,22 @@ def _default_fetchers(
     on: date,
     session: Session | None = None,
     symbols: tuple[str, ...] | None = None,
+    request_budget: AbroadRequestBudget | None = None,
 ) -> dict[str, Callable[[], Any]]:
+    abroad_budget = request_budget or AbroadRequestBudget()
+
+    def fetch_us_stocks() -> list[AbroadPrice] | AbroadBatch:
+        if not os.getenv("PRICE_API_KEY", "") or session is None:
+            return []
+        from wealth.policy.denmark_picks import load_eu_etfs
+
+        return _fetch_abroad_us_stocks(
+            _held_us_stock_keys(session),
+            on,
+            curated_count=len(load_eu_etfs()["instruments"]),
+            request_budget=abroad_budget,
+        )
+
     return {
         "nse": lambda: _fetch_recent_bhavcopies(on),
         "amfi": amfi.fetch_nav_all,
@@ -484,8 +678,8 @@ def _default_fetchers(
         "amfi_history": (
             lambda: _fetch_missing_amfi_history(session, on) if session is not None else []
         ),
-        "eu_etfs": lambda: _fetch_abroad_etfs(session, on) if session is not None else [],
-        "us_stocks": lambda: _fetch_abroad_us_stocks(session, on) if session is not None else [],
+        "eu_etfs": lambda: _fetch_abroad_etfs(on, request_budget=abroad_budget),
+        "us_stocks": fetch_us_stocks,
         "universes": _fetch_universes,
         "edgar": lambda: _fetch_edgar(session, on, symbols),
         "us_index_pe": lambda: _fetch_us_index_pe(session, on) if session is not None else None,
@@ -755,6 +949,38 @@ def _store_source(
         store.upsert_gold_price(session, records, source=selected_source, fetched_at=fetched_at)
         return {"gold_prices": 1, "gold_source": selected_source}
     if source in {"eu_etfs", "us_stocks"}:
+        if isinstance(records, AbroadBatch):
+            inserted = 0
+            for item in records.records:
+                if isinstance(item, CuratedAbroadPrice):
+                    security_id, _provider_symbol = _upsert_curated_security(
+                        session,
+                        item.instrument,
+                        item.listing,
+                    )
+                else:
+                    security_id = item.security_id
+                if security_id is None:
+                    raise ValueError("Alpha Vantage quote has no matching security")
+                store.upsert_eod_price(
+                    session,
+                    security_id,
+                    item.close.as_of,
+                    item.close.close,
+                    source="AlphaVantage",
+                    source_url=alpha_vantage.SOURCE_URL,
+                    fetched_at=fetched_at,
+                )
+                inserted += 1
+            counts: dict[str, Any] = {
+                "prices_eod": inserted,
+                "requested": records.requested,
+                "skipped": records.skipped,
+            }
+            errors = {
+                reason: f"{amount} skipped" for reason, amount in records.skipped.items() if amount
+            }
+            return SourceBatchResult(counts, errors)
         if not isinstance(records, list) or any(
             not isinstance(item, AbroadPrice) for item in records
         ):
@@ -786,8 +1012,269 @@ def _run_gold_fetch(fetch: Callable[[], Any]) -> tuple[GoldObservation, str]:
     return fallback, "manual"
 
 
+def _prepare_engine_fetchers(
+    engine: Engine,
+    on: date,
+    selected_sources: tuple[str, ...],
+    symbols: tuple[str, ...] | None,
+    overrides: Mapping[str, Callable[[], Any]] | None,
+) -> dict[str, Callable[[], Any]]:
+    abroad_budget = AbroadRequestBudget()
+    fetchers = _default_fetchers(on, symbols=symbols, request_budget=abroad_budget)
+    fetchers.update(overrides or {})
+    overridden = set(overrides or {})
+    prepared_windows: list[tuple[date, date]] = []
+    prepared_us_stocks: list[tuple[Any, str]] = []
+    curated_count = 0
+    edgar_symbols: list[str] = []
+    nse_targets: list[NseFundamentalTarget] = []
+    nse_missing: list[str] = []
+
+    needs_preparation = {
+        source
+        for source in ("amfi_history", "us_stocks", "edgar", "nse_fundamentals")
+        if source in selected_sources and source not in overridden
+    }
+    if needs_preparation:
+        with system_session(engine) as session:
+            if "amfi_history" in needs_preparation:
+                prepared_windows = store.missing_amfi_history_windows(session, on)
+            if "us_stocks" in needs_preparation:
+                prepared_us_stocks = _held_us_stock_keys(session)
+            if "edgar" in needs_preparation:
+                edgar_symbols = _universe_symbols(session, "US", "sp500", symbols)
+            if "nse_fundamentals" in needs_preparation:
+                target_symbols = _universe_symbols(session, "IN", "nifty500", symbols)
+                if target_symbols:
+                    securities = _securities_for_symbols(session, "IN", target_symbols)
+                    nse_targets = [
+                        NseFundamentalTarget(
+                            symbol=symbol,
+                            security_id=security.id,
+                            after=store.latest_fundamental_filed_at(
+                                session, security.id, "NSE_XBRL"
+                            ),
+                        )
+                        for symbol in target_symbols
+                        if (security := securities.get(symbol.upper())) is not None
+                    ]
+                    nse_missing = [
+                        symbol for symbol in target_symbols if symbol.upper() not in securities
+                    ]
+                else:
+                    nse_missing = ["universe"]
+
+    if "amfi_history" in needs_preparation:
+        fetchers["amfi_history"] = lambda: _fetch_amfi_history_windows(prepared_windows)
+    if "eu_etfs" in selected_sources and "eu_etfs" not in overridden:
+        fetchers["eu_etfs"] = lambda: _fetch_abroad_etfs(
+            on,
+            request_budget=abroad_budget,
+        )
+    if "us_stocks" in needs_preparation:
+        from wealth.policy.denmark_picks import load_eu_etfs
+
+        curated_count = len(load_eu_etfs()["instruments"])
+        fetchers["us_stocks"] = lambda: _fetch_abroad_us_stocks(
+            prepared_us_stocks,
+            on,
+            curated_count=curated_count,
+            request_budget=abroad_budget,
+        )
+    if "edgar" in needs_preparation:
+        fetchers["edgar"] = lambda: _fetch_edgar_for_symbols(on, edgar_symbols)
+    if "nse_fundamentals" in needs_preparation:
+        if nse_missing == ["universe"]:
+            fetchers["nse_fundamentals"] = lambda: FundamentalsBatch({}, {"universe": "NoSymbols"})
+        else:
+            fetchers["nse_fundamentals"] = lambda: _fetch_nse_fundamental_targets(
+                on,
+                nse_targets,
+                nse_missing,
+            )
+    if "us_index_pe" in selected_sources and "us_index_pe" not in overridden:
+        fetchers["us_index_pe"] = lambda: _fetch_us_index_pe_for_engine(engine, on)
+    return fetchers
+
+
+def _refresh_sources_succeeded(
+    selected_sources: tuple[str, ...], errors: Mapping[str, str], counts: Mapping[str, Any]
+) -> int:
+    successful = 0
+    for source in selected_sources:
+        source_errors = [key for key in errors if key == source or key.startswith(f"{source}:")]
+        source_counts = counts.get(source)
+        if (
+            not source_errors
+            or (
+                source in {"eu_etfs", "us_stocks"}
+                and isinstance(source_counts, dict)
+                and source_counts.get("prices_eod", 0) > 0
+            )
+            or (
+                source == "fx"
+                and isinstance(source_counts, dict)
+                and source_counts.get("fx_rates", 0) > 0
+            )
+            or (
+                source in {"edgar", "nse_fundamentals"}
+                and isinstance(source_counts, dict)
+                and source_counts.get("symbols", 0) > 0
+            )
+            or (
+                source in {"index_pe", "us_index_pe"}
+                and isinstance(source_counts, dict)
+                and source_counts.get("index_valuations", 0) > 0
+            )
+            or (
+                source == "ust"
+                and isinstance(source_counts, dict)
+                and source_counts.get("macro_series", 0) > 0
+            )
+            or (
+                source == "feeds"
+                and isinstance(source_counts, dict)
+                and source_counts.get("feed_items", 0) > 0
+            )
+            or (
+                source == "universes"
+                and isinstance(source_counts, dict)
+                and source_counts.get("universes_loaded", 0) > 0
+            )
+        ):
+            successful += 1
+    return successful
+
+
+def _run_refresh_on_engine(
+    engine: Engine,
+    on: date,
+    only: tuple[str, ...] | list[str] | None = None,
+    *,
+    fetchers: Mapping[str, Callable[[], Any]] | None = None,
+    prune_old: bool = False,
+    fetched_at: datetime | None = None,
+    symbols: tuple[str, ...] | list[str] | None = None,
+) -> dict[str, Any]:
+    selected_sources = tuple(
+        source for source in (only or _SOURCES) if only or source != "nse_history"
+    )
+    if "nse_history" in selected_sources:
+        raise ValueError("nse_history commits day by day; use run_nse_history")
+    unknown = set(selected_sources) - set(_SOURCES)
+    if unknown:
+        raise ValueError(f"Unknown market-data sources: {', '.join(sorted(unknown))}")
+    if "universes" in selected_sources:
+        selected_sources = ("universes",) + tuple(
+            source for source in selected_sources if source != "universes"
+        )
+    normalized_symbols = (
+        tuple(dict.fromkeys(symbol.strip().upper() for symbol in symbols if symbol.strip()))
+        if symbols
+        else None
+    )
+    effective_fetchers = _prepare_engine_fetchers(
+        engine,
+        on,
+        selected_sources,
+        normalized_symbols,
+        fetchers,
+    )
+    started_at = fetched_at or datetime.now(UTC)
+    counts: dict[str, Any] = {}
+    errors: dict[str, str] = {}
+
+    for retention_name, operation in (
+        ("fundamentals_pit_retention", store.prune_fundamentals),
+        ("feed_items_retention", store.prune_feed_items),
+        ("index_valuations_retention", store.prune_index_valuations),
+        ("macro_series_retention", store.prune_macro_series),
+    ):
+        try:
+            with system_session(engine) as session:
+                if retention_name == "feed_items_retention":
+                    deleted = operation(
+                        session,
+                        on,
+                        retention_days=macro_geo.FEED_RETENTION_DAYS,
+                    )
+                elif retention_name == "fundamentals_pit_retention":
+                    deleted = operation(session, on)
+                else:
+                    deleted = operation(session, on)
+            if deleted:
+                counts[f"{retention_name.removesuffix('_retention')}_pruned"] = deleted
+        except Exception as error:
+            errors[retention_name] = type(error).__name__
+
+    for source in selected_sources:
+        fetcher = effective_fetchers.get(source)
+        if fetcher is None:
+            errors[source] = "MissingAdapter"
+            continue
+        source_name: str | None = None
+        try:
+            if source == "gold":
+                records, source_name = _run_gold_fetch(fetcher)
+            else:
+                records = fetcher()
+            if source == "fx" and isinstance(records, FxFetchResult):
+                for currency, error_code in records.errors.items():
+                    errors[f"fx:{currency}"] = error_code
+                records = list(records.observations)
+        except Exception as error:
+            errors[source] = type(error).__name__
+            continue
+
+        try:
+            with system_session(engine) as session:
+                result = _store_source(
+                    session,
+                    source,
+                    records,
+                    on=on,
+                    fetched_at=started_at,
+                )
+            if isinstance(result, SourceBatchResult):
+                counts[source] = result.counts
+                errors.update({f"{source}:{key}": value for key, value in result.errors.items()})
+            else:
+                counts[source] = result
+            if source_name == "manual":
+                counts["gold_fallback"] = "manual"
+            if source == "master" and isinstance(records, NseMasterBatch):
+                counts["master_etf"] = records.etf_count
+                if records.etf_error is not None:
+                    errors["etf_master"] = records.etf_error
+        except Exception as error:
+            errors[source] = type(error).__name__
+
+    if prune_old:
+        try:
+            with system_session(engine) as session:
+                counts["pruned"] = store.prune(session, on, retention_days=_RETENTION_DAYS)
+        except Exception as error:
+            errors["prune"] = type(error).__name__
+
+    successful_sources = _refresh_sources_succeeded(selected_sources, errors, counts)
+    status = "succeeded" if not errors else "partial" if successful_sources else "failed"
+    finished_at = datetime.now(UTC)
+    with system_session(engine) as session:
+        run = MarketdataRun(
+            started_at=started_at,
+            finished_at=finished_at,
+            status=status,
+            counts=counts,
+            errors=errors,
+        )
+        session.add(run)
+        session.flush()
+        run_id = str(run.id)
+    return {"run_id": run_id, "status": status, "counts": counts, "errors": errors}
+
+
 def run_refresh(
-    session: Session,
+    session: Session | Engine,
     on: date,
     only: tuple[str, ...] | list[str] | None = None,
     *,
@@ -797,6 +1284,27 @@ def run_refresh(
     symbols: tuple[str, ...] | list[str] | None = None,
 ) -> dict[str, Any]:
     """Fetch selected sources, continue after failures, and record one run row."""
+    if isinstance(session, Engine):
+        return _run_refresh_on_engine(
+            session,
+            on,
+            only,
+            fetchers=fetchers,
+            prune_old=prune_old,
+            fetched_at=fetched_at,
+            symbols=symbols,
+        )
+    if fetchers is None:
+        if session.in_transaction():
+            raise ValueError("Pass an Engine to fetch refresh sources outside a transaction")
+        return _run_refresh_on_engine(
+            session.get_bind(),
+            on,
+            only,
+            prune_old=prune_old,
+            fetched_at=fetched_at,
+            symbols=symbols,
+        )
     selected_sources = tuple(
         source for source in (only or _SOURCES) if only or source != "nse_history"
     )
@@ -912,48 +1420,7 @@ def run_refresh(
         except Exception as error:
             errors["prune"] = type(error).__name__
 
-    successful_sources = 0
-    for source in selected_sources:
-        source_errors = [key for key in errors if key == source or key.startswith(f"{source}:")]
-        if (
-            not source_errors
-            or (
-                source == "fx"
-                and isinstance(counts.get("fx"), dict)
-                and counts["fx"].get("fx_rates", 0) > 0
-            )
-            or (
-                source in {"edgar", "nse_fundamentals"}
-                and isinstance(counts.get(source), dict)
-                and counts[source].get("symbols", 0) > 0
-            )
-            or (
-                source == "index_pe"
-                and isinstance(counts.get(source), dict)
-                and counts[source].get("index_valuations", 0) > 0
-            )
-            or (
-                source == "us_index_pe"
-                and isinstance(counts.get(source), dict)
-                and counts[source].get("index_valuations", 0) > 0
-            )
-            or (
-                source == "ust"
-                and isinstance(counts.get(source), dict)
-                and counts[source].get("macro_series", 0) > 0
-            )
-            or (
-                source == "feeds"
-                and isinstance(counts.get(source), dict)
-                and counts[source].get("feed_items", 0) > 0
-            )
-            or (
-                source == "universes"
-                and isinstance(counts.get(source), dict)
-                and counts[source].get("universes_loaded", 0) > 0
-            )
-        ):
-            successful_sources += 1
+    successful_sources = _refresh_sources_succeeded(selected_sources, errors, counts)
     run.status = "succeeded" if not errors else "partial" if successful_sources else "failed"
     run.finished_at = datetime.now(UTC)
     run.counts = counts
@@ -1068,21 +1535,20 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    engine = make_engine(database_url)
+    engine = make_engine(database_url, pool_pre_ping=True)
     others = tuple(source for source in args.sources if source != "nse_history")
     results: list[dict[str, Any]] = []
     try:
         if others:
-            with system_session(engine) as session:
-                results.append(
-                    run_refresh(
-                        session,
-                        on,
-                        others,
-                        prune_old=args.prune,
-                        symbols=args.symbols,
-                    )
+            results.append(
+                run_refresh(
+                    engine,
+                    on,
+                    others,
+                    prune_old=args.prune,
+                    symbols=args.symbols,
                 )
+            )
         if "nse_history" in args.sources:
             results.append(run_nse_history(engine, on))
     finally:
