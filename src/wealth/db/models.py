@@ -1129,6 +1129,94 @@ class Action(UserOwned, Base):
     )
 
 
+class RecordedBuy(UserOwned, Base):
+    __tablename__ = "recorded_buys"
+    __table_args__ = (
+        _tenant_identity("recorded_buys"),
+        ForeignKeyConstraint(
+            ["user_id", "member_id"],
+            ["household_members.user_id", "household_members.id"],
+            name="fk_recorded_buys_member_tenant",
+            ondelete="CASCADE",
+            deferrable=True,
+            initially="IMMEDIATE",
+        ),
+        ForeignKeyConstraint(
+            ["user_id", "action_id"],
+            ["actions.user_id", "actions.id"],
+            name="fk_recorded_buys_action_tenant",
+            ondelete="SET NULL (action_id)",
+            deferrable=True,
+            initially="IMMEDIATE",
+        ),
+        ForeignKeyConstraint(
+            ["user_id", "account_id"],
+            ["accounts.user_id", "accounts.id"],
+            name="fk_recorded_buys_account_tenant",
+            ondelete="CASCADE",
+            deferrable=True,
+            initially="IMMEDIATE",
+        ),
+        ForeignKeyConstraint(
+            ["security_id"],
+            ["securities.id"],
+            name="fk_recorded_buys_security",
+            ondelete="SET NULL (security_id)",
+        ),
+        CheckConstraint("line >= 0", name="ck_recorded_buys_line_nonnegative"),
+        CheckConstraint("amount > 0", name="ck_recorded_buys_amount_positive"),
+        CheckConstraint(
+            "amount_inr IS NULL OR amount_inr > 0", name="ck_recorded_buys_amount_inr_positive"
+        ),
+        CheckConstraint("units IS NULL OR units > 0", name="ck_recorded_buys_units_positive"),
+        CheckConstraint(
+            "status IN ('waiting', 'matched', 'removed')", name="ck_recorded_buys_status"
+        ),
+        CheckConstraint(
+            "account_type IS NULL OR account_type IN ('ask', 'ordinary')",
+            name="ck_recorded_buys_account_type",
+        ),
+        Index(
+            "ix_recorded_buys_household_member_status_date",
+            "user_id",
+            "member_id",
+            "status",
+            "bought_on",
+        ),
+        Index("ix_recorded_buys_household_action_status", "user_id", "action_id", "status"),
+    )
+
+    member_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    action_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
+    account_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
+    line: Mapped[int] = mapped_column(SmallInteger, nullable=False, server_default=text("0"))
+    bought_on: Mapped[date] = mapped_column(Date, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(16, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    amount_inr: Mapped[Decimal | None] = mapped_column(Numeric(16, 2))
+    units: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
+    units_entered: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    cost_per_unit: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
+    cost_per_unit_inr: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
+    security_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
+    security_type: Mapped[str] = mapped_column(String(16), nullable=False, server_default="mf")
+    security_symbol: Mapped[str | None] = mapped_column(String(32))
+    security_isin: Mapped[str | None] = mapped_column(String(24))
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    sleeve: Mapped[str] = mapped_column(String(32), nullable=False)
+    instrument_category: Mapped[str] = mapped_column(String(80), nullable=False)
+    account_type: Mapped[str | None] = mapped_column(String(16))
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="waiting")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class WeeklyPlan(Base):
     __tablename__ = "weekly_plans"
     __table_args__ = (

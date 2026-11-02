@@ -43,6 +43,7 @@ _POST_INITIAL_TABLES = {
     "rule_change_proposals",
     "paper_positions",
     "track_record",
+    "recorded_buys",
 }
 _NON_USER_ID_TABLES = {
     "household_access",
