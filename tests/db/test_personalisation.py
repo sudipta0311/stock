@@ -87,7 +87,7 @@ def test_research_ideas_reads_selector_and_track_record_from_existing_pack(
 ) -> None:
     client, secret, _application = api_client
     headers, _subject = _auth(secret, "c16b-pack-reader")
-    old_week = "2026-W43"
+    old_week = "2026-W40"
     pack = ResearchPackRecord(
         week=old_week,
         pack={
@@ -141,6 +141,48 @@ def test_research_ideas_reads_selector_and_track_record_from_existing_pack(
     assert payload["ideas"][0]["why"] is None
     assert payload["core_picks"]["in_nifty50"][0]["symbol"] == "SYNTH"
     assert payload["track_record"]["markets"]["IN"]["status"] == "available"
+
+
+def test_research_ideas_fall_back_to_last_saturdays_pack_during_the_week(
+    api_client: tuple[TestClient, str, object],
+    migrated_database: MigratedDatabase,
+) -> None:
+    # Saturday's run stores its pack under that ISO week; Monday to Friday of the next
+    # week must still show it instead of "No new ideas this week".
+    client, secret, application = api_client
+    headers, _subject = _auth(secret, "ideas-week-fallback")
+    with Session(migrated_database.owner_engine) as session, session.begin():
+        session.add(
+            ResearchPackRecord(
+                week="2026-W48",
+                pack={
+                    "ideas": [
+                        {
+                            "security_id": "synthetic-saturday-idea",
+                            "symbol": "SATURDAY",
+                            "market": "IN",
+                            "sector": "Industrials",
+                            "price": "100.00",
+                            "quant_decile": 8,
+                            "dossier_status": "APPROVED",
+                            "valuation_percentile": "45",
+                            "confidence": "HIGH",
+                        }
+                    ]
+                },
+            )
+        )
+    application.dependency_overrides[get_today] = lambda: date(2026, 12, 2)  # type: ignore[attr-defined]
+    try:
+        fallback = client.get("/v1/research/ideas", headers=headers)
+        exact = client.get("/v1/research/ideas", params={"week": "2026-W49"}, headers=headers)
+    finally:
+        application.dependency_overrides[get_today] = lambda: _TODAY  # type: ignore[attr-defined]
+
+    assert fallback.status_code == 200
+    assert [idea["symbol"] for idea in fallback.json()["ideas"]] == ["SATURDAY"]
+    assert exact.status_code == 200
+    assert exact.json()["ideas"] == []
 
 
 def test_research_ideas_loads_all_company_names_in_one_query(

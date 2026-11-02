@@ -66,3 +66,28 @@ def test_plan_reads_a_pack_whose_ideas_carry_why_and_hints() -> None:
 
     assert pack is not None
     assert [idea.symbol for idea in pack.ideas] == ["SYNTH"]
+
+
+@dataclass
+class _WeekSession:
+    records: dict[str, ResearchPackRecord]
+
+    def get(self, model: type, key: object) -> object | None:
+        return self.records.get(str(key)) if model is ResearchPackRecord else None
+
+
+def test_plan_uses_last_saturdays_pack_until_the_next_run() -> None:
+    saturday_pack = ResearchPackRecord(week="2026-W44", pack={"ideas": [_pack_idea()]})
+    session = _WeekSession({"2026-W44": saturday_pack})
+
+    pack = data._research_pack(session, "2026-W45")  # type: ignore[arg-type]
+
+    # The plan for the new week accepts the pack because it carries the plan's week.
+    assert pack is not None and pack.week == "2026-W45"
+    assert [idea.symbol for idea in pack.ideas] == ["SYNTH"]
+    assert data._research_pack(session, "2026-W46") is None  # type: ignore[arg-type]
+
+
+def test_previous_iso_week_crosses_the_year_end() -> None:
+    assert data._previous_iso_week("2026-W01") == "2025-W52"
+    assert data._previous_iso_week("2026-W45") == "2026-W44"

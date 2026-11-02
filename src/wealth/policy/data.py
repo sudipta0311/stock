@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 from pathlib import Path
@@ -628,8 +628,26 @@ def _manual_abroad_price(security: Security, as_of: date) -> tuple[Decimal, date
     return None
 
 
+def _previous_iso_week(week: str) -> str:
+    year_text, week_text = week.split("-W")
+    monday = date.fromisocalendar(int(year_text), int(week_text), 1)
+    year, number, _weekday = (monday - timedelta(days=7)).isocalendar()
+    return f"{year:04d}-W{number:02d}"
+
+
+def research_pack_row(session: Session, week: str) -> ResearchPackRecord | None:
+    """Return the research pack that serves `week`.
+
+    The Saturday run stores its pack under that ISO week, and the pack keeps serving the
+    following Monday to Friday until the next run, so fall back one week.
+    """
+    return session.get(ResearchPackRecord, week) or session.get(
+        ResearchPackRecord, _previous_iso_week(week)
+    )
+
+
 def _research_pack(session: Session, week: str) -> ResearchPack | None:
-    row = session.get(ResearchPackRecord, week)
+    row = research_pack_row(session, week)
     if row is None:
         return None
     document = row.pack
@@ -666,7 +684,7 @@ def _research_pack(session: Session, week: str) -> ResearchPack | None:
 
 def _research_index_percentiles(session: Session, week: str) -> dict[str, Decimal]:
     """Read stored official index P/E percentiles for deterministic policy rules."""
-    row = session.get(ResearchPackRecord, week)
+    row = research_pack_row(session, week)
     if row is None or not isinstance(row.pack, dict):
         return {}
     raw_values = row.pack.get("index_valuation_percentiles")

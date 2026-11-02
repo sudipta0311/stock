@@ -28,7 +28,7 @@ from wealth.db.models import (
 )
 from wealth.marketdata import store
 from wealth.policy.actions import SatelliteIdea, load_buying_rules, satellite_idea_from_pack
-from wealth.policy.data import load_policy_inputs
+from wealth.policy.data import load_policy_inputs, research_pack_row
 from wealth.policy.denmark_picks import global_fund_ideas
 from wealth.policy.highlights import (
     Highlight,
@@ -575,7 +575,11 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
         us_market = _us_market_summary(
             store.latest_index_valuation_percentile(user.session, "S&P 500", today)
         )
-        record = user.session.get(ResearchPackRecord, selected_week)
+        record = (
+            user.session.get(ResearchPackRecord, selected_week)
+            if week is not None
+            else research_pack_row(user.session, selected_week)
+        )
         if record is None:
             return ResearchIdeasResponse(
                 week=selected_week,
