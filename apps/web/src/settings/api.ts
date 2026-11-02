@@ -226,6 +226,7 @@ export async function downloadSettingsExport(): Promise<Blob> {
     ["goals", "/v1/goals"],
     ["imports", "/v1/imports"],
     ["actions", "/v1/actions"],
+    ["recorded_buys", "/v1/recorded-buys"],
     ["inbox", "/v1/inbox"],
     ["highlight_dismissals", "/v1/highlights/dismissals"],
   ];

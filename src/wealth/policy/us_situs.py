@@ -25,7 +25,10 @@ def _decimal(value: object, field: str) -> Decimal:
     return amount
 
 
-def us_situs_value_usd(holdings: Iterable[Mapping[str, Any] | object]) -> Decimal:
+def us_situs_value_usd(
+    holdings: Iterable[Mapping[str, Any] | object],
+    fx_rates: Mapping[str, Decimal] | None = None,
+) -> Decimal:
     """Sum USD values for US-domiciled holdings; other domiciles are excluded."""
     total = Decimal(0)
     for holding in holdings:
@@ -33,15 +36,25 @@ def us_situs_value_usd(holdings: Iterable[Mapping[str, Any] | object]) -> Decima
             continue
         value_usd = _field(holding, "value_usd")
         if value_usd is None:
-            if str(_field(holding, "currency") or "").upper() != "USD":
-                continue
-            price = _field(holding, "price")
-            if price is None:
-                price = _field(holding, "statement_value")
-                value_usd = _decimal(price, "statement value") if price is not None else None
-            else:
-                quantity = _decimal(_field(holding, "quantity"), "quantity")
-                value_usd = quantity * _decimal(price, "price")
+            if str(_field(holding, "currency") or "").upper() == "USD":
+                price = _field(holding, "price")
+                if price is None:
+                    statement_value = _field(holding, "statement_value")
+                    value_usd = (
+                        _decimal(statement_value, "statement value")
+                        if statement_value is not None
+                        else None
+                    )
+                else:
+                    quantity = _decimal(_field(holding, "quantity"), "quantity")
+                    value_usd = quantity * _decimal(price, "price")
+            if value_usd is None:
+                cost_value_inr = _field(holding, "cost_value_inr")
+                if cost_value_inr is None:
+                    cost_value_inr = _field(holding, "fallback_value_inr")
+                usd_inr = (fx_rates or {}).get("USD/INR")
+                if cost_value_inr is not None and usd_inr is not None and usd_inr > 0:
+                    value_usd = _decimal(cost_value_inr, "recorded buy cost") / usd_inr
         if value_usd is not None:
             total += _decimal(value_usd, "USD value")
     return total

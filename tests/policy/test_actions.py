@@ -402,6 +402,14 @@ def test_missing_instant_debt_pick_keeps_money_out_of_other_sleeves() -> None:
     assert result.notes == ["emergency_pick_unavailable", "on_plan"]
 
 
+def test_new_money_below_minimum_is_carried_without_a_buy_step() -> None:
+    result = build_action_list(_week_input(new_money="750", capacity="0", debt_picks=[]))
+
+    assert result.status == "NONE"
+    assert result.actions == []
+    assert result.carry_forward == Decimal("750.00")
+
+
 def test_no_gaps_or_sip_pool_returns_none_on_plan() -> None:
     """No new money, positive gaps, or SIP capacity produces the explicit on-plan result."""
     no_gaps = {sleeve: Decimal("-1") for sleeve in _plan().gap}

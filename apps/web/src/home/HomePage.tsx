@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   CalendarDays,
@@ -7,6 +7,8 @@ import {
   MoveRight,
 } from "lucide-react";
 import { Link } from "react-router";
+import { ApiError } from "../api/client";
+import { refreshActionQueries } from "../api/query-client";
 import { getNetworth } from "../money/api";
 import { roundActionAmount } from "../lib/money";
 import { actionLabel, labelForCode, triggerKeyLabel } from "../lib/labels";
@@ -29,9 +31,14 @@ import {
   dismissHighlight,
   getActions,
   getPlan,
+  recordBought,
   updateActionStatus,
 } from "../planning/api";
-import type { ActionResponse, WeeklyPlan } from "../planning/api";
+import type {
+  ActionResponse,
+  RecordBuyRequest,
+  WeeklyPlan,
+} from "../planning/api";
 import { Button, Card, Sheet } from "../ui";
 import { Highlights } from "../features/Highlights";
 import * as englishCopy from "../copy/sections/index";
@@ -73,6 +80,292 @@ function rawActionAmount(action: ActionResponse): string {
 
 function actionAmount(action: ActionResponse): string {
   return roundActionAmount(rawActionAmount(action));
+}
+
+function isBuyAction(action: ActionResponse): boolean {
+  return ["BUY_LUMPSUM", "BUY_STP", "BUY_ABROAD", "BUY_STOCK_TRANCHE"].includes(
+    textValue(payloadFor(action).kind, action.kind),
+  );
+}
+
+function buyStepName(action: ActionResponse): string {
+  const payload = payloadFor(action);
+  if (textValue(payload.kind, action.kind) === "BUY_STOCK_TRANCHE") {
+    const params = asRecord(payload.params);
+    return textValue(
+      payload.name ??
+        payload.security_name ??
+        params.name ??
+        params.symbol ??
+        payload.symbol,
+      actionCategory(action) || actionTitle(action),
+    );
+  }
+  return actionCategory(action) || actionTitle(action);
+}
+
+function todayForDateInput(): string {
+  const now = new Date();
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 10);
+}
+
+type BuyLineDraft = {
+  line: number;
+  title: string;
+  accountLabel?: string;
+  amount: string;
+  currency: string;
+  units: string;
+  checked: boolean;
+  hasUnitsField: boolean;
+};
+
+function buyLineDrafts(action: ActionResponse): BuyLineDraft[] {
+  const payload = payloadFor(action);
+  const params = asRecord(payload.params);
+  if (textValue(payload.kind, action.kind) === "BUY_ABROAD") {
+    return asArray(params.abroad_buy_list).map((rawLine, line) => {
+      const item = asRecord(rawLine);
+      const instrument = asRecord(item.instrument);
+      const hasDkkAmount = item.amount_dkk !== undefined;
+      const reasons = asArray(item.reason_codes);
+      const isStock =
+        reasons.includes("approved_us_stock_idea") ||
+        textValue(instrument.type).toLowerCase() === "equity";
+      const account = textValue(item.account).toLowerCase();
+      const accountLabel =
+        account === "ask"
+          ? englishCopy.denmark.account_ask
+          : account === "ordinary"
+            ? englishCopy.denmark.account_ordinary
+            : "";
+      const instrumentName = textValue(
+        instrument.name ?? instrument.ticker ?? instrument.symbol,
+        instrumentLabel(textValue(item.instrument_category)),
+      );
+      return {
+        line,
+        title: instrumentName,
+        accountLabel: accountLabel || undefined,
+        amount: textValue(item.amount_dkk ?? item.amount ?? item.amount_inr),
+        currency: hasDkkAmount
+          ? "DKK"
+          : textValue(item.currency, "DKK").toUpperCase(),
+        units: "",
+        checked: true,
+        hasUnitsField: !isStock,
+      };
+    });
+  }
+  return [
+    {
+      line: 0,
+      title: buyStepName(action),
+      amount: rawActionAmount(action),
+      currency: textValue(payload.currency, "INR").toUpperCase(),
+      units: textValue(payload.quantity ?? params.quantity),
+      checked: true,
+      hasUnitsField:
+        textValue(payload.kind, action.kind) !== "BUY_STOCK_TRANCHE",
+    },
+  ];
+}
+
+function isPositiveDecimalText(value: string): boolean {
+  const trimmed = value.trim();
+  return /^\d+(?:\.\d+)?$/.test(trimmed) && /[1-9]/.test(trimmed);
+}
+
+function BuyRecordSheet({
+  action,
+  saving,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  action: ActionResponse;
+  saving: boolean;
+  error: boolean;
+  onClose(): void;
+  onSubmit(payload: RecordBuyRequest): void;
+}) {
+  const [lines, setLines] = useState(() => buyLineDrafts(action));
+  const [boughtOn, setBoughtOn] = useState(todayForDateInput);
+  const [message, setMessage] = useState("");
+  const isStockTranche =
+    textValue(payloadFor(action).kind, action.kind) === "BUY_STOCK_TRANCHE";
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const selected = lines.filter((line) => line.checked);
+    if (!selected.length) {
+      setMessage(englishCopy.home.buy_choose_one);
+      return;
+    }
+    if (
+      selected.some(
+        (line) =>
+          !isPositiveDecimalText(line.amount) ||
+          (line.units.length > 0 && !isPositiveDecimalText(line.units)),
+      )
+    ) {
+      setMessage(englishCopy.home.buy_amount_error);
+      return;
+    }
+    onSubmit({
+      bought_on: boughtOn || undefined,
+      lines: selected.map((line) => ({
+        line: line.line,
+        amount: line.amount.trim(),
+        currency: line.currency,
+        units: line.units.trim() || undefined,
+      })),
+    });
+  }
+
+  return (
+    <Sheet
+      open
+      onOpenChange={(open) => !open && onClose()}
+      title={englishCopy.home.buy_sheet_title}
+    >
+      <form className="grid gap-4" onSubmit={submit}>
+        <p className="text-sm text-muted-foreground">
+          {lines.length > 1
+            ? englishCopy.home.buy_sheet_multiple_description
+            : englishCopy.home.buy_sheet_description}
+        </p>
+        {lines.map((line, index) => (
+          <fieldset
+            key={line.line}
+            aria-label={
+              line.accountLabel
+                ? `${line.title}, ${line.accountLabel}`
+                : line.title
+            }
+            data-testid={`buy-row-${line.line}`}
+            className="grid gap-2 border-t border-line pt-3 first:border-0 first:pt-0"
+          >
+            <label className="flex min-w-0 items-start gap-3 text-sm font-medium">
+              {lines.length > 1 ? (
+                <>
+                  <input
+                    type="checkbox"
+                    checked={line.checked}
+                    onChange={(event) => {
+                      const checked = event.currentTarget.checked;
+                      setLines((current) =>
+                        current.map((entry, entryIndex) =>
+                          entryIndex === index ? { ...entry, checked } : entry,
+                        ),
+                      );
+                    }}
+                  />
+                  <span className="shrink-0">
+                    {englishCopy.home.buy_bought}
+                  </span>
+                </>
+              ) : null}
+              <span className="min-w-0 flex-1">
+                <span className="block line-clamp-2 [overflow-wrap:anywhere]">
+                  {line.title}
+                </span>
+                {line.accountLabel ? (
+                  <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
+                    {line.accountLabel}
+                  </span>
+                ) : null}
+              </span>
+            </label>
+            <label className="grid gap-1 text-sm">
+              <span>
+                {englishCopy.home.buy_amount} ({line.currency})
+              </span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={line.amount}
+                onChange={(event) => {
+                  const amount = event.currentTarget.value;
+                  setLines((current) =>
+                    current.map((entry, entryIndex) =>
+                      entryIndex === index ? { ...entry, amount } : entry,
+                    ),
+                  );
+                }}
+                className="min-h-12 w-full rounded-xl border border-line bg-surface px-3 text-base tabular-nums"
+                required={line.checked}
+              />
+            </label>
+            {isStockTranche && line.units ? (
+              <p className="text-sm text-muted-foreground">
+                {englishCopy.home.buy_units_from_step.replace(
+                  "{units}",
+                  line.units,
+                )}
+              </p>
+            ) : null}
+          </fieldset>
+        ))}
+        <details>
+          <summary className="cursor-pointer text-sm font-semibold">
+            {englishCopy.home.buy_more_details}
+          </summary>
+          <div className="grid gap-3 pt-3">
+            {lines.map((line, index) =>
+              line.hasUnitsField ? (
+                <label key={line.line} className="grid gap-1 text-sm">
+                  <span>{englishCopy.home.buy_units_optional}</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={line.units}
+                    onChange={(event) => {
+                      const units = event.currentTarget.value;
+                      setLines((current) =>
+                        current.map((entry, entryIndex) =>
+                          entryIndex === index ? { ...entry, units } : entry,
+                        ),
+                      );
+                    }}
+                    className="min-h-12 w-full rounded-xl border border-line bg-surface px-3 text-base tabular-nums"
+                  />
+                </label>
+              ) : null,
+            )}
+            <label className="grid gap-1 text-sm">
+              <span>{englishCopy.home.buy_date_optional}</span>
+              <input
+                type="date"
+                value={boughtOn}
+                onChange={(event) => setBoughtOn(event.currentTarget.value)}
+                className="min-h-12 w-full rounded-xl border border-line bg-surface px-3 text-base"
+              />
+            </label>
+          </div>
+        </details>
+        {message || error ? (
+          <p role="alert" className="text-sm text-danger-foreground">
+            {message || englishCopy.home.buy_save_error}
+          </p>
+        ) : null}
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" data-primary="true" loading={saving}>
+            {englishCopy.home.buy_save}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={onClose}
+            disabled={saving}
+          >
+            {englishCopy.home.buy_cancel}
+          </Button>
+        </div>
+      </form>
+    </Sheet>
+  );
 }
 
 function sellDetails(action: ActionResponse): {
@@ -360,6 +653,7 @@ function ActionCard({
     <article
       className="grid gap-3 border-t border-line py-3 first:border-0 first:pt-0"
       aria-label={cardLabel}
+      data-testid={`action-${action.kind}`}
     >
       <div className="flex items-start gap-3">
         <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground">
@@ -419,11 +713,13 @@ function ActionCard({
 
 export function HomePage() {
   const [sheetAction, setSheetAction] = useState<ActionResponse | null>(null);
+  const [recordAction, setRecordAction] = useState<ActionResponse | null>(null);
   const [amountMode, setAmountMode] = useState<"monthly" | "weekly" | null>(
     null,
   );
   const [amountDraft, setAmountDraft] = useState("");
   const [amountMessage, setAmountMessage] = useState("");
+  const [actionMessage, setActionMessage] = useState("");
   const queryClient = useQueryClient();
   const {
     activeMemberId,
@@ -476,6 +772,12 @@ export function HomePage() {
     "/v1/actions",
     getActions,
   );
+  async function refreshAfterMissingAction(error: unknown): Promise<void> {
+    if (!(error instanceof ApiError) || error.status !== 404) return;
+    setRecordAction(null);
+    setActionMessage(englishCopy.home.step_updated);
+    await refreshActionQueries(queryClient);
+  }
   const investing = useFeatureQuery(
     ["settings", "investing"],
     "/v1/me/investing",
@@ -493,6 +795,28 @@ export function HomePage() {
           ),
       );
     },
+    onError: refreshAfterMissingAction,
+  });
+  const recordBuy = useMutation({
+    mutationFn: ({
+      action,
+      payload,
+    }: {
+      action: ActionResponse;
+      payload: RecordBuyRequest;
+    }) => recordBought(action.id, payload),
+    onSuccess: async (result) => {
+      queryClient.setQueryData<ActionResponse[]>(
+        ["c27b", "actions", selectedHouseholdId],
+        (current) =>
+          (current ?? []).map((action) =>
+            action.id === result.action.id ? result.action : action,
+          ),
+      );
+      setRecordAction(null);
+      await queryClient.invalidateQueries({ queryKey: ["c27b"] });
+    },
+    onError: refreshAfterMissingAction,
   });
   const hideHighlight = useMutation({
     mutationFn: dismissHighlight,
@@ -530,6 +854,10 @@ export function HomePage() {
     (action) => !activeMemberId || actionMemberId(action) === activeMemberId,
   );
   const actionList = activeActions(visibleActions);
+  const completedBuyActions = visibleActions
+    .filter((action) => action.status === "done" && action.has_recorded_buys)
+    .sort((left, right) => left.rank - right.rank)
+    .slice(0, 1);
   const nextMaturity = upcomingMaturities(networth.data)[0];
   const netWorthPrimary = networth.data
     ? formatHouseholdAmount(networth.data.net_worth, primaryCurrency, fxRate)
@@ -573,9 +901,17 @@ export function HomePage() {
                 action={action}
                 person={memberForAction(action, meMemberId, members, planValue)}
                 readOnly={isViewer}
-                saving={markDone.isPending}
+                saving={markDone.isPending || recordBuy.isPending}
                 primary={index === 0 && !isViewer}
-                onDone={(selected) => markDone.mutate(selected)}
+                onDone={(selected) => {
+                  setActionMessage("");
+                  if (isBuyAction(selected)) {
+                    setRecordAction(selected);
+                    recordBuy.reset();
+                  } else {
+                    markDone.mutate(selected);
+                  }
+                }}
                 onOpen={setSheetAction}
               />
             ))}
@@ -603,6 +939,23 @@ export function HomePage() {
             {englishCopy.home.amount_not_set}
           </p>
         ) : null}
+        {completedBuyActions.map((action) => (
+          <div
+            key={action.id}
+            role="status"
+            className="grid gap-1 border-t border-line pt-3"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold">{buyStepName(action)}</h3>
+              <span className="text-sm font-medium">
+                {englishCopy.home.buy_done}
+              </span>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              {englishCopy.home.buy_saved}
+            </p>
+          </div>
+        ))}
         {editorMode ? (
           <form
             className="grid gap-3 border-t border-line pt-3"
@@ -706,7 +1059,15 @@ export function HomePage() {
             {amountMessage}
           </p>
         ) : null}
-        {markDone.isError ? (
+        {actionMessage ? (
+          <p role="status" className="text-sm text-muted-foreground">
+            {actionMessage}
+          </p>
+        ) : null}
+        {markDone.isError &&
+        !(
+          markDone.error instanceof ApiError && markDone.error.status === 404
+        ) ? (
           <p role="alert" className="text-sm text-muted-foreground">
             We couldn't mark this done. Try again.
           </p>
@@ -952,6 +1313,18 @@ export function HomePage() {
             );
           })()
         : null}
+      {recordAction ? (
+        <BuyRecordSheet
+          key={recordAction.id}
+          action={recordAction}
+          saving={recordBuy.isPending}
+          error={recordBuy.isError}
+          onClose={() => setRecordAction(null)}
+          onSubmit={(payload) =>
+            recordBuy.mutate({ action: recordAction, payload })
+          }
+        />
+      ) : null}
     </div>
   );
 }

@@ -84,7 +84,8 @@ const section = {
   "use_tradebook": "Use buy and sell history",
   "keep_statement": "Keep current holdings",
   "confirmed_zero_title": "Nothing changed",
-  "confirmed_zero_description": "Your current holdings were kept."
+  "confirmed_zero_description": "Your current holdings were kept.",
+  "matched_recorded_buys": "Includes {count} buys you added."
 };
 
 export default section;

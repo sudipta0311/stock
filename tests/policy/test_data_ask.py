@@ -24,7 +24,10 @@ class FakeSession:
         self.rows = rows
 
     def execute(self, _statement: Any) -> FakeRows:
-        return FakeRows(self.rows)
+        return FakeRows([(*row, None) for row in self.rows])
+
+    def scalars(self, _statement: Any) -> list[Any]:
+        return []
 
 
 def test_ask_deposits_convert_on_transaction_date_and_net_withdrawals(

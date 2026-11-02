@@ -22,6 +22,7 @@ from wealth.db.models import (
     HighlightDismissal,
     HouseholdMember,
     Profile,
+    RecordedBuy,
     ResearchPackRecord,
     Security,
 )
@@ -37,7 +38,7 @@ from wealth.policy.highlights import (
     highlights,
 )
 from wealth.policy.market_timing import map_us_market_timing
-from wealth.policy.personalise import WeeklyPlan, personalise
+from wealth.policy.personalise import WeeklyPlan, apply_weekly_spending_to_plan, personalise
 from wealth.policy.store import actions_for_week, latest_plan, save_weekly_plan
 from wealth.schemas.common import Rupees
 from wealth.schemas.profile import InvestingPrefs, Residency, ResidencyInput, residency_from_stored
@@ -72,6 +73,7 @@ class ActionResponse(ApiModel):
     status: Literal["proposed", "done", "dismissed"]
     done_by: UUID | None = None
     created_at: datetime
+    has_recorded_buys: bool = False
 
 
 class ActionStatusUpdate(ApiModel):
@@ -272,7 +274,7 @@ def _compute_if_stale(user: Any, today: date) -> WeeklyPlanResponse:
         today,
         deployment_mode=getattr(user, "deployment_mode", "personal"),
     )
-    computed = personalise(user_data, market, research, week, today)
+    computed = personalise(user_data, market, research, week, today, apply_weekly_spending=False)
     from wealth.api.fund_check import add_weekly_fund_action
 
     computed = computed.model_copy(
@@ -286,6 +288,7 @@ def _compute_if_stale(user: Any, today: date) -> WeeklyPlanResponse:
             )
         }
     )
+    computed = apply_weekly_spending_to_plan(computed, user_data, market.fx_rates)
     from wealth.db.repo import acting_household_member
 
     me_member_id = acting_household_member(user.session, user.user_id, household_owner_id).id
@@ -480,18 +483,38 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
         user: Any = user_dependency,
         today: date = today_dependency,
         week: Annotated[str | None, Query(pattern=r"^\d{4}-W\d{2}$")] = None,
-    ) -> list[ActionRow]:
+    ) -> list[ActionResponse]:
         selected_week = week or current_week(today)
         if not _valid_week(selected_week):
             raise HTTPException(status_code=422, detail="The requested ISO week is invalid.")
-        return actions_for_week(user.session, user.household_owner_id, selected_week)
+        actions = actions_for_week(user.session, user.household_owner_id, selected_week)
+        action_ids = [row.id for row in actions]
+        actions_with_buys = (
+            set(
+                user.session.scalars(
+                    select(RecordedBuy.action_id).where(
+                        RecordedBuy.user_id == user.household_owner_id,
+                        RecordedBuy.action_id.in_(action_ids),
+                        RecordedBuy.status.in_(("waiting", "matched")),
+                    )
+                )
+            )
+            if action_ids
+            else set()
+        )
+        return [
+            ActionResponse.model_validate(action).model_copy(
+                update={"has_recorded_buys": action.id in actions_with_buys}
+            )
+            for action in actions
+        ]
 
     @router.patch("/v1/actions/{action_id}", response_model=ActionResponse)
     def patch_action(
         action_id: UUID,
         payload: ActionStatusUpdate,
         user: Any = user_dependency,
-    ) -> ActionRow:
+    ) -> ActionResponse:
         action = user.session.scalar(
             select(ActionRow).where(
                 ActionRow.user_id == user.household_owner_id,
@@ -518,7 +541,21 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             )
         )
         user.session.flush()
-        return action
+        has_recorded_buys = (
+            user.session.scalar(
+                select(RecordedBuy.id)
+                .where(
+                    RecordedBuy.user_id == user.household_owner_id,
+                    RecordedBuy.action_id == action.id,
+                    RecordedBuy.status.in_(("waiting", "matched")),
+                )
+                .limit(1)
+            )
+            is not None
+        )
+        return ActionResponse.model_validate(action).model_copy(
+            update={"has_recorded_buys": has_recorded_buys}
+        )
 
     @router.get("/v1/stress", response_model=StressResponse)
     def get_stress(user: Any = user_dependency, today: date = today_dependency) -> StressResponse:

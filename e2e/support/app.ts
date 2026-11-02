@@ -298,6 +298,10 @@ export function seedHomeAction(email: string): Promise<void> {
   return runDatabaseCommand(["seed-action", email]);
 }
 
+export function seedDenmarkBuyAction(email: string): Promise<void> {
+  return runDatabaseCommand(["seed-denmark-buy", email]);
+}
+
 export function seedResearchPack(): Promise<void> {
   return runDatabaseCommand(["seed-research-pack"]);
 }

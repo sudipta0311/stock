@@ -754,6 +754,7 @@ export function ImportReviewPage() {
   const [saving, setSaving] = useState(false);
   const [discardOpen, setDiscardOpen] = useState(false);
   const [confirmedCount, setConfirmedCount] = useState<number | null>(null);
+  const [recordedBuysMatched, setRecordedBuysMatched] = useState(0);
   const [alreadyConfirmed, setAlreadyConfirmed] = useState(false);
   const [taxWrapper, setTaxWrapper] = useState<"ask" | "ordinary" | "pension">(
     "ordinary",
@@ -939,11 +940,13 @@ export function ImportReviewPage() {
         detail.tax_wrapper_question ? { tax_wrapper: taxWrapper } : {},
       );
       setAlreadyConfirmed(false);
+      setRecordedBuysMatched(result.counts.recorded_buys_matched ?? 0);
       setConfirmedCount(
         sumImportCounts(
           Object.fromEntries(
             Object.entries(result.counts).filter(
-              ([key]) => key !== "cash_flows",
+              ([key]) =>
+                key !== "cash_flows" && key !== "recorded_buys_matched",
             ),
           ),
         ),
@@ -1040,6 +1043,14 @@ export function ImportReviewPage() {
               : cashFlowsSaved
                 ? englishCopy.imports.cash_flow_saved_description
                 : englishCopy.imports.confirmed_zero_description}
+          </p>
+        ) : null}
+        {!wasAlreadyConfirmed && recordedBuysMatched > 0 ? (
+          <p role="status" className="text-sm text-muted-foreground">
+            {englishCopy.imports.matched_recorded_buys.replace(
+              "{count}",
+              String(recordedBuysMatched),
+            )}
           </p>
         ) : null}
         <Link

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import delete, select, text
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -16,7 +16,7 @@ from wealth.policy.personalise import WeeklyPlan
 def save_weekly_plan(
     session: Session, user_id: UUID, plan: WeeklyPlan, *, replace_proposed_actions: bool = True
 ) -> None:
-    """Upsert one plan and replace only its still-proposed action rows."""
+    """Upsert a plan while retaining ids for unchanged proposed actions."""
     document = plan.model_dump(mode="json")
     statement = pg_insert(WeeklyPlanRow).values(
         user_id=user_id,
@@ -32,24 +32,55 @@ def save_weekly_plan(
 
     if not replace_proposed_actions:
         return
-    session.execute(
-        delete(ActionRow).where(
-            ActionRow.user_id == user_id,
-            ActionRow.week == plan.week,
-            ActionRow.status == "proposed",
+    existing = list(
+        session.scalars(
+            select(ActionRow)
+            .where(
+                ActionRow.user_id == user_id,
+                ActionRow.week == plan.week,
+                ActionRow.status == "proposed",
+            )
+            .order_by(ActionRow.rank, ActionRow.id)
         )
     )
     for action in plan.actions:
-        session.add(
-            ActionRow(
-                user_id=user_id,
-                week=plan.week,
-                rank=int(action["rank"]),
-                kind=str(action["kind"]),
-                payload=action,
-                status="proposed",
-            )
+        kind = str(action["kind"])
+        member_id = action.get("member_id")
+        identity_payload = {
+            key: value for key, value in action.items() if key not in {"rank", "kind"}
+        }
+        match_index = next(
+            (
+                index
+                for index, row in enumerate(existing)
+                if row.kind == kind
+                and row.payload.get("member_id") == member_id
+                and {
+                    key: value for key, value in row.payload.items() if key not in {"rank", "kind"}
+                }
+                == identity_payload
+            ),
+            None,
         )
+        if match_index is None:
+            session.add(
+                ActionRow(
+                    user_id=user_id,
+                    week=plan.week,
+                    rank=int(action["rank"]),
+                    kind=kind,
+                    payload=action,
+                    status="proposed",
+                )
+            )
+            continue
+
+        matched = existing.pop(match_index)
+        matched.rank = int(action["rank"])
+        matched.payload = action
+
+    for row in existing:
+        session.delete(row)
     session.flush()
 
 

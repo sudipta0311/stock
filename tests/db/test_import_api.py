@@ -32,7 +32,14 @@ from conftest import MigratedDatabase
 from wealth.api.main import create_app
 from wealth.api.settings import Settings
 from wealth.db import session as db_session
-from wealth.db.models import AuditLog, HoldingLot, ImportJob, Security, User
+from wealth.db.models import (
+    AuditLog,
+    HoldingLot,
+    ImportJob,
+    RecordedBuy,
+    Security,
+    User,
+)
 from wealth.importer.models import ParsedHolding, ParsedStatement
 
 pytestmark = pytest.mark.db
@@ -166,7 +173,13 @@ def test_upload_review_confirm_refreshes_holdings_and_networth(
                 AuditLog.action == "cas_import_confirmed",
             )
         ).scalar_one()
-        assert audit == {"new": 7, "changed": 0, "accepted": 0, "skipped": 0}
+        assert audit == {
+            "new": 7,
+            "changed": 0,
+            "accepted": 0,
+            "skipped": 0,
+            "recorded_buys_matched": 0,
+        }
     assert stored_job.file_deleted_at is not None
     assert stored_job.parse_report == {"warnings": []}
 
@@ -685,3 +698,57 @@ uvicorn.run(app, host="127.0.0.1", port={port}, log_level="critical", access_log
     assert process.poll() is not None
     print(f"Uvicorn peak RSS after three uploads: {peak_rss[0] / (1024 * 1024):.1f} MiB")
     assert peak_rss[0] < 300 * 1024 * 1024
+
+
+def test_cas_confirmation_matches_an_unclassified_recorded_fund_once(
+    import_api_client: tuple[TestClient, str], migrated_database: MigratedDatabase
+) -> None:
+    client, secret = import_api_client
+    headers, _claims = _headers(secret, "recorded-buy-match")
+    me = client.get("/v1/me", headers=headers)
+    assert me.status_code == 200
+    members = client.get("/v1/members", headers=headers)
+    assert members.status_code == 200
+    member_id = UUID(next(row["id"] for row in members.json() if row["is_self"]))
+    user_id = UUID(me.json()["id"])
+    with migrated_database.owner_engine.begin() as connection:
+        connection.execute(
+            RecordedBuy.__table__.insert().values(
+                user_id=user_id,
+                member_id=member_id,
+                action_id=None,
+                account_id=None,
+                line=0,
+                bought_on=date(2026, 6, 25),
+                amount=Decimal("5000.00"),
+                currency="INR",
+                amount_inr=Decimal("5000.00"),
+                units=None,
+                units_entered=False,
+                cost_per_unit=None,
+                cost_per_unit_inr=None,
+                security_id=None,
+                security_type="mf",
+                security_symbol=None,
+                security_isin=None,
+                name="Indian index fund",
+                sleeve="equity_india",
+                instrument_category="in_core_index",
+                account_type=None,
+                status="waiting",
+            )
+        )
+
+    uploaded = _upload(client, headers)
+    assert uploaded.status_code == 201, uploaded.text
+    confirmed = client.post(f"/v1/imports/{uploaded.json()['job_id']}/confirm", headers=headers)
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["counts"]["recorded_buys_matched"] == 1
+    assert confirmed.json()["net_worth"] == "52410.00"
+    matched = client.get("/v1/recorded-buys?status=matched", headers=headers)
+    assert matched.status_code == 200
+    assert len(matched.json()) == 1
+    assert client.get("/v1/recorded-buys?status=waiting", headers=headers).json() == []
+    networth = client.get("/v1/networth", headers=headers).json()
+    assert networth["assets_total"] == "52410.00"
+    assert all(row.get("recorded_buy_id") is None for row in networth["holdings"])

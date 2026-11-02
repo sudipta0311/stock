@@ -182,7 +182,7 @@ export function HoldingPage() {
   const holding = networthData.holdings.find(
     (candidate) => candidate.security_id === id,
   );
-  if (!holding)
+  if (!holding?.security_id)
     return (
       <Card>
         <h2 className="font-semibold">Holding not found</h2>

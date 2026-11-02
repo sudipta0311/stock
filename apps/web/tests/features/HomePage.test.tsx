@@ -378,7 +378,15 @@ describe("Home this week", () => {
 
   it("shows one action and removes it after Mark done succeeds", async () => {
     const user = userEvent.setup();
-    const onlyAction = action();
+    const onlyAction = action({
+      kind: "BUILD_EMERGENCY_FUND",
+      payload: {
+        kind: "BUILD_EMERGENCY_FUND",
+        sleeve: "debt",
+        instrument_category: "sweep_fd",
+        amount: "10000.00",
+      },
+    });
     let patched = false;
     server.use(
       ...baseHomeHandlers([onlyAction]),
@@ -390,10 +398,8 @@ describe("Home this week", () => {
     );
     renderHome();
     expect(
-      await screen.findByRole("article", {
-        name: /Invest now.*Indian index fund/,
-      }),
-    ).toBeInTheDocument();
+      await screen.findByRole("button", { name: "Mark done" }),
+    ).toBeVisible();
     expect(screen.getByText("₹10,000")).toBeInTheDocument();
     const root = document.querySelector<HTMLElement>(
       '[data-copy-screen="home"]',
@@ -401,9 +407,330 @@ describe("Home this week", () => {
     expect(root?.querySelectorAll('[data-primary="true"]')).toHaveLength(1);
     await user.click(screen.getByRole("button", { name: "Mark done" }));
     await waitFor(() => expect(patched).toBe(true));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Mark done" }),
+      ).not.toBeInTheDocument(),
+    );
     expect(
-      await screen.findByText(englishCopy.home.amount_question),
+      screen.getByText(englishCopy.home.amount_question),
     ).toBeInTheDocument();
+  });
+
+  it("records only the checked Denmark purchases with their prefilled amounts", async () => {
+    const user = userEvent.setup();
+    const abroadAction = action({
+      kind: "BUY_ABROAD",
+      payload: {
+        kind: "BUY_ABROAD",
+        sleeve: "equity_global",
+        instrument_category: "abroad_etf",
+        amount: "30000.00",
+        member_id: "member-test-1",
+        params: {
+          abroad_buy_list: [
+            {
+              member_id: "member-test-1",
+              account: "ask",
+              instrument: {
+                name: "Synthetic global fund",
+                isin: "US0000000001",
+              },
+              amount_dkk: "1000",
+            },
+            {
+              member_id: "member-test-1",
+              account: "ordinary",
+              instrument: { name: "Synthetic company share", ticker: "SYNTH" },
+              amount_dkk: "2000",
+              reason_codes: ["approved_us_stock_idea"],
+            },
+          ],
+        },
+      },
+    });
+    let savedLines: unknown;
+    let saved = false;
+    const completed = {
+      ...abroadAction,
+      status: "done" as const,
+      has_recorded_buys: true,
+    };
+    server.use(...baseHomeHandlers([abroadAction]));
+    server.use(
+      http.get(/\/v1\/actions$/, () =>
+        HttpResponse.json(saved ? [completed] : [abroadAction]),
+      ),
+      http.post(
+        /\/v1\/actions\/action-test-1\/bought$/,
+        async ({ request }) => {
+          saved = true;
+          savedLines = ((await request.json()) as { lines: unknown[] }).lines;
+          return HttpResponse.json({
+            action: completed,
+            recorded_buys: [],
+          });
+        },
+      ),
+    );
+    renderHome();
+
+    await user.click(await screen.findByRole("button", { name: "Mark done" }));
+    const sheet = screen.getByRole("dialog", {
+      name: englishCopy.home.buy_sheet_title,
+    });
+    expect(
+      within(sheet).getByText(englishCopy.home.buy_sheet_multiple_description),
+    ).toBeVisible();
+    const fundRow = within(sheet).getByTestId("buy-row-0");
+    const shareRow = within(sheet).getByTestId("buy-row-1");
+    expect(fundRow).toHaveAccessibleName(
+      /Synthetic global fund.*Share savings account/,
+    );
+    expect(
+      within(fundRow).getByText("Synthetic global fund", { exact: true }),
+    ).toBeVisible();
+    expect(
+      within(fundRow).getByText(englishCopy.denmark.account_ask, {
+        exact: true,
+      }),
+    ).toBeVisible();
+    expect(shareRow).toHaveAccessibleName(
+      /Synthetic company share.*Ordinary account/,
+    );
+    expect(
+      within(shareRow).getByText("Synthetic company share", { exact: true }),
+    ).toBeVisible();
+    expect(
+      within(shareRow).getByText(englishCopy.denmark.account_ordinary, {
+        exact: true,
+      }),
+    ).toBeVisible();
+    expect(
+      within(sheet).getByRole("group", {
+        name: /Synthetic global fund.*Share savings account/,
+      }),
+    ).toBeVisible();
+    expect(
+      within(sheet).getByRole("group", {
+        name: /Synthetic company share.*Ordinary account/,
+      }),
+    ).toBeVisible();
+    expect(within(sheet).getAllByRole("checkbox")).toHaveLength(2);
+    expect(within(sheet).getAllByLabelText("Amount (DKK)")).toHaveLength(2);
+    expect(within(sheet).getAllByLabelText("Amount (DKK)")[0]).toHaveValue(
+      "1000",
+    );
+    const details = within(sheet)
+      .getByText(englishCopy.home.buy_more_details)
+      .closest("details");
+    expect(details).not.toHaveAttribute("open");
+    await user.click(within(sheet).getAllByRole("checkbox")[1]!);
+    await user.click(
+      within(sheet).getByRole("button", { name: englishCopy.home.buy_save }),
+    );
+
+    await waitFor(() =>
+      expect(savedLines).toEqual([
+        { line: 0, amount: "1000", currency: "DKK" },
+      ]),
+    );
+    expect(await screen.findByText(englishCopy.home.buy_done)).toBeVisible();
+    expect(screen.getByText(englishCopy.home.buy_saved)).toBeVisible();
+  });
+
+  it("shows the stock name, step quantity, and amount in the buy sheet", async () => {
+    const user = userEvent.setup();
+    const stockAction = action({
+      kind: "BUY_STOCK_TRANCHE",
+      payload: {
+        kind: "BUY_STOCK_TRANCHE",
+        name: "Synthetic company share",
+        amount: "12000.00",
+        quantity: "2.5",
+        member_id: "member-test-1",
+        params: { symbol: "SYNTH" },
+      },
+    });
+    server.use(...baseHomeHandlers([stockAction]));
+    renderHome();
+
+    await user.click(await screen.findByRole("button", { name: "Mark done" }));
+    const sheet = screen.getByRole("dialog", {
+      name: englishCopy.home.buy_sheet_title,
+    });
+    expect(
+      within(sheet).getByText(englishCopy.home.buy_sheet_description),
+    ).toBeVisible();
+    expect(
+      within(sheet).queryByText(
+        englishCopy.home.buy_sheet_multiple_description,
+      ),
+    ).not.toBeInTheDocument();
+    const buyRow = within(sheet).getByTestId("buy-row-0");
+    expect(
+      within(buyRow).getByText("Synthetic company share", { exact: true }),
+    ).toBeVisible();
+    expect(within(sheet).getByText("2.5 units from this step")).toBeVisible();
+    expect(within(sheet).getByLabelText("Amount (INR)")).toHaveValue(
+      "12000.00",
+    );
+    expect(within(sheet).queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(
+      within(sheet).queryByLabelText(englishCopy.home.buy_units_optional),
+    ).toBeNull();
+  });
+
+  it("refreshes action rows when a fresh plan replaces their ids", async () => {
+    const staleAction = action({ id: "stale-plan-action" });
+    let actionReads = 0;
+    server.use(...baseHomeHandlers([staleAction]));
+    server.use(
+      http.get(/\/v1\/plan$/, () =>
+        HttpResponse.json(weeklyPlan({ fresh: true })),
+      ),
+      http.get(/\/v1\/actions$/, () => {
+        actionReads += 1;
+        return HttpResponse.json(actionReads === 1 ? [staleAction] : []);
+      }),
+    );
+    renderHome();
+
+    await screen.findByText(englishCopy.home.amount_question);
+    await waitFor(() => expect(actionReads).toBeGreaterThan(1));
+    expect(
+      screen.queryByRole("button", { name: "Mark done" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("closes a stale buy sheet and refreshes actions after a 404", async () => {
+    const user = userEvent.setup();
+    const staleBuy = action({
+      id: "stale-buy-action",
+      payload: {
+        kind: "BUY_LUMPSUM",
+        sleeve: "equity_india",
+        instrument_category: "in_core_index",
+        amount: "10000.00",
+        reason_code: "target_gap",
+      },
+    });
+    let actionReads = 0;
+    server.use(...baseHomeHandlers([staleBuy]));
+    server.use(
+      http.get(/\/v1\/plan$/, () =>
+        HttpResponse.json(weeklyPlan({ fresh: false })),
+      ),
+      http.get(/\/v1\/actions$/, () => {
+        actionReads += 1;
+        return HttpResponse.json(actionReads === 1 ? [staleBuy] : []);
+      }),
+      http.post(/\/v1\/actions\/stale-buy-action\/bought$/, () =>
+        HttpResponse.json(
+          { detail: "The action was not found." },
+          { status: 404 },
+        ),
+      ),
+    );
+    renderHome();
+
+    await user.click(await screen.findByRole("button", { name: "Mark done" }));
+    const sheet = screen.getByRole("dialog", {
+      name: englishCopy.home.buy_sheet_title,
+    });
+    await user.click(
+      within(sheet).getByRole("button", { name: englishCopy.home.buy_save }),
+    );
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      englishCopy.home.step_updated,
+    );
+    expect(
+      screen.queryByRole("dialog", { name: englishCopy.home.buy_sheet_title }),
+    ).not.toBeInTheDocument();
+    await waitFor(() => expect(actionReads).toBeGreaterThan(1));
+    expect(
+      screen.queryByRole("button", { name: "Mark done" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("refreshes actions and shows one line after marking a stale step done", async () => {
+    const user = userEvent.setup();
+    const staleAction = action({
+      id: "stale-done-action",
+      kind: "BUILD_EMERGENCY_FUND",
+      payload: {
+        kind: "BUILD_EMERGENCY_FUND",
+        amount: "5000.00",
+        instrument_category: "sweep_fd",
+        reason_code: "emergency_fund_gap",
+      },
+    });
+    let actionReads = 0;
+    server.use(...baseHomeHandlers([staleAction]));
+    server.use(
+      http.get(/\/v1\/plan$/, () =>
+        HttpResponse.json(weeklyPlan({ fresh: false })),
+      ),
+      http.get(/\/v1\/actions$/, () => {
+        actionReads += 1;
+        return HttpResponse.json(actionReads === 1 ? [staleAction] : []);
+      }),
+      http.patch(/\/v1\/actions\/stale-done-action$/, () =>
+        HttpResponse.json(
+          { detail: "The action was not found." },
+          { status: 404 },
+        ),
+      ),
+    );
+    renderHome();
+
+    await user.click(await screen.findByRole("button", { name: "Mark done" }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      englishCopy.home.step_updated,
+    );
+    await waitFor(() => expect(actionReads).toBeGreaterThan(1));
+    expect(
+      screen.queryByRole("button", { name: "Mark done" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getAllByText(englishCopy.home.step_updated)).toHaveLength(1);
+  });
+
+  it("wraps a long fund title in the buy sheet", async () => {
+    const user = userEvent.setup();
+    const longName = "Synthetic Developed World Equity Index Fund Acc";
+    const buyAction = action({
+      kind: "BUY_ABROAD",
+      payload: {
+        kind: "BUY_ABROAD",
+        amount: "12345.60",
+        member_id: "member-test-1",
+        instrument_category: "abroad_etf",
+        params: {
+          abroad_buy_list: [
+            {
+              member_id: "member-test-1",
+              account: "ask",
+              instrument: { name: longName, isin: "DK0000000001" },
+              amount_dkk: "1000.00",
+            },
+          ],
+        },
+      },
+    });
+    server.use(...baseHomeHandlers([buyAction]));
+    renderHome();
+
+    await user.click(await screen.findByRole("button", { name: "Mark done" }));
+    const sheet = screen.getByRole("dialog", {
+      name: englishCopy.home.buy_sheet_title,
+    });
+    const title = within(sheet)
+      .getByTestId("buy-row-0")
+      .querySelector(".line-clamp-2");
+    expect(title).toHaveTextContent(longName);
+    expect(title).not.toHaveClass("truncate");
   });
 
   it("shows up to three actions", async () => {

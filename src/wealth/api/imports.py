@@ -1056,6 +1056,37 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             applied = Counter(
                 confirm_broker_items(user.session, user.household_owner_id, job, items)
             )
+            from wealth.api.recorded_buys import match_recorded_buys_for_import
+            from wealth.db.repo import acting_household_member
+
+            importing_member_id = (
+                job.member_id
+                or acting_household_member(user.session, user.user_id, user.household_owner_id).id
+            )
+            confirmed_security_ids = {
+                item.match_security_id
+                for item in items
+                if item.match_security_id is not None
+                and item.status
+                in {
+                    "new",
+                    "changed",
+                    "accepted",
+                    "enrich",
+                    "replace_with_lots",
+                    "quantity_mismatch",
+                }
+            }
+            recorded_buys_matched = match_recorded_buys_for_import(
+                user.session,
+                user.household_owner_id,
+                importing_member_id,
+                job.source,
+                job.statement_date,
+                today,
+                confirmed_security_ids,
+            )
+            applied["recorded_buys_matched"] = recorded_buys_matched
             job.status = "confirmed"
             job.confirmed_at = datetime.now(UTC)
             user.session.add(
@@ -1082,7 +1113,11 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
         applied = Counter()
         from wealth.db.repo import acting_household_member
 
-        member_id = acting_household_member(user.session, user.user_id, user.household_owner_id).id
+        member_id = (
+            job.member_id
+            or acting_household_member(user.session, user.user_id, user.household_owner_id).id
+        )
+        confirmed_security_ids: set[UUID] = set()
         for item in items:
             if item.status in {"rejected", "duplicate"}:
                 continue
@@ -1130,8 +1165,22 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                     holding.account_ref,
                 )
             item.match_security_id = security_id
+            confirmed_security_ids.add(security_id)
             applied[item.status] += 1
 
+        from wealth.api.recorded_buys import match_recorded_buys_for_import
+
+        recorded_buys_matched = match_recorded_buys_for_import(
+            user.session,
+            user.household_owner_id,
+            member_id,
+            job.source,
+            job.statement_date,
+            today,
+            confirmed_security_ids,
+        )
+        applied["recorded_buys_matched"] = recorded_buys_matched
+        job.counts = {**dict(job.counts or {}), "recorded_buys_matched": recorded_buys_matched}
         job.status = "confirmed"
         job.confirmed_at = datetime.now(UTC)
         user.session.add(
@@ -1144,6 +1193,7 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                     "new": applied["new"],
                     "changed": applied["changed"],
                     "accepted": applied["accepted"],
+                    "recorded_buys_matched": recorded_buys_matched,
                     "skipped": len(items) - sum(applied.values()),
                 },
             )

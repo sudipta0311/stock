@@ -25,6 +25,7 @@ from wealth.db.models import (
     NavMonthly,
     Profile,
     RealisedTrade,
+    RecordedBuy,
     Security,
 )
 from wealth.db.models import (
@@ -72,7 +73,7 @@ def _previous_month_end(value: date) -> date:
 
 
 def _tax_lots(
-    lots: list[HoldingLot], security: Security, price: Decimal | None
+    lots: list[HoldingLot | RecordedBuy], security: Security, price: Decimal | None
 ) -> tuple[tuple[Lot, ...], bool]:
     tax_class = None
     if security.category == "mf:equity_global":
@@ -90,10 +91,17 @@ def _tax_lots(
     result: list[Lot] = []
     complete = bool(lots and price is not None and tax_class is not None)
     for row in lots:
-        if row.acquired_on is None or row.cost_per_unit is None or tax_class is None:
+        quantity = row.quantity if isinstance(row, HoldingLot) else row.units
+        acquired_on = row.acquired_on if isinstance(row, HoldingLot) else row.bought_on
+        if (
+            quantity is None
+            or acquired_on is None
+            or row.cost_per_unit is None
+            or tax_class is None
+        ):
             complete = False
             continue
-        if tax_class == "debt_mf_post_2023" and row.acquired_on < date(2023, 4, 1):
+        if tax_class == "debt_mf_post_2023" and acquired_on < date(2023, 4, 1):
             complete = False
             continue
         try:
@@ -101,9 +109,9 @@ def _tax_lots(
                 Lot(
                     lot_id=str(row.id),
                     tax_class=tax_class,
-                    quantity=row.quantity,
+                    quantity=quantity,
                     cost_per_unit=row.cost_per_unit,
-                    acquired_on=row.acquired_on,
+                    acquired_on=acquired_on,
                     market_price=price,
                 )
             )
@@ -268,10 +276,26 @@ def _build_inputs(
             )
         )
     )
-    lots_by_security: dict[tuple[str, str], list[HoldingLot]] = defaultdict(list)
+    recorded_buys = list(
+        session.scalars(
+            select(RecordedBuy).where(
+                RecordedBuy.user_id == owner_id,
+                RecordedBuy.status == "waiting",
+                RecordedBuy.units.is_not(None),
+                RecordedBuy.units > 0,
+                RecordedBuy.security_id.is_not(None),
+                RecordedBuy.security_type == "mf",
+            )
+        )
+    )
+    lots_by_security: dict[tuple[str, str], list[HoldingLot | RecordedBuy]] = defaultdict(list)
     security_ids = {row.security_id for row in lots}
     for row in lots:
         lots_by_security[(str(row.member_id), str(row.security_id))].append(row)
+    for row in recorded_buys:
+        if row.security_id is not None:
+            security_ids.add(row.security_id)
+            lots_by_security[(str(row.member_id), str(row.security_id))].append(row)
     held_securities = (
         list(session.scalars(select(Security).where(Security.id.in_(security_ids))))
         if security_ids
@@ -328,11 +352,25 @@ def _build_inputs(
             continue
         price_row = latest_daily.get(security.id)
         price = price_row[1] if price_row else monthly_latest.get(security.id)
-        quantity = sum((row.quantity for row in security_lots), Decimal(0))
+        quantity = sum(
+            (
+                row.quantity if isinstance(row, HoldingLot) else row.units or Decimal(0)
+                for row in security_lots
+            ),
+            Decimal(0),
+        )
         value = (
             price * quantity
             if price is not None
-            else sum((row.statement_value or Decimal(0) for row in security_lots), Decimal(0))
+            else sum(
+                (
+                    row.statement_value or Decimal(0)
+                    if isinstance(row, HoldingLot)
+                    else row.amount_inr or Decimal(0)
+                    for row in security_lots
+                ),
+                Decimal(0),
+            )
         )
         tax_lots, complete = _tax_lots(security_lots, security, price)
         holdings.append(

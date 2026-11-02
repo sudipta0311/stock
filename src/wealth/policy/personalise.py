@@ -7,7 +7,7 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, fields, is_dataclass, replace
 from datetime import date
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from enum import Enum
 from types import MappingProxyType
 from typing import Any, Literal
@@ -24,6 +24,7 @@ from wealth.policy.actions import (
     Sip,
     WeekInput,
     build_action_list,
+    load_buying_rules,
 )
 from wealth.policy.allocation import AllocationPlan, build_targets
 from wealth.policy.debt_answer import debt_answer
@@ -132,6 +133,43 @@ class HoldingInput:
     sector: str | None = None
     member_id: str | None = None
     joint: bool = False
+    cost_value_inr: Decimal = Decimal(0)
+    fallback_value_inr: Decimal = Decimal(0)
+
+
+@dataclass(frozen=True)
+class RecordedBuyInput:
+    """A saved user-entered buy, included in policy inputs and their digest."""
+
+    id: str
+    action_id: str | None
+    member_id: str
+    bought_on: date
+    amount: Decimal
+    currency: str
+    amount_inr: Decimal | None
+    units: Decimal | None
+    units_entered: bool
+    cost_per_unit: Decimal | None
+    cost_per_unit_inr: Decimal | None
+    security_id: str | None
+    security_type: str
+    security_symbol: str | None
+    security_isin: str | None
+    name: str
+    sleeve: str
+    instrument_category: str
+    account_type: str | None
+    status: str
+
+
+@dataclass(frozen=True)
+class WeeklySpendInput:
+    """Money already spent this week, grouped by household member and sleeve."""
+
+    member_id: str
+    sleeve: str
+    amount_inr: Decimal
 
 
 @dataclass(frozen=True)
@@ -149,6 +187,8 @@ class UserData:
     members: tuple[MemberProfile, ...] = ()
     loan_candidates: tuple[Any, ...] = ()
     deployment_mode: Literal["personal", "public"] = "personal"
+    recorded_buys: tuple[RecordedBuyInput, ...] = ()
+    weekly_spending: tuple[WeeklySpendInput, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -285,12 +325,14 @@ def _digest_inputs(
 
 
 def _holding_value(holding: HoldingInput, fx_rates: Mapping[str, Decimal]) -> Decimal | None:
-    if holding.price is None:
-        return None
     fx = _currency_fx_to_inr(holding.currency, fx_rates)
-    if fx is None:
-        return None
-    return round_paise(holding.quantity * holding.price * fx)
+    if holding.price is None or fx is None:
+        fallback = holding.cost_value_inr + holding.fallback_value_inr
+        if fallback <= 0:
+            return None
+        return round_paise(fallback)
+    market_value = holding.quantity * holding.price * fx
+    return round_paise(market_value + holding.cost_value_inr)
 
 
 def _currency_fx_to_inr(currency: str, fx_rates: Mapping[str, Decimal]) -> Decimal | None:
@@ -389,6 +431,159 @@ def _merge_weekly_actions(
     carried = round_paise(buy_list.carry_forward + omitted_buy_amount)
     ranked = [action.model_copy(update={"rank": rank}) for rank, action in enumerate(selected, 1)]
     return ranked, carried
+
+
+_WEEKLY_BUY_STEP_KINDS = frozenset({"BUY_LUMPSUM", "BUY_STP", "BUY_ABROAD", "BUY_STOCK_TRANCHE"})
+
+
+def _policy_decimal(value: object) -> Decimal | None:
+    if value is None:
+        return None
+    try:
+        parsed = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    return parsed if parsed.is_finite() and parsed >= 0 else None
+
+
+def _apply_weekly_spending(
+    actions: Sequence[Action],
+    carry_forward: Decimal,
+    spending: Sequence[WeeklySpendInput],
+    fx_rates: Mapping[str, Decimal],
+) -> tuple[list[Action], Decimal]:
+    """Subtract this week's completed buys from matching proposed sleeves only."""
+    minimum_action = Decimal(str(load_buying_rules()["min_action_inr"]))
+    stock_pick_minimum_dkk = _policy_decimal(
+        load_eu_etfs().get("selection", {}).get("stock_picks", {}).get("minimum_buy_dkk", "2000")
+    )
+    remaining_spend: dict[tuple[str, str], Decimal] = {}
+    for item in spending:
+        key = (item.member_id, item.sleeve)
+        remaining_spend[key] = remaining_spend.get(key, Decimal(0)) + max(
+            Decimal(0), item.amount_inr
+        )
+    output: list[Action] = []
+    added_carry = Decimal(0)
+    dkk_per_inr = fx_rates.get("DKK/INR")
+
+    for action in sorted(actions, key=lambda item: item.rank):
+        if action.kind not in _WEEKLY_BUY_STEP_KINDS:
+            output.append(action)
+            continue
+
+        if action.kind == "BUY_ABROAD":
+            raw_lines = action.params.get("abroad_buy_list")
+            if not isinstance(raw_lines, list):
+                output.append(action)
+                continue
+            retained_lines: list[dict[str, Any]] = []
+            for raw_line in raw_lines:
+                if not isinstance(raw_line, dict):
+                    continue
+                line = dict(raw_line)
+                line_member = str(line.get("member_id") or action.member_id)
+                line_sleeve = str(line.get("sleeve") or action.sleeve)
+                key = (line_member, line_sleeve)
+                line_amount = _policy_decimal(line.get("amount_inr"))
+                if line_amount is None:
+                    retained_lines.append(line)
+                    continue
+                spend_left = remaining_spend.get(key, Decimal(0))
+                spent_here = min(line_amount, spend_left)
+                remainder = round_paise(line_amount - spent_here)
+                remaining_spend[key] = max(Decimal(0), spend_left - spent_here)
+                if remainder <= 0:
+                    continue
+                displayed_dkk = _policy_decimal(line.get("amount_dkk"))
+                remainder_dkk: Decimal | None = None
+                if displayed_dkk is not None:
+                    if dkk_per_inr is not None and dkk_per_inr > 0:
+                        remainder_dkk = remainder / dkk_per_inr
+                    elif line_amount > 0:
+                        remainder_dkk = displayed_dkk * remainder / line_amount
+                line_reasons = line.get("reason_codes")
+                is_stock_pick = isinstance(line_reasons, list) and (
+                    "approved_us_stock_idea" in line_reasons
+                )
+                below_stock_pick_minimum = (
+                    is_stock_pick
+                    and stock_pick_minimum_dkk is not None
+                    and remainder_dkk is not None
+                    and remainder_dkk < stock_pick_minimum_dkk
+                )
+                if remainder < minimum_action or below_stock_pick_minimum:
+                    added_carry += remainder
+                    continue
+
+                if remainder_dkk is not None:
+                    line["amount_dkk"] = format(round_dkk_for_display(remainder_dkk), "f")
+                line["amount_inr"] = format(remainder, ".2f")
+                retained_lines.append(line)
+
+            total_inr = round_paise(
+                sum(
+                    (
+                        _policy_decimal(line.get("amount_inr")) or Decimal(0)
+                        for line in retained_lines
+                    ),
+                    Decimal(0),
+                )
+            )
+            if total_inr <= 0:
+                continue
+            if total_inr < minimum_action:
+                added_carry += total_inr
+                continue
+            params = {**action.params, "abroad_buy_list": retained_lines}
+            output.append(action.model_copy(update={"amount": total_inr, "params": params}))
+            continue
+
+        key = (action.member_id, action.sleeve)
+        spend_left = remaining_spend.get(key, Decimal(0))
+        spent_here = min(action.amount, spend_left)
+        remainder = round_paise(action.amount - spent_here)
+        remaining_spend[key] = max(Decimal(0), spend_left - spent_here)
+        if remainder <= 0:
+            continue
+        if remainder < minimum_action:
+            added_carry += remainder
+            continue
+        output.append(action.model_copy(update={"amount": remainder}))
+
+    ranked = [action.model_copy(update={"rank": rank}) for rank, action in enumerate(output, 1)]
+    return ranked, round_paise(carry_forward + added_carry)
+
+
+def apply_weekly_spending_to_plan(
+    plan: WeeklyPlan,
+    user_data: UserData,
+    fx_rates: Mapping[str, Decimal],
+) -> WeeklyPlan:
+    """Apply recorded spending after all weekly buy steps have been assembled."""
+    if not user_data.weekly_spending:
+        return plan
+    actions = [Action.model_validate(action) for action in plan.actions]
+    adjusted, carry_forward = _apply_weekly_spending(
+        actions,
+        Decimal(plan.carry_forward),
+        user_data.weekly_spending,
+        fx_rates,
+    )
+    abroad_buy_list = [
+        line
+        for action in adjusted
+        if action.kind == "BUY_ABROAD"
+        for line in action.params.get("abroad_buy_list", [])
+        if isinstance(line, dict)
+    ]
+    return plan.model_copy(
+        update={
+            "actions": [action.model_dump(mode="json") for action in adjusted],
+            "carry_forward": format(carry_forward, ".2f"),
+            "abroad_buy_list": abroad_buy_list,
+        }
+    )
 
 
 def _abroad_exposure(action: Action) -> str | None:
@@ -521,7 +716,8 @@ def _abroad_action_rows(
             stock_tax_rules = load_eu_etfs().get("selection", {}).get("us_stock_tax", {})
             stock_tax_sources = stock_tax_rules.get("sources", {})
             current_situs_usd = us_situs_value_usd(
-                holding for holding in holdings if holding.member_id == member.id
+                (holding for holding in holdings if holding.member_id == member.id),
+                market.fx_rates,
             )
             usd_per_inr = market.fx_rates.get("USD/INR")
             projected_situs_usd = (
@@ -1049,6 +1245,8 @@ def personalise(
     research: ResearchPack | None,
     week: str,
     as_of: date,
+    *,
+    apply_weekly_spending: bool = True,
 ) -> WeeklyPlan:
     """Run the deterministic Policy Engine chain and return one immutable weekly plan."""
     if not isinstance(user_data, UserData):
@@ -1121,6 +1319,24 @@ def personalise(
         )
         market_holdings.append((holding.sleeve, value, liquidity))
         member_market_holdings.append((member_id, holding.sleeve, value, liquidity))
+
+    for buy in user_data.recorded_buys:
+        if (
+            buy.status != "waiting"
+            or buy.security_id is not None
+            or buy.amount_inr is None
+            or buy.amount_inr <= 0
+        ):
+            continue
+        try:
+            Sleeve(buy.sleeve)
+        except ValueError:
+            notes.append(f"recorded_buy_sleeve_unknown:{buy.id}")
+            continue
+        market_holdings.append((buy.sleeve, buy.amount_inr, LiquidityClass.INSTANT))
+        member_market_holdings.append(
+            (buy.member_id, buy.sleeve, buy.amount_inr, LiquidityClass.INSTANT)
+        )
 
     household_snapshot = build_household_snapshot(
         user_data.valued_assets,
@@ -1209,7 +1425,7 @@ def personalise(
     annual_global = round_paise(monthly_global * 12 + household_new_money * global_share)
     from wealth.policy.us_situs import us_situs_value_usd
 
-    us_situs = us_situs_value_usd(user_data.holdings)
+    us_situs = us_situs_value_usd(user_data.holdings, market.fx_rates)
     route = select_route(
         RouteContext(
             monthly_global_new_money=monthly_global,
@@ -1507,6 +1723,20 @@ def personalise(
         selected_research,
     )
     carry_forward = round_paise(carry_forward + abroad_carry)
+    if apply_weekly_spending:
+        weekly_actions, carry_forward = _apply_weekly_spending(
+            weekly_actions,
+            carry_forward,
+            user_data.weekly_spending,
+            market.fx_rates,
+        )
+        abroad_buy_list = [
+            line
+            for action in weekly_actions
+            if action.kind == "BUY_ABROAD"
+            for line in action.params.get("abroad_buy_list", [])
+            if isinstance(line, dict)
+        ]
     notes.extend(abroad_notes)
     if market.yield_table_as_of is not None and not market.yield_table_verified:
         notes.append(f"debt_yields_unverified_as_of:{market.yield_table_as_of.isoformat()}")

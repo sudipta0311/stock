@@ -216,6 +216,16 @@ def validate_buying_rules(rules: BuyingRules) -> None:
     if not 1 <= maximum_actions <= 3:
         raise ValueError("max_actions must be from 1 to 3")
 
+    recorded_buys = rules.get("recorded_buys", {})
+    if not isinstance(recorded_buys, Mapping):
+        raise ValueError("recorded_buys must be a mapping")
+    settlement_days = integer_rule(
+        recorded_buys.get("statement_settlement_days", 3),
+        "recorded_buys.statement_settlement_days",
+    )
+    if not 1 <= settlement_days <= 14:
+        raise ValueError("recorded_buys.statement_settlement_days must be from 1 to 14")
+
     satellite = rules.get("satellite")
     if not isinstance(satellite, Mapping):
         raise ValueError("satellite must be a mapping")

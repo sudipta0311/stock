@@ -21,6 +21,7 @@ describe("holding Exit Card", () => {
           networth({
             holdings: [
               {
+                added_by_you: false,
                 security_id: "security-test",
                 name: "Demo Company",
                 symbol: "DEMO",
@@ -33,6 +34,7 @@ describe("holding Exit Card", () => {
                 fx_missing: false,
                 price_as_of: "2026-10-28",
                 price_source: "fixture",
+                units_entered: false,
                 status: "priced",
               },
             ],

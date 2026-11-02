@@ -1,6 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiPathAvailable } from "../api/feature-support";
 import { ApiError } from "../api/client";
+import { refreshActionQueries } from "../api/query-client";
 import { Badge, Card, EmptyState, Skeleton } from "../ui";
 import type { ReactNode } from "react";
 
@@ -10,7 +11,24 @@ export function useFeatureQuery<T>(
   queryFn: () => Promise<T>,
 ) {
   const supported = apiPathAvailable(path);
-  const query = useQuery({ queryKey, queryFn, enabled: supported });
+  const queryClient = useQueryClient();
+  const query = useQuery({
+    queryKey,
+    queryFn: async () => {
+      const result = await queryFn();
+      if (
+        path === "/v1/plan" &&
+        typeof result === "object" &&
+        result !== null &&
+        "fresh" in result &&
+        result.fresh === true
+      ) {
+        void refreshActionQueries(queryClient);
+      }
+      return result;
+    },
+    enabled: supported,
+  });
   return { ...query, supported };
 }
 

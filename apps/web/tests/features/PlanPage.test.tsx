@@ -242,6 +242,7 @@ describe("Plan page", () => {
           networth({
             holdings: [
               {
+                added_by_you: false,
                 currency: "INR",
                 fx_as_of: null,
                 fx_missing: false,
@@ -252,6 +253,7 @@ describe("Plan page", () => {
                 security_id: "security-test-1",
                 security_type: "mf",
                 status: "priced",
+                units_entered: false,
                 symbol: "SYNTHETIC",
                 value: "10000.00",
                 value_usd: null,

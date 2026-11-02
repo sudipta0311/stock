@@ -6,6 +6,11 @@ export type ActionResponse = components["schemas"]["ActionResponse"];
 export type StressResponse = components["schemas"]["StressResponse"];
 export type ResearchIdeasResponse =
   components["schemas"]["ResearchIdeasResponse"];
+export type RecordBuyRequest = components["schemas"]["RecordBuyRequest"];
+export type ActionBoughtResponse =
+  components["schemas"]["ActionBoughtResponse"];
+export type RecordedBuyResponse = components["schemas"]["RecordedBuyResponse"];
+export type RecordedBuyPatch = components["schemas"]["RecordedBuyPatch"];
 
 export function getPlan(): Promise<WeeklyPlan> {
   return apiFetch("/v1/plan");
@@ -23,6 +28,36 @@ export function updateActionStatus(
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ status }),
+  });
+}
+
+export function recordBought(
+  actionId: string,
+  payload: RecordBuyRequest,
+): Promise<ActionBoughtResponse> {
+  return apiFetch(`/v1/actions/${encodeURIComponent(actionId)}/bought`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateRecordedBuy(
+  recordedBuyId: string,
+  payload: RecordedBuyPatch,
+): Promise<RecordedBuyResponse> {
+  return apiFetch(`/v1/recorded-buys/${encodeURIComponent(recordedBuyId)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function removeRecordedBuy(
+  recordedBuyId: string,
+): Promise<RecordedBuyResponse> {
+  return apiFetch(`/v1/recorded-buys/${encodeURIComponent(recordedBuyId)}`, {
+    method: "DELETE",
   });
 }
 

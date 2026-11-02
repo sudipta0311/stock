@@ -1,4 +1,4 @@
-// OpenAPI SHA256: 81e135bf939a356a4734f0843baed8c97b17b466a4bec76763449e1d4c09426b
+// OpenAPI SHA256: 98eee75332f66fce69fc5972c591affad7bfd139cefabd43539951528e86d592
 export interface paths {
     "/healthz": {
         parameters: {
@@ -85,6 +85,23 @@ export interface paths {
         head?: never;
         /** Patch Action */
         patch: operations["patch_action_v1_actions__action_id__patch"];
+        trace?: never;
+    };
+    "/v1/actions/{action_id}/bought": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Record Bought */
+        post: operations["record_bought_v1_actions__action_id__bought_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/assets": {
@@ -938,6 +955,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/recorded-buys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Recorded Buys */
+        get: operations["list_recorded_buys_v1_recorded_buys_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/recorded-buys/{recorded_buy_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove Recorded Buy */
+        delete: operations["remove_recorded_buy_v1_recorded_buys__recorded_buy_id__delete"];
+        options?: never;
+        head?: never;
+        /** Patch Recorded Buy */
+        patch: operations["patch_recorded_buy_v1_recorded_buys__recorded_buy_id__patch"];
+        trace?: never;
+    };
     "/v1/research/ideas": {
         parameters: {
             query?: never;
@@ -1149,6 +1201,12 @@ export interface components {
             /** Tax Wrapper */
             tax_wrapper?: ("ask" | "ordinary" | "pension") | null;
         };
+        /** ActionBoughtResponse */
+        ActionBoughtResponse: {
+            action: components["schemas"]["ActionResponse"];
+            /** Recorded Buys */
+            recorded_buys: components["schemas"]["RecordedBuyResponse"][];
+        };
         /** ActionResponse */
         ActionResponse: {
             /**
@@ -1158,6 +1216,11 @@ export interface components {
             created_at: string;
             /** Done By */
             done_by?: string | null;
+            /**
+             * Has Recorded Buys
+             * @default false
+             */
+            has_recorded_buys: boolean;
             /**
              * Id
              * Format: uuid
@@ -1442,6 +1505,17 @@ export interface components {
             title: string;
             /** Why */
             why: string;
+        };
+        /** BuyLineInput */
+        BuyLineInput: {
+            /** Amount */
+            amount: string;
+            /** Currency */
+            currency: string;
+            /** Line */
+            line: number;
+            /** Units */
+            units?: string | null;
         };
         /** ChecklistWrite */
         ChecklistWrite: {
@@ -1838,6 +1912,17 @@ export interface components {
         };
         /** HoldingValuationResponse */
         HoldingValuationResponse: {
+            /**
+             * Added By You
+             * @default false
+             */
+            added_by_you: boolean;
+            /** Amount */
+            amount?: string | null;
+            /** Amount Currency */
+            amount_currency?: string | null;
+            /** Bought On */
+            bought_on?: string | null;
             /** Currency */
             currency: string;
             /** Fx As Of */
@@ -1852,11 +1937,10 @@ export interface components {
             price_source: string | null;
             /** Quantity */
             quantity: string;
-            /**
-             * Security Id
-             * Format: uuid
-             */
-            security_id: string;
+            /** Recorded Buy Id */
+            recorded_buy_id?: string | null;
+            /** Security Id */
+            security_id: string | null;
             /** Security Type */
             security_type: string;
             /**
@@ -1866,6 +1950,11 @@ export interface components {
             status: "priced" | "statement_value_used" | "price_unavailable" | "fx_unavailable";
             /** Symbol */
             symbol: string;
+            /**
+             * Units Entered
+             * @default false
+             */
+            units_entered: boolean;
             /** Value */
             value: string | null;
             /** Value Usd */
@@ -3317,6 +3406,75 @@ export interface components {
             /** Missing */
             missing: string[];
         };
+        /** RecordBuyRequest */
+        RecordBuyRequest: {
+            /** Bought On */
+            bought_on?: string | null;
+            /** Lines */
+            lines: components["schemas"]["BuyLineInput"][];
+        };
+        /** RecordedBuyPatch */
+        RecordedBuyPatch: {
+            /** Amount */
+            amount?: string | null;
+            /** Bought On */
+            bought_on?: string | null;
+            /** Units */
+            units?: string | null;
+        };
+        /** RecordedBuyResponse */
+        RecordedBuyResponse: {
+            /** Account Type */
+            account_type: string | null;
+            /** Action Id */
+            action_id: string | null;
+            /** Amount */
+            amount: string;
+            /** Amount Inr */
+            amount_inr: string | null;
+            /**
+             * Bought On
+             * Format: date
+             */
+            bought_on: string;
+            /** Currency */
+            currency: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Instrument Category */
+            instrument_category: string;
+            /** Line */
+            line: number;
+            /**
+             * Member Id
+             * Format: uuid
+             */
+            member_id: string;
+            /** Name */
+            name: string;
+            /** Security Id */
+            security_id: string | null;
+            /** Security Isin */
+            security_isin: string | null;
+            /** Security Symbol */
+            security_symbol: string | null;
+            /** Security Type */
+            security_type: string;
+            /** Sleeve */
+            sleeve: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "waiting" | "matched" | "removed";
+            /** Units */
+            units: string | null;
+            /** Units Entered */
+            units_entered: boolean;
+        };
         /** RecurringDepositAsset */
         RecurringDepositAsset: {
             /**
@@ -4267,6 +4425,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    record_bought_v1_actions__action_id__bought_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Household"?: string | null;
+            };
+            path: {
+                action_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordBuyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActionBoughtResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6522,6 +6717,110 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_recorded_buys_v1_recorded_buys_get: {
+        parameters: {
+            query?: {
+                status?: ("waiting" | "matched" | "removed") | null;
+                member_id?: string | null;
+            };
+            header?: {
+                "X-Household"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordedBuyResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_recorded_buy_v1_recorded_buys__recorded_buy_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Household"?: string | null;
+            };
+            path: {
+                recorded_buy_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordedBuyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_recorded_buy_v1_recorded_buys__recorded_buy_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Household"?: string | null;
+            };
+            path: {
+                recorded_buy_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecordedBuyPatch"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecordedBuyResponse"];
+                };
             };
             /** @description Validation Error */
             422: {

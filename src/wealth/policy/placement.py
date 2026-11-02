@@ -29,6 +29,11 @@ class PlacementResult:
     carry_forward: Decimal = Decimal("0.00")
 
 
+def action_spends_new_money(kind: str) -> bool:
+    """Mirror the placement branches that consume this week's available money."""
+    return not (kind.startswith("SELL_") or kind in {"REVIEW_EXIT", "SWAP", "REBALANCE_SIPS"})
+
+
 def place_actions(
     actions: Sequence[Action],
     members: Sequence[MemberContext],

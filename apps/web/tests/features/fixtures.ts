@@ -211,6 +211,7 @@ export function action(
       params: { market: "IN" },
     },
     status: "proposed",
+    has_recorded_buys: false,
     created_at: "2026-10-28T00:00:00Z",
     ...overrides,
   };

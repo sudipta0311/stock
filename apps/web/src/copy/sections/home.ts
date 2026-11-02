@@ -20,7 +20,24 @@ const section = {
   "money_summary": "Money: {amount}",
   "money_summary_empty": "Money: Add items to see your total",
   "plan_empty": "Add what you have to see your plan",
-  "add_money": "Add your money"
+  "add_money": "Add your money",
+  "buy_sheet_title": "What did you buy?",
+  "buy_sheet_description": "Enter the amount you spent.",
+  "buy_sheet_multiple_description": "Untick anything you didn't buy. Enter the amount you spent.",
+  "buy_bought": "Bought",
+  "buy_amount": "Amount",
+  "buy_units_optional": "Units (optional)",
+  "buy_units_from_step": "{units} units from this step",
+  "buy_date_optional": "Date (optional)",
+  "buy_more_details": "More details",
+  "buy_choose_one": "Select at least one item.",
+  "buy_amount_error": "Enter a positive amount using digits and a decimal point.",
+  "buy_save_error": "We couldn't save this purchase. Try again.",
+  "step_updated": "This step was updated. Check it and try again.",
+  "buy_save": "Save",
+  "buy_cancel": "Cancel",
+  "buy_done": "Done ✓",
+  "buy_saved": "Added to your money."
 };
 
 export default section;

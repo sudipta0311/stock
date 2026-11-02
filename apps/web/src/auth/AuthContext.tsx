@@ -9,7 +9,7 @@ import {
 import type { ReactNode } from "react";
 import type { components } from "../api/schema";
 import { apiFetch, getSelectedHouseholdId } from "../api/client";
-import { queryClient } from "../api/query-client";
+import { queryClient, refreshActionQueries } from "../api/query-client";
 import {
   clearAuthToken,
   getAuthToken,
@@ -99,7 +99,11 @@ function warmHomeQueries(): void {
     }),
     queryClient.prefetchQuery({
       queryKey: ["c27b", "plan", selectedHouseholdId, activeMemberId],
-      queryFn: () => apiFetch("/v1/plan"),
+      queryFn: async () => {
+        const plan = await apiFetch<{ fresh?: boolean }>("/v1/plan");
+        if (plan.fresh) void refreshActionQueries(queryClient);
+        return plan;
+      },
     }),
     queryClient.prefetchQuery({
       queryKey: ["c27b", "actions", selectedHouseholdId],

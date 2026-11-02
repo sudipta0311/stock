@@ -657,6 +657,132 @@ def test_weekly_plan_upsert_replaces_proposed_and_preserves_user_statuses(
     assert plan_count == 1
 
 
+def _plan_with_actions(actions: list[dict[str, object]], digest: str) -> WeeklyPlan:
+    return WeeklyPlan(
+        week=_WEEK,
+        as_of=_TODAY,
+        allocation={},
+        band_breaches=[],
+        debt_answer={},
+        foundation=[],
+        route={},
+        actions=actions,
+        exit_cards=[],
+        stress={},
+        notes=[],
+        inputs_digest=digest,
+    )
+
+
+def test_weekly_plan_rebuild_keeps_ids_for_identical_proposed_actions_and_updates_rank(
+    api_client: tuple[TestClient, str, object],
+    migrated_database: MigratedDatabase,
+) -> None:
+    client, secret, _application = api_client
+    headers, subject = _auth(secret, "weekly-stable-action-ids")
+    assert client.get("/v1/me", headers=headers).status_code == 200
+    user_id = _user_id(migrated_database, subject)
+    actions = [
+        {
+            "rank": 1,
+            "kind": "BUY_ABROAD",
+            "member_id": "synthetic-member-a",
+            "amount": "1000.00",
+            "params": {"abroad_buy_list": [{"name": "Synthetic fund"}]},
+        },
+        {
+            "rank": 2,
+            "kind": "BUILD_EMERGENCY_FUND",
+            "member_id": "synthetic-member-b",
+            "amount": "500.00",
+        },
+    ]
+
+    with user_session(migrated_database.owner_engine, user_id) as session:
+        save_weekly_plan(session, user_id, _plan_with_actions(actions, "a" * 64))
+    with migrated_database.owner_engine.connect() as connection:
+        original = {
+            kind: action_id
+            for action_id, kind in connection.execute(
+                select(Action.id, Action.kind).where(Action.user_id == user_id)
+            )
+        }
+
+    rebuilt_actions = [
+        {**actions[1], "rank": 1},
+        {**actions[0], "rank": 2},
+    ]
+    with user_session(migrated_database.owner_engine, user_id) as session:
+        save_weekly_plan(session, user_id, _plan_with_actions(rebuilt_actions, "b" * 64))
+
+    with migrated_database.owner_engine.connect() as connection:
+        rows = list(
+            connection.execute(
+                select(Action.id, Action.kind, Action.rank, Action.payload).where(
+                    Action.user_id == user_id,
+                    Action.status == "proposed",
+                )
+            )
+        )
+    by_kind = {row.kind: row for row in rows}
+    assert {kind: row.id for kind, row in by_kind.items()} == original
+    assert by_kind["BUY_ABROAD"].rank == 2
+    assert by_kind["BUY_ABROAD"].payload["rank"] == 2
+    assert by_kind["BUILD_EMERGENCY_FUND"].rank == 1
+
+
+def test_weekly_plan_rebuild_replaces_only_action_with_changed_amount(
+    api_client: tuple[TestClient, str, object],
+    migrated_database: MigratedDatabase,
+) -> None:
+    client, secret, _application = api_client
+    headers, subject = _auth(secret, "weekly-changed-action")
+    assert client.get("/v1/me", headers=headers).status_code == 200
+    user_id = _user_id(migrated_database, subject)
+    actions = [
+        {
+            "rank": 1,
+            "kind": "BUY_ABROAD",
+            "member_id": "synthetic-member-a",
+            "amount": "1000.00",
+            "params": {"abroad_buy_list": [{"name": "Synthetic fund"}]},
+        },
+        {
+            "rank": 2,
+            "kind": "BUY_STP",
+            "member_id": "synthetic-member-b",
+            "amount": "500.00",
+        },
+    ]
+    with user_session(migrated_database.owner_engine, user_id) as session:
+        save_weekly_plan(session, user_id, _plan_with_actions(actions, "c" * 64))
+    with migrated_database.owner_engine.connect() as connection:
+        original = {
+            kind: action_id
+            for action_id, kind in connection.execute(
+                select(Action.id, Action.kind).where(Action.user_id == user_id)
+            )
+        }
+
+    changed_actions = [actions[0], {**actions[1], "amount": "750.00"}]
+    with user_session(migrated_database.owner_engine, user_id) as session:
+        save_weekly_plan(session, user_id, _plan_with_actions(changed_actions, "d" * 64))
+
+    with migrated_database.owner_engine.connect() as connection:
+        rows = list(
+            connection.execute(
+                select(Action.id, Action.kind, Action.payload).where(
+                    Action.user_id == user_id,
+                    Action.status == "proposed",
+                )
+            )
+        )
+    by_kind = {row.kind: row for row in rows}
+    assert by_kind["BUY_ABROAD"].id == original["BUY_ABROAD"]
+    assert by_kind["BUY_STP"].id != original["BUY_STP"]
+    assert by_kind["BUY_STP"].payload["amount"] == "750.00"
+
+
 def test_weekly_job_loads_each_user_inside_user_session(
     migrated_database: MigratedDatabase,
     monkeypatch: pytest.MonkeyPatch,

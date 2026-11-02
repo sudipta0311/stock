@@ -12,7 +12,23 @@ const section = {
   "loans": "Loans",
   "other": "Other",
   "group_total_unavailable": "Not available",
-  "more_details": "More details"
+  "more_details": "More details",
+  "added_by_you": "Added by you",
+  "details_buy": "Details",
+  "edit_buy": "Edit",
+  "buy_details": "Shown from what you entered. Your next statement will replace it.",
+  "buy_no_units": "Not entered",
+  "buy_amount": "Amount",
+  "buy_units_optional": "Units (optional)",
+  "buy_date": "Date",
+  "buy_amount_error": "Enter a positive amount using digits and a decimal point.",
+  "buy_units_error": "Enter a positive number of units, or leave it blank.",
+  "buy_save_error": "We couldn't save this purchase. Try again.",
+  "save_buy": "Save changes",
+  "remove_buy_title": "Remove this purchase?",
+  "remove_buy_confirm": "This purchase will no longer count in your plan. Remove it?",
+  "cancel": "Cancel",
+  "remove_buy": "Remove purchase"
 };
 
 export default section;

@@ -14,6 +14,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from wealth.core.dates import fy_start
+from wealth.core.money import round_paise
 from wealth.db.models import (
     Account,
     BrokerCashFlowRecord,
@@ -23,8 +24,12 @@ from wealth.db.models import (
     ManualAsset,
     Profile,
     RealisedTrade,
+    RecordedBuy,
     ResearchPackRecord,
     Security,
+)
+from wealth.db.models import (
+    Action as ActionRow,
 )
 from wealth.db.models import (
     Goal as GoalRow,
@@ -42,8 +47,10 @@ from wealth.policy.personalise import (
     MarketContext,
     PolicyProfile,
     RealisedTradesThisFy,
+    RecordedBuyInput,
     ResearchPack,
     UserData,
+    WeeklySpendInput,
 )
 from wealth.policy.residency import load_residency_rules
 from wealth.rates.reference import RateUnavailable
@@ -96,6 +103,168 @@ def _goals(session: Session, user_id: UUID) -> tuple[Goal, ...]:
             member_id=row.member_id,
         )
         for row in rows
+    )
+
+
+def _recorded_buy_inputs(rows: tuple[RecordedBuy, ...]) -> tuple[RecordedBuyInput, ...]:
+    return tuple(
+        RecordedBuyInput(
+            id=str(row.id),
+            action_id=str(row.action_id) if row.action_id is not None else None,
+            member_id=str(row.member_id),
+            bought_on=row.bought_on,
+            amount=row.amount,
+            currency=row.currency,
+            amount_inr=row.amount_inr,
+            units=row.units,
+            units_entered=row.units_entered,
+            cost_per_unit=row.cost_per_unit,
+            cost_per_unit_inr=row.cost_per_unit_inr,
+            security_id=str(row.security_id) if row.security_id is not None else None,
+            security_type=row.security_type,
+            security_symbol=row.security_symbol,
+            security_isin=row.security_isin,
+            name=row.name,
+            sleeve=row.sleeve,
+            instrument_category=row.instrument_category,
+            account_type=row.account_type,
+            status=row.status,
+        )
+        for row in rows
+    )
+
+
+def _amount_inr_for_recorded_buy(session: Session, buy: RecordedBuy) -> Decimal | None:
+    if buy.amount_inr is not None:
+        return buy.amount_inr
+    if buy.currency == "INR":
+        return round_paise(buy.amount)
+    fx_row = store.latest_fx_rate(session, f"{buy.currency}/INR", buy.bought_on)
+    return round_paise(buy.amount * fx_row[0]) if fx_row is not None and fx_row[0] > 0 else None
+
+
+def _payload_decimal(value: object) -> Decimal | None:
+    if value is None:
+        return None
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    return amount if amount.is_finite() and amount >= 0 else None
+
+
+def _weekly_spend_for_recorded_buy(
+    buy: RecordedBuy,
+    action: ActionRow,
+    recorded_amount_inr: Decimal | None,
+) -> Decimal | None:
+    payload = action.payload if isinstance(action.payload, dict) else {}
+    details = payload.get("action") if isinstance(payload.get("action"), dict) else payload
+    kind = str(details.get("kind") or action.kind)
+    if kind == "BUY_ABROAD":
+        params = details.get("params")
+        lines = (
+            params.get("abroad_buy_list", details.get("abroad_buy_list"))
+            if isinstance(params, dict)
+            else details.get("abroad_buy_list")
+        )
+        if not isinstance(lines, list) or not 0 <= buy.line < len(lines):
+            return recorded_amount_inr
+        line = lines[buy.line]
+        if not isinstance(line, dict):
+            return recorded_amount_inr
+        if "amount_dkk" in line:
+            display_currency = "DKK"
+            displayed_amount = _payload_decimal(line.get("amount_dkk"))
+        else:
+            display_currency = str(line.get("currency") or "DKK").upper()
+            displayed_amount = _payload_decimal(line.get("amount"))
+        planned_amount_inr = _payload_decimal(line.get("amount_inr"))
+        if (
+            buy.currency == display_currency
+            and displayed_amount is not None
+            and buy.amount >= displayed_amount
+            and planned_amount_inr is not None
+        ):
+            return max(recorded_amount_inr or Decimal(0), planned_amount_inr)
+        return recorded_amount_inr
+
+    if kind in {"BUY_LUMPSUM", "BUY_STP", "BUY_STOCK_TRANCHE"}:
+        step_amount = _payload_decimal(details.get("amount"))
+        if buy.currency == "INR" and step_amount is not None and buy.amount >= step_amount:
+            return max(recorded_amount_inr or Decimal(0), step_amount)
+    return recorded_amount_inr
+
+
+def _weekly_spending_for_week(
+    session: Session,
+    user_id: UUID,
+    week: str,
+    recorded_buys: tuple[RecordedBuy, ...],
+) -> tuple[WeeklySpendInput, ...]:
+    buy_step_kinds = {"BUY_LUMPSUM", "BUY_STP", "BUY_ABROAD", "BUY_STOCK_TRANCHE"}
+    actions = tuple(
+        session.scalars(
+            select(ActionRow).where(ActionRow.user_id == user_id, ActionRow.week == week)
+        )
+    )
+    actions_by_id = {row.id: row for row in actions}
+    buys_by_action: dict[UUID, list[RecordedBuy]] = {}
+    for buy in recorded_buys:
+        if buy.status in {"waiting", "matched"} and buy.action_id in actions_by_id:
+            assert buy.action_id is not None
+            buys_by_action.setdefault(buy.action_id, []).append(buy)
+
+    spent_by_member_and_sleeve: dict[tuple[str, str], Decimal] = {}
+
+    def add_spending(member_id: object, sleeve: object, amount: Decimal | None) -> None:
+        if not isinstance(member_id, str) or not member_id:
+            return
+        if not isinstance(sleeve, str) or not sleeve or amount is None or amount <= 0:
+            return
+        key = (member_id, sleeve)
+        spent_by_member_and_sleeve[key] = spent_by_member_and_sleeve.get(key, Decimal(0)) + amount
+
+    for action_id, buys in buys_by_action.items():
+        action = actions_by_id[action_id]
+        for buy in buys:
+            recorded_amount_inr = _amount_inr_for_recorded_buy(session, buy)
+            amount = _weekly_spend_for_recorded_buy(buy, action, recorded_amount_inr)
+            add_spending(str(buy.member_id), buy.sleeve, amount)
+
+    for action in actions:
+        if action.status != "done" or action.id in buys_by_action:
+            continue
+        payload = action.payload if isinstance(action.payload, dict) else {}
+        details = payload.get("action") if isinstance(payload.get("action"), dict) else payload
+        kind = str(details.get("kind") or action.kind)
+        if kind not in buy_step_kinds:
+            continue
+
+        if kind == "BUY_ABROAD":
+            params = details.get("params")
+            lines = (
+                params.get("abroad_buy_list", details.get("abroad_buy_list"))
+                if isinstance(params, dict)
+                else details.get("abroad_buy_list")
+            )
+            if isinstance(lines, list) and lines:
+                for line in lines:
+                    if not isinstance(line, dict):
+                        continue
+                    add_spending(
+                        line.get("member_id") or details.get("member_id"),
+                        line.get("sleeve") or details.get("sleeve"),
+                        _payload_decimal(line.get("amount_inr")),
+                    )
+                continue
+
+        amount = _payload_decimal(details.get("amount"))
+        add_spending(details.get("member_id"), details.get("sleeve"), amount)
+
+    return tuple(
+        WeeklySpendInput(member_id=member_id, sleeve=sleeve, amount_inr=amount)
+        for (member_id, sleeve), amount in sorted(spent_by_member_and_sleeve.items())
     )
 
 
@@ -251,7 +420,11 @@ def _loan_candidates(
 
 
 def _holdings(
-    session: Session, user_id: UUID, as_of: date, prices: DbPriceProvider
+    session: Session,
+    user_id: UUID,
+    as_of: date,
+    prices: DbPriceProvider,
+    recorded_buys: tuple[RecordedBuy, ...] = (),
 ) -> tuple[HoldingInput, ...]:
     statement = (
         select(HoldingLot, Security)
@@ -275,6 +448,8 @@ def _holdings(
                 "statement_quantity": Decimal(0),
                 "statement_as_of": None,
                 "joint": lot.joint,
+                "cost_value_inr": Decimal(0),
+                "fallback_value_inr": Decimal(0),
             },
         )
         record["quantity"] = record["quantity"] + lot.quantity  # type: ignore[operator]
@@ -301,21 +476,82 @@ def _holdings(
                 fx_missing=lot.fx_missing,
             )
         )
-        if record["price"] is None:
-            try:
-                quote = (
-                    prices.nav(
-                        security.isin or security.amfi_scheme_code or security.symbol,
-                        as_of,
-                    )
-                    if security.security_type == "mf"
-                    else prices.price(security.id, as_of)
+
+    for buy in recorded_buys:
+        if buy.status != "waiting" or buy.security_id is None:
+            continue
+        security = session.get(Security, buy.security_id)
+        if security is None:
+            continue
+        owner_key = (security.id, buy.member_id)
+        record = grouped.setdefault(
+            owner_key,
+            {
+                "security": security,
+                "quantity": Decimal(0),
+                "lots": [],
+                "price": None,
+                "price_as_of": None,
+                "price_source": None,
+                "statement_value": Decimal(0),
+                "statement_quantity": Decimal(0),
+                "statement_as_of": None,
+                "joint": False,
+                "cost_value_inr": Decimal(0),
+                "fallback_value_inr": Decimal(0),
+            },
+        )
+        if buy.units is None:
+            if buy.amount_inr is not None:
+                record["cost_value_inr"] = record["cost_value_inr"] + buy.amount_inr  # type: ignore[operator]
+        else:
+            record["quantity"] = record["quantity"] + buy.units  # type: ignore[operator]
+            if buy.amount_inr is not None:
+                record["fallback_value_inr"] = (
+                    record["fallback_value_inr"] + buy.amount_inr  # type: ignore[operator]
                 )
-            except PriceUnavailable:
-                continue
-            record["price"] = quote.value
-            record["price_as_of"] = quote.as_of
-            record["price_source"] = quote.source
+            record["lots"].append(  # type: ignore[union-attr]
+                HoldingLotInput(
+                    lot_id=f"recorded:{buy.id}",
+                    quantity=buy.units,
+                    cost_per_unit=buy.cost_per_unit,
+                    acquired_on=buy.bought_on,
+                    member_id=str(buy.member_id),
+                    currency=security.currency,
+                    cost_per_unit_inr=buy.cost_per_unit_inr,
+                    fx_missing=buy.cost_per_unit_inr is None,
+                )
+            )
+            if buy.cost_per_unit is not None:
+                record["statement_value"] = (
+                    record["statement_value"] + buy.cost_per_unit * buy.units  # type: ignore[operator]
+                )
+                record["statement_quantity"] = (
+                    record["statement_quantity"] + buy.units  # type: ignore[operator]
+                )
+                current_statement_date = record["statement_as_of"]
+                if current_statement_date is None or buy.bought_on > current_statement_date:
+                    record["statement_as_of"] = buy.bought_on
+
+    for record in grouped.values():
+        if record["price"] is not None:
+            continue
+        security = record["security"]
+        assert isinstance(security, Security)
+        try:
+            quote = (
+                prices.nav(
+                    security.isin or security.amfi_scheme_code or security.symbol,
+                    as_of,
+                )
+                if security.security_type == "mf"
+                else prices.price(security.id, as_of)
+            )
+        except PriceUnavailable:
+            continue
+        record["price"] = quote.value
+        record["price_as_of"] = quote.as_of
+        record["price_source"] = quote.source
 
     holdings: list[HoldingInput] = []
     for (security_id, member_id), record in grouped.items():
@@ -360,6 +596,8 @@ def _holdings(
                 sector=security.category,
                 member_id=str(member_id),
                 joint=bool(record["joint"]),
+                cost_value_inr=record["cost_value_inr"],  # type: ignore[arg-type]
+                fallback_value_inr=record["fallback_value_inr"],  # type: ignore[arg-type]
             )
         )
     return tuple(holdings)
@@ -508,13 +746,14 @@ def _member_profiles(
 def _ask_deposits_dkk(
     session: Session, user_id: UUID, member_id: UUID, as_of: date
 ) -> tuple[Decimal | None, bool]:
-    """Return this calendar year's net ASK deposits, converted on each transaction date."""
+    """Return this year's imported contributions plus uncovered waiting purchases."""
     flows = session.execute(
         select(
             BrokerCashFlowRecord.amount,
             BrokerCashFlowRecord.currency,
             BrokerCashFlowRecord.transaction_date,
             BrokerCashFlowRecord.kind,
+            BrokerCashFlowRecord.account_id,
         )
         .join(
             Account,
@@ -533,11 +772,23 @@ def _ask_deposits_dkk(
         )
         .order_by(BrokerCashFlowRecord.transaction_date, BrokerCashFlowRecord.id)
     ).all()
-    if not flows:
+    buys = list(
+        session.scalars(
+            select(RecordedBuy).where(
+                RecordedBuy.user_id == user_id,
+                RecordedBuy.member_id == member_id,
+                RecordedBuy.status == "waiting",
+                RecordedBuy.account_type == "ask",
+                RecordedBuy.bought_on >= date(as_of.year, 1, 1),
+                RecordedBuy.bought_on <= as_of,
+            )
+        )
+    )
+    if not flows and not buys:
         return None, False
     deposits = Decimal(0)
     withdrawals = Decimal(0)
-    for amount, currency, transaction_date, kind in flows:
+    for amount, currency, transaction_date, kind, _account_id in flows:
         if currency == "DKK":
             converted = amount
         else:
@@ -557,7 +808,32 @@ def _ask_deposits_dkk(
             deposits += converted
         else:
             withdrawals += converted
-    return deposits - withdrawals, False
+    used = deposits - withdrawals
+    for buy in buys:
+        cash_flow_covers_buy = any(
+            transaction_date >= buy.bought_on
+            and (buy.account_id is None or account_id == buy.account_id)
+            for _amount, _currency, transaction_date, _kind, account_id in flows
+        )
+        if cash_flow_covers_buy:
+            continue
+        if buy.currency == "DKK":
+            converted_buy = buy.amount
+        else:
+            currency_rate = store.latest_fx_rate(session, f"{buy.currency}/INR", buy.bought_on)
+            dkk_rate = store.latest_fx_rate(session, "DKK/INR", buy.bought_on)
+            if (
+                currency_rate is None
+                or dkk_rate is None
+                or currency_rate[0] <= 0
+                or dkk_rate[0] <= 0
+                or (buy.bought_on - currency_rate[1]).days > 10
+                or (buy.bought_on - dkk_rate[1]).days > 10
+            ):
+                return None, True
+            converted_buy = buy.amount * currency_rate[0] / dkk_rate[0]
+        used += converted_buy
+    return used, False
 
 
 def _has_prior_ask_activity(session: Session, user_id: UUID, member_id: UUID, as_of: date) -> bool:
@@ -663,11 +939,19 @@ def load_policy_inputs(
         if profile is not None
         else InvestingPrefs()
     )
+    recorded_buys = tuple(
+        session.scalars(
+            select(RecordedBuy)
+            .where(RecordedBuy.user_id == user_id)
+            .order_by(RecordedBuy.created_at, RecordedBuy.id)
+        )
+    )
     members = _member_profiles(session, user_id, profile, context, investing, as_of)
+    weekly_spending = _weekly_spending_for_week(session, user_id, week, recorded_buys)
     self_member = next(member for member in members if member.is_self)
     prices = DbPriceProvider(session)
     valued_assets, notes = _manual_assets(session, user_id, as_of, prices)
-    holdings = _holdings(session, user_id, as_of, prices)
+    holdings = _holdings(session, user_id, as_of, prices, recorded_buys)
 
     goals = _goals(session, user_id)
     fx_rates: dict[str, Decimal] = {}
@@ -708,6 +992,8 @@ def load_policy_inputs(
         loan_candidates=_loan_candidates(session, user_id, as_of, profile),
         deployment_mode=deployment_mode,
         notes=tuple(notes),
+        recorded_buys=_recorded_buy_inputs(recorded_buys),
+        weekly_spending=weekly_spending,
     )
     market = MarketContext(
         fx_rates=fx_rates,

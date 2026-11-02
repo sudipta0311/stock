@@ -4,6 +4,7 @@ import { HttpResponse, http } from "msw";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { describe, expect, it } from "vitest";
 import { axe } from "vitest-axe";
+import englishCopy from "../../src/copy/en.json";
 import { AddAssetPage } from "../../src/money/AssetFormPage";
 import { MoneyMapPage } from "../../src/money/MoneyMapPage";
 import type {
@@ -519,6 +520,7 @@ describe("Money Map", () => {
       ...baseHandlers(
         networth({
           holdings: holdings.map(([securityType, name], index) => ({
+            added_by_you: false,
             currency: "INR",
             fx_as_of: null,
             fx_missing: false,
@@ -529,6 +531,7 @@ describe("Money Map", () => {
             security_id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
             security_type: securityType,
             status: "priced",
+            units_entered: false,
             symbol: `TEST${index + 1}`,
             value: "100.00",
             value_usd: null,
@@ -555,11 +558,129 @@ describe("Money Map", () => {
     expect(screen.getByText("6 items")).toBeVisible();
   });
 
+  it("shows a recorded purchase, its value, and its edit and removal details", async () => {
+    const user = userEvent.setup();
+    const buy = {
+      added_by_you: true,
+      amount: "1000.00",
+      amount_currency: "INR",
+      bought_on: "2026-10-27",
+      currency: "INR",
+      fx_as_of: null,
+      fx_missing: false,
+      name: "Indian index fund",
+      price_as_of: null,
+      price_source: "recorded_buy",
+      quantity: "",
+      recorded_buy_id: "recorded-buy-test",
+      security_id: null,
+      security_type: "mf",
+      status: "statement_value_used",
+      symbol: "",
+      units_entered: false,
+      value: "1000.00",
+      value_usd: null,
+    } as const;
+    let updateBody: Record<string, unknown> | null = null;
+    let deleteCalled = false;
+    server.use(
+      ...baseHandlers(networth({ holdings: [buy] })),
+      http.patch(
+        /\/v1\/recorded-buys\/recorded-buy-test$/,
+        async ({ request }) => {
+          updateBody = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json({
+            id: "recorded-buy-test",
+            action_id: "action-buy-test",
+            member_id: memberId,
+            line: 0,
+            bought_on: "2026-10-27",
+            amount: "1250.00",
+            currency: "INR",
+            amount_inr: "1250.00",
+            units: "25",
+            units_entered: true,
+            security_id: null,
+            security_type: "mf",
+            security_symbol: null,
+            security_isin: null,
+            name: "Indian index fund",
+            sleeve: "equity_india",
+            instrument_category: "in_core_index",
+            account_type: null,
+            status: "waiting",
+          });
+        },
+      ),
+      http.delete(/\/v1\/recorded-buys\/recorded-buy-test$/, () => {
+        deleteCalled = true;
+        return HttpResponse.json({ ...buy, status: "removed" });
+      }),
+    );
+    renderMap();
+
+    const group = await screen.findByRole("region", { name: "Funds" });
+    expect(within(group).getByText("Added by you")).toBeVisible();
+    expect(within(group).getAllByText("₹1,000")).toHaveLength(2);
+    await user.click(
+      within(group).getByRole("button", {
+        name: /Indian index fund.*Added by you/,
+      }),
+    );
+    const sheet = screen.getByRole("dialog", { name: "Added by you" });
+    expect(
+      within(sheet).getByText(englishCopy.money_ui.buy_details),
+    ).toBeVisible();
+    expect(within(sheet).getByRole("button", { name: "Edit" })).toBeVisible();
+    expect(
+      within(sheet).getByRole("button", {
+        name: englishCopy.money_ui.remove_buy,
+      }),
+    ).toBeVisible();
+
+    await user.click(within(sheet).getByRole("button", { name: "Edit" }));
+    await user.clear(within(sheet).getByLabelText("Amount (INR)"));
+    await user.type(within(sheet).getByLabelText("Amount (INR)"), "1250.00");
+    await user.type(within(sheet).getByLabelText("Units (optional)"), "25");
+    await user.click(
+      within(sheet).getByRole("button", { name: "Save changes" }),
+    );
+    await waitFor(() =>
+      expect(updateBody).toEqual({
+        amount: "1250.00",
+        bought_on: "2026-10-27",
+        units: "25",
+      }),
+    );
+
+    await user.click(
+      within(group).getByRole("button", {
+        name: /Indian index fund.*Added by you/,
+      }),
+    );
+    const reopened = screen.getByRole("dialog", { name: "Added by you" });
+    await user.click(
+      within(reopened).getByRole("button", {
+        name: englishCopy.money_ui.remove_buy,
+      }),
+    );
+    expect(
+      within(reopened).getByText(englishCopy.money_ui.remove_buy_confirm),
+    ).toBeVisible();
+    await user.click(
+      within(reopened).getByRole("button", {
+        name: englishCopy.money_ui.remove_buy,
+      }),
+    );
+    await waitFor(() => expect(deleteCalled).toBe(true));
+  });
+
   it("formats a group total using every holding, including hidden rows", async () => {
     window.localStorage.clear();
     window.localStorage.setItem(PRIMARY_CURRENCY_STORAGE_KEY, "DKK");
     const holdings: NetworthResponse["holdings"] = [
       ...Array.from({ length: 8 }, (_value, index) => ({
+        added_by_you: false,
         currency: "INR",
         fx_as_of: null,
         fx_missing: false,
@@ -570,11 +691,13 @@ describe("Money Map", () => {
         security_id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
         security_type: "mf",
         status: "priced" as const,
+        units_entered: false,
         symbol: `SYNTHETIC-FUND-${index + 1}`,
         value: "1000.00",
         value_usd: null,
       })),
       {
+        added_by_you: false,
         currency: "INR",
         fx_as_of: null,
         fx_missing: false,
@@ -585,6 +708,7 @@ describe("Money Map", () => {
         security_id: "00000000-0000-4000-8000-000000000099",
         security_type: "mf",
         status: "priced" as const,
+        units_entered: false,
         symbol: "SYNTHETIC-HIDDEN-FUND",
         value: "125.00",
         value_usd: null,
@@ -649,6 +773,7 @@ describe("Money Map", () => {
         networth({
           holdings: [
             {
+              added_by_you: false,
               currency: "INR",
               fx_as_of: null,
               fx_missing: false,
@@ -659,6 +784,7 @@ describe("Money Map", () => {
               security_id: "security-synthetic-fund",
               security_type: "mf",
               status: "priced",
+              units_entered: false,
               symbol: "SYNTHETIC-INDEX-CODE",
               value: "10000.00",
               value_usd: null,

@@ -224,6 +224,27 @@
         "title": "AccountWrite",
         "type": "object"
       },
+      "ActionBoughtResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "$ref": "#/components/schemas/ActionResponse"
+          },
+          "recorded_buys": {
+            "items": {
+              "$ref": "#/components/schemas/RecordedBuyResponse"
+            },
+            "title": "Recorded Buys",
+            "type": "array"
+          }
+        },
+        "required": [
+          "action",
+          "recorded_buys"
+        ],
+        "title": "ActionBoughtResponse",
+        "type": "object"
+      },
       "ActionResponse": {
         "additionalProperties": false,
         "properties": {
@@ -243,6 +264,11 @@
               }
             ],
             "title": "Done By"
+          },
+          "has_recorded_buys": {
+            "default": false,
+            "title": "Has Recorded Buys",
+            "type": "boolean"
           },
           "id": {
             "format": "uuid",
@@ -950,6 +976,43 @@
           "deeplink"
         ],
         "title": "BriefAction",
+        "type": "object"
+      },
+      "BuyLineInput": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "currency": {
+            "pattern": "^[A-Za-z]{3}$",
+            "title": "Currency",
+            "type": "string"
+          },
+          "line": {
+            "minimum": 0.0,
+            "title": "Line",
+            "type": "integer"
+          },
+          "units": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Units"
+          }
+        },
+        "required": [
+          "line",
+          "amount",
+          "currency"
+        ],
+        "title": "BuyLineInput",
         "type": "object"
       },
       "ChecklistWrite": {
@@ -2102,6 +2165,45 @@
       "HoldingValuationResponse": {
         "additionalProperties": false,
         "properties": {
+          "added_by_you": {
+            "default": false,
+            "title": "Added By You",
+            "type": "boolean"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "amount_currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Currency"
+          },
+          "bought_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bought On"
+          },
           "currency": {
             "title": "Currency",
             "type": "string"
@@ -2153,10 +2255,29 @@
             "title": "Quantity",
             "type": "string"
           },
+          "recorded_buy_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recorded Buy Id"
+          },
           "security_id": {
-            "format": "uuid",
-            "title": "Security Id",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Security Id"
           },
           "security_type": {
             "title": "Security Type",
@@ -2175,6 +2296,11 @@
           "symbol": {
             "title": "Symbol",
             "type": "string"
+          },
+          "units_entered": {
+            "default": false,
+            "title": "Units Entered",
+            "type": "boolean"
           },
           "value": {
             "anyOf": [
@@ -6282,6 +6408,240 @@
         "title": "QuickAddResponse",
         "type": "object"
       },
+      "RecordBuyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "bought_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bought On"
+          },
+          "lines": {
+            "items": {
+              "$ref": "#/components/schemas/BuyLineInput"
+            },
+            "minItems": 1,
+            "title": "Lines",
+            "type": "array"
+          }
+        },
+        "required": [
+          "lines"
+        ],
+        "title": "RecordBuyRequest",
+        "type": "object"
+      },
+      "RecordedBuyPatch": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "bought_on": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bought On"
+          },
+          "units": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Units"
+          }
+        },
+        "title": "RecordedBuyPatch",
+        "type": "object"
+      },
+      "RecordedBuyResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "account_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Type"
+          },
+          "action_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Id"
+          },
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "amount_inr": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Inr"
+          },
+          "bought_on": {
+            "format": "date",
+            "title": "Bought On",
+            "type": "string"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "instrument_category": {
+            "title": "Instrument Category",
+            "type": "string"
+          },
+          "line": {
+            "title": "Line",
+            "type": "integer"
+          },
+          "member_id": {
+            "format": "uuid",
+            "title": "Member Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "security_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Security Id"
+          },
+          "security_isin": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Security Isin"
+          },
+          "security_symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Security Symbol"
+          },
+          "security_type": {
+            "title": "Security Type",
+            "type": "string"
+          },
+          "sleeve": {
+            "title": "Sleeve",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "waiting",
+              "matched",
+              "removed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "units": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Units"
+          },
+          "units_entered": {
+            "title": "Units Entered",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "action_id",
+          "member_id",
+          "line",
+          "bought_on",
+          "amount",
+          "currency",
+          "amount_inr",
+          "units",
+          "units_entered",
+          "security_id",
+          "security_type",
+          "security_symbol",
+          "security_isin",
+          "name",
+          "sleeve",
+          "instrument_category",
+          "account_type",
+          "status"
+        ],
+        "title": "RecordedBuyResponse",
+        "type": "object"
+      },
       "RecurringDepositAsset": {
         "additionalProperties": false,
         "properties": {
@@ -8542,6 +8902,77 @@
           }
         ],
         "summary": "Patch Action"
+      }
+    },
+    "/v1/actions/{action_id}/bought": {
+      "post": {
+        "operationId": "record_bought_v1_actions__action_id__bought_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "action_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Action Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Household",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Household"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordBuyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionBoughtResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Record Bought"
       }
     },
     "/v1/assets": {
@@ -12594,6 +13025,229 @@
           }
         ],
         "summary": "Delete Push Subscription"
+      }
+    },
+    "/v1/recorded-buys": {
+      "get": {
+        "operationId": "list_recorded_buys_v1_recorded_buys_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "waiting",
+                    "matched",
+                    "removed"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "member_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Member Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Household",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Household"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/RecordedBuyResponse"
+                  },
+                  "title": "Response List Recorded Buys V1 Recorded Buys Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Recorded Buys"
+      }
+    },
+    "/v1/recorded-buys/{recorded_buy_id}": {
+      "delete": {
+        "operationId": "remove_recorded_buy_v1_recorded_buys__recorded_buy_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "recorded_buy_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Recorded Buy Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Household",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Household"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordedBuyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Remove Recorded Buy"
+      },
+      "patch": {
+        "operationId": "patch_recorded_buy_v1_recorded_buys__recorded_buy_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "recorded_buy_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Recorded Buy Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Household",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Household"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecordedBuyPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordedBuyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Patch Recorded Buy"
       }
     },
     "/v1/research/ideas": {

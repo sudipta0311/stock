@@ -13,6 +13,13 @@ export const queryClient = new QueryClient({
   },
 });
 
+export async function refreshActionQueries(client: QueryClient): Promise<void> {
+  const predicate = (query: { queryKey: readonly unknown[] }) =>
+    query.queryKey.includes("actions");
+  await client.cancelQueries({ predicate });
+  await client.invalidateQueries({ predicate });
+}
+
 export function useApiMutation<TData, TVariables>(
   mutationFn: MutationFunction<TData, TVariables>,
   invalidates: readonly QueryKey[],

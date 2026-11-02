@@ -253,7 +253,13 @@ class UnvaluedAssetResponse(MoneyMapModel):
 
 
 class HoldingValuationResponse(MoneyMapModel):
-    security_id: UUID
+    security_id: UUID | None
+    recorded_buy_id: UUID | None = None
+    added_by_you: bool = False
+    bought_on: date | None = None
+    amount: str | None = None
+    amount_currency: str | None = None
+    units_entered: bool = False
     symbol: str
     name: str
     security_type: str
@@ -630,6 +636,7 @@ def refresh_networth_snapshot(
         ManualAsset,
         NetworthSnapshot,
         Profile,
+        RecordedBuy,
         Security,
     )
     from wealth.marketdata.provider import DbPriceProvider
@@ -773,8 +780,22 @@ def refresh_networth_snapshot(
     if member_id is not None:
         market_statement = market_statement.where(HoldingLot.member_id == member_id)
     market_rows = list(session.execute(market_statement))
+    recorded_statement = select(RecordedBuy).where(
+        RecordedBuy.user_id == user_id,
+        RecordedBuy.status == "waiting",
+    )
+    if member_id is not None:
+        recorded_statement = recorded_statement.where(RecordedBuy.member_id == member_id)
+    recorded_buys = list(
+        session.scalars(
+            recorded_statement.order_by(
+                RecordedBuy.bought_on, RecordedBuy.created_at, RecordedBuy.id
+            )
+        )
+    )
     market_holdings: list[tuple[Sleeve | str, Decimal, LiquidityClass | str]] = []
     holding_values: list[dict[str, Any]] = []
+    recorded_holding_values: list[dict[str, Any]] = []
     for lot, security in market_rows:
         try:
             quote = (
@@ -847,6 +868,100 @@ def refresh_networth_snapshot(
                 else LiquidityClass.INSTANT
             )
             market_holdings.append((security.sleeve, value, liquidity))
+
+    for buy in recorded_buys:
+        security = session.get(Security, buy.security_id) if buy.security_id is not None else None
+        quote = None
+        if security is not None and buy.units is not None:
+            try:
+                quote = (
+                    prices.nav(security.isin or security.amfi_scheme_code or security.symbol, today)
+                    if security.security_type == "mf"
+                    else prices.price(security.id, today)
+                )
+            except PriceUnavailable:
+                quote = None
+        native_value: Decimal | None = buy.amount
+        currency = buy.currency
+        value = buy.amount_inr
+        fx_rate: Decimal | None = None
+        fx_as_of: date | None = None
+        price_as_of: date | None = None
+        price_source: str | None = "recorded_buy"
+        status = "statement_value_used"
+        if security is not None:
+            currency = security.currency
+            native_value = buy.amount if buy.currency == security.currency else None
+            if buy.units is not None and buy.cost_per_unit is not None:
+                native_value = buy.units * buy.cost_per_unit
+            if quote is not None and buy.units is not None:
+                native_value = buy.units * quote.value
+                price_as_of = quote.as_of
+                price_source = quote.source
+                status = "priced"
+                fx_row = session.execute(
+                    select(FxRate.rate, FxRate.as_of)
+                    .where(
+                        FxRate.pair == f"{security.currency}/INR",
+                        FxRate.as_of <= today,
+                    )
+                    .order_by(FxRate.as_of.desc())
+                    .limit(1)
+                ).one_or_none()
+                if security.currency == "INR":
+                    fx_rate = Decimal(1)
+                elif fx_row is not None:
+                    fx_rate, fx_as_of = fx_row
+                value = (
+                    round_paise(native_value * fx_rate) if fx_rate is not None else buy.amount_inr
+                )
+        if value is None and currency == "INR":
+            value = buy.amount
+        if value is None:
+            status = "fx_unavailable"
+        value_usd = (
+            format(round_paise(native_value), "f")
+            if currency == "USD" and native_value is not None
+            else None
+        )
+        recorded_holding_values.append(
+            {
+                "security_id": str(security.id) if security is not None else None,
+                "recorded_buy_id": str(buy.id),
+                "added_by_you": True,
+                "bought_on": buy.bought_on.isoformat(),
+                "amount": format(buy.amount, "f"),
+                "amount_currency": buy.currency,
+                "units_entered": buy.units_entered,
+                "symbol": (
+                    security.nse_symbol or security.symbol or security.isin or ""
+                    if security is not None
+                    else buy.security_symbol or ""
+                ),
+                "name": security.name if security is not None else buy.name,
+                "security_type": security.security_type
+                if security is not None
+                else buy.security_type,
+                "quantity": format(buy.units, ".6f") if buy.units is not None else "",
+                "value": _money(value),
+                "value_usd": value_usd,
+                "currency": currency,
+                "price_as_of": price_as_of.isoformat() if price_as_of else None,
+                "fx_as_of": fx_as_of.isoformat() if fx_as_of else None,
+                "fx_missing": value is None,
+                "price_source": price_source,
+                "status": status,
+            }
+        )
+        if value is not None:
+            holding_sleeve = security.sleeve if security is not None else buy.sleeve
+            liquidity = (
+                LiquidityClass.WITHIN_1Y
+                if (security.security_type if security is not None else buy.security_type)
+                in {"sgb", "bond"}
+                else LiquidityClass.INSTANT
+            )
+            market_holdings.append((holding_sleeve, value, liquidity))
 
     snapshot = WealthSnapshot.from_assets(valued_assets, market_holdings)
     by_sleeve = [
@@ -964,7 +1079,7 @@ def refresh_networth_snapshot(
             if prices.market_data_as_of(today) is not None
             else None
         ),
-        "holdings": _merge_lots(holding_values),
+        "holdings": [*_merge_lots(holding_values), *recorded_holding_values],
     }
     insert = pg_insert(NetworthSnapshot).values(
         id=uuid4(), user_id=user_id, on_date=today, totals=totals

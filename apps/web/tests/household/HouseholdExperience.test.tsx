@@ -165,6 +165,7 @@ function actionFor(
       params: { account_type: "ORDINARY" },
     },
     status,
+    has_recorded_buys: false,
     done_by: status === "done" ? "Test partner" : undefined,
     created_at: "2026-10-28T00:00:00Z",
   } as ActionResponse;

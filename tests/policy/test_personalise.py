@@ -18,6 +18,7 @@ from wealth.policy.personalise import (
     MarketContext,
     PolicyProfile,
     UserData,
+    WeeklySpendInput,
     _acquisition_fx_notes,
     _exit_action,
     _merge_weekly_actions,
@@ -254,6 +255,16 @@ def test_personalise_is_deterministic_for_identical_inputs() -> None:
     second = _plan_json()
     assert first["inputs_digest"] == second["inputs_digest"]
     assert first == second
+
+
+def test_weekly_spending_is_part_of_the_plan_digest() -> None:
+    user_data = synthetic_user_data()
+    with_spending = replace(
+        user_data,
+        weekly_spending=(WeeklySpendInput("self", "equity_global", Decimal("2000.00")),),
+    )
+
+    assert _plan_json(user_data)["inputs_digest"] != _plan_json(with_spending)["inputs_digest"]
 
 
 def test_us_market_percentile_removes_missing_data_note() -> None:

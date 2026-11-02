@@ -18,10 +18,13 @@ from sqlalchemy.orm import Session
 from tests.db.migrated_database import MigratedDatabase, create_migrated_database
 from tests.fixtures.cas.make_pdf import write_encrypted_pdf
 
+from wealth.api.fund_check import add_weekly_fund_action
 from wealth.db.models import (
+    Account,
     Action,
     FxRate,
     GoldPrice,
+    HoldingLot,
     HouseholdMember,
     NavDaily,
     PriceEod,
@@ -30,6 +33,8 @@ from wealth.db.models import (
     User,
 )
 from wealth.db.session import normalize_database_url
+from wealth.policy.data import load_policy_inputs
+from wealth.policy.personalise import personalise
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -186,6 +191,103 @@ def _seed_action(email: str) -> int:
         engine.dispose()
 
 
+def _seed_denmark_buy_action(email: str) -> int:
+    engine, _schema_name = _owner_engine()
+    try:
+        with Session(engine) as session, session.begin():
+            user = session.scalar(select(User).where(User.email == email.casefold()))
+            if user is None:
+                raise RuntimeError("The synthetic e2e user was not found")
+            member = session.scalar(
+                select(HouseholdMember).where(
+                    HouseholdMember.user_id == user.id,
+                    HouseholdMember.is_self.is_(True),
+                )
+            )
+            if member is None:
+                raise RuntimeError("The synthetic e2e household has no owner member")
+            member.residency = {
+                **dict(member.residency or {}),
+                "status": "NRI",
+                "country": "DK",
+            }
+            member.investing = {"new_money_this_week": "12345.60"}
+            account = Account(
+                user_id=user.id,
+                member_id=member.id,
+                institution="Synthetic broker",
+                account_type="investment",
+                tax_wrapper="ask",
+            )
+            portfolio_account = Account(
+                user_id=user.id,
+                member_id=member.id,
+                institution="Synthetic portfolio account",
+                account_type="investment",
+                tax_wrapper="ordinary",
+            )
+            session.add_all((account, portfolio_account))
+            iso = date.today().isocalendar()
+            week = f"{iso.year}-W{iso.week:02}"
+            session.flush()
+            security = session.scalar(
+                select(Security).where(Security.market == "IN", Security.symbol == "E2E-EQUITY")
+            )
+            if security is None:
+                raise RuntimeError("The Denmark e2e scenario has no synthetic portfolio holding")
+            session.add(
+                HoldingLot(
+                    user_id=user.id,
+                    account_id=portfolio_account.id,
+                    member_id=member.id,
+                    security_id=security.id,
+                    quantity=Decimal("10000"),
+                    cost_per_unit=Decimal("100"),
+                    acquired_on=date.today(),
+                    source="manual",
+                    currency="INR",
+                )
+            )
+            session.flush()
+            user_data, market, research = load_policy_inputs(
+                session,
+                user.id,
+                week,
+                date.today(),
+                deployment_mode="personal",
+            )
+            computed = personalise(user_data, market, research, week, date.today())
+            computed = computed.model_copy(
+                update={
+                    "actions": add_weekly_fund_action(
+                        session,
+                        user.id,
+                        date.today(),
+                        computed.actions,
+                        can_write=True,
+                    )
+                }
+            )
+            buy_action = next(
+                (action for action in computed.actions if action.get("kind") == "BUY_ABROAD"),
+                None,
+            )
+            if buy_action is None:
+                raise RuntimeError("The Denmark e2e scenario did not produce a fund purchase")
+            session.add(
+                Action(
+                    user_id=user.id,
+                    week=week,
+                    rank=int(buy_action["rank"]),
+                    kind=str(buy_action["kind"]),
+                    payload=buy_action,
+                )
+            )
+        return 0
+    finally:
+        engine.dispose()
+
+
 def _seed_research_pack() -> int:
     engine, _schema_name = _owner_engine()
     iso = date.today().isocalendar()
@@ -275,6 +377,8 @@ def main(argv: list[str] | None = None) -> int:
         return _setup_stack()
     if len(args) == 2 and args[0] == "seed-action":
         return _seed_action(args[1])
+    if len(args) == 2 and args[0] == "seed-denmark-buy":
+        return _seed_denmark_buy_action(args[1])
     if args == ["seed-research-pack"]:
         return _seed_research_pack()
     if len(args) == 2 and args[0] == "verify-deleted":

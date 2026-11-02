@@ -224,8 +224,9 @@ function settingsHandlers() {
     http.put("*/v1/me/risk-answers", async ({ request }) =>
       HttpResponse.json(await request.json()),
     ),
-    http.get(/\/v1\/(accounts|assets|goals|imports|actions|inbox)$/, () =>
-      HttpResponse.json([]),
+    http.get(
+      /\/v1\/(accounts|assets|goals|imports|actions|recorded-buys|inbox)$/,
+      () => HttpResponse.json([]),
     ),
   ];
 }

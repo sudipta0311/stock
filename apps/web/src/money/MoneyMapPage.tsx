@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
@@ -45,8 +45,8 @@ import { apiPathAvailable } from "../api/feature-support";
 import { useHousehold } from "../household/HouseholdContext";
 import { quantityLabel } from "./quantity";
 import { assetTitles } from "./titles";
-import { getPlan } from "../planning/api";
-import type { WeeklyPlan } from "../planning/api";
+import { getPlan, removeRecordedBuy, updateRecordedBuy } from "../planning/api";
+import type { RecordedBuyPatch, WeeklyPlan } from "../planning/api";
 import {
   formatHouseholdAmount,
   formatSecondaryAmount,
@@ -132,6 +132,11 @@ function plainDate(isoDate: string): string {
         year: "numeric",
         timeZone: "UTC",
       }).format(parsed);
+}
+
+function isPositiveDecimalText(value: string): boolean {
+  const trimmed = value.trim();
+  return /^\d+(?:\.\d+)?$/.test(trimmed) && /[1-9]/.test(trimmed);
 }
 
 /** Largest first; holdings without a value go last, then by name. */
@@ -388,6 +393,7 @@ function HoldingsGroup({
   primaryCurrency,
   fxQuote,
   showSecondary,
+  onSelectRecordedBuy,
 }: {
   title: string;
   holdings: NetworthResponse["holdings"];
@@ -396,6 +402,7 @@ function HoldingsGroup({
   primaryCurrency: "INR" | "DKK";
   fxQuote: DkkInrRate | undefined;
   showSecondary: boolean;
+  onSelectRecordedBuy(holding: NetworthResponse["holdings"][number]): void;
 }) {
   if (!holdings.length) return null;
   return (
@@ -412,43 +419,70 @@ function HoldingsGroup({
         </div>
         {byValue(holdings)
           .slice(0, showAll ? undefined : HOLDINGS_SHOWN)
-          .map((holding) => (
-            <Link
-              key={holding.security_id}
-              to={`/money/holding/${holding.security_id}`}
-              className="flex min-h-16 items-center justify-between gap-3 border-t border-line py-2 first:border-0 first:pt-0 hover:text-brand"
-            >
-              <span className="flex w-0 min-w-0 flex-1 items-center gap-3">
-                <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground">
-                  <Building2 aria-hidden="true" className="size-4" />
-                </span>
-                <span className="min-w-0">
-                  <strong className="block truncate text-sm">
-                    <span data-security>{holding.name}</span>
-                  </strong>
-                  <span className="block truncate text-xs text-muted-foreground">
-                    {quantityLabel(holding.quantity, holding.security_type)}
+          .map((holding, index) => {
+            const row = (
+              <>
+                <span className="flex w-0 min-w-0 flex-1 items-center gap-3">
+                  <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground">
+                    <Building2 aria-hidden="true" className="size-4" />
+                  </span>
+                  <span className="min-w-0">
+                    <strong className="block truncate text-sm">
+                      <span data-security>{holding.name}</span>
+                    </strong>
+                    <span className="block truncate text-xs text-muted-foreground">
+                      {holding.added_by_you
+                        ? englishCopy.money_ui.added_by_you
+                        : quantityLabel(
+                            holding.quantity,
+                            holding.security_type,
+                          )}
+                    </span>
                   </span>
                 </span>
-              </span>
-              <span className="flex shrink-0 items-center gap-2 text-right text-sm font-semibold tabular-nums">
-                {holding.value ? (
-                  <AmountLabel
-                    amount={holding.value}
-                    primaryCurrency={primaryCurrency}
-                    fxQuote={fxQuote}
-                    showSecondary={showSecondary}
-                  />
-                ) : (
-                  "Not available"
-                )}
-                <ChevronRight
-                  aria-hidden="true"
-                  className="size-4 text-muted-foreground"
-                />
-              </span>
-            </Link>
-          ))}
+                <span className="flex shrink-0 items-center gap-2 text-right text-sm font-semibold tabular-nums">
+                  {holding.value ? (
+                    <AmountLabel
+                      amount={holding.value}
+                      primaryCurrency={primaryCurrency}
+                      fxQuote={fxQuote}
+                      showSecondary={showSecondary}
+                    />
+                  ) : (
+                    "Not available"
+                  )}
+                  {holding.recorded_buy_id ? (
+                    <span className="text-xs font-medium text-brand">
+                      {englishCopy.money_ui.details_buy}
+                    </span>
+                  ) : (
+                    <ChevronRight
+                      aria-hidden="true"
+                      className="size-4 text-muted-foreground"
+                    />
+                  )}
+                </span>
+              </>
+            );
+            return holding.recorded_buy_id ? (
+              <button
+                key={holding.recorded_buy_id}
+                type="button"
+                onClick={() => onSelectRecordedBuy(holding)}
+                className="flex min-h-16 w-full items-center justify-between gap-3 border-t border-line py-2 text-left first:border-0 first:pt-0 hover:text-brand"
+              >
+                {row}
+              </button>
+            ) : (
+              <Link
+                key={holding.security_id ?? `${holding.name}:${index}`}
+                to={`/money/holding/${holding.security_id}`}
+                className="flex min-h-16 items-center justify-between gap-3 border-t border-line py-2 hover:text-brand"
+              >
+                {row}
+              </Link>
+            );
+          })}
         {holdings.length > HOLDINGS_SHOWN ? (
           <Button
             variant="secondary"
@@ -460,6 +494,170 @@ function HoldingsGroup({
         ) : null}
       </Card>
     </section>
+  );
+}
+
+function RecordedBuySheet({
+  holding,
+  saving,
+  removing,
+  error,
+  onClose,
+  onSave,
+  onRemove,
+}: {
+  holding: NetworthResponse["holdings"][number];
+  saving: boolean;
+  removing: boolean;
+  error: boolean;
+  onClose(): void;
+  onSave(payload: RecordedBuyPatch): void;
+  onRemove(): void;
+}) {
+  const [amount, setAmount] = useState(holding.amount ?? "");
+  const [units, setUnits] = useState(holding.quantity);
+  const [unitsChanged, setUnitsChanged] = useState(false);
+  const [boughtOn, setBoughtOn] = useState(holding.bought_on ?? "");
+  const [editing, setEditing] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [message, setMessage] = useState("");
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!isPositiveDecimalText(amount)) {
+      setMessage(englishCopy.money_ui.buy_amount_error);
+      return;
+    }
+    if (unitsChanged && units.trim() && !isPositiveDecimalText(units)) {
+      setMessage(englishCopy.money_ui.buy_units_error);
+      return;
+    }
+    onSave({
+      amount: amount.trim(),
+      bought_on: boughtOn || undefined,
+      ...(unitsChanged ? { units: units.trim() || null } : {}),
+    });
+  }
+
+  return (
+    <Sheet
+      open
+      onOpenChange={(open) => !open && onClose()}
+      title={
+        confirmRemove
+          ? englishCopy.money_ui.remove_buy_title
+          : englishCopy.money_ui.added_by_you
+      }
+    >
+      {confirmRemove ? (
+        <div className="grid gap-4">
+          <p className="text-sm">{englishCopy.money_ui.remove_buy_confirm}</p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => setConfirmRemove(false)}
+              disabled={removing}
+            >
+              {englishCopy.money_ui.cancel}
+            </Button>
+            <Button data-primary="true" loading={removing} onClick={onRemove}>
+              {englishCopy.money_ui.remove_buy}
+            </Button>
+          </div>
+        </div>
+      ) : editing ? (
+        <form className="grid gap-4" onSubmit={submit}>
+          <p className="text-sm text-muted-foreground">
+            {englishCopy.money_ui.buy_details}
+          </p>
+          <label className="grid gap-1 text-sm">
+            <span>
+              {englishCopy.money_ui.buy_amount} ({holding.amount_currency})
+            </span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={amount}
+              onChange={(event) => setAmount(event.currentTarget.value)}
+              className="min-h-12 w-full rounded-xl border border-line bg-surface px-3 text-base tabular-nums"
+              required
+            />
+          </label>
+          <label className="grid gap-1 text-sm">
+            <span>{englishCopy.money_ui.buy_units_optional}</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={units}
+              onChange={(event) => {
+                setUnitsChanged(true);
+                setUnits(event.currentTarget.value);
+              }}
+              className="min-h-12 w-full rounded-xl border border-line bg-surface px-3 text-base tabular-nums"
+            />
+          </label>
+          <label className="grid gap-1 text-sm">
+            <span>{englishCopy.money_ui.buy_date}</span>
+            <input
+              type="date"
+              value={boughtOn}
+              onChange={(event) => setBoughtOn(event.currentTarget.value)}
+              className="min-h-12 w-full rounded-xl border border-line bg-surface px-3 text-base"
+              required
+            />
+          </label>
+          {message || error ? (
+            <p role="alert" className="text-sm text-danger-foreground">
+              {message || englishCopy.money_ui.buy_save_error}
+            </p>
+          ) : null}
+          <div className="flex flex-wrap gap-2">
+            <Button type="submit" data-primary="true" loading={saving}>
+              {englishCopy.money_ui.save_buy}
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => setEditing(false)}
+              disabled={saving}
+            >
+              {englishCopy.money_ui.cancel}
+            </Button>
+          </div>
+        </form>
+      ) : (
+        <div className="grid gap-4">
+          <p className="text-sm text-muted-foreground">
+            {englishCopy.money_ui.buy_details}
+          </p>
+          <dl className="grid gap-2 text-sm">
+            <div className="flex justify-between gap-4 border-t border-line pt-2">
+              <dt>{englishCopy.money_ui.buy_amount}</dt>
+              <dd className="text-right tabular-nums">
+                {holding.amount} {holding.amount_currency}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-4 border-t border-line pt-2">
+              <dt>{englishCopy.money_ui.buy_units_optional}</dt>
+              <dd className="text-right tabular-nums">
+                {holding.quantity || englishCopy.money_ui.buy_no_units}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-4 border-t border-line pt-2">
+              <dt>{englishCopy.money_ui.buy_date}</dt>
+              <dd className="text-right">{holding.bought_on}</dd>
+            </div>
+          </dl>
+          <div className="flex flex-wrap gap-2">
+            <Button data-primary="true" onClick={() => setEditing(true)}>
+              {englishCopy.money_ui.edit_buy}
+            </Button>
+            <Button variant="ghost" onClick={() => setConfirmRemove(true)}>
+              {englishCopy.money_ui.remove_buy}
+            </Button>
+          </div>
+        </div>
+      )}
+    </Sheet>
   );
 }
 
@@ -718,6 +916,7 @@ function HouseholdInsights({
 
 export function MoneyMapPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const {
     activeMemberId,
     selectedMemberId,
@@ -734,6 +933,9 @@ export function MoneyMapPage() {
   const [showFundCheck, setShowFundCheck] = useState(false);
   const [showMonthlyAmounts, setShowMonthlyAmounts] = useState(false);
   const [addSheetOpen, setAddSheetOpen] = useState(false);
+  const [editingRecordedBuy, setEditingRecordedBuy] = useState<
+    NetworthResponse["holdings"][number] | null
+  >(null);
   const assetsQuery = useQuery({
     queryKey: ["c27b", "assets", selectedHouseholdId, activeMemberId],
     queryFn: () => listAssets(activeMemberId),
@@ -760,6 +962,21 @@ export function MoneyMapPage() {
     queryKey: ["c36", "imports", selectedHouseholdId],
     queryFn: listImports,
     staleTime: 0,
+  });
+  const saveRecordedBuy = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: RecordedBuyPatch }) =>
+      updateRecordedBuy(id, payload),
+    onSuccess: async () => {
+      setEditingRecordedBuy(null);
+      await queryClient.invalidateQueries({ queryKey: ["c27b"] });
+    },
+  });
+  const deleteRecordedBuy = useMutation({
+    mutationFn: removeRecordedBuy,
+    onSuccess: async () => {
+      setEditingRecordedBuy(null);
+      await queryClient.invalidateQueries({ queryKey: ["c27b"] });
+    },
   });
   const assets = useMemo(() => assetsQuery.data ?? [], [assetsQuery.data]);
   const importJobs = importsQuery.data ?? [];
@@ -1056,6 +1273,11 @@ export function MoneyMapPage() {
           primaryCurrency={primaryCurrency}
           fxQuote={fxQuote}
           showSecondary={hasDanishMember}
+          onSelectRecordedBuy={(holding) => {
+            saveRecordedBuy.reset();
+            deleteRecordedBuy.reset();
+            setEditingRecordedBuy(holding);
+          }}
         />
         <details
           onToggle={(event) => setShowMonthlyAmounts(event.currentTarget.open)}
@@ -1073,6 +1295,11 @@ export function MoneyMapPage() {
           primaryCurrency={primaryCurrency}
           fxQuote={fxQuote}
           showSecondary={hasDanishMember}
+          onSelectRecordedBuy={(holding) => {
+            saveRecordedBuy.reset();
+            deleteRecordedBuy.reset();
+            setEditingRecordedBuy(holding);
+          }}
         />
         <HoldingsGroup
           title={englishCopy.money_ui.bonds_and_gold_bonds}
@@ -1082,6 +1309,11 @@ export function MoneyMapPage() {
           primaryCurrency={primaryCurrency}
           fxQuote={fxQuote}
           showSecondary={hasDanishMember}
+          onSelectRecordedBuy={(holding) => {
+            saveRecordedBuy.reset();
+            deleteRecordedBuy.reset();
+            setEditingRecordedBuy(holding);
+          }}
         />
         <HoldingsGroup
           title={englishCopy.money_ui.other}
@@ -1091,6 +1323,11 @@ export function MoneyMapPage() {
           primaryCurrency={primaryCurrency}
           fxQuote={fxQuote}
           showSecondary={hasDanishMember}
+          onSelectRecordedBuy={(holding) => {
+            saveRecordedBuy.reset();
+            deleteRecordedBuy.reset();
+            setEditingRecordedBuy(holding);
+          }}
         />
         {visibleGroups.length ? (
           visibleGroups.map(([sleeve, items]) => (
@@ -1321,6 +1558,23 @@ export function MoneyMapPage() {
           </Button>
         </div>
       </Sheet>
+      {editingRecordedBuy ? (
+        <RecordedBuySheet
+          holding={editingRecordedBuy}
+          saving={saveRecordedBuy.isPending}
+          removing={deleteRecordedBuy.isPending}
+          error={saveRecordedBuy.isError || deleteRecordedBuy.isError}
+          onClose={() => setEditingRecordedBuy(null)}
+          onSave={(payload) => {
+            const id = editingRecordedBuy.recorded_buy_id;
+            if (id) saveRecordedBuy.mutate({ id, payload });
+          }}
+          onRemove={() => {
+            const id = editingRecordedBuy.recorded_buy_id;
+            if (id) deleteRecordedBuy.mutate(id);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
