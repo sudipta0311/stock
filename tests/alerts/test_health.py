@@ -48,6 +48,13 @@ _SUNDAY_BEFORE = datetime(2026, 10, 31, 23, 59, tzinfo=UTC)
 _SUNDAY_START = datetime(2026, 11, 1, 0, 0, tzinfo=UTC)
 
 
+@pytest.fixture(autouse=True)
+def _outside_github_actions(monkeypatch: pytest.MonkeyPatch) -> None:
+    # CI sets these, and the CLI then prints annotations before its JSON line.
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+
+
 def _healthy_facts() -> HealthFacts:
     weekly_sources = {
         "universes": {"universes_loaded": 1},
