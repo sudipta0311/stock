@@ -6,6 +6,7 @@ const section = {
   "set_monthly_amount": "Set your monthly amount",
   "how": "How?",
   "why": "Why?",
+  "ask_unverified_note": "If your broker doesn't offer this share in your share savings account, buy it in your ordinary account.",
   "term_prompt": "What's this?",
   "fund_fallback": "European fund",
   "fund_code_label": "Search code",

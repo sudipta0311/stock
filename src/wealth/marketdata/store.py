@@ -278,7 +278,25 @@ def upsert_nse_master(session: Session, records: list[NseSecurity]) -> int:
     return count
 
 
-def upsert_us_equity_security(session: Session, symbol: str, name: str) -> UUID:
+def us_equity_isin_conflicts(session: Session, symbol: str, isin: str) -> bool:
+    """Return whether an ISIN belongs to a different US symbol row or identifier."""
+    normalized_symbol = symbol.strip().upper()
+    target = session.execute(
+        select(Security.id, Security.isin).where(
+            Security.market == "US", Security.symbol == normalized_symbol
+        )
+    ).first()
+    target_id = target[0] if target is not None else None
+    target_isin = target[1] if target is not None else None
+    if target_isin is not None and target_isin != isin:
+        return True
+    existing_id = session.scalar(select(Security.id).where(Security.isin == isin))
+    return existing_id is not None and existing_id != target_id
+
+
+def upsert_us_equity_security(
+    session: Session, symbol: str, name: str, *, isin: str | None = None
+) -> UUID:
     """Insert/update a US listing through the shared security upsert function."""
     normalized_symbol = symbol.strip().upper()
     security_id = session.scalar(
@@ -290,7 +308,7 @@ def upsert_us_equity_security(session: Session, symbol: str, name: str) -> UUID:
                 name.strip()[:160],
                 "equity",
                 "USD",
-                None,
+                isin,
                 "equity_global",
                 "equity:us",
             )

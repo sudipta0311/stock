@@ -169,6 +169,21 @@ def test_preexisting_share_savings_account_requires_start_value() -> None:
     assert "ask_start_value_missing" not in known_value.notes
 
 
+def test_ask_room_uses_the_latest_cap_on_january_four_of_a_new_year() -> None:
+    member = MemberProfile(
+        id="member-dk",
+        name="Member",
+        relationship="self",
+        is_self=True,
+        residency=Residency(status="NRI", country="DK"),
+    )
+    household = build_household_snapshot((), (), (), (member,), self_member_id=member.id)
+
+    context = build_member_contexts((member,), household, (), as_of_year=2027, fx_rates={})[0]
+
+    assert context.limits_room["ask_deposit_dkk"] == Decimal("174200.00")
+
+
 def test_india_equity_prefers_eligible_spouse_and_adds_clubbing_copy() -> None:
     members, _assets, _household_snapshot, contexts = _household()
     action = Action(
@@ -185,7 +200,7 @@ def test_india_equity_prefers_eligible_spouse_and_adds_clubbing_copy() -> None:
         contexts,
         debt_yields={},
         fx_rates={"USD/INR": Decimal("83"), "DKK/INR": Decimal("12")},
-        as_of_year=2026,
+        as_of_year=2027,
     )
 
     placed = result.actions[0]
@@ -248,7 +263,7 @@ def test_danish_global_equity_uses_member_ask_room() -> None:
         contexts,
         debt_yields={},
         fx_rates={"USD/INR": Decimal("83"), "DKK/INR": Decimal("12")},
-        as_of_year=2026,
+        as_of_year=2027,
     )
 
     assert len(result.actions) == 1

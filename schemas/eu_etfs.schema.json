@@ -30,7 +30,10 @@
             "default_pct": {"$ref": "#/$defs/decimalString"},
             "maximum_pct": {"$ref": "#/$defs/decimalString"},
             "per_stock_max_pct_of_investable_wealth": {"$ref": "#/$defs/decimalString"},
-            "minimum_buy_dkk": {"$ref": "#/$defs/decimalString"}
+            "minimum_buy_dkk": {"$ref": "#/$defs/decimalString"},
+            "ask_eligible_markets": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+            "ask_verified": {"type": "boolean"},
+            "ask_source_url": {"type": "string", "format": "uri", "pattern": "^https://"}
           }
         },
         "us_stock_tax": {

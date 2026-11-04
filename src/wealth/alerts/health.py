@@ -19,6 +19,8 @@ from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.engine import Connection
 
 from wealth.db.session import normalize_database_url
+from wealth.policy.denmark import ask_rule_for_year
+from wealth.policy.residency import load_residency_rules
 
 # Two missed weekday sessions are tolerated before a price feed is called stale.
 PRICE_STALE_TRADING_DAYS = 2
@@ -543,6 +545,29 @@ def _check_fund_lookthrough(facts: HealthFacts, now: datetime) -> dict[str, Any]
     )
 
 
+def _check_ask_rules(now: datetime) -> dict[str, Any]:
+    """Warn when the current year has no exact share savings account cap rule."""
+    try:
+        _cap, exact = ask_rule_for_year(
+            load_residency_rules(), "deposit_cap_dkk", now.astimezone(UTC).year
+        )
+    except (KeyError, TypeError):
+        exact = False
+    if not exact:
+        return _check(
+            "ask_rules",
+            "warning",
+            "ASK deposit_cap_dkk has no exact entry for the current year.",
+            {"rule_key": "deposit_cap_dkk", "exact": False},
+        )
+    return _check(
+        "ask_rules",
+        "ok",
+        "ASK deposit_cap_dkk has an exact entry for the current year.",
+        {"rule_key": "deposit_cap_dkk", "exact": True},
+    )
+
+
 def evaluate_health(facts: HealthFacts, now: datetime) -> dict[str, Any]:
     """Turn aggregate database facts into ordered, user-safe health checks."""
     if now.tzinfo is None or now.utcoffset() != timedelta(0):
@@ -580,6 +605,7 @@ def evaluate_health(facts: HealthFacts, now: datetime) -> dict[str, Any]:
     checks.append(_check_weekly_plans(current, facts))
     checks.append(_check_weekly_email(current, facts))
     checks.append(_check_fund_lookthrough(facts, current))
+    checks.append(_check_ask_rules(current))
     return {
         "ok": all(item["level"] != "problem" for item in checks),
         "checked_at": _iso_utc(current),

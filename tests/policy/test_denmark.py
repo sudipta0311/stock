@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import re
 from decimal import Decimal
+from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -11,6 +14,7 @@ from wealth.policy.actions import Action, SatelliteIdea
 from wealth.policy.denmark import (
     account_lines,
     ask_deposit_room_dkk,
+    ask_rule_for_year,
     dkk_from_inr,
     inr_from_dkk,
     round_dkk_for_display,
@@ -31,6 +35,7 @@ from wealth.policy.personalise import (
     ResearchPack,
     UserData,
     _abroad_action_rows,
+    _share_buy_account,
 )
 from wealth.schemas.profile import FinancialContext, InvestingPrefs, MemberTax, Residency
 
@@ -75,6 +80,21 @@ def test_ask_room_uses_start_value_and_nets_calendar_year_withdrawals() -> None:
     assert ask_deposit_room_dkk(cap, Decimal("105000"), Decimal(0)) == Decimal("69200")
     assert ask_deposit_room_dkk(cap, Decimal("180000"), Decimal("-10000")) == Decimal("4200")
     assert ask_deposit_room_dkk(cap, Decimal("100000"), Decimal("2000")) == Decimal("72200")
+
+
+def test_ask_rules_fall_back_to_the_latest_earlier_year() -> None:
+    rules = {"denmark": {"ask": {"deposit_cap_dkk": {2026: "174200"}}}}
+
+    assert ask_rule_for_year(rules, "deposit_cap_dkk", 2026) == ("174200", True)
+    assert ask_rule_for_year(rules, "deposit_cap_dkk", 2027) == ("174200", False)
+
+
+def test_source_uses_year_maps_for_ask_rules() -> None:
+    source_root = Path(__file__).parents[2] / "src" / "wealth"
+    year_suffixed_ask_key = re.compile(r"(?:deposit_cap_dkk|tax_rate_pct)_20\d{2}")
+
+    for source_path in source_root.rglob("*.py"):
+        assert year_suffixed_ask_key.search(source_path.read_text(encoding="utf-8")) is None
 
 
 def test_displayed_fund_name_uses_plain_language() -> None:
@@ -427,6 +447,24 @@ def _dk_member(member_id: str = "member", **pref_updates: object) -> MemberProfi
     )
 
 
+def _approved_stock_idea(security_id: str, symbol: str) -> SatelliteIdea:
+    return SatelliteIdea(
+        security_id=security_id,
+        symbol=symbol,
+        market="US",
+        sector="Industrials",
+        price=Decimal("100"),
+        quant_decile=10,
+        dossier_status="APPROVED",
+        valuation_percentile=Decimal("35"),
+        confidence="HIGH",
+        name=f"Synthetic {symbol} Company",
+        isin="US0000000001" if symbol.endswith("A") else "US0000000002",
+        exchange="NASDAQ",
+        currency="USD",
+    )
+
+
 def _global_action() -> Action:
     return Action(
         rank=1,
@@ -449,18 +487,69 @@ def _global_buy(*, amount_inr: str, account_type: str) -> Action:
     )
 
 
-def _run_abroad(actions: list[Action], member: MemberProfile, ask_room: Decimal):
+def _run_abroad(
+    actions: list[Action],
+    member: MemberProfile,
+    ask_room: Decimal,
+    *,
+    research: ResearchPack | None = None,
+    investable_total_inr: Decimal = Decimal("1250000"),
+) -> tuple[list[Action], list[dict[str, Any]], Decimal, list[str]]:
     context = SimpleNamespace(
         member=member,
-        snapshot=SimpleNamespace(net_worth=Decimal("10000000")),
+        snapshot=SimpleNamespace(
+            net_worth=investable_total_inr, investable_total=investable_total_inr
+        ),
         limits_room={"ask_deposit_dkk": ask_room},
     )
     market = MarketContext(
-        fx_rates={"DKK/INR": Decimal("12.5")},
+        fx_rates={"DKK/INR": Decimal("12.5"), "USD/INR": Decimal("12.5")},
         debt_yields={},
         index_valuation_percentiles={},
     )
-    return _abroad_action_rows(actions, [member], [context], [], market, None, {})
+    return _abroad_action_rows(actions, [member], [context], [], market, research, {})
+
+
+def test_approved_share_uses_room_left_after_the_etf_and_marks_unverified_rules() -> None:
+    member = _dk_member(us_stock_picks_opt_in=True, us_stock_picks_pct="25")
+    idea = _approved_stock_idea("share-a", "SYNTHA")
+
+    actions, lines, _carry, _notes = _run_abroad(
+        [_global_buy(amount_inr="250000", account_type="ASK")],
+        member,
+        Decimal("20000"),
+        research=ResearchPack(week="2026-W45", ideas=(idea,)),
+    )
+
+    assert [(line["account"], line["amount_dkk"]) for line in lines] == [
+        ("ask", "15000"),
+        ("ask", "5000"),
+    ]
+    share_line = lines[1]
+    assert share_line["reason_codes"] == ["approved_us_stock_idea", "ask_room_remaining"]
+    assert share_line["details"]["ask_unverified"] is True
+    assert actions[0].params["account_type"] == "ASK"
+
+
+def test_two_share_buys_use_remaining_room_in_order_after_the_etf() -> None:
+    member = _dk_member(us_stock_picks_opt_in=True, us_stock_picks_pct="25")
+    ideas = (_approved_stock_idea("share-a", "SYNTHA"), _approved_stock_idea("share-b", "SYNTHB"))
+
+    actions, lines, _carry, _notes = _run_abroad(
+        [_global_buy(amount_inr="300000", account_type="ASK")],
+        member,
+        Decimal("22000"),
+        research=ResearchPack(week="2026-W45", ideas=ideas),
+        investable_total_inr=Decimal("750000"),
+    )
+
+    assert [(line["account"], line["amount_dkk"]) for line in lines] == [
+        ("ask", "18000"),
+        ("ask", "3000"),
+        ("ordinary", "3000"),
+    ]
+    assert lines[2]["reason_codes"] == ["approved_us_stock_idea", "ordinary_after_ask"]
+    assert actions[0].params["account_type"] == "ASK"
 
 
 def test_ordinary_action_yields_only_ordinary_lines() -> None:
@@ -478,6 +567,92 @@ def test_ordinary_action_yields_only_ordinary_lines() -> None:
     assert actions[0].params["broker"] == "nordnet"
     assert actions[0].params["account_type"] == "ORDINARY"
     assert carry == 0
+
+
+def test_share_buys_use_only_room_left_after_the_etf_line() -> None:
+    account, reasons, room_left = _share_buy_account(
+        "US",
+        Decimal("5000"),
+        Decimal("8000"),
+        ask_eligible_markets=["US"],
+        may_use_ask=True,
+        requested_account="ASK",
+    )
+
+    assert account == "ask"
+    assert reasons == ["approved_us_stock_idea", "ask_room_remaining"]
+    assert room_left == Decimal("3000")
+
+
+def test_share_buy_uses_ordinary_account_instead_of_splitting_when_room_is_short() -> None:
+    account, reasons, room_left = _share_buy_account(
+        "US",
+        Decimal("5000"),
+        Decimal("2000"),
+        ask_eligible_markets=["US"],
+        may_use_ask=True,
+        requested_account="ASK",
+    )
+
+    assert account == "ordinary"
+    assert reasons == ["approved_us_stock_idea", "ordinary_after_ask"]
+    assert room_left == Decimal("2000")
+
+
+def test_ordinary_request_keeps_every_share_buy_in_ordinary_account() -> None:
+    account, reasons, room_left = _share_buy_account(
+        "US",
+        Decimal("3000"),
+        Decimal("5000"),
+        ask_eligible_markets=["US"],
+        may_use_ask=True,
+        requested_account="ORDINARY",
+    )
+
+    assert account == "ordinary"
+    assert reasons == ["approved_us_stock_idea"]
+    assert room_left == Decimal("5000")
+
+
+def test_member_who_cannot_use_ask_gets_no_after_ask_reason() -> None:
+    account, reasons, room_left = _share_buy_account(
+        "US",
+        Decimal("3000"),
+        Decimal("0"),
+        ask_eligible_markets=["US"],
+        may_use_ask=False,
+        requested_account="ASK",
+    )
+
+    assert account == "ordinary"
+    assert reasons == ["approved_us_stock_idea"]
+    assert room_left == Decimal("0")
+
+
+def test_share_buys_use_room_in_order_without_splitting() -> None:
+    first = _share_buy_account(
+        "US",
+        Decimal("3000"),
+        Decimal("4000"),
+        ask_eligible_markets=["US"],
+        may_use_ask=True,
+        requested_account="ASK",
+    )
+    second = _share_buy_account(
+        "US",
+        Decimal("3000"),
+        first[2],
+        ask_eligible_markets=["US"],
+        may_use_ask=True,
+        requested_account="ASK",
+    )
+
+    assert (first[0], first[2]) == ("ask", Decimal("1000"))
+    assert second == (
+        "ordinary",
+        ["approved_us_stock_idea", "ordinary_after_ask"],
+        Decimal("1000"),
+    )
 
 
 def test_two_actions_for_one_member_never_use_more_than_remaining_ask_room() -> None:

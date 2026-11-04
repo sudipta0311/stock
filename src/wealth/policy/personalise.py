@@ -34,7 +34,14 @@ from wealth.policy.debt_picker import (
     UnrankedDebtOption,
     pick_debt_with_unranked,
 )
-from wealth.policy.denmark import account_lines, dkk_from_inr, inr_from_dkk, round_dkk_for_display
+from wealth.policy.denmark import (
+    account_lines,
+    ask_rule_for_year,
+    dkk_from_inr,
+    inr_from_dkk,
+    round_ask_dkk_for_display,
+    round_dkk_for_display,
+)
 from wealth.policy.denmark_picks import (
     approved_us_stock_buys,
     load_eu_etfs,
@@ -326,6 +333,15 @@ def _digest_inputs(
     week: str,
     as_of: date,
 ) -> str:
+    residency_rules = load_residency_rules()
+    ask_rule_inputs = {
+        key: {
+            "value": value,
+            "exact": exact,
+        }
+        for key in ("deposit_cap_dkk", "tax_rate_pct")
+        for value, exact in (ask_rule_for_year(residency_rules, key, as_of.year),)
+    }
     document = {
         "engine": "c27a-v1",
         "week": week,
@@ -333,6 +349,7 @@ def _digest_inputs(
         "user_data": user_data,
         "market": market,
         "research": research,
+        "denmark_ask_rules": ask_rule_inputs,
     }
     canonical = json.dumps(
         _jsonable(document), ensure_ascii=True, sort_keys=True, separators=(",", ":")
@@ -620,6 +637,25 @@ def _abroad_exposure(action: Action) -> str | None:
     return "global_all_world"
 
 
+def _share_buy_account(
+    market: str,
+    amount_dkk: Decimal,
+    ask_room_dkk: Decimal,
+    *,
+    ask_eligible_markets: Sequence[str],
+    may_use_ask: bool,
+    requested_account: str,
+) -> tuple[str, list[str], Decimal]:
+    """Place a share buy wholly in ASK when its market and remaining room allow it."""
+    ask_applies = may_use_ask and requested_account != "ORDINARY" and market in ask_eligible_markets
+    if ask_applies and ask_room_dkk >= amount_dkk:
+        return "ask", ["approved_us_stock_idea", "ask_room_remaining"], ask_room_dkk - amount_dkk
+    reason_codes = ["approved_us_stock_idea"]
+    if ask_applies:
+        reason_codes.append("ordinary_after_ask")
+    return "ordinary", reason_codes, ask_room_dkk
+
+
 def _abroad_action_rows(
     actions: Sequence[Action],
     members: Sequence[MemberProfile],
@@ -709,13 +745,22 @@ def _abroad_action_rows(
             "pension_note": member.investing.has_danish_pension_account,
             "tax_verified": False,
         }
-        stock_lines: list[dict[str, Any]] = []
         stock_buys: list[tuple[SatelliteIdea, Decimal]] = []
+        stock_tax_details: dict[str, Any] = {}
+        stock_pick_rules: Mapping[str, Any] = {}
+        ask_eligible_markets: list[str] = []
+        ask_verified = False
         if exposure != "india_equity" and member.investing.us_stock_picks_opt_in:
             investable_inr = max(Decimal(0), context.snapshot.investable_total)
             investable_dkk = dkk_from_inr(investable_inr, inr_per_dkk)
             stock_budget = total_dkk * member.investing.us_stock_picks_pct / Decimal(100)
             selected_ideas = research.ideas if research is not None else ()
+            eu_etf_rules = load_eu_etfs()
+            stock_pick_rules = eu_etf_rules.get("selection", {}).get("stock_picks", {})
+            ask_eligible_markets = [
+                str(market_name) for market_name in stock_pick_rules.get("ask_eligible_markets", [])
+            ]
+            ask_verified = bool(stock_pick_rules.get("ask_verified", False))
             lookthrough_rules = load_lookthrough_rules()
             held_dkk_by_security: dict[str, Decimal] = {}
             for idea in selected_ideas:
@@ -750,18 +795,11 @@ def _abroad_action_rows(
                 investable_wealth_dkk=investable_dkk,
                 available_dkk=stock_budget,
                 satellite_pct=member.investing.us_stock_picks_pct,
-                minimum_buy_dkk=Decimal(
-                    str(
-                        load_eu_etfs()
-                        .get("selection", {})
-                        .get("stock_picks", {})
-                        .get("minimum_buy_dkk", "2000")
-                    )
-                ),
+                minimum_buy_dkk=Decimal(str(stock_pick_rules.get("minimum_buy_dkk", "2000"))),
                 held_dkk_by_security=held_dkk_by_security,
             )
             stock_total = sum((amount for _idea, amount in stock_buys), Decimal(0))
-            stock_tax_rules = load_eu_etfs().get("selection", {}).get("us_stock_tax", {})
+            stock_tax_rules = eu_etf_rules.get("selection", {}).get("us_stock_tax", {})
             stock_tax_sources = stock_tax_rules.get("sources", {})
             current_situs_usd = us_situs_value_usd(
                 (holding for holding in holdings if holding.member_id == member.id),
@@ -791,31 +829,6 @@ def _abroad_action_rows(
                     if isinstance(url, str)
                 ],
             }
-            for idea, amount_dkk in stock_buys:
-                if not isinstance(idea, SatelliteIdea):
-                    continue
-                stock_lines.append(
-                    {
-                        "member_id": member.id,
-                        "account": "ordinary",
-                        "broker": member.investing.broker,
-                        "instrument": {
-                            "name": idea.name,
-                            "ticker": idea.symbol,
-                            "exchange": idea.exchange,
-                            "isin": idea.isin,
-                            "currency": idea.currency,
-                        },
-                        "amount_dkk": format(round_dkk_for_display(amount_dkk), "f"),
-                        "amount_inr": format(inr_from_dkk(amount_dkk, inr_per_dkk), ".2f"),
-                        "reason_codes": ["approved_us_stock_idea"],
-                        "how_to_key": f"how_to.{member.investing.broker}",
-                        "details": {
-                            "tax_verified": False,
-                            "us_stock_tax": stock_tax_details,
-                        },
-                    }
-                )
         else:
             stock_total = Decimal(0)
         etf_amount = max(Decimal(0), total_dkk - stock_total)
@@ -829,10 +842,63 @@ def _abroad_action_rows(
             details=details,
             broker_availability_unchecked=broker_availability_unchecked,
         )
+        ask_room_after_etfs = max(
+            Decimal(0),
+            ask_room
+            - sum(
+                (
+                    Decimal(str(line.get("_amount_dkk_unrounded", 0)))
+                    for line in lines
+                    if line["account"] == "ask"
+                ),
+                Decimal(0),
+            ),
+        )
+        for idea, amount_dkk in stock_buys:
+            if not isinstance(idea, SatelliteIdea):
+                continue
+            account, reason_codes, ask_room_after_etfs = _share_buy_account(
+                idea.market,
+                amount_dkk,
+                ask_room_after_etfs,
+                ask_eligible_markets=ask_eligible_markets,
+                may_use_ask=member.residency.country == "DK",
+                requested_account=requested_account,
+            )
+            line_details: dict[str, Any] = {
+                "tax_verified": False,
+                "us_stock_tax": stock_tax_details,
+            }
+            if account == "ask" and not ask_verified:
+                line_details["ask_unverified"] = True
+            line = {
+                "member_id": member.id,
+                "account": account,
+                "broker": member.investing.broker,
+                "instrument": {
+                    "name": idea.name,
+                    "ticker": idea.symbol,
+                    "exchange": idea.exchange,
+                    "isin": idea.isin,
+                    "currency": idea.currency,
+                },
+                "amount_dkk": format(
+                    round_ask_dkk_for_display(amount_dkk)
+                    if account == "ask"
+                    else round_dkk_for_display(amount_dkk),
+                    "f",
+                ),
+                "amount_inr": format(inr_from_dkk(amount_dkk, inr_per_dkk), ".2f"),
+                "reason_codes": reason_codes,
+                "how_to_key": f"how_to.{member.investing.broker}",
+                "details": line_details,
+            }
+            if account == "ask":
+                line["_amount_dkk_unrounded"] = amount_dkk
+            lines.append(line)
         if exposure == "india_equity":
             for line in lines:
                 line["reason_codes"] = ["india_fund_from_denmark", *line["reason_codes"]]
-        lines.extend(stock_lines)
         already = sum(1 for line in buy_list if line["member_id"] == member.id)
         remaining = max(0, 3 - already)
         accepted = lines[:remaining]

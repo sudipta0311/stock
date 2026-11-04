@@ -189,6 +189,11 @@ function DenmarkBuyCard({ plan }: { plan?: WeeklyPlan }) {
                   </summary>
                   <div className="mt-2 grid gap-2 text-base">
                     <p>{copy.why_ranked}</p>
+                    {details.ask_unverified ? (
+                      <p className="text-xs text-muted-foreground">
+                        {copy.ask_unverified_note}
+                      </p>
+                    ) : null}
                     {reasonCodes.includes("broker_availability_unchecked") ? (
                       <p>{copy.broker_availability_unchecked}</p>
                     ) : null}

@@ -10,7 +10,7 @@ from typing import Literal
 
 from wealth.core.money import round_paise
 from wealth.policy.debt_picker import load_debt_rules
-from wealth.policy.denmark import ask_deposit_room_dkk
+from wealth.policy.denmark import ask_deposit_room_dkk, ask_rule_for_year
 from wealth.policy.residency import (
     eligibility_rule,
     load_residency_rules,
@@ -280,7 +280,8 @@ def build_member_contexts(
             Decimal(0),
         )
         rules = load_residency_rules()
-        ask_cap = Decimal(str(rules["denmark"]["ask"]["deposit_cap_dkk_2026"]))
+        ask_cap_value, _ask_cap_exact = ask_rule_for_year(rules, "deposit_cap_dkk", as_of_year)
+        ask_cap = Decimal(str(ask_cap_value))
         lrs_cap = Decimal(str(rules["limits"]["lrs_annual_usd"]))
         lrs_used_usd = Decimal(0)
         usd_inr = fx_rates.get("USD/INR")

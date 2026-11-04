@@ -882,9 +882,62 @@ describe("Ideas page", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Why?")).toBeInTheDocument();
     expect(
+      screen.queryByText(englishCopy.denmark.ask_unverified_note),
+    ).not.toBeInTheDocument();
+    expect(
       screen.getByText("Tax details still need a check."),
     ).not.toBeVisible();
     expect((await axe(container)).violations).toEqual([]);
+  });
+
+  it("keeps the unverified share-account note inside the closed Why details", async () => {
+    const user = userEvent.setup();
+    server.use(
+      ...ideaHandlers(
+        weeklyPlan({
+          residency: {
+            status: "NRI",
+            country: "DK",
+            settle_plan: "undecided",
+            us_person: false,
+          },
+          abroad_buy_list: [
+            {
+              member_id: "member-test-1",
+              account: "ask",
+              broker: "nordnet",
+              instrument: {
+                name: "Synthetic share",
+                ticker: "SYNTH",
+                exchange: "NASDAQ",
+                isin: "US0378331005",
+                currency: "USD",
+              },
+              amount_dkk: "3000",
+              amount_inr: "37500.00",
+              reason_codes: ["approved_us_stock_idea", "ask_room_remaining"],
+              how_to_key: "how_to.nordnet",
+              details: { ask_unverified: true },
+            },
+          ],
+        }),
+      ),
+    );
+    renderWithQueries(
+      <MemoryRouter>
+        <IdeasPage />
+      </MemoryRouter>,
+    );
+
+    const note = englishCopy.denmark.ask_unverified_note;
+    expect(
+      await screen.findByRole("heading", { name: "Synthetic share" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(note)).not.toBeVisible();
+    const why = screen.getByText("Why?");
+    expect(why.closest("details")).not.toHaveAttribute("open");
+    await user.click(why);
+    expect(screen.getByText(note)).toBeVisible();
   });
 
   it("shows a Danish member's buy line and broker check in a shared household", async () => {

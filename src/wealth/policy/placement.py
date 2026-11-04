@@ -10,6 +10,7 @@ from decimal import Decimal, InvalidOperation
 from wealth.core.money import round_paise
 from wealth.policy.actions import Action
 from wealth.policy.debt_picker import DebtNeed, DebtPick, pick_debt_with_unranked
+from wealth.policy.denmark import ask_rule_for_year
 from wealth.policy.household import MemberContext
 from wealth.policy.residency import (
     eligibility_rule,
@@ -107,6 +108,7 @@ def place_actions(
                 amc_international_suspended=amc_international_suspended,
                 etf_inav_premium_pct=etf_inav_premium_pct,
                 us_situs_holdings_usd=us_situs_holdings_usd,
+                as_of_year=selected_year,
             )
         elif action.sleeve == "debt" and action.kind in {
             "BUY_LUMPSUM",
@@ -420,6 +422,7 @@ def _place_global_equity(
     amc_international_suspended: bool,
     etf_inav_premium_pct: Decimal | None,
     us_situs_holdings_usd: Decimal,
+    as_of_year: int,
 ) -> tuple[list[Action], list[str], Decimal]:
     ordered = _preferred(members, available)
     chunks: list[Action] = []
@@ -449,6 +452,9 @@ def _place_global_equity(
             if ask_amount > 0:
                 used_other = _spend_household(available, member.member_id, ask_amount, members)
                 clubbing = _clubbing_note_if_needed(member, used_other)
+                ask_tax_rate, _ask_tax_exact = ask_rule_for_year(
+                    load_residency_rules(), "tax_rate_pct", as_of_year
+                )
                 chunks.append(
                     _assign(
                         action,
@@ -459,9 +465,7 @@ def _place_global_equity(
                         params={
                             "account_type": "ASK",
                             "broker": member.member.investing.broker,
-                            "ask_tax_rate_pct": str(
-                                load_residency_rules()["denmark"]["ask"]["tax_rate_pct_2026"]
-                            ),
+                            "ask_tax_rate_pct": str(ask_tax_rate),
                         },
                         clubbing_check=clubbing,
                     )

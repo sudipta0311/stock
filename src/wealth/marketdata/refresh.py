@@ -18,6 +18,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import Engine, delete, func, or_, select, update
 from sqlalchemy.orm import Session
 
+from wealth.core.ids import isin_from_cusip
 from wealth.db.models import (
     FundamentalPIT,
     FundBasket,
@@ -786,7 +787,12 @@ def _store_source(
         if not isinstance(records, UniverseBatch):
             raise TypeError("universe adapter returned invalid rows")
         errors = dict(records.errors)
-        counts: dict[str, Any] = {"universes_loaded": 0}
+        counts: dict[str, Any] = {
+            "universes_loaded": 0,
+            "isin_filled": 0,
+            "isin_conflicts": 0,
+            "isin_unavailable": 0,
+        }
         if records.sp500 is not None:
             try:
                 with session.begin_nested():
@@ -795,7 +801,17 @@ def _store_source(
                     for row in records.sp500.securities:
                         listed = records.sp500_sectors.get(row.symbol)
                         name = listed.name if listed is not None and listed.name else row.name
-                        security_id = store.upsert_us_equity_security(session, row.symbol, name)
+                        isin = isin_from_cusip(row.cusip)
+                        if isin is None:
+                            counts["isin_unavailable"] += 1
+                        elif store.us_equity_isin_conflicts(session, row.symbol, isin):
+                            counts["isin_conflicts"] += 1
+                            isin = None
+                        else:
+                            counts["isin_filled"] += 1
+                        security_id = store.upsert_us_equity_security(
+                            session, row.symbol, name, isin=isin
+                        )
                         security_ids.add(security_id)
                         # SSGA now lists every sector as "-"; the GICS table fills the gap.
                         sector, industry = (

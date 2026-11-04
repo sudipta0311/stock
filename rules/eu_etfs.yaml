@@ -19,6 +19,11 @@ selection:
     maximum_pct: "25"
     per_stock_max_pct_of_investable_wealth: "5"
     minimum_buy_dkk: "2000"
+    # Den Juridiske Vejledning C.B.5.2 allows shares admitted to regulated markets or MTFs;
+    # brokers decide which markets they offer in the share savings account.
+    ask_eligible_markets: [US]
+    ask_verified: false
+    ask_source_url: "https://skat.dk/borger/aktier-og-andre-vaerdipapirer/aktiesparekonto"
   us_stock_tax:
     dividend_withholding_pct: "15"
     estate_filing_threshold_usd: "60000"

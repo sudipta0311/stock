@@ -5,12 +5,17 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from copy import deepcopy
 from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
+
+import wealth.policy.personalise as personalise_module
 from wealth.policy.actions import Action, ActionList
+from wealth.policy.denmark import ask_rule_for_year
 from wealth.policy.exits import HoldingFacts, build_exit_card
 from wealth.policy.personalise import (
     HoldingInput,
@@ -20,12 +25,14 @@ from wealth.policy.personalise import (
     UserData,
     WeeklySpendInput,
     _acquisition_fx_notes,
+    _digest_inputs,
     _exit_action,
     _merge_weekly_actions,
     _normalised_lots,
     personalise,
     plan_health_score,
 )
+from wealth.policy.residency import load_residency_rules
 from wealth.policy.tax import Lot, TaxContext
 from wealth.schemas.assets import parse_asset
 from wealth.schemas.common import ValuationMethod
@@ -265,6 +272,23 @@ def test_weekly_spending_is_part_of_the_plan_digest() -> None:
     )
 
     assert _plan_json(user_data)["inputs_digest"] != _plan_json(with_spending)["inputs_digest"]
+
+
+def test_new_ask_year_rule_changes_the_plan_digest(monkeypatch: pytest.MonkeyPatch) -> None:
+    user_data = synthetic_user_data()
+    market = synthetic_market()
+    as_of = date(2027, 1, 4)
+    week = "2027-W01"
+    old_rules = load_residency_rules()
+    monkeypatch.setattr(personalise_module, "load_residency_rules", lambda: old_rules)
+    fallback_digest = _digest_inputs(user_data, market, None, week, as_of)
+
+    new_rules = deepcopy(old_rules)
+    new_rules["denmark"]["ask"]["deposit_cap_dkk"][2027] = "180000"
+    monkeypatch.setattr(personalise_module, "load_residency_rules", lambda: new_rules)
+
+    assert ask_rule_for_year(new_rules, "deposit_cap_dkk", 2027) == ("180000", True)
+    assert _digest_inputs(user_data, market, None, week, as_of) != fallback_digest
 
 
 def test_us_market_percentile_removes_missing_data_note() -> None:

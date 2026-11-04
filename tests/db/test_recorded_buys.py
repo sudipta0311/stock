@@ -44,8 +44,10 @@ from wealth.policy.data import (
     _weekly_spending_for_week,
     load_policy_inputs,
 )
+from wealth.policy.household import MemberProfile, build_household_snapshot, build_member_contexts
 from wealth.policy.personalise import WeeklySpendInput, _apply_weekly_spending, _holding_value
 from wealth.policy.us_situs import us_situs_value_usd
+from wealth.schemas.profile import InvestingPrefs, Residency
 
 pytestmark = pytest.mark.db
 _TODAY = date(2026, 10, 28)
@@ -878,10 +880,31 @@ def test_ask_room_uses_waiting_buy_once_when_later_cashflow_covers_it(
             amount_inr=Decimal("1250"),
             account_id=account_id,
             account_type="ask",
+            security_type="equity",
+            name="Synthetic US share",
+            sleeve="equity_global",
+            category="stock",
         )
         session.add(buy)
         session.flush()
-        assert _ask_deposits_dkk(session, user_id, member_id, _TODAY) == (Decimal("100"), False)
+        ask_used, fx_missing = _ask_deposits_dkk(session, user_id, member_id, _TODAY)
+        assert (ask_used, fx_missing) == (Decimal("100"), False)
+        member = MemberProfile(
+            id=str(member_id),
+            name="Synthetic member",
+            relationship="self",
+            is_self=True,
+            residency=Residency(status="NRI", country="DK"),
+            investing=InvestingPrefs(ask_value_start_of_year_dkk=Decimal("0")),
+            ask_used_dkk=ask_used,
+            ask_deposit_fx_missing=fx_missing,
+            has_prior_ask_activity=True,
+        )
+        household = build_household_snapshot((), (), (), (member,), self_member_id=member.id)
+        next_week_context = build_member_contexts(
+            (member,), household, (), as_of_year=2026, fx_rates={}
+        )[0]
+        assert next_week_context.limits_room["ask_deposit_dkk"] == Decimal("174100.00")
         session.add(
             BrokerCashFlowRecord(
                 user_id=user_id,

@@ -16,6 +16,12 @@ def round_dkk_for_display(amount: Decimal) -> Decimal:
     return amount.quantize(quantum, rounding=ROUND_HALF_UP)
 
 
+def round_ask_dkk_for_display(amount: Decimal) -> Decimal:
+    """Round ASK amounts down so displayed deposits never exceed the room used."""
+    quantum = Decimal("1E2") if amount >= Decimal("1000") else Decimal("1")
+    return amount.quantize(quantum, rounding=ROUND_DOWN)
+
+
 def inr_from_dkk(amount_dkk: Decimal, inr_per_dkk: Decimal) -> Decimal:
     """Convert DKK into INR using the FX table's INR-per-DKK rate."""
     if inr_per_dkk <= 0:
@@ -38,6 +44,26 @@ def ask_deposit_room_dkk(
     """Return remaining room under the ASK calendar-year net-deposit cap."""
     # https://skat.dk/borger/aktier-og-andre-vaerdipapirer/aktiesparekonto
     return max(Decimal(0), cap_dkk - value_start_of_year_dkk - net_deposits_this_year_dkk)
+
+
+def ask_rule_for_year(rules: Mapping[str, Any], key: str, year: int) -> tuple[Any, bool]:
+    """Return this year's ASK rule, or the latest earlier rule and an inexact flag."""
+    yearly_values = rules["denmark"]["ask"][key]
+    if not isinstance(yearly_values, Mapping):
+        raise TypeError(f"denmark.ask.{key} must map years to values")
+    parsed_years: dict[int, Any] = {}
+    for rule_year, value in yearly_values.items():
+        try:
+            parsed_year = int(rule_year)
+        except (TypeError, ValueError):
+            continue
+        parsed_years[parsed_year] = value
+    if year in parsed_years:
+        return parsed_years[year], True
+    earlier_years = [rule_year for rule_year in parsed_years if rule_year < year]
+    if not earlier_years:
+        raise KeyError(f"denmark.ask.{key} has no entry for or before {year}")
+    return parsed_years[max(earlier_years)], False
 
 
 def account_lines(
@@ -78,8 +104,7 @@ def account_lines(
     for account, amount in chunks:
         displayed_amount = round_dkk_for_display(amount)
         if account == "ask":
-            quantum = Decimal("1E2") if amount >= Decimal("1000") else Decimal("1")
-            displayed_amount = amount.quantize(quantum, rounding=ROUND_DOWN)
+            displayed_amount = round_ask_dkk_for_display(amount)
         line = {
             "member_id": member_id,
             "account": account,

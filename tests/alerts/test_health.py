@@ -113,6 +113,16 @@ def test_fresh_market_data_and_empty_history_baseline_are_ok() -> None:
     assert _checks(result, "fund_lookthrough")[0]["level"] == "ok"
 
 
+def test_ask_rules_warn_when_the_current_year_has_no_exact_cap() -> None:
+    next_year = datetime(2027, 1, 4, 9, 0, tzinfo=UTC)
+
+    check = _checks(evaluate_health(_healthy_facts(), next_year), "ask_rules")[0]
+
+    assert check["level"] == "warning"
+    assert "deposit_cap_dkk" in check["message"]
+    assert "174200" not in check["message"]
+
+
 def test_fund_lookthrough_fails_when_no_basket_is_stored() -> None:
     facts = replace(_healthy_facts(), fund_baskets=())
 

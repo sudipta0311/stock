@@ -408,8 +408,10 @@ denmark:
     verified: false
     last_checked: "2026-10-28"
     needs_review: false
-    tax_rate_pct_2026: "17"
-    deposit_cap_dkk_2026: "174200"
+    tax_rate_pct:
+      2026: "17"
+    deposit_cap_dkk:
+      2026: "174200"
     note_key: dk_aktiesparekonto
   pal_pension:
     source_url: "https://skat.dk/borger/pension-og-efterloen/skat-af-pensionsafkast"

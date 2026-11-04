@@ -141,4 +141,9 @@ A holdings file with no average price or cost:
 ## Notes
 - No migration expected (templates and parse reports exist). If you find you need one, it is `0029` revising C47's `0028`.
 - No LLM, and no guessing of columns from row values beyond the kind check in D.
+- **Don't re-key S&P 500 securities (found in the C50 review).**
+  - Since C50, S&P 500 securities carry their ISIN (from the CUSIP).
+  - `app_upsert_security_by_symbol` finds an existing row by ISIN and overwrites its `market`, `symbol` and `exchange` with the caller's values. An imported US share with a broker-specific ticker (e.g. `AAPL.O`) would rename the S&P 500 row. The next universe refresh then can't find it by symbol.
+  - When an imported share's ISIN already belongs to a security, link the holding to that security as it is: don't change its market, symbol or exchange. Use a new code path; never edit migration 0014.
+  - Test: import a US share with ISIN `US0378331005` and ticker `AAPL.O` while a `(US, AAPL)` security with that ISIN exists. The holding links to it, and the symbol stays `AAPL`.
 - Out of scope: PDF broker statements; email (Gmail) import of broker files; DK/EU share prices (shares without a price feed keep the statement price, as today); sell or "add more" advice (C49).
