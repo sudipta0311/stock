@@ -1665,7 +1665,11 @@ def personalise(
         debt_picks=debt_picks,
         satellite_pct=user_data.investing.satellite_pct,
         satellite_holdings=satellite_holdings,
-        through_fund_inr=dict(user_data.through_fund_inr),
+        # WeekInput takes whole paise; fund value x weight leaves many decimals.
+        through_fund_inr={
+            security_id: round_paise(amount)
+            for security_id, amount in user_data.through_fund_inr.items()
+        },
         ideas=ideas,
         index_valuation_percentile=index_percentiles,
         week=week,

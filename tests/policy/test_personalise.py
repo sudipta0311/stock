@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 import wealth.policy.personalise as personalise_module
-from wealth.policy.actions import Action, ActionList
+from wealth.policy.actions import Action, ActionList, SatelliteIdea
 from wealth.policy.denmark import ask_rule_for_year
 from wealth.policy.exits import HoldingFacts, build_exit_card
 from wealth.policy.personalise import (
@@ -22,6 +22,7 @@ from wealth.policy.personalise import (
     HoldingLotInput,
     MarketContext,
     PolicyProfile,
+    ResearchPack,
     UserData,
     WeeklySpendInput,
     _acquisition_fx_notes,
@@ -289,6 +290,32 @@ def test_new_ask_year_rule_changes_the_plan_digest(monkeypatch: pytest.MonkeyPat
 
     assert ask_rule_for_year(new_rules, "deposit_cap_dkk", 2027) == ("180000", True)
     assert _digest_inputs(user_data, market, None, week, as_of) != fallback_digest
+
+
+def test_fund_lookthrough_amounts_with_many_decimals_still_build_a_plan() -> None:
+    # A fund's value x equity share x weight is rarely whole paise.
+    idea = SatelliteIdea(
+        security_id="synthetic-lookthrough-share",
+        symbol="SYNLT",
+        market="IN",
+        sector="Industrials",
+        price=Decimal("100"),
+        quant_decile=9,
+        dossier_status="APPROVED",
+        valuation_percentile=Decimal("40"),
+        confidence="HIGH",
+    )
+    user_data = replace(
+        synthetic_user_data(),
+        through_fund_inr={idea.security_id: Decimal("1234.567891")},
+        through_fund_by_member_security={("self", idea.security_id): Decimal("1234.567891")},
+    )
+
+    plan = personalise(
+        user_data, synthetic_market(), ResearchPack(week=_WEEK, ideas=(idea,)), _WEEK, _AS_OF
+    )
+
+    assert plan.week == _WEEK
 
 
 def test_us_market_percentile_removes_missing_data_note() -> None:
