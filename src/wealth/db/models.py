@@ -728,6 +728,80 @@ class UniverseMember(Base):
     survivorship_label: Mapped[str] = mapped_column(String(80), nullable=False)
 
 
+class FundBasket(Base):
+    """Latest public membership and source metadata for one fund or index basket."""
+
+    __tablename__ = "fund_baskets"
+    __table_args__ = (
+        CheckConstraint("members_total >= 0", name="ck_fund_baskets_members_total_non_negative"),
+        CheckConstraint(
+            "members_found >= 0 AND members_found <= members_total",
+            name="ck_fund_baskets_members_found_range",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True)
+    label: Mapped[str] = mapped_column(String(120), nullable=False)
+    as_of: Mapped[date] = mapped_column(Date, nullable=False)
+    source: Mapped[str] = mapped_column(String(48), nullable=False)
+    source_url: Mapped[str] = mapped_column(Text, nullable=False)
+    weights_estimated: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    weight_source: Mapped[str | None] = mapped_column(String(48))
+    members_total: Mapped[int] = mapped_column(Integer, nullable=False)
+    members_found: Mapped[int] = mapped_column(Integer, nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class FundBasketWeight(Base):
+    """One public company weight in the latest snapshot of a fund or index basket."""
+
+    __tablename__ = "fund_basket_weights"
+    __table_args__ = (
+        CheckConstraint(
+            "market IS NULL OR market IN ('IN', 'US')",
+            name="ck_fund_basket_weights_market",
+        ),
+        CheckConstraint(
+            "isin IS NOT NULL OR symbol IS NOT NULL",
+            name="ck_fund_basket_weights_company_key",
+        ),
+        CheckConstraint(
+            "weight_pct >= 0 AND weight_pct > '-Infinity'::numeric "
+            "AND weight_pct < 'Infinity'::numeric",
+            name="ck_fund_basket_weights_non_negative_finite",
+        ),
+        Index("ix_fund_basket_weights_isin", "isin"),
+        Index("ix_fund_basket_weights_market_symbol", "market", "symbol"),
+        Index(
+            "uq_fund_basket_weights_basket_isin",
+            "basket_id",
+            "isin",
+            unique=True,
+            postgresql_where=text("isin IS NOT NULL"),
+        ),
+        Index(
+            "uq_fund_basket_weights_basket_symbol",
+            "basket_id",
+            "market",
+            "symbol",
+            unique=True,
+            postgresql_where=text("symbol IS NOT NULL AND isin IS NULL"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    basket_id: Mapped[str] = mapped_column(
+        String(48), ForeignKey("fund_baskets.id", ondelete="CASCADE"), nullable=False
+    )
+    market: Mapped[str | None] = mapped_column(String(2))
+    isin: Mapped[str | None] = mapped_column(String(12))
+    symbol: Mapped[str | None] = mapped_column(String(32))
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    weight_pct: Mapped[Decimal] = mapped_column(Numeric(9, 6), nullable=False)
+
+
 class HoldingLot(UserOwned, Base):
     __tablename__ = "holdings_lots"
     __table_args__ = (

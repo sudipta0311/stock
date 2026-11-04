@@ -22,6 +22,8 @@ _SHARED_MARKET_TABLES = {
     "index_valuations",
     "macro_series",
     "feed_items",
+    "fund_baskets",
+    "fund_basket_weights",
 }
 _POST_INITIAL_TABLES = {
     "fund_lagging_checks",
