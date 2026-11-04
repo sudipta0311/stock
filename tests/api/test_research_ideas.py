@@ -5,8 +5,10 @@ from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
+from pydantic import BaseModel, ValidationError
 
 from wealth.api.personalisation import (
+    _error_location,
     _index_funds_for_household,
     _us_market_summary,
     _valuation_percentile_thresholds,
@@ -16,6 +18,23 @@ from wealth.marketdata.store import IndexValuationPercentile
 from wealth.policy.actions import load_buying_rules
 from wealth.policy.denmark_picks import global_fund_ideas
 from wealth.policy.market_timing import map_us_market_timing
+from wealth.schemas.common import Rupees
+
+
+class _Amounts(BaseModel):
+    by_security: dict[str, Rupees]
+
+
+def test_error_location_names_fields_and_types_but_never_values() -> None:
+    with pytest.raises(ValidationError) as caught:
+        _Amounts(by_security={"5d7c0b0e-synthetic-key": "1234.5678"})
+
+    where = _error_location(caught.value)
+
+    assert where.startswith("ValidationError@")
+    assert "by_security.*=" in where
+    assert "1234.5678" not in where
+    assert "synthetic-key" not in where
 
 
 @pytest.mark.parametrize(

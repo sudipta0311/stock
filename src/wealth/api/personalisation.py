@@ -14,7 +14,7 @@ from uuid import UUID, uuid4
 
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -529,6 +529,14 @@ def _error_location(error: BaseException) -> str:
     for frame in (ours[-1] if ours else None, frames[-1] if frames else None):
         if frame is not None:
             parts.append(f"{FilePath(frame.filename).name}:{frame.lineno}")
+    if isinstance(error, ValidationError):
+        # Field names and error types only; keys such as ids become "*".
+        for item in error.errors(include_url=False, include_input=False)[:2]:
+            loc = ".".join(
+                str(part) if isinstance(part, str) and part.isidentifier() else "*"
+                for part in item["loc"]
+            )
+            parts.append(f"{loc}={item['type']}")
     return "@".join(dict.fromkeys(parts))
 
 
