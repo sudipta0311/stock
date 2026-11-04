@@ -25,6 +25,7 @@ from wealth.core.dates import add_months
 from wealth.core.ids import isin_check_digit_ok
 from wealth.core.money import parse_inr
 from wealth.importer.brokers.types import BrokerCashFlow, BrokerHolding, Layout, Trade
+from wealth.policy.lookthrough import load_lookthrough_rules
 
 _MAX_TABLE_ROWS = 100_000
 _MAX_TABLE_COLUMNS = 256
@@ -47,6 +48,7 @@ _CURRENCY_CODES = {"INR", "USD", "EUR", "DKK", "GBP", "SEK"}
 _MARKETS = {"IN", "US", "DK", "EU", "GB"}
 # Indian grouping with more than 2 decimals, which prices and fund units often have.
 _INR_LONG_FRACTION = re.compile(r"(?:\d+|\d{1,3}(?:,\d{3})+|\d{1,2}(?:,\d{2})+,\d{3})\.\d{3,}")
+_ETF_WORD = re.compile(r"\betfs?\b", re.IGNORECASE)
 _CURRENCY_MARKERS = re.compile(r"(?:INR|USD|EUR|DKK|GBP|SEK|RS\.?|KR\.?)", re.IGNORECASE)
 _MARKET_NAMES = {
     "india": "IN",
@@ -490,6 +492,9 @@ def _rows_from_xlsx(data: bytes) -> tuple[list[str], list[dict[str, Any]]]:
         raise ValueError("The XLSX workbook could not be read.") from error
     try:
         for worksheet in workbook.worksheets:
+            # Some exports (INDmoney) declare the sheet as just A1, and read-only mode
+            # trusts that, so it would never reach the header row.
+            worksheet.reset_dimensions()
             values: list[tuple[Any, ...]] = []
             for row in worksheet.iter_rows(values_only=True):
                 if len(row) > _MAX_TABLE_COLUMNS:
@@ -806,6 +811,30 @@ def _row_market_currency(
     return market, currency
 
 
+def _security_type(
+    row: Mapping[str, Any],
+    layout: Layout,
+    *,
+    market: str,
+    symbol: str | None,
+    isin: str | None,
+) -> str:
+    """File a row as an ETF from its type column, its name, or the look-through fund lists."""
+    raw_type = (_text(_column_value(row, layout, "security_type")) or "").casefold()
+    if raw_type in {"etf", "etfs"}:
+        return "etf"
+    # Exports like INDmoney's have no type column; VOO and QQQM only show it in the name.
+    name = _text(_column_value(row, layout, "name"))
+    if name and _ETF_WORD.search(name):
+        return "etf"
+    rules = load_lookthrough_rules()
+    if market == "US" and symbol and symbol.upper() in rules.get("by_us_symbol", {}):
+        return "etf"
+    if isin and isin.upper() in rules.get("_curated_by_isin", {}):
+        return "etf"
+    return "equity"
+
+
 def _is_summary(row: Mapping[str, Any], layout: Layout) -> bool:
     values = [str(value).strip().casefold() for value in row.values() if value is not None]
     return not any(values) or any(
@@ -866,9 +895,6 @@ def parse_holdings(rows: list[dict[str, Any]], layout: Layout) -> list[BrokerHol
                     raw_market_value, field="market value", currency=currency
                 )
         isin = _text(_column_value(row, layout, "isin"))
-        raw_security_type = (
-            _text(_column_value(row, layout, "security_type")) or "equity"
-        ).casefold()
         result.append(
             BrokerHolding(
                 isin=isin.upper() if isin else None,
@@ -881,7 +907,7 @@ def parse_holdings(rows: list[dict[str, Any]], layout: Layout) -> list[BrokerHol
                 market=market,
                 currency=currency,
                 market_value=parsed_market_value,
-                security_type="etf" if raw_security_type in {"etf", "etfs"} else "equity",
+                security_type=_security_type(row, layout, market=market, symbol=symbol, isin=isin),
             )
         )
     return result
@@ -941,9 +967,6 @@ def parse_tradebook(
             continue
         isin = _text(_column_value(row, layout, "isin"))
         symbol = _text(_column_value(row, layout, "symbol"))
-        raw_security_type = (
-            _text(_column_value(row, layout, "security_type")) or "equity"
-        ).casefold()
         if isin is None and symbol is None:
             continue
         result.append(
@@ -961,7 +984,7 @@ def parse_tradebook(
                 currency=currency,
                 commission=commission,
                 proceeds=proceeds,
-                security_type="etf" if raw_security_type in {"etf", "etfs"} else "equity",
+                security_type=_security_type(row, layout, market=market, symbol=symbol, isin=isin),
             )
         )
     return result

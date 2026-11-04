@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import re
+import zipfile
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -575,6 +576,67 @@ def test_indian_and_us_headers_auto_map_and_cost_value_is_divided_exactly() -> N
     holding = parse_holdings(us_rows, us_layout)[0]
     assert holding.avg_price == Decimal("100.00") / Decimal("3")
     assert (holding.market, holding.currency) == ("US", "USD")
+
+
+def test_xlsx_with_a_wrong_sheet_size_tag_is_still_read_in_full() -> None:
+    # INDmoney's holdings export declares the sheet as just A1, with the real header on row 5.
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Holdings Report"
+    sheet.append(["Synthetic holdings report"])
+    sheet.append(["Synthetic Person", "Synthetic account"])
+    sheet.append([])
+    sheet.append([])
+    sheet.append(
+        [
+            "Symbol",
+            "Name",
+            "Quantity",
+            "($) Cost Price",
+            "($) Invested Value",
+            "($) Market Price",
+            "($) Market Value",
+            "($) Unrealized Returns",
+        ]
+    )
+    sheet.append(["SYNA", "Synthetic Alpha Inc", 0.25, 120.5, 30.125, 130.0, 32.5, 2.375])
+    sheet.append(["SYNB", "Synthetic Broad Market ETF", 2.0, 50.0, 100.0, 55.0, 110.0, 10.0])
+    # A US fund from the look-through rules whose name doesn't say ETF.
+    sheet.append(["QQQM", "Synthetic Nasdaq Tracker Trust", 1.0, 200.0, 200.0, 210.0, 210.0, 10.0])
+    sheet.append([])
+    sheet.append(["Synthetic note: prices are delayed."])
+    output = io.BytesIO()
+    workbook.save(output)
+    source = zipfile.ZipFile(io.BytesIO(output.getvalue()))
+    rewritten = io.BytesIO()
+    with zipfile.ZipFile(rewritten, "w", zipfile.ZIP_DEFLATED) as target:
+        for item in source.infolist():
+            content = source.read(item.filename)
+            if item.filename == "xl/worksheets/sheet1.xml":
+                wrong_size = b'<dimension ref="A1"'
+                content, count = re.subn(rb'<dimension ref="[^"]*"', wrong_size, content)
+                assert count == 1
+            target.writestr(item, content)
+
+    headers, rows = read_table(rewritten.getvalue(), "synthetic_indmoney.xlsx")
+    layout, kind, _mapping = auto_map(
+        headers, rows, broker="indmoney", market_default="US", currency_default="USD"
+    )
+
+    assert headers[0] == "Symbol"
+    assert kind == "holdings"
+    assert layout is not None
+    holdings = parse_holdings(rows, layout)
+    assert [
+        (holding.symbol, holding.market, holding.currency, holding.security_type)
+        for holding in holdings
+    ] == [
+        ("SYNA", "US", "USD", "equity"),
+        ("SYNB", "US", "USD", "etf"),
+        ("QQQM", "US", "USD", "etf"),
+    ]
+    assert holdings[0].quantity == Decimal("0.25")
+    assert holdings[0].avg_price == Decimal("120.5")
 
 
 def test_shares_registered_abroad_keep_an_indian_or_us_brokers_market() -> None:
