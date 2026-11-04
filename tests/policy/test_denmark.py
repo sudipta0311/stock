@@ -3,8 +3,11 @@ from __future__ import annotations
 from decimal import Decimal
 from types import SimpleNamespace
 
+import pytest
+
+from wealth.api.personalisation import _idea_ownership
 from wealth.policy import personalise
-from wealth.policy.actions import Action
+from wealth.policy.actions import Action, SatelliteIdea
 from wealth.policy.denmark import (
     account_lines,
     ask_deposit_room_dkk,
@@ -21,8 +24,15 @@ from wealth.policy.denmark_picks import (
     ranked_etfs,
 )
 from wealth.policy.household import MemberProfile
-from wealth.policy.personalise import MarketContext, _abroad_action_rows
-from wealth.schemas.profile import InvestingPrefs, MemberTax, Residency
+from wealth.policy.personalise import (
+    HoldingInput,
+    MarketContext,
+    PolicyProfile,
+    ResearchPack,
+    UserData,
+    _abroad_action_rows,
+)
+from wealth.schemas.profile import FinancialContext, InvestingPrefs, MemberTax, Residency
 
 
 def _row(
@@ -263,6 +273,148 @@ def test_us_stock_picks_respect_opt_in_filters_and_code_caps() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("through_fund_inr", "expected_stock_dkk"),
+    [
+        (Decimal("0"), Decimal("3500")),
+        (Decimal("43750"), None),
+        (Decimal("12500"), Decimal("2500")),
+    ],
+)
+def test_denmark_us_stock_room_counts_direct_and_fund_holdings(
+    through_fund_inr: Decimal,
+    expected_stock_dkk: Decimal | None,
+) -> None:
+    member = _dk_member(us_stock_picks_opt_in=True)
+    context = SimpleNamespace(
+        member=member,
+        snapshot=SimpleNamespace(net_worth=Decimal("1250000"), investable_total=Decimal("1250000")),
+        limits_room={"ask_deposit_dkk": Decimal(0)},
+    )
+    market = MarketContext(
+        fx_rates={"DKK/INR": Decimal("12.5"), "USD/INR": Decimal("12.5")},
+        debt_yields={},
+        index_valuation_percentiles={},
+    )
+    idea = SatelliteIdea(
+        security_id="synthetic-us-idea",
+        symbol="SYNUS",
+        market="US",
+        sector="Industrials",
+        price=Decimal("100"),
+        quant_decile=10,
+        dossier_status="APPROVED",
+        valuation_percentile=Decimal("35"),
+        confidence="HIGH",
+        name="Synthetic US Company",
+        isin="US0000000001",
+        exchange="NASDAQ",
+        currency="USD",
+    )
+    direct = HoldingInput(
+        security_id="direct-us",
+        symbol=None,
+        market="US",
+        currency="USD",
+        security_type="equity",
+        sleeve="equity_global",
+        category="equity:us",
+        quantity=Decimal("15"),
+        price=Decimal("100"),
+        member_id=member.id,
+        isin="US0000000001",
+    )
+    action = _global_buy(amount_inr="1000000", account_type="ORDINARY")
+    action = action.model_copy(update={"member_id": member.id})
+    actions, lines, _carry, _notes = _abroad_action_rows(
+        [action],
+        [member],
+        [context],
+        [direct],
+        market,
+        ResearchPack(week="2026-W45", ideas=(idea,)),
+        {(member.id, idea.security_id): through_fund_inr} if through_fund_inr else {},
+        {("US", "SYNUS"): ("US0000000001",)},
+    )
+    stock_lines = [line for line in lines if line["instrument"].get("ticker") == "SYNUS"]
+
+    assert (
+        Decimal(str(stock_lines[0]["amount_dkk"])) if stock_lines else None
+    ) == expected_stock_dkk
+    assert actions[0].kind == "BUY_ABROAD"
+
+
+@pytest.mark.parametrize(
+    ("held_dkk", "expected_status", "has_plan_step"),
+    [
+        (Decimal("3100"), "enough", False),
+        (Decimal("3000"), "some", True),
+    ],
+)
+def test_ideas_enough_status_matches_denmark_plan_minimum_room(
+    held_dkk: Decimal,
+    expected_status: str,
+    has_plan_step: bool,
+) -> None:
+    member = _dk_member(us_stock_picks_opt_in=True, us_stock_picks_pct=Decimal("10"))
+    idea = SatelliteIdea(
+        security_id="synthetic-us-room",
+        symbol="ROOMUS",
+        market="US",
+        sector="Technology",
+        price=Decimal("100"),
+        quant_decile=10,
+        dossier_status="APPROVED",
+        valuation_percentile=Decimal("35"),
+        confidence="HIGH",
+        name="Synthetic US room company",
+        isin="US0000000010",
+        exchange="NASDAQ",
+        currency="USD",
+    )
+    held_inr = held_dkk
+    user_data = UserData(
+        profile=PolicyProfile(),
+        financial_context=FinancialContext(monthly_expenses=Decimal("10000")),
+        goals=(),
+        valued_assets=(),
+        holdings=(),
+        investing=member.investing,
+        members=(member,),
+        through_fund_inr={idea.security_id: held_inr},
+        through_fund_by_member_security={(member.id, idea.security_id): held_inr},
+    )
+    context = SimpleNamespace(
+        member_id=member.id,
+        member=member,
+        residency=member.residency,
+        snapshot=SimpleNamespace(investable_total=Decimal("100000")),
+    )
+    market = MarketContext(
+        fx_rates={"DKK/INR": Decimal(1)},
+        debt_yields={},
+        index_valuation_percentiles={},
+    )
+    ownership = _idea_ownership(
+        idea,
+        user_data,
+        market,
+        SimpleNamespace(allocation={}),
+        {member.id: context},
+    )
+    plan_picks = approved_us_stock_buys(
+        [idea],
+        investable_wealth_dkk=Decimal("100000"),
+        available_dkk=Decimal("5000"),
+        satellite_pct=Decimal("10"),
+        held_dkk_by_security={idea.security_id: held_dkk},
+    )
+
+    assert ownership.status == expected_status
+    assert bool(plan_picks) is has_plan_step
+    assert (ownership.status == "enough") is (not bool(plan_picks))
+
+
 def _dk_member(member_id: str = "member", **pref_updates: object) -> MemberProfile:
     return MemberProfile(
         id=member_id,
@@ -308,7 +460,7 @@ def _run_abroad(actions: list[Action], member: MemberProfile, ask_room: Decimal)
         debt_yields={},
         index_valuation_percentiles={},
     )
-    return _abroad_action_rows(actions, [member], [context], [], market, None)
+    return _abroad_action_rows(actions, [member], [context], [], market, None, {})
 
 
 def test_ordinary_action_yields_only_ordinary_lines() -> None:

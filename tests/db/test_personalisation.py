@@ -12,7 +12,7 @@ import jwt
 import pytest
 from alembic import command
 from fastapi.testclient import TestClient
-from sqlalchemy import event, func, inspect, select, text, update
+from sqlalchemy import delete, event, func, inspect, select, text, update
 from sqlalchemy.orm import Session
 
 from conftest import MigratedDatabase
@@ -23,9 +23,14 @@ from wealth.db import session as db_session
 from wealth.db.models import (
     Action,
     AuditLog,
+    FundBasket,
+    FundBasketWeight,
+    FxRate,
     HighlightDismissal,
+    HoldingLot,
     HouseholdMember,
     ResearchPackRecord,
+    Security,
     User,
 )
 from wealth.db.models import WeeklyPlan as WeeklyPlanRow
@@ -236,7 +241,7 @@ def test_research_ideas_loads_all_company_names_in_one_query(
         _context: object,
         _executemany: bool,
     ) -> None:
-        if "from securities" in statement.lower():
+        if "select securities.id, securities.name" in statement.lower():
             security_queries.append(statement)
 
     event.listen(migrated_database.api_engine, "before_cursor_execute", count_security_query)
@@ -255,6 +260,242 @@ def test_research_ideas_loads_all_company_names_in_one_query(
         "Synthetic Company Beta",
     ]
     assert len(security_queries) == 1
+
+
+def test_research_idea_owned_statuses_use_only_the_current_household_funds(
+    api_client: tuple[TestClient, str, object],
+    migrated_database: MigratedDatabase,
+) -> None:
+    client, secret, _application = api_client
+    owner_headers, owner_subject = _auth(secret, "fund-ownership-owner")
+    other_headers, _other_subject = _auth(secret, "fund-ownership-other")
+    week = "2026-W10"
+    provisioned = client.get("/v1/research/ideas", params={"week": week}, headers=owner_headers)
+    assert provisioned.status_code == 200
+    owner_id = _user_id(migrated_database, owner_subject)
+    now = _TODAY
+    idea_specs = (
+        ("IN", "OWN-IN-SOME", "Synthetic India Some", "INR"),
+        ("IN", "OWN-IN-ENOUGH", "Synthetic India Enough", "INR"),
+        ("IN", "OWN-IN-NONE", "Synthetic India None", "INR"),
+        ("US", "AAPL", "Synthetic US Some", "USD"),
+        ("US", "OWN-US-ENOUGH", "Synthetic US Enough", "USD"),
+        ("US", "OWN-US-NONE", "Synthetic US None", "USD"),
+    )
+    with Session(migrated_database.owner_engine) as session, session.begin():
+        member = session.scalar(
+            select(HouseholdMember).where(
+                HouseholdMember.user_id == owner_id,
+                HouseholdMember.is_self.is_(True),
+            )
+        )
+        assert member is not None
+        member.residency = {
+            "status": "NRI",
+            "country": "DK",
+            "us_person": False,
+            "planned_return_year": None,
+            "settle_plan": "undecided",
+        }
+        member.investing = {"us_stock_picks_opt_in": True}
+        idea_securities = []
+        for market, symbol, name, currency in idea_specs:
+            security = Security(
+                market=market,
+                symbol=symbol,
+                name=name,
+                security_type="equity",
+                currency=currency,
+                sleeve="equity_india" if market == "IN" else "equity_global",
+                category="equity:india" if market == "IN" else "equity:us",
+                exchange="NASDAQ" if market == "US" else None,
+            )
+            session.add(security)
+            session.flush()
+            idea_securities.append(
+                {
+                    "security_id": str(security.id),
+                    "symbol": symbol,
+                    "market": market,
+                    "sector": "Industrials",
+                    "price": "100.00",
+                    "quant_decile": 10,
+                    "dossier_status": "APPROVED",
+                    "valuation_percentile": "45",
+                    "confidence": "HIGH",
+                }
+            )
+
+        india_fund = Security(
+            market="IN",
+            symbol="OWN-NIFTY-FUND",
+            name="Synthetic NIFTY 100 fund",
+            security_type="mf",
+            currency="INR",
+            sleeve="equity_india",
+            category="equity:india",
+            sub_category="Large Cap",
+        )
+        global_fund = Security(
+            market="IN",
+            symbol="OWN-SP500-FUND",
+            name="Synthetic S&P 500 fund",
+            security_type="mf",
+            currency="INR",
+            sleeve="equity_global",
+            category="equity:global",
+            sub_category="International / FoF Overseas",
+        )
+        direct_us_share = Security(
+            market="US",
+            symbol=None,
+            isin="US0378331005",
+            name="Synthetic US direct share",
+            security_type="equity",
+            currency="USD",
+            sleeve="equity_global",
+            category="equity:us",
+            exchange="NASDAQ",
+        )
+        session.add_all((india_fund, global_fund, direct_us_share))
+        session.flush()
+        direct_us_share_id = direct_us_share.id
+        session.add_all(
+            (
+                HoldingLot(
+                    user_id=owner_id,
+                    member_id=member.id,
+                    security_id=india_fund.id,
+                    quantity=Decimal(1),
+                    source="manual",
+                    currency="INR",
+                    statement_value=Decimal("2000000"),
+                    statement_date=now,
+                ),
+                HoldingLot(
+                    user_id=owner_id,
+                    member_id=member.id,
+                    security_id=global_fund.id,
+                    quantity=Decimal(1),
+                    source="manual",
+                    currency="INR",
+                    statement_value=Decimal("2000000"),
+                    statement_date=now,
+                ),
+                HoldingLot(
+                    user_id=owner_id,
+                    member_id=member.id,
+                    security_id=direct_us_share.id,
+                    quantity=Decimal(1),
+                    source="manual",
+                    currency="USD",
+                    statement_value=Decimal("1000"),
+                    statement_date=now,
+                ),
+                FundBasket(
+                    id="nifty100",
+                    label="NIFTY 100",
+                    as_of=now,
+                    source="synthetic_test",
+                    source_url="https://example.test/nifty100",
+                    weights_estimated=True,
+                    weight_source="synthetic_test",
+                    members_total=3,
+                    members_found=3,
+                ),
+                FundBasket(
+                    id="sp500",
+                    label="S&P 500",
+                    as_of=now,
+                    source="synthetic_test",
+                    source_url="https://example.test/sp500",
+                    weights_estimated=True,
+                    weight_source="synthetic_test",
+                    members_total=3,
+                    members_found=3,
+                ),
+                FxRate(
+                    pair="DKK/INR",
+                    as_of=now,
+                    rate=Decimal("12.5"),
+                    source="synthetic_test",
+                    source_url="https://example.test/fx",
+                ),
+                FxRate(
+                    pair="USD/INR",
+                    as_of=now,
+                    rate=Decimal("12.5"),
+                    source="synthetic_test",
+                    source_url="https://example.test/fx",
+                ),
+                ResearchPackRecord(week=week, pack={"ideas": idea_securities}),
+            )
+        )
+        session.flush()
+        session.add_all(
+            (
+                FundBasketWeight(
+                    basket_id="nifty100",
+                    market="IN",
+                    isin=None,
+                    symbol="OWN-IN-SOME",
+                    name="Synthetic India Some",
+                    weight_pct=Decimal("0.5"),
+                ),
+                FundBasketWeight(
+                    basket_id="nifty100",
+                    market="IN",
+                    isin=None,
+                    symbol="OWN-IN-ENOUGH",
+                    name="Synthetic India Enough",
+                    weight_pct=Decimal("10"),
+                ),
+                FundBasketWeight(
+                    basket_id="sp500",
+                    market="US",
+                    isin="US0378331005",
+                    symbol="AAPL",
+                    name="Synthetic US Some",
+                    weight_pct=Decimal("2"),
+                ),
+                FundBasketWeight(
+                    basket_id="sp500",
+                    market="US",
+                    isin=None,
+                    symbol="OWN-US-ENOUGH",
+                    name="Synthetic US Enough",
+                    weight_pct=Decimal("15"),
+                ),
+            )
+        )
+
+    response = client.get("/v1/research/ideas", params={"week": week}, headers=owner_headers)
+    other_response = client.get("/v1/research/ideas", params={"week": week}, headers=other_headers)
+
+    assert response.status_code == 200
+    ownership = {row["symbol"]: row["owned"] for row in response.json()["ideas"]}
+    assert ownership["OWN-IN-SOME"]["status"] == "some"
+    assert ownership["OWN-IN-SOME"]["through_funds_inr"] == "10000.00"
+    assert ownership["OWN-IN-ENOUGH"]["status"] == "enough"
+    assert ownership["OWN-IN-NONE"]["status"] == "none"
+    assert ownership["AAPL"]["status"] == "some"
+    assert ownership["AAPL"]["direct_inr"] == "12500.00"
+    assert ownership["AAPL"]["direct"] == "1000.00"
+    assert ownership["AAPL"]["through_funds_inr"] == "40000.00"
+    assert ownership["AAPL"]["currency"] == "DKK"
+    assert ownership["AAPL"]["through_funds"] == "3200.00"
+    assert ownership["AAPL"]["funds"][0]["amount"] == "3200.00"
+    assert ownership["OWN-US-ENOUGH"]["status"] == "enough"
+    assert ownership["OWN-IN-SOME"]["currency"] == "INR"
+    assert ownership["OWN-IN-SOME"]["through_funds"] == "10000.00"
+    assert ownership["OWN-US-NONE"]["status"] == "none"
+    assert other_response.status_code == 200
+    assert all(row["owned"]["status"] == "none" for row in other_response.json()["ideas"])
+    assert all(row["owned"]["currency"] == "INR" for row in other_response.json()["ideas"])
+
+    with Session(migrated_database.owner_engine) as session, session.begin():
+        session.execute(delete(HoldingLot).where(HoldingLot.security_id == direct_us_share_id))
+        session.execute(delete(Security).where(Security.id == direct_us_share_id))
 
 
 def test_investing_preferences_validate_and_round_trip(

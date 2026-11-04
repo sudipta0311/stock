@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 _ISIN_PATTERN = re.compile(r"^[A-Z]{2}[A-Z0-9]{9}[0-9]$")
+_CUSIP_PATTERN = re.compile(r"^[0-9][A-Z0-9]{8}$")
 
 
 def isin_check_digit_ok(isin: str) -> bool:
@@ -27,3 +28,21 @@ def isin_check_digit_ok(isin: str) -> bool:
         checksum += digit // 10 + digit % 10
         double = not double
     return checksum % 10 == 0
+
+
+def isin_from_cusip(cusip: str | None, country: str = "US") -> str | None:
+    """Convert a numeric-leading nine-character CUSIP to a checked ISIN."""
+    if not isinstance(cusip, str):
+        return None
+    normalized_cusip = cusip.strip().upper()
+    normalized_country = country.strip().upper() if isinstance(country, str) else ""
+    if not _CUSIP_PATTERN.fullmatch(normalized_cusip) or not re.fullmatch(
+        r"[A-Z]{2}", normalized_country
+    ):
+        return None
+    prefix = normalized_country + normalized_cusip
+    for digit in "0123456789":
+        candidate = prefix + digit
+        if isin_check_digit_ok(candidate):
+            return candidate
+    return None

@@ -1,0 +1,143 @@
+version: 1
+max_age_days: 21
+
+# Public index baskets are used as holding proxies. Weights are reference data,
+# never user-provided values.
+baskets:
+  sp500: {label: "S&P 500", source: ssga_spy, ticker: SPY}
+  nasdaq100: {label: "NASDAQ 100", source: invesco, ticker: QQQ}
+  msci_world: {label: "MSCI World", source: ssga_emea, ticker: sppw}
+  msci_acwi: {label: "MSCI ACWI", source: ssga_emea, ticker: spyy}
+  msci_acwi_imi: {label: "MSCI ACWI IMI", source: ssga_emea, ticker: spyi}
+  msci_em: {label: "MSCI Emerging Markets", source: ssga_emea, ticker: spym}
+  msci_india: {label: "MSCI India", source: derived, derived_from: msci_em}
+  msci_em_ex_india: {label: "Emerging markets excluding India", source: derived, derived_from: msci_em}
+  nifty50: {label: "NIFTY 50", source: nse, list: nifty50}
+  niftynext50: {label: "NIFTY Next 50", source: nse, list: niftynext50}
+  nifty100: {label: "NIFTY 100", source: nse, list: nifty100}
+  niftymidcap150: {label: "NIFTY Midcap 150", source: nse, list: niftymidcap150}
+  niftysmallcap250: {label: "NIFTY Smallcap 250", source: nse, list: niftysmallcap250}
+  nifty500: {label: "NIFTY 500", source: nse, list: nifty500}
+  niftylargemidcap250: {label: "NIFTY LargeMidcap 250", source: nse, list: niftylargemidcap250}
+  niftybank: {label: "NIFTY Bank", source: nse, list: niftybank}
+  niftyit: {label: "NIFTY IT", source: nse, list: niftyit}
+  niftypharma: {label: "NIFTY Pharma", source: nse, list: niftypharma}
+  niftyfmcg: {label: "NIFTY FMCG", source: nse, list: niftyfmcg}
+  niftyauto: {label: "NIFTY Auto", source: nse, list: niftyauto}
+
+by_index_name:
+  NIFTY 50: nifty50
+  NIFTY NEXT 50: niftynext50
+  NIFTY MIDCAP 150: niftymidcap150
+  S&P 500: sp500
+  NASDAQ 100: nasdaq100
+  MSCI World: msci_world
+  MSCI ACWI: msci_acwi
+  MSCI ACWI IMI: msci_acwi_imi
+  MSCI India: msci_india
+
+by_us_symbol:
+  VOO: {basket: sp500, proxy: true}
+  IVV: {basket: sp500, proxy: true}
+  SPY: {basket: sp500}
+  SPLG: {basket: sp500, proxy: true}
+  QQQ: {basket: nasdaq100}
+  QQQM: {basket: nasdaq100, proxy: true}
+  URTH: {basket: msci_world, proxy: true}
+  ACWI: {basket: msci_acwi, proxy: true}
+  VT: {basket: msci_acwi_imi, proxy: true}
+  INDA: {basket: msci_india, proxy: true}
+  EEM: {basket: msci_em, proxy: true}
+  IEMG: {basket: msci_em, proxy: true}
+  VWO: {basket: msci_em, proxy: true}
+
+by_sub_category:
+  Large Cap: {basket: nifty100, proxy: true}
+  Large & Mid Cap: {basket: niftylargemidcap250, proxy: true}
+  Mid Cap: {basket: niftymidcap150, proxy: true}
+  Small Cap: {basket: niftysmallcap250, proxy: true}
+  Flexi Cap: {basket: nifty500, proxy: true}
+  Multi Cap: {basket: nifty500, proxy: true}
+  ELSS: {basket: nifty500, proxy: true}
+  Other Equity: {basket: nifty500, proxy: true}
+  Aggressive Hybrid: {basket: nifty500, equity_share: "0.75", proxy: true}
+  Balanced Hybrid: {basket: nifty500, equity_share: "0.5", proxy: true}
+  Conservative Hybrid: {basket: nifty500, equity_share: "0.2", proxy: true}
+  Sectoral/Thematic:
+    basket: nifty500
+    proxy: true
+    name_keywords:
+      - {any: [bank], basket: niftybank}
+      - {any: [it, technology, information technology], basket: niftyit}
+      - {any: [pharma, healthcare, health care], basket: niftypharma}
+      - {any: [fmcg, consumption], basket: niftyfmcg}
+      - {any: [auto, automobile], basket: niftyauto}
+  Index Funds/ETFs:
+    proxy: true
+    name_keywords:
+      - {any: [nifty next 50, nifty next50, junior bees], basket: niftynext50, exclude_any: []}
+      - {any: [nifty 50, nifty50], basket: nifty50, exclude_any: [nifty next 50, nifty next50, nifty 500, nifty500]}
+      - {any: [nifty 100, nifty100], basket: nifty100}
+      - {any: [nifty midcap 150, midcap 150], basket: niftymidcap150}
+      - {any: [nifty smallcap 250, smallcap 250], basket: niftysmallcap250}
+      - {any: [nifty 500, nifty500], basket: nifty500}
+      - {any: [nifty bank, bank bees], basket: niftybank}
+      - {any: [nifty it, nifty information technology], basket: niftyit}
+      - {any: [nifty pharma], basket: niftypharma}
+      - {any: [nifty fmcg], basket: niftyfmcg}
+      - {any: [nifty auto], basket: niftyauto}
+      - {any: [s&p 500, s&p500, sp 500, sp500], basket: sp500}
+      - {any: [nasdaq 100, nasdaq100], basket: nasdaq100}
+      - {any: [msci world], basket: msci_world}
+      - {any: [msci acwi imi], basket: msci_acwi_imi}
+      - {any: [msci acwi, all country world, all-country world], basket: msci_acwi}
+      - {any: [msci india], basket: msci_india}
+      - {any: [emerging markets, msci em], basket: msci_em}
+  "International / FoF Overseas":
+    proxy: true
+    name_keywords:
+      - {any: [s&p 500, s&p500, sp 500, sp500], basket: sp500}
+      - {any: [nasdaq 100, nasdaq100], basket: nasdaq100}
+      - {any: [msci world], basket: msci_world}
+      - {any: [msci acwi imi], basket: msci_acwi_imi}
+      - {any: [msci acwi, all country world, all-country world], basket: msci_acwi}
+      - {any: [msci india], basket: msci_india}
+      - {any: [emerging markets, msci em], basket: msci_em}
+
+by_name_keywords:
+  - {any: [ftse all-world, all-world], basket: msci_acwi, proxy: true}
+  - {any: [ftse all world], basket: msci_acwi, proxy: true}
+  - {any: [total world], basket: msci_acwi_imi, proxy: true}
+  - {any: [ftse developed world], basket: msci_world, proxy: true}
+  - {any: [developed world, globale aktier], basket: msci_world, proxy: true}
+  - {any: [global ac], basket: msci_acwi, proxy: true}
+  - {any: [ftse emerging], basket: msci_em, proxy: true}
+  - {any: [nifty next 50, nifty next50, junior bees], basket: niftynext50, proxy: true}
+  - {any: [nifty 50, nifty50], basket: nifty50, proxy: true, exclude_any: [nifty next 50, nifty next50, nifty 500, nifty500]}
+  - {any: [nifty 100, nifty100], basket: nifty100, proxy: true}
+  - {any: [nifty midcap 150, midcap 150], basket: niftymidcap150, proxy: true}
+  - {any: [nifty smallcap 250, smallcap 250], basket: niftysmallcap250, proxy: true}
+  - {any: [nifty 500, nifty500], basket: nifty500, proxy: true}
+  - {any: [nifty bank, bank bees], basket: niftybank, proxy: true}
+  - {any: [nifty it, information technology], basket: niftyit, proxy: true}
+  - {any: [nifty pharma], basket: niftypharma, proxy: true}
+  - {any: [nifty fmcg], basket: niftyfmcg, proxy: true}
+  - {any: [nifty auto], basket: niftyauto, proxy: true}
+  - {any: [s&p 500, s&p500, sp 500, sp500], basket: sp500, proxy: true}
+  - {any: [nasdaq 100, nasdaq100], basket: nasdaq100, proxy: true}
+  - {any: [msci world], basket: msci_world, proxy: true}
+  - {any: [msci acwi imi], basket: msci_acwi_imi, proxy: true}
+  - {any: [msci acwi, all country world, all-country world], basket: msci_acwi, proxy: true}
+  - {any: [msci india], basket: msci_india, proxy: true}
+  - {any: [emerging markets, msci em], basket: msci_em, proxy: true}
+
+not_looked_through:
+  debt: {reason: fixed-income fund}
+  gold: {reason: gold fund}
+  arbitrage: {reason: arbitrage fund}
+  liquid: {reason: cash-management fund}
+
+same_company:
+  - [GOOGL, GOOG]
+  - [FOXA, FOX]
+  - [NWSA, NWS]

@@ -1,4 +1,4 @@
-// OpenAPI SHA256: 98eee75332f66fce69fc5972c591affad7bfd139cefabd43539951528e86d592
+// OpenAPI SHA256: c295482347189bce7f30986e01f5ed957178e2d61fcb1bf70c0d7fc3806c9f50
 export interface paths {
     "/healthz": {
         parameters: {
@@ -2026,6 +2026,43 @@ export interface components {
              */
             role: "owner" | "partner" | "viewer";
         };
+        /** IdeaOwnership */
+        IdeaOwnership: {
+            /**
+             * Currency
+             * @enum {string}
+             */
+            currency: "INR" | "DKK";
+            /** Direct */
+            direct: string;
+            /** Direct Inr */
+            direct_inr: string;
+            /** Funds */
+            funds?: components["schemas"]["IdeaOwnershipFund"][];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "none" | "some" | "enough";
+            /** Through Funds */
+            through_funds: string;
+            /** Through Funds Inr */
+            through_funds_inr: string;
+        };
+        /** IdeaOwnershipFund */
+        IdeaOwnershipFund: {
+            /** Amount */
+            amount: string;
+            /** Amount Inr */
+            amount_inr: string;
+            /**
+             * Estimated
+             * @default false
+             */
+            estimated: boolean;
+            /** Name */
+            name: string;
+        };
         /** ImportConfirmationRequest */
         ImportConfirmationRequest: {
             /** Tax Wrapper */
@@ -3527,6 +3564,7 @@ export interface components {
             market: "IN" | "US";
             /** Name */
             name?: string | null;
+            owned?: components["schemas"]["IdeaOwnership"] | null;
             /**
              * Price
              * Format: decimal

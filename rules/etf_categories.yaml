@@ -24,7 +24,7 @@ categories:
     security_types: [etf, mf]
     index_name: NIFTY 50
     include_any: [nifty 50, nifty50]
-    exclude_any: [next 50, nifty next]
+    exclude_any: [next 50, nifty next, nifty 500, nifty500]
   - id: in_nifty_next50
     label: India next 50 companies
     market: IN

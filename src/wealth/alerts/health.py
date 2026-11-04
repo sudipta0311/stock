@@ -11,6 +11,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, TextIO
 
@@ -44,6 +45,7 @@ WEEKLY_USER_DATA_READY_UTC = time(0, 0)
 
 _FX_PAIRS = ("DKK/INR", "USD/INR", "EUR/INR")
 _WEEKLY_SOURCE_COUNT_KEYS: dict[str, tuple[str, ...]] = {
+    "fund_baskets": ("baskets_stored",),
     "universes": ("universes_loaded",),
     "nse_history": ("prices_eod", "sessions_requested"),
     "edgar": ("symbols",),
@@ -59,6 +61,7 @@ _ALL_MARKETDATA_SOURCES = frozenset(
         "master",
         "amfi_history",
         "nse_history",
+        "fund_baskets",
         "eu_etfs",
         "us_stocks",
         "universes",
@@ -80,6 +83,7 @@ _SOURCE_WORKFLOWS = {
     "ust": "Daily market data",
     "feeds": "Daily market data",
     "amfi_history": "Monthly fund history",
+    "fund_baskets": "Weekly company data",
     "eu_etfs": "Overseas market data",
     "us_stocks": "Overseas market data",
     "universes": "Weekly company data",
@@ -106,6 +110,14 @@ class MarketdataRunFact:
 
 
 @dataclass(frozen=True)
+class FundBasketHealthFact:
+    basket_id: str
+    as_of: date
+    members_total: int
+    members_found: int
+
+
+@dataclass(frozen=True)
 class HealthFacts:
     india_prices: tuple[DayRowCount, ...]
     india_fund_prices: tuple[DayRowCount, ...]
@@ -120,6 +132,7 @@ class HealthFacts:
     eligible_email_count: int
     missing_email_count: int
     email_sending_configured: bool
+    fund_baskets: tuple[FundBasketHealthFact, ...] = ()
 
 
 def _iso_utc(value: datetime) -> str:
@@ -473,6 +486,63 @@ def _check_weekly_email(now: datetime, facts: HealthFacts) -> dict[str, Any]:
     return _check("weekly_email", "problem", message, result_facts)
 
 
+def _check_fund_lookthrough(facts: HealthFacts, now: datetime) -> dict[str, Any]:
+    from wealth.policy.lookthrough import load_lookthrough_rules
+
+    rules = load_lookthrough_rules()
+    mapped = set(rules.get("baskets", {}))
+    stored = {item.basket_id: item for item in facts.fund_baskets}
+    counts = {
+        "stored": len(stored),
+        "mapped": len(mapped),
+        "missing": sorted(mapped - stored.keys()),
+        "old": [],
+        "low_coverage": [],
+        "max_age_days": int(rules.get("max_age_days", 21)),
+    }
+    if not stored:
+        return _check(
+            "fund_lookthrough",
+            "problem",
+            "No fund holdings data is stored. Rerun Weekly company data.",
+            counts,
+        )
+    as_of = now.astimezone(UTC).date()
+    counts["old"] = sorted(
+        basket_id
+        for basket_id in mapped & stored.keys()
+        if (as_of - stored[basket_id].as_of).days < 0
+        or (as_of - stored[basket_id].as_of).days > counts["max_age_days"]
+    )
+    for basket_id in ("nifty50", "nifty100"):
+        item = stored.get(basket_id)
+        if item is not None and (
+            item.members_total == 0
+            or Decimal(item.members_found) / Decimal(item.members_total) < Decimal("0.9")
+        ):
+            counts["low_coverage"].append(basket_id)
+    if counts["missing"] or counts["old"]:
+        return _check(
+            "fund_lookthrough",
+            "warning",
+            "Some fund holdings data is missing or old. Rerun Weekly company data.",
+            counts,
+        )
+    if counts["low_coverage"]:
+        return _check(
+            "fund_lookthrough",
+            "warning",
+            "Some India index lists have limited matches. Rerun Weekly company data.",
+            counts,
+        )
+    return _check(
+        "fund_lookthrough",
+        "ok",
+        "Fund holdings data is current.",
+        counts,
+    )
+
+
 def evaluate_health(facts: HealthFacts, now: datetime) -> dict[str, Any]:
     """Turn aggregate database facts into ordered, user-safe health checks."""
     if now.tzinfo is None or now.utcoffset() != timedelta(0):
@@ -509,6 +579,7 @@ def evaluate_health(facts: HealthFacts, now: datetime) -> dict[str, Any]:
     checks.append(_check_research_pack(current, facts))
     checks.append(_check_weekly_plans(current, facts))
     checks.append(_check_weekly_email(current, facts))
+    checks.append(_check_fund_lookthrough(facts, current))
     return {
         "ok": all(item["level"] != "problem" for item in checks),
         "checked_at": _iso_utc(current),
@@ -776,6 +847,18 @@ def load_health_facts(
         ).all()
         fx_latest = {pair: None for pair in _FX_PAIRS}
         fx_latest.update({str(row.pair): row.as_of for row in fx_rows})
+        basket_rows = connection.execute(
+            text("SELECT id, as_of, members_total, members_found FROM fund_baskets ORDER BY id")
+        ).all()
+        fund_baskets = tuple(
+            FundBasketHealthFact(
+                basket_id=str(row.id),
+                as_of=row.as_of,
+                members_total=int(row.members_total),
+                members_found=int(row.members_found),
+            )
+            for row in basket_rows
+        )
         run_rows = connection.execute(
             text(
                 "SELECT started_at, status, counts, errors FROM marketdata_runs "
@@ -810,6 +893,7 @@ def load_health_facts(
         eligible_email_count=eligible_emails,
         missing_email_count=missing_emails,
         email_sending_configured=email_sending_configured,
+        fund_baskets=fund_baskets,
     )
 
 

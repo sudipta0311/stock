@@ -518,6 +518,206 @@ describe("Ideas page", () => {
     expect(screen.getByText("Reference price $1,333")).toBeInTheDocument();
   });
 
+  it("shows owned amounts quietly and keeps enough ideas closed", async () => {
+    const user = userEvent.setup();
+    server.use(...ideaHandlers());
+    server.use(
+      http.get(/\/v1\/research\/ideas$/, () =>
+        HttpResponse.json({
+          week: "2026-W44",
+          ideas: [
+            {
+              security_id: "security-funds-only",
+              symbol: "FUNDSONLY",
+              name: "Synthetic Funds Company",
+              market: "IN",
+              sector: "Industrials",
+              price: "100.00",
+              quant_decile: 8,
+              dossier_status: "APPROVED",
+              valuation_percentile: "35",
+              valuation_label: "fair",
+              confidence: "HIGH",
+              owned: {
+                direct_inr: "0.00",
+                through_funds_inr: "270000.00",
+                status: "some",
+                funds: [
+                  {
+                    name: "Synthetic Nifty 50 index fund",
+                    amount_inr: "250000.00",
+                    estimated: true,
+                  },
+                ],
+              },
+            },
+            {
+              security_id: "security-direct-and-funds",
+              symbol: "BOTH",
+              name: "Synthetic Direct Company",
+              market: "IN",
+              sector: "Industrials",
+              price: "100.00",
+              quant_decile: 8,
+              dossier_status: "APPROVED",
+              valuation_percentile: "35",
+              valuation_label: "fair",
+              confidence: "HIGH",
+              owned: {
+                direct_inr: "50000.00",
+                through_funds_inr: "271000.00",
+                status: "some",
+                funds: [],
+              },
+            },
+            {
+              security_id: "security-enough",
+              symbol: "ENOUGH",
+              name: "Synthetic Enough Company",
+              market: "IN",
+              sector: "Industrials",
+              price: "100.00",
+              quant_decile: 8,
+              dossier_status: "APPROVED",
+              valuation_percentile: "35",
+              valuation_label: "fair",
+              confidence: "HIGH",
+              owned: {
+                direct_inr: "0.00",
+                through_funds_inr: "1000000.00",
+                status: "enough",
+                funds: [],
+              },
+            },
+            {
+              security_id: "security-enough-direct-only",
+              symbol: "DIRECTONLY",
+              name: "Synthetic Direct Only Company",
+              market: "IN",
+              sector: "Industrials",
+              price: "100.00",
+              quant_decile: 8,
+              dossier_status: "APPROVED",
+              valuation_percentile: "35",
+              valuation_label: "fair",
+              confidence: "HIGH",
+              owned: {
+                direct_inr: "300000.00",
+                through_funds_inr: "0.00",
+                status: "enough",
+                funds: [],
+              },
+            },
+            {
+              security_id: "security-dkk-some",
+              symbol: "DKKDEMO",
+              name: "Synthetic Denmark Company",
+              market: "US",
+              sector: "Technology",
+              price: "100.00",
+              quant_decile: 8,
+              dossier_status: "APPROVED",
+              valuation_percentile: "35",
+              valuation_label: "fair",
+              confidence: "HIGH",
+              owned: {
+                currency: "DKK",
+                direct_inr: "0.00",
+                through_funds_inr: "40000.00",
+                direct: "0.00",
+                through_funds: "3200.00",
+                status: "some",
+                funds: [
+                  {
+                    name: "Synthetic global fund",
+                    amount_inr: "40000.00",
+                    amount: "3200.00",
+                    estimated: true,
+                  },
+                ],
+              },
+            },
+            {
+              security_id: "security-none",
+              symbol: "NONE",
+              name: "Synthetic New Company",
+              market: "IN",
+              sector: "Industrials",
+              price: "100.00",
+              quant_decile: 8,
+              dossier_status: "APPROVED",
+              valuation_percentile: "35",
+              valuation_label: "fair",
+              confidence: "HIGH",
+              owned: {
+                direct_inr: "0.00",
+                through_funds_inr: "0.00",
+                status: "none",
+                funds: [],
+              },
+            },
+          ],
+        }),
+      ),
+    );
+    const { container } = renderWithQueries(
+      <MemoryRouter>
+        <IdeasPage />
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByText(
+        "You already own about ₹2.7 L of this through your funds.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "You already own about ₹3.21 L of this, ₹2.71 L through your funds.",
+      ),
+    ).toBeVisible();
+    const noneIdea = screen.getByText("NONE").closest("article");
+    expect(noneIdea).not.toHaveTextContent("You already own about");
+    expect(
+      screen.getByText(
+        "You already own about DKK 3,200 of this through your funds.",
+      ),
+    ).toBeVisible();
+    const alreadyOwned = screen.getByText("You already own enough (2)");
+    expect(alreadyOwned.closest("details")).not.toHaveAttribute("open");
+    expect(screen.getByText("ENOUGH")).not.toBeVisible();
+    expect(screen.getByText("NONE")).toBeVisible();
+    await user.click(alreadyOwned);
+    expect(
+      screen.getByText(
+        "You own enough of these, directly or through your funds, so we won't suggest more.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "You already own about ₹10 L of this through your funds.",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.getByText("You already own about ₹3 L of this."),
+    ).toBeVisible();
+    await user.click(screen.getAllByText(englishCopy.ideas.why_this_idea)[0]!);
+    expect(
+      screen.getByText(
+        "Synthetic Nifty 50 index fund: about ₹2.5 L (estimate)",
+      ),
+    ).toBeVisible();
+    const dkkIdea = screen.getByText("DKKDEMO").closest("article");
+    if (!dkkIdea) throw new Error("Expected the Denmark idea card");
+    await user.click(
+      within(dkkIdea).getByText(englishCopy.ideas.why_this_idea),
+    );
+    expect(
+      screen.getByText("Synthetic global fund: about DKK 3,200 (estimate)"),
+    ).toBeVisible();
+    expect((await axe(container)).violations).toEqual([]);
+  });
+
   it("keeps selector details closed and explains fund terms when opened", async () => {
     const user = userEvent.setup();
     server.use(...ideaHandlers());

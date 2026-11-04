@@ -2503,6 +2503,90 @@
         "title": "HouseholdSummary",
         "type": "object"
       },
+      "IdeaOwnership": {
+        "additionalProperties": false,
+        "properties": {
+          "currency": {
+            "enum": [
+              "INR",
+              "DKK"
+            ],
+            "title": "Currency",
+            "type": "string"
+          },
+          "direct": {
+            "title": "Direct",
+            "type": "string"
+          },
+          "direct_inr": {
+            "title": "Direct Inr",
+            "type": "string"
+          },
+          "funds": {
+            "items": {
+              "$ref": "#/components/schemas/IdeaOwnershipFund"
+            },
+            "title": "Funds",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "none",
+              "some",
+              "enough"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "through_funds": {
+            "title": "Through Funds",
+            "type": "string"
+          },
+          "through_funds_inr": {
+            "title": "Through Funds Inr",
+            "type": "string"
+          }
+        },
+        "required": [
+          "direct_inr",
+          "through_funds_inr",
+          "direct",
+          "through_funds",
+          "currency",
+          "status"
+        ],
+        "title": "IdeaOwnership",
+        "type": "object"
+      },
+      "IdeaOwnershipFund": {
+        "additionalProperties": false,
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "amount_inr": {
+            "title": "Amount Inr",
+            "type": "string"
+          },
+          "estimated": {
+            "default": false,
+            "title": "Estimated",
+            "type": "boolean"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "amount_inr",
+          "amount"
+        ],
+        "title": "IdeaOwnershipFund",
+        "type": "object"
+      },
       "ImportConfirmationRequest": {
         "additionalProperties": false,
         "properties": {
@@ -6793,6 +6877,16 @@
               }
             ],
             "title": "Name"
+          },
+          "owned": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IdeaOwnership"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "price": {
             "format": "decimal",

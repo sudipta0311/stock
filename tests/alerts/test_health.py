@@ -20,6 +20,7 @@ from tests.db.migrated_database import MigratedDatabase, create_migrated_databas
 from wealth.alerts import health
 from wealth.alerts.health import (
     DayRowCount,
+    FundBasketHealthFact,
     HealthFacts,
     MarketdataRunFact,
     evaluate_health,
@@ -29,6 +30,7 @@ from wealth.alerts.health import (
 from wealth.db.models import (
     AlertLog,
     Consent,
+    FundBasket,
     FxRate,
     HouseholdAccess,
     HouseholdMember,
@@ -41,6 +43,7 @@ from wealth.db.models import (
     User,
     WeeklyPlan,
 )
+from wealth.policy.lookthrough import load_lookthrough_rules
 
 _NOW = datetime(2026, 11, 2, 9, 0, tzinfo=UTC)
 _SATURDAY = datetime(2026, 10, 31, 19, 0, tzinfo=UTC)
@@ -57,6 +60,7 @@ def _outside_github_actions(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _healthy_facts() -> HealthFacts:
     weekly_sources = {
+        "fund_baskets": {"baskets_stored": 1},
         "universes": {"universes_loaded": 1},
         "nse_history": {"prices_eod": 1, "sessions_requested": 1},
         "edgar": {"fundamentals_pit": 0, "symbols": 1},
@@ -84,6 +88,15 @@ def _healthy_facts() -> HealthFacts:
         eligible_email_count=0,
         missing_email_count=0,
         email_sending_configured=False,
+        fund_baskets=tuple(
+            FundBasketHealthFact(
+                basket_id=basket_id,
+                as_of=date(2026, 10, 30),
+                members_total=50 if basket_id == "nifty50" else 100,
+                members_found=50 if basket_id == "nifty50" else 95,
+            )
+            for basket_id in load_lookthrough_rules()["baskets"]
+        ),
     )
 
 
@@ -97,6 +110,48 @@ def test_fresh_market_data_and_empty_history_baseline_are_ok() -> None:
     assert result["ok"] is True
     assert all(item["level"] == "ok" for item in result["checks"])
     assert _checks(result, "india_prices")[0]["facts"]["expected_date"] == "2026-10-30"
+    assert _checks(result, "fund_lookthrough")[0]["level"] == "ok"
+
+
+def test_fund_lookthrough_fails_when_no_basket_is_stored() -> None:
+    facts = replace(_healthy_facts(), fund_baskets=())
+
+    check = _checks(evaluate_health(facts, _NOW), "fund_lookthrough")[0]
+
+    assert check["level"] == "problem"
+    assert "No fund holdings data" in check["message"]
+
+
+def test_fund_lookthrough_warns_for_missing_or_old_baskets() -> None:
+    baskets = list(_healthy_facts().fund_baskets)
+    baskets = [item for item in baskets if item.basket_id != "sp500"]
+    baskets.append(
+        FundBasketHealthFact(
+            basket_id="sp500",
+            as_of=date(2026, 10, 1),
+            members_total=500,
+            members_found=500,
+        )
+    )
+    facts = replace(_healthy_facts(), fund_baskets=tuple(baskets))
+
+    check = _checks(evaluate_health(facts, _NOW), "fund_lookthrough")[0]
+
+    assert check["level"] == "warning"
+    assert "sp500" in check["facts"]["old"]
+
+
+def test_fund_lookthrough_warns_for_low_nifty_coverage() -> None:
+    baskets = [
+        replace(item, members_found=44) if item.basket_id == "nifty50" else item
+        for item in _healthy_facts().fund_baskets
+    ]
+    facts = replace(_healthy_facts(), fund_baskets=tuple(baskets))
+
+    check = _checks(evaluate_health(facts, _NOW), "fund_lookthrough")[0]
+
+    assert check["level"] == "warning"
+    assert "nifty50" in check["facts"]["low_coverage"]
 
 
 def test_price_data_older_than_two_weekday_sessions_is_a_problem() -> None:
@@ -428,6 +483,7 @@ def health_database() -> Any:
 
 def _seed_health_database(database: MigratedDatabase) -> None:
     run_time = datetime(2026, 10, 30, 19, 0, tzinfo=UTC)
+    basket_rules = load_lookthrough_rules()["baskets"]
     with Session(database.owner_engine) as session, session.begin():
         india = Security(
             market="IN",
@@ -493,6 +549,7 @@ def _seed_health_database(database: MigratedDatabase) -> None:
                 finished_at=run_time,
                 status="succeeded",
                 counts={
+                    "fund_baskets": {"baskets_stored": len(basket_rules)},
                     "universes": {"universes_loaded": 1},
                     "nse_history": {"prices_eod": 1, "sessions_requested": 1},
                     "edgar": {"fundamentals_pit": 0, "symbols": 1},
@@ -507,6 +564,20 @@ def _seed_health_database(database: MigratedDatabase) -> None:
                 week="2026-W44",
                 pack={"markets": {"IN": {"idea_count": 1}, "US": {"idea_count": 1}}},
             )
+        )
+        session.add_all(
+            FundBasket(
+                id=basket_id,
+                label=rules["label"],
+                as_of=date(2026, 10, 30),
+                source="synthetic_test",
+                source_url="https://example.invalid/fund-baskets",
+                weights_estimated=False,
+                weight_source="synthetic_test",
+                members_total=100,
+                members_found=100,
+            )
+            for basket_id, rules in basket_rules.items()
         )
 
 

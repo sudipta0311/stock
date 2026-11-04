@@ -10,7 +10,7 @@ import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from time import sleep as sleep_for
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -20,6 +20,8 @@ from sqlalchemy.orm import Session
 
 from wealth.db.models import (
     FundamentalPIT,
+    FundBasket,
+    FundBasketWeight,
     HoldingLot,
     IndexValuation,
     MarketdataRun,
@@ -36,6 +38,7 @@ from wealth.marketdata.sources import (
     ecb,
     edgar,
     fred,
+    fund_baskets,
     ibja,
     macro_geo,
     manual,
@@ -71,6 +74,7 @@ _SOURCES = (
     "master",
     "amfi_history",
     "nse_history",
+    "fund_baskets",
     "eu_etfs",
     "us_stocks",
     "universes",
@@ -623,14 +627,18 @@ def _build_us_index_pe(
     )
 
 
-def _fetch_universes() -> UniverseBatch:
+def _fetch_universes(
+    *,
+    fetch_sp500: Callable[[], Sp500Holdings] | None = None,
+    fetch_nifty500: Callable[[], list[NseSecurity]] | None = None,
+) -> UniverseBatch:
     sp500: Sp500Holdings | None = None
     nifty500: list[NseSecurity] | None = None
     errors: dict[str, str] = {}
     sp500_closes: dict[str, Decimal] = {}
     sp500_sectors: dict[str, Sp500Sector] = {}
     try:
-        sp500 = universes.fetch_sp500()
+        sp500 = (fetch_sp500 or universes.fetch_sp500)()
     except Exception as error:
         errors["sp500"] = type(error).__name__
     if sp500 is not None:
@@ -643,7 +651,7 @@ def _fetch_universes() -> UniverseBatch:
         except Exception as error:
             errors["sp500_sectors"] = type(error).__name__
     try:
-        nifty500 = universes.fetch_nifty500()
+        nifty500 = (fetch_nifty500 or universes.fetch_nifty500)()
     except Exception as error:
         errors["nifty500"] = type(error).__name__
     return UniverseBatch(sp500, nifty500, errors, sp500_closes, sp500_sectors)
@@ -656,6 +664,34 @@ def _default_fetchers(
     request_budget: AbroadRequestBudget | None = None,
 ) -> dict[str, Callable[[], Any]]:
     abroad_budget = request_budget or AbroadRequestBudget()
+    cached_reference_data: dict[str, Any] = {}
+
+    def cached_reference(key: str, fetch: Callable[[], Any]) -> Any:
+        if key not in cached_reference_data:
+            try:
+                cached_reference_data[key] = fetch()
+            except Exception as error:
+                cached_reference_data[key] = error
+        result = cached_reference_data[key]
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    def shared_sp500() -> Sp500Holdings:
+        return cached_reference("sp500", universes.fetch_sp500)
+
+    def shared_nifty500() -> list[NseSecurity]:
+        return cached_reference("nifty500", universes.fetch_nifty500)
+
+    def fetch_universes() -> UniverseBatch:
+        return _fetch_universes(fetch_sp500=shared_sp500, fetch_nifty500=shared_nifty500)
+
+    def fetch_fund_baskets() -> fund_baskets.FundBasketBatch:
+        return fund_baskets.fetch_fund_baskets(
+            on,
+            fetch_sp500=shared_sp500,
+            fetch_nifty500=shared_nifty500,
+        )
 
     def fetch_us_stocks() -> list[AbroadPrice] | AbroadBatch:
         if not os.getenv("PRICE_API_KEY", "") or session is None:
@@ -680,7 +716,8 @@ def _default_fetchers(
         ),
         "eu_etfs": lambda: _fetch_abroad_etfs(on, request_budget=abroad_budget),
         "us_stocks": fetch_us_stocks,
-        "universes": _fetch_universes,
+        "universes": fetch_universes,
+        "fund_baskets": fetch_fund_baskets,
         "edgar": lambda: _fetch_edgar(session, on, symbols),
         "us_index_pe": lambda: _fetch_us_index_pe(session, on) if session is not None else None,
         "nse_fundamentals": lambda: _fetch_nse_fundamentals(session, on, symbols),
@@ -838,6 +875,69 @@ def _store_source(
                 counts["universes_loaded"] += 1
             except Exception as error:
                 errors["nifty500_store"] = type(error).__name__
+        return SourceBatchResult(counts, errors)
+    if source == "fund_baskets":
+        if not isinstance(records, fund_baskets.FundBasketBatch):
+            raise TypeError("fund-basket adapter returned invalid rows")
+        errors = dict(records.errors)
+        counts: dict[str, Any] = {"baskets_stored": 0, "baskets": {}}
+        for basket_id, snapshot in records.baskets.items():
+            try:
+                with session.begin_nested():
+                    basket = session.get(FundBasket, basket_id)
+                    if basket is None:
+                        basket = FundBasket(
+                            id=basket_id,
+                            label=snapshot.label,
+                            as_of=snapshot.as_of,
+                            source=snapshot.source,
+                            source_url=snapshot.source_url,
+                            weights_estimated=snapshot.weights_estimated,
+                            weight_source=snapshot.weight_source,
+                            members_total=snapshot.members_total,
+                            members_found=snapshot.members_found,
+                            fetched_at=fetched_at,
+                        )
+                        session.add(basket)
+                    else:
+                        basket.label = snapshot.label
+                        basket.as_of = snapshot.as_of
+                        basket.source = snapshot.source
+                        basket.source_url = snapshot.source_url
+                        basket.weights_estimated = snapshot.weights_estimated
+                        basket.weight_source = snapshot.weight_source
+                        basket.members_total = snapshot.members_total
+                        basket.members_found = snapshot.members_found
+                        basket.fetched_at = fetched_at
+                    session.flush()
+                    session.execute(
+                        delete(FundBasketWeight).where(FundBasketWeight.basket_id == basket_id)
+                    )
+                    session.add_all(
+                        [
+                            FundBasketWeight(
+                                basket_id=basket_id,
+                                market=row.market,
+                                isin=row.isin,
+                                symbol=row.symbol,
+                                name=row.name,
+                                weight_pct=row.weight_pct.quantize(
+                                    Decimal("0.000001"), rounding=ROUND_HALF_UP
+                                ),
+                            )
+                            for row in snapshot.weights
+                        ]
+                    )
+                    session.flush()
+                counts["baskets"][basket_id] = {
+                    "rows": len(snapshot.weights),
+                    "members_total": snapshot.members_total,
+                    "members_found": snapshot.members_found,
+                    "as_of": snapshot.as_of.isoformat(),
+                }
+                counts["baskets_stored"] += 1
+            except Exception as error:
+                errors[basket_id] = type(error).__name__
         return SourceBatchResult(counts, errors)
     if source == "master":
         securities = records.securities if isinstance(records, NseMasterBatch) else records
@@ -1140,6 +1240,11 @@ def _refresh_sources_succeeded(
                 source == "universes"
                 and isinstance(source_counts, dict)
                 and source_counts.get("universes_loaded", 0) > 0
+            )
+            or (
+                source == "fund_baskets"
+                and isinstance(source_counts, dict)
+                and source_counts.get("baskets_stored", 0) > 0
             )
         ):
             successful += 1

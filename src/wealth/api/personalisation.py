@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from datetime import date, datetime
 from decimal import Decimal
 from functools import lru_cache
@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from wealth.core.money import round_paise
 from wealth.db.models import Action as ActionRow
 from wealth.db.models import (
     AuditLog,
@@ -27,9 +28,15 @@ from wealth.db.models import (
     Security,
 )
 from wealth.marketdata import store
-from wealth.policy.actions import SatelliteIdea, load_buying_rules, satellite_idea_from_pack
+from wealth.policy.actions import (
+    SatelliteIdea,
+    india_stock_room,
+    load_buying_rules,
+    satellite_idea_from_pack,
+)
 from wealth.policy.data import load_policy_inputs, research_pack_row
-from wealth.policy.denmark_picks import global_fund_ideas
+from wealth.policy.denmark import dkk_from_inr
+from wealth.policy.denmark_picks import global_fund_ideas, load_eu_etfs, us_stock_room
 from wealth.policy.highlights import (
     Highlight,
     HighlightContext,
@@ -37,10 +44,22 @@ from wealth.policy.highlights import (
     highlight_fingerprint,
     highlights,
 )
+from wealth.policy.household import MemberContext, build_household_snapshot, build_member_contexts
+from wealth.policy.lookthrough import (
+    load_lookthrough_rules,
+    same_company,
+)
 from wealth.policy.market_timing import map_us_market_timing
-from wealth.policy.personalise import WeeklyPlan, apply_weekly_spending_to_plan, personalise
+from wealth.policy.personalise import (
+    MarketContext,
+    UserData,
+    WeeklyPlan,
+    _holding_value,
+    apply_weekly_spending_to_plan,
+    personalise,
+)
 from wealth.policy.store import actions_for_week, latest_plan, save_weekly_plan
-from wealth.schemas.common import Rupees
+from wealth.schemas.common import LiquidityClass, Rupees, Sleeve
 from wealth.schemas.profile import InvestingPrefs, Residency, ResidencyInput, residency_from_stored
 
 
@@ -97,6 +116,23 @@ class ResearchIdeaWhy(ApiModel):
     risk: str
 
 
+class IdeaOwnershipFund(ApiModel):
+    name: str
+    amount_inr: str
+    amount: str
+    estimated: bool = False
+
+
+class IdeaOwnership(ApiModel):
+    direct_inr: str
+    through_funds_inr: str
+    direct: str
+    through_funds: str
+    currency: Literal["INR", "DKK"]
+    status: Literal["none", "some", "enough"]
+    funds: list[IdeaOwnershipFund] = Field(default_factory=list)
+
+
 class ResearchIdeaSummary(ApiModel):
     security_id: str
     symbol: str
@@ -111,6 +147,7 @@ class ResearchIdeaSummary(ApiModel):
     confidence: str
     entry_hint: EntryHintSummary | None = None
     why: ResearchIdeaWhy | None = None
+    owned: IdeaOwnership | None = None
 
 
 class ResearchIndexFundInstrument(ApiModel):
@@ -261,6 +298,223 @@ def _valid_week(value: str) -> bool:
     except (ValueError, AttributeError):
         return False
     return True
+
+
+def _member_contexts_for_ownership(
+    user_data: UserData,
+    market: MarketContext,
+    as_of: date,
+) -> dict[str, MemberContext]:
+    self_member = next(member for member in user_data.members if member.is_self)
+    market_holdings: list[tuple[str, Decimal, LiquidityClass]] = []
+    member_market_holdings: list[tuple[str, str, Decimal, LiquidityClass]] = []
+    for holding in user_data.holdings:
+        value = _holding_value(holding, market.fx_rates)
+        member_id = holding.member_id or self_member.id
+        if value is None or holding.sleeve is None:
+            continue
+        liquidity = (
+            LiquidityClass.WITHIN_1Y
+            if holding.security_type in {"bond", "sgb"}
+            else LiquidityClass.INSTANT
+        )
+        market_holdings.append((holding.sleeve, value, liquidity))
+        member_market_holdings.append((member_id, holding.sleeve, value, liquidity))
+    for buy in user_data.recorded_buys:
+        if (
+            buy.status != "waiting"
+            or buy.security_id is not None
+            or buy.amount_inr is None
+            or buy.amount_inr <= 0
+        ):
+            continue
+        try:
+            Sleeve(buy.sleeve)
+        except ValueError:
+            continue
+        market_holdings.append((buy.sleeve, buy.amount_inr, LiquidityClass.INSTANT))
+        member_market_holdings.append(
+            (buy.member_id, buy.sleeve, buy.amount_inr, LiquidityClass.INSTANT)
+        )
+    snapshot = build_household_snapshot(
+        user_data.valued_assets,
+        market_holdings,
+        member_market_holdings,
+        user_data.members,
+        self_member_id=self_member.id,
+    )
+    has_indian_funds_by_member = {
+        member.id: any(
+            (holding.member_id or self_member.id) == member.id
+            and holding.market == "IN"
+            and holding.security_type in {"mf", "etf"}
+            for holding in user_data.holdings
+        )
+        for member in user_data.members
+    }
+    contexts = build_member_contexts(
+        user_data.members,
+        snapshot,
+        user_data.valued_assets,
+        as_of_year=as_of.year,
+        fx_rates=market.fx_rates,
+        fallback_tax_slab_pct=user_data.profile.tax_slab_pct,
+        fallback_tax_regime=user_data.profile.tax_regime,
+        fallback_city_tier=user_data.profile.city_tier,
+        has_indian_funds_by_member=has_indian_funds_by_member,
+    )
+    return {context.member_id: context for context in contexts}
+
+
+def _idea_ownership(
+    idea: SatelliteIdea,
+    user_data: UserData,
+    market: MarketContext,
+    plan: WeeklyPlan,
+    member_contexts: Mapping[str, MemberContext],
+) -> IdeaOwnership:
+    direct_by_member: dict[str, Decimal] = {}
+    direct_total = Decimal(0)
+    self_member_id = next(member.id for member in user_data.members if member.is_self)
+    rules = load_lookthrough_rules()
+    for holding in user_data.holdings:
+        if holding.security_type != "equity" or holding.market != idea.market:
+            continue
+        is_same_company = same_company(
+            holding.market,
+            holding.isin,
+            holding.symbol,
+            idea.market,
+            idea.isin,
+            idea.symbol,
+            user_data.lookthrough_company_keys,
+            rules=rules,
+        )
+        if holding.security_id != idea.security_id and (not is_same_company):
+            continue
+        value = _holding_value(holding, market.fx_rates) or Decimal(0)
+        direct_total += value
+        member_id = holding.member_id or self_member_id
+        direct_by_member[member_id] = direct_by_member.get(member_id, Decimal(0)) + value
+
+    through_total = user_data.through_fund_inr.get(idea.security_id, Decimal(0))
+    owned_total = direct_total + through_total
+    enough = False
+    inr_per_dkk = market.fx_rates.get("DKK/INR")
+    if idea.market == "IN":
+        buying_rules = load_buying_rules()
+        satellite = buying_rules["satellite"]
+        india_target = Decimal(plan.allocation.get("equity_india", {}).get("target", "0"))
+        global_target = Decimal(plan.allocation.get("equity_global", {}).get("target", "0"))
+        total_equity = india_target + global_target
+        satellite_target = india_target * user_data.investing.satellite_pct / Decimal(100)
+        held_satellite = Decimal(0)
+        sector_value = Decimal(0)
+        for holding in user_data.holdings:
+            if holding.market != "IN" or holding.security_type != "equity":
+                continue
+            value = _holding_value(holding, market.fx_rates) or Decimal(0)
+            held_satellite += value
+            if (holding.sector or "unknown") == idea.sector:
+                sector_value += value
+        stock_cap = (
+            total_equity * Decimal(str(satellite["max_stock_pct_of_total_equity"])) / Decimal(100)
+        )
+        sector_cap = (
+            satellite_target * Decimal(str(satellite["max_sector_pct_of_satellite"])) / Decimal(100)
+        )
+        room = india_stock_room(
+            max_stock=stock_cap,
+            direct_value=direct_total,
+            through_funds_value=through_total,
+            sector_room=sector_cap - sector_value,
+            satellite_gap=satellite_target - held_satellite,
+            price=idea.price,
+            min_action=Decimal(str(buying_rules["min_action_inr"])),
+        )
+        enough = room == 0
+    else:
+        settings = load_eu_etfs().get("selection", {}).get("stock_picks", {})
+        minimum_buy = Decimal(str(settings.get("minimum_buy_dkk", "2000")))
+        maximum_pct = Decimal(str(settings.get("per_stock_max_pct_of_investable_wealth", "5")))
+        eligible = [
+            context
+            for context in member_contexts.values()
+            if context.residency.country == "DK" and context.member.investing.us_stock_picks_opt_in
+        ]
+        has_room = False
+        if inr_per_dkk is not None and inr_per_dkk > 0:
+            for context in eligible:
+                held_inr = direct_by_member.get(context.member_id, Decimal(0))
+                held_inr += user_data.through_fund_by_member_security.get(
+                    (context.member_id, idea.security_id), Decimal(0)
+                )
+                held_dkk = dkk_from_inr(held_inr, inr_per_dkk)
+                cap_dkk = (
+                    context.snapshot.investable_total / inr_per_dkk * maximum_pct / Decimal(100)
+                )
+                if (
+                    us_stock_room(
+                        per_stock_cap=cap_dkk,
+                        held_dkk=held_dkk,
+                        available_dkk=cap_dkk,
+                        minimum_buy_dkk=minimum_buy,
+                    )
+                    > 0
+                ):
+                    has_room = True
+                    break
+        enough = bool(eligible) and not has_room
+
+    status: Literal["none", "some", "enough"] = (
+        "none" if owned_total <= 0 else "enough" if enough else "some"
+    )
+    eligible_denmark_member = any(
+        context.residency.country == "DK" and context.member.investing.us_stock_picks_opt_in
+        for context in member_contexts.values()
+    )
+    ownership_currency: Literal["INR", "DKK"] = (
+        "DKK"
+        if idea.market == "US"
+        and eligible_denmark_member
+        and inr_per_dkk is not None
+        and inr_per_dkk > 0
+        else "INR"
+    )
+    direct_in_currency = (
+        dkk_from_inr(direct_total, inr_per_dkk)
+        if ownership_currency == "DKK" and inr_per_dkk is not None
+        else direct_total
+    )
+    through_in_currency = (
+        dkk_from_inr(through_total, inr_per_dkk)
+        if ownership_currency == "DKK" and inr_per_dkk is not None
+        else through_total
+    )
+    funds = []
+    for part in user_data.through_fund_parts.get(idea.security_id, ())[:3]:
+        amount = (
+            dkk_from_inr(part.amount_inr, inr_per_dkk)
+            if ownership_currency == "DKK" and inr_per_dkk is not None
+            else part.amount_inr
+        )
+        funds.append(
+            IdeaOwnershipFund(
+                name=part.name,
+                amount_inr=format(round_paise(part.amount_inr), ".2f"),
+                amount=format(round_paise(amount), ".2f"),
+                estimated=part.proxy,
+            )
+        )
+    return IdeaOwnership(
+        direct_inr=format(round_paise(direct_total), ".2f"),
+        through_funds_inr=format(round_paise(through_total), ".2f"),
+        direct=format(round_paise(direct_in_currency), ".2f"),
+        through_funds=format(round_paise(through_in_currency), ".2f"),
+        currency=ownership_currency,
+        status=status,
+        funds=funds,
+    )
 
 
 def _compute_if_stale(user: Any, today: date) -> WeeklyPlanResponse:
@@ -587,6 +841,22 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                 index_funds=index_funds,
                 us_market=us_market,
             )
+        user_data, market, research = load_policy_inputs(
+            user.session,
+            user.household_owner_id,
+            selected_week,
+            today,
+            deployment_mode=getattr(user, "deployment_mode", "personal"),
+        )
+        current_plan = personalise(
+            user_data,
+            market,
+            research,
+            selected_week,
+            today,
+            apply_weekly_spending=False,
+        )
+        member_contexts = _member_contexts_for_ownership(user_data, market, today)
         prepared_ideas: list[tuple[SatelliteIdea, Any, Any, UUID | None]] = []
         for raw in record.pack.get("ideas", []):
             if not isinstance(raw, dict):
@@ -633,6 +903,13 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                         ResearchIdeaWhy.model_validate(raw_why)
                         if isinstance(raw_why, dict)
                         else None
+                    ),
+                    owned=_idea_ownership(
+                        idea,
+                        user_data,
+                        market,
+                        current_plan,
+                        member_contexts,
                     ),
                 )
             )

@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 import { Lightbulb } from "lucide-react";
 import { formatInr, formatUsd } from "../lib/money";
+import { formatDkk } from "../household/fx";
 import {
   asArray,
   asRecord,
@@ -53,6 +54,21 @@ function usdAmount(raw: unknown): string {
   if ((match[3]?.[0] ?? "0") >= "5") amount += 1n;
   if (match[1]) amount = -amount;
   return `USD ${new Intl.NumberFormat("en-US").format(amount)}`;
+}
+
+function addInrAmounts(left: string, right: string): string {
+  const toPaise = (value: string): bigint => {
+    const match = /^(-?)(\d+)(?:\.(\d+))?$/.exec(value.trim());
+    if (!match) return 0n;
+    const whole = BigInt(match[2] ?? "0");
+    const fraction = BigInt((match[3] ?? "").padEnd(2, "0").slice(0, 2));
+    const amount = whole * 100n + fraction;
+    return match[1] ? -amount : amount;
+  };
+  const total = toPaise(left) + toPaise(right);
+  const sign = total < 0n ? "-" : "";
+  const magnitude = total < 0n ? -total : total;
+  return `${sign}${magnitude / 100n}.${String(magnitude % 100n).padStart(2, "0")}`;
 }
 
 function DenmarkBuyCard({ plan }: { plan?: WeeklyPlan }) {
@@ -478,21 +494,36 @@ function SelectorFunds({ research }: { research?: ResearchIdeasResponse }) {
   );
 }
 
+function groupIdeasByMarket(ideas: unknown[]): Map<string, unknown[]> {
+  const groups = new Map<string, unknown[]>();
+  for (const raw of ideas) {
+    const market = textValue(asRecord(raw).market, "Other");
+    groups.set(market, [...(groups.get(market) ?? []), raw]);
+  }
+  return groups;
+}
+
 function splitIdeasByMarket(ideas: unknown[]): {
   top: Map<string, unknown[]>;
   rest: Map<string, unknown[]>;
+  alreadyOwned: unknown[];
 } {
   const top = new Map<string, unknown[]>();
   const rest = new Map<string, unknown[]>();
   const counts = new Map<string, number>();
+  const alreadyOwned: unknown[] = [];
   for (const raw of ideas) {
+    if (textValue(asRecord(asRecord(raw).owned).status) === "enough") {
+      alreadyOwned.push(raw);
+      continue;
+    }
     const market = textValue(asRecord(raw).market, "Other");
     const count = counts.get(market) ?? 0;
     const target = count < 3 ? top : rest;
     target.set(market, [...(target.get(market) ?? []), raw]);
     counts.set(market, count + 1);
   }
-  return { top, rest };
+  return { top, rest, alreadyOwned };
 }
 
 function ideaMarketLabel(market: string): string {
@@ -523,6 +554,40 @@ function ResearchIdea({
     .map((reason) => textValue(reason))
     .filter(Boolean);
   const whyRisk = textValue(why.risk);
+  const ownership = asRecord(idea.owned);
+  const ownershipStatus = textValue(ownership.status);
+  const ownershipCurrency = textValue(ownership.currency, "INR");
+  const directOwned = textValue(ownership.direct ?? ownership.direct_inr, "0");
+  const throughOwned = textValue(
+    ownership.through_funds ?? ownership.through_funds_inr,
+    "0",
+  );
+  const ownedFunds = asArray(ownership.funds).slice(0, 3);
+  const hasDirectOwned = Number(directOwned) > 0;
+  const hasThroughOwned = Number(throughOwned) > 0;
+  const formatOwnedAmount = (amount: string) =>
+    ownershipCurrency === "DKK"
+      ? formatDkk(amount)
+      : formatInr(amount, "compact");
+  const ownershipLine =
+    ownershipStatus !== "some" && ownershipStatus !== "enough"
+      ? null
+      : hasThroughOwned && hasDirectOwned
+        ? englishCopy.ideas.owned_direct_and_funds
+            .replace(
+              "{total}",
+              formatOwnedAmount(addInrAmounts(directOwned, throughOwned)),
+            )
+            .replace("{through}", formatOwnedAmount(throughOwned))
+        : hasThroughOwned
+          ? englishCopy.ideas.owned_funds_only.replace(
+              "{amount}",
+              formatOwnedAmount(throughOwned),
+            )
+          : englishCopy.ideas.owned_direct_only.replace(
+              "{amount}",
+              formatOwnedAmount(directOwned),
+            );
   const hint = asRecord(idea.entry_hint);
   const hintCode = textValue(hint.code);
   const hintParts = Number(hint.parts);
@@ -577,6 +642,11 @@ function ResearchIdea({
         {hintLine ? (
           <p className="mt-1 text-sm font-medium">{hintLine}</p>
         ) : null}
+        {ownershipLine ? (
+          <p className="mt-1 min-w-0 break-words text-sm text-muted-foreground [overflow-wrap:anywhere]">
+            {ownershipLine}
+          </p>
+        ) : null}
         <div className="mt-1 flex items-baseline justify-between gap-3">
           <p className="min-w-0 truncate text-sm text-muted-foreground">
             {textValue(idea.sector, "Sector unavailable")}
@@ -587,7 +657,10 @@ function ResearchIdea({
             </p>
           ) : null}
         </div>
-        {whyReasons.length || whyRisk || hintReasons.length ? (
+        {whyReasons.length ||
+        whyRisk ||
+        hintReasons.length ||
+        ownedFunds.length ? (
           <details className="mt-1">
             <summary className="min-h-9 cursor-pointer py-1 text-sm text-muted-foreground">
               {englishCopy.ideas.why_this_idea}
@@ -616,6 +689,38 @@ function ResearchIdea({
                   {hintReasons.join(" ")}
                 </p>
               ) : null}
+              {ownedFunds.length ? (
+                <div>
+                  <p className="font-medium text-foreground">
+                    {englishCopy.ideas.owned_details_title}
+                  </p>
+                  <ul className="grid gap-1">
+                    {ownedFunds.map((rawFund, fundIndex) => {
+                      const fund = asRecord(rawFund);
+                      const estimate =
+                        fund.estimated === true
+                          ? englishCopy.ideas.owned_estimate
+                          : "";
+                      return (
+                        <li
+                          className="break-words [overflow-wrap:anywhere]"
+                          key={`${symbol}-fund-${fundIndex}`}
+                        >
+                          {englishCopy.ideas.owned_fund_detail
+                            .replace("{name}", textValue(fund.name))
+                            .replace(
+                              "{amount}",
+                              formatOwnedAmount(
+                                textValue(fund.amount ?? fund.amount_inr, "0"),
+                              ),
+                            )
+                            .replace("{estimate}", estimate)}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ) : null}
             </div>
           </details>
         ) : null}
@@ -643,7 +748,7 @@ function IdeaGroups({
   return (
     <div className="grid gap-3">
       {[...groups].map(([market, ideas]) => (
-        <section key={market} aria-label={ideaMarketLabel(market)}>
+        <div key={market}>
           <h3 className="text-sm font-semibold">{ideaMarketLabel(market)}</h3>
           <div className="grid gap-3">
             {ideas.map((raw, index) => (
@@ -655,7 +760,7 @@ function IdeaGroups({
               />
             ))}
           </div>
-        </section>
+        </div>
       ))}
     </div>
   );
@@ -693,6 +798,25 @@ function ResearchCard({
               </summary>
               <div className="pt-3">
                 <IdeaGroups groups={groups.rest} actions={actions} />
+              </div>
+            </details>
+          ) : null}
+          {groups.alreadyOwned.length ? (
+            <details className="border-t border-line pt-3">
+              <summary className="min-h-12 cursor-pointer text-sm font-semibold text-brand">
+                {englishCopy.ideas.already_in_funds_title.replace(
+                  "{count}",
+                  String(groups.alreadyOwned.length),
+                )}
+              </summary>
+              <div className="grid gap-3 pt-2">
+                <p className="text-sm text-muted-foreground">
+                  {englishCopy.ideas.already_enough_intro}
+                </p>
+                <IdeaGroups
+                  groups={groupIdeasByMarket(groups.alreadyOwned)}
+                  actions={actions}
+                />
               </div>
             </details>
           ) : null}

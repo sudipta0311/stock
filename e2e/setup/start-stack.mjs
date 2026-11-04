@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
-import { mkdir } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,6 +12,7 @@ const webRoot = join(repositoryRoot, "apps", "web");
 const reportDir = join(repositoryRoot, "out", "e2e");
 const processes = new Set();
 let databaseProcess;
+let databaseSetupHandoff;
 
 function pythonExecutable() {
   const localPython = join(repositoryRoot, ".venv", "Scripts", "python.exe");
@@ -46,6 +47,9 @@ function removeE2eEnvironment(environment) {
     "E2E_CAS_PATH",
     "E2E_CAS_PASSWORD",
     "E2E_SCHEMA_NAME",
+    "E2E_SETUP_FILE_HANDOFF",
+    "E2E_SETUP_OUTPUT_FILE",
+    "E2E_SETUP_RELEASE_FILE",
   ]) {
     delete environment[name];
   }
@@ -98,6 +102,27 @@ function waitForJsonLine(child) {
       reject(new Error("Database setup process stopped.")),
     );
   });
+}
+
+async function waitForSetupFile(child, outputPath, timeoutMs = 90_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error("Database setup process stopped.");
+    }
+    try {
+      const value = JSON.parse(await readFile(outputPath, "utf8"));
+      if (value.api_database_url && value.api_secret) {
+        await rm(outputPath, { force: true });
+        await rm(`${outputPath}.pending`, { force: true });
+        return value;
+      }
+    } catch (error) {
+      if (error?.code !== "ENOENT" && !(error instanceof SyntaxError)) throw error;
+    }
+    await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
+  }
+  throw new Error("Database setup process did not become ready in time.");
 }
 
 function spawnQuiet(command, args, options) {
@@ -170,8 +195,18 @@ async function stopStack() {
     await waitForExit(child);
   }
   if (databaseProcess && databaseProcess.exitCode === null) {
-    databaseProcess.stdin.end();
+    if (databaseSetupHandoff) {
+      await writeFile(databaseSetupHandoff.releasePath, "release\n", { flag: "w" });
+    } else {
+      databaseProcess.stdin.end();
+    }
     await waitForExit(databaseProcess, 35_000);
+  }
+  if (databaseSetupHandoff) {
+    await rm(databaseSetupHandoff.outputPath, { force: true });
+    await rm(`${databaseSetupHandoff.outputPath}.pending`, { force: true });
+    await rm(databaseSetupHandoff.releasePath, { force: true });
+    databaseSetupHandoff = undefined;
   }
 }
 
@@ -211,18 +246,32 @@ export default async function globalSetup() {
     removeDatabaseEnvironment(cleanEnvironment()),
   );
   databaseEnvironment.PYTHONDONTWRITEBYTECODE = "1";
+  const useFileHandoff = process.env.E2E_SETUP_FILE_HANDOFF === "1";
+  if (useFileHandoff) {
+    const runId = `${process.pid}-${Date.now()}`;
+    databaseSetupHandoff = {
+      outputPath: join(reportDir, `database-setup-${runId}.json`),
+      releasePath: join(reportDir, `database-release-${runId}.signal`),
+    };
+    databaseEnvironment.E2E_SETUP_OUTPUT_FILE = databaseSetupHandoff.outputPath;
+    databaseEnvironment.E2E_SETUP_RELEASE_FILE = databaseSetupHandoff.releasePath;
+  }
   databaseProcess = spawnQuiet(
     pythonExecutable(),
     ["-m", "scripts.e2e_database", "setup"],
-    {
-      cwd: repositoryRoot,
-      env: databaseEnvironment,
-      stdio: ["pipe", "pipe", "ignore"],
-    },
+    useFileHandoff
+      ? { cwd: repositoryRoot, env: databaseEnvironment }
+      : {
+          cwd: repositoryRoot,
+          env: databaseEnvironment,
+          stdio: ["pipe", "pipe", "ignore"],
+        },
   );
 
   try {
-    const database = await waitForJsonLine(databaseProcess);
+    const database = useFileHandoff
+      ? await waitForSetupFile(databaseProcess, databaseSetupHandoff.outputPath)
+      : await waitForJsonLine(databaseProcess);
     const apiPort = await freePort();
     const webPort = await freePort();
     const apiOrigin = `http://127.0.0.1:${apiPort}`;

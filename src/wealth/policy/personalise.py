@@ -58,6 +58,12 @@ from wealth.policy.loans import (
     load_tax_relief_rules,
     pay_extra_or_invest,
 )
+from wealth.policy.lookthrough import (
+    CompanyKey,
+    FundPart,
+    load_lookthrough_rules,
+    same_company,
+)
 from wealth.policy.placement import place_actions
 from wealth.policy.rebalance import band_breaches
 from wealth.policy.residency import (
@@ -135,6 +141,9 @@ class HoldingInput:
     joint: bool = False
     cost_value_inr: Decimal = Decimal(0)
     fallback_value_inr: Decimal = Decimal(0)
+    name: str = ""
+    isin: str | None = None
+    sub_category: str | None = None
 
 
 @dataclass(frozen=True)
@@ -189,6 +198,13 @@ class UserData:
     deployment_mode: Literal["personal", "public"] = "personal"
     recorded_buys: tuple[RecordedBuyInput, ...] = ()
     weekly_spending: tuple[WeeklySpendInput, ...] = ()
+    through_fund_inr: Mapping[str, Decimal] = field(default_factory=dict)
+    through_fund_by_member_security: Mapping[tuple[str, str], Decimal] = field(default_factory=dict)
+    through_fund_parts: Mapping[str, tuple[FundPart, ...]] = field(default_factory=dict)
+    lookthrough_as_of: Mapping[str, date] = field(default_factory=dict)
+    lookthrough_company_keys: Mapping[tuple[str, str], tuple[CompanyKey, ...]] = field(
+        default_factory=dict
+    )
 
 
 @dataclass(frozen=True)
@@ -611,6 +627,8 @@ def _abroad_action_rows(
     holdings: Sequence[HoldingInput],
     market: MarketContext,
     research: ResearchPack | None,
+    through_fund_by_member_security: Mapping[tuple[str, str], Decimal],
+    lookthrough_company_keys: Mapping[tuple[str, str], tuple[CompanyKey, ...]] | None = None,
 ) -> tuple[list[Action], list[dict[str, Any]], Decimal, list[str]]:
     """Replace Danish foreign buys with sourced instruments and code-sized DKK lines."""
     profiles = {member.id: member for member in members}
@@ -698,6 +716,35 @@ def _abroad_action_rows(
             investable_dkk = dkk_from_inr(investable_inr, inr_per_dkk)
             stock_budget = total_dkk * member.investing.us_stock_picks_pct / Decimal(100)
             selected_ideas = research.ideas if research is not None else ()
+            lookthrough_rules = load_lookthrough_rules()
+            held_dkk_by_security: dict[str, Decimal] = {}
+            for idea in selected_ideas:
+                direct_inr = sum(
+                    (
+                        _holding_value(holding, market.fx_rates) or Decimal(0)
+                        for holding in holdings
+                        if holding.member_id == member.id
+                        and holding.market == "US"
+                        and holding.security_type == "equity"
+                        and same_company(
+                            holding.market,
+                            holding.isin,
+                            holding.symbol,
+                            idea.market,
+                            idea.isin,
+                            idea.symbol,
+                            lookthrough_company_keys or {},
+                            rules=lookthrough_rules,
+                        )
+                    ),
+                    Decimal(0),
+                )
+                through_inr = through_fund_by_member_security.get(
+                    (member.id, idea.security_id), Decimal(0)
+                )
+                held_dkk_by_security[idea.security_id] = dkk_from_inr(
+                    direct_inr + through_inr, inr_per_dkk
+                )
             stock_buys = approved_us_stock_buys(
                 selected_ideas,
                 investable_wealth_dkk=investable_dkk,
@@ -711,6 +758,7 @@ def _abroad_action_rows(
                         .get("minimum_buy_dkk", "2000")
                     )
                 ),
+                held_dkk_by_security=held_dkk_by_security,
             )
             stock_total = sum((amount for _idea, amount in stock_buys), Decimal(0))
             stock_tax_rules = load_eu_etfs().get("selection", {}).get("us_stock_tax", {})
@@ -1551,6 +1599,7 @@ def personalise(
         debt_picks=debt_picks,
         satellite_pct=user_data.investing.satellite_pct,
         satellite_holdings=satellite_holdings,
+        through_fund_inr=dict(user_data.through_fund_inr),
         ideas=ideas,
         index_valuation_percentile=index_percentiles,
         week=week,
@@ -1721,6 +1770,8 @@ def personalise(
         user_data.holdings,
         market,
         selected_research,
+        user_data.through_fund_by_member_security,
+        user_data.lookthrough_company_keys,
     )
     carry_forward = round_paise(carry_forward + abroad_carry)
     if apply_weekly_spending:

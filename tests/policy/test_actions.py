@@ -1,10 +1,13 @@
 """Worked examples for weekly deterministic policy actions."""
 
 from collections.abc import Mapping
+from dataclasses import replace
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 
+from wealth.api.personalisation import _idea_ownership
 from wealth.policy.actions import (
     SatelliteHolding,
     SatelliteIdea,
@@ -17,7 +20,10 @@ from wealth.policy.actions import (
 from wealth.policy.allocation import AllocationPlan
 from wealth.policy.debt_picker import DebtPick
 from wealth.policy.foundation import FoundationItem, FoundationReport
+from wealth.policy.household import MemberProfile
+from wealth.policy.personalise import MarketContext, PolicyProfile, UserData
 from wealth.policy.routes import RouteDecision
+from wealth.schemas.profile import FinancialContext, InvestingPrefs
 
 
 def _plan(gaps: Mapping[str, Decimal] | None = None) -> AllocationPlan:
@@ -106,6 +112,7 @@ def _week_input(
     debt_picks: list[DebtPick] | None = None,
     satellite_pct: str = "20",
     holdings: list[SatelliteHolding] | None = None,
+    through_fund_inr: dict[str, Decimal] | None = None,
     ideas: list[SatelliteIdea] | None = None,
     valuation_in: str = "50",
     valuation_us: str = "50",
@@ -120,12 +127,39 @@ def _week_input(
         debt_picks=[_instant_pick()] if debt_picks is None else debt_picks,
         satellite_pct=Decimal(satellite_pct),
         satellite_holdings=[] if holdings is None else holdings,
+        through_fund_inr={} if through_fund_inr is None else through_fund_inr,
         ideas=[] if ideas is None else ideas,
         index_valuation_percentile={
             "IN": Decimal(valuation_in),
             "US": Decimal(valuation_us),
         },
         week="2026-W45",
+    )
+
+
+def _india_target_plan(target: str, *, gap: str = "200000") -> AllocationPlan:
+    gaps = {
+        "equity_india": Decimal(gap),
+        "equity_global": Decimal(0),
+        "debt": Decimal(0),
+        "gold": Decimal(0),
+        "cash": Decimal(0),
+    }
+    base = _plan(gaps)
+    targets = dict(base.target_rupees)
+    targets["equity_india"] = Decimal(target)
+    targets["equity_global"] = Decimal(0)
+    current = dict(base.current_rupees)
+    current["equity_india"] = Decimal(target) - Decimal(gap)
+    current["equity_global"] = Decimal(0)
+    return replace(
+        base,
+        target_rupees=targets,
+        current_rupees=current,
+        current_equity_rupees={
+            "equity_india": current["equity_india"],
+            "equity_global": Decimal(0),
+        },
     )
 
 
@@ -289,6 +323,202 @@ def test_satellite_buy_obeys_caps_and_rounds_core_remainder() -> None:
     assert stock.tranche == {"n": "1", "of": "3"}
     assert core.amount == Decimal("11500.00")
     assert result.carry_forward == Decimal("160.00")
+
+
+@pytest.mark.parametrize(
+    ("equity_target", "expected_stock_amount", "expected_core_amount", "expected_note"),
+    [
+        ("6000000", None, "200000.00", True),
+        ("8000000", "79000.00", "121000.00", False),
+    ],
+)
+def test_india_stock_room_counts_the_household_fund_example(
+    equity_target: str,
+    expected_stock_amount: str | None,
+    expected_core_amount: str,
+    expected_note: bool,
+) -> None:
+    idea = SatelliteIdea(
+        security_id="synthetic-hdfc",
+        symbol="BANKX",
+        market="IN",
+        sector="Banks",
+        price=Decimal("1000"),
+        quant_decile=10,
+        dossier_status="APPROVED",
+        valuation_percentile=Decimal("42"),
+        confidence="HIGH",
+    )
+    result = build_action_list(
+        _week_input(
+            plan=_india_target_plan(equity_target),
+            new_money="200000",
+            capacity="0",
+            holdings=[
+                SatelliteHolding(
+                    security_id="synthetic-hdfc",
+                    sector="Banks",
+                    value=Decimal("50000"),
+                )
+            ],
+            ideas=[idea],
+            through_fund_inr={"synthetic-hdfc": Decimal("271000")},
+        )
+    )
+    stock = next(
+        (action for action in result.actions if action.kind == "BUY_STOCK_TRANCHE"),
+        None,
+    )
+    core = next(
+        action for action in result.actions if action.instrument_category == "in_core_index"
+    )
+
+    assert (format(stock.amount, ".2f") if stock else None) == expected_stock_amount
+    assert core.amount == Decimal(expected_core_amount)
+    assert ("stock_owned_through_funds:synthetic-hdfc" in result.notes) is expected_note
+
+
+@pytest.mark.parametrize(
+    ("through_funds", "expected_status", "has_stock_step"),
+    [
+        ("395000", "enough", False),
+        ("393000", "some", True),
+    ],
+)
+def test_ideas_enough_status_matches_india_plan_share_room(
+    through_funds: str,
+    expected_status: str,
+    has_stock_step: bool,
+) -> None:
+    idea = SatelliteIdea(
+        security_id="synthetic-room-idea",
+        symbol="ROOM",
+        market="IN",
+        sector="Technology",
+        price=Decimal("6000"),
+        quant_decile=10,
+        dossier_status="APPROVED",
+        valuation_percentile=Decimal("35"),
+        confidence="HIGH",
+    )
+    through_amount = Decimal(through_funds)
+    user_data = UserData(
+        profile=PolicyProfile(),
+        financial_context=FinancialContext(monthly_expenses=Decimal("10000")),
+        goals=(),
+        valued_assets=(),
+        holdings=(),
+        investing=InvestingPrefs(satellite_pct=Decimal("20")),
+        members=(MemberProfile(id="owner", name="Owner", relationship="self", is_self=True),),
+        through_fund_inr={idea.security_id: through_amount},
+    )
+    market = MarketContext(
+        fx_rates={},
+        debt_yields={},
+        index_valuation_percentiles={"IN": Decimal("50"), "US": Decimal("50")},
+    )
+    idea_status = _idea_ownership(
+        idea,
+        user_data,
+        market,
+        SimpleNamespace(
+            allocation={
+                "equity_india": {"target": "8000000"},
+                "equity_global": {"target": "0"},
+            }
+        ),
+        {},
+    )
+    plan_result = build_action_list(
+        _week_input(
+            plan=_india_target_plan("8000000"),
+            new_money="200000",
+            capacity="0",
+            ideas=[idea],
+            through_fund_inr={idea.security_id: through_amount},
+        )
+    )
+    has_plan_step = any(action.kind == "BUY_STOCK_TRANCHE" for action in plan_result.actions)
+
+    assert idea_status.status == expected_status
+    assert has_plan_step is has_stock_step
+    assert (idea_status.status == "enough") is (not has_plan_step)
+
+
+def test_india_fund_amount_does_not_reduce_the_direct_sector_room() -> None:
+    idea = SatelliteIdea(
+        security_id="synthetic-bank",
+        symbol="BANKX",
+        market="IN",
+        sector="Banks",
+        price=Decimal("1000"),
+        quant_decile=10,
+        dossier_status="APPROVED",
+        valuation_percentile=Decimal("42"),
+        confidence="HIGH",
+    )
+    result = build_action_list(
+        _week_input(
+            plan=_india_target_plan("8000000"),
+            new_money="200000",
+            capacity="0",
+            holdings=[
+                SatelliteHolding(
+                    security_id="synthetic-bank",
+                    sector="Banks",
+                    value=Decimal("50000"),
+                ),
+                SatelliteHolding(
+                    security_id="synthetic-other-bank",
+                    sector="Banks",
+                    value=Decimal("150000"),
+                ),
+            ],
+            ideas=[idea],
+            through_fund_inr={"synthetic-bank": Decimal("250000")},
+        )
+    )
+    stock = next(action for action in result.actions if action.kind == "BUY_STOCK_TRANCHE")
+
+    assert stock.amount == Decimal("100000.00")
+
+
+def test_india_fund_amount_does_not_reduce_the_direct_satellite_gap() -> None:
+    idea = SatelliteIdea(
+        security_id="synthetic-bank",
+        symbol="BANKX",
+        market="IN",
+        sector="Banks",
+        price=Decimal("1000"),
+        quant_decile=10,
+        dossier_status="APPROVED",
+        valuation_percentile=Decimal("42"),
+        confidence="HIGH",
+    )
+    result = build_action_list(
+        _week_input(
+            plan=_india_target_plan("8000000", gap="200000"),
+            new_money="200000",
+            capacity="0",
+            holdings=[
+                SatelliteHolding(
+                    security_id="synthetic-bank",
+                    sector="Banks",
+                    value=Decimal("50000"),
+                ),
+                SatelliteHolding(
+                    security_id="synthetic-other-sector",
+                    sector="Other",
+                    value=Decimal("1500000"),
+                ),
+            ],
+            ideas=[idea],
+            through_fund_inr={"synthetic-bank": Decimal("300000")},
+        )
+    )
+    stock = next(action for action in result.actions if action.kind == "BUY_STOCK_TRANCHE")
+
+    assert stock.amount == Decimal("50000.00")
 
 
 @pytest.mark.parametrize("gate", ["valuation", "dossier", "decile", "sector"])

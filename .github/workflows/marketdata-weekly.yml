@@ -34,7 +34,7 @@ jobs:
         # A few companies without usable filings make a source "partial"; only "failed" stops the job.
         run: |
           failed=0
-          for source in universes nse_history edgar us_index_pe nse_fundamentals; do
+          for source in fund_baskets universes nse_history edgar us_index_pe nse_fundamentals; do
             python -m wealth.marketdata.refresh --only "$source" > "refresh-$source.json" || true
             cat "refresh-$source.json"
             status=$(jq -r '.status' "refresh-$source.json" 2>/dev/null || true)

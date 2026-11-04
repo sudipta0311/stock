@@ -13,6 +13,7 @@ from typing import Any, Literal
 import yaml
 
 from wealth.policy.actions import SatelliteIdea
+from wealth.policy.lookthrough import remaining_stock_room
 
 _RULES_PATH = Path(__file__).resolve().parents[3] / "rules" / "eu_etfs.yaml"
 _SIZE_RANK = {"small": 0, "medium": 1, "large": 2}
@@ -254,6 +255,7 @@ def approved_us_stock_buys(
     satellite_pct: Decimal,
     max_per_stock_pct: Decimal = Decimal("5"),
     minimum_buy_dkk: Decimal = Decimal("2000"),
+    held_dkk_by_security: Mapping[str, Decimal] | None = None,
 ) -> list[tuple[Mapping[str, Any] | SatelliteIdea, Decimal]]:
     """Size only approved US ideas, with code-owned total and per-stock caps."""
     if investable_wealth_dkk <= 0 or available_dkk <= 0:
@@ -262,6 +264,7 @@ def approved_us_stock_buys(
     total_cap = investable_wealth_dkk * total_pct / Decimal(100)
     per_stock_cap = investable_wealth_dkk * max_per_stock_pct / Decimal(100)
     remaining = min(available_dkk, total_cap)
+    held = held_dkk_by_security or {}
     sorted_ideas = sorted(
         ideas,
         key=lambda idea: (
@@ -279,15 +282,33 @@ def approved_us_stock_buys(
             )
         ):
             continue
-        amount = min(remaining, per_stock_cap)
-        amount = amount.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
-        if amount < minimum_buy_dkk:
+        security_id = str(_idea_value(idea, "security_id") or "")
+        amount = us_stock_room(
+            per_stock_cap=per_stock_cap,
+            held_dkk=held.get(security_id, Decimal(0)),
+            available_dkk=remaining,
+            minimum_buy_dkk=minimum_buy_dkk,
+        )
+        if amount <= 0:
             continue
         output.append((idea, amount))
         remaining -= amount
         if remaining < minimum_buy_dkk:
             break
     return output
+
+
+def us_stock_room(
+    *,
+    per_stock_cap: Decimal,
+    held_dkk: Decimal,
+    available_dkk: Decimal,
+    minimum_buy_dkk: Decimal,
+) -> Decimal:
+    """Return whole-kroner room only when it meets the US-pick minimum."""
+    room = remaining_stock_room(per_stock_cap, held_dkk, Decimal(0), available_dkk)
+    amount = room.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    return amount if amount >= minimum_buy_dkk else Decimal(0)
 
 
 def _idea_value(idea: Mapping[str, Any] | SatelliteIdea, key: str) -> Any:

@@ -1117,8 +1117,12 @@ def test_recorded_buy_migration_can_downgrade_and_upgrade(
         assert member_fk["options"]["deferrable"] is True
         deferrable, initially_deferred = connection.execute(
             text(
-                "SELECT condeferrable, condeferred FROM pg_constraint "
-                "WHERE conname = 'fk_recorded_buys_member_tenant'"
+                "SELECT con.condeferrable, con.condeferred "
+                "FROM pg_constraint AS con "
+                "JOIN pg_class AS rel ON rel.oid = con.conrelid "
+                "JOIN pg_namespace AS ns ON ns.oid = rel.relnamespace "
+                "WHERE con.conname = 'fk_recorded_buys_member_tenant' "
+                "AND ns.nspname = current_schema()"
             )
         ).one()
         assert deferrable is True

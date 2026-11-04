@@ -23,7 +23,8 @@ SPY_NAV_HISTORY_URL = (
     "navhist-us-en-spy.xlsx"
 )
 SP500_SECTORS_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-NIFTY500_ARCHIVE_URL = "https://archives.nseindia.com/content/indices/ind_nifty500list.csv"
+NIFTY_ARCHIVE_URL = "https://archives.nseindia.com/content/indices/ind_{index}list.csv"
+NIFTY500_ARCHIVE_URL = NIFTY_ARCHIVE_URL.format(index="nifty500")
 SP500_SOURCE = "SSGA_SPY_HOLDINGS"
 SP500_PRICE_SOURCE = "SSGA_SPY_IMPLIED"
 NIFTY500_SOURCE = "NSE_NIFTY500_ARCHIVE"
@@ -42,6 +43,8 @@ class UniverseSecurity:
     industry: str = "Unclassified"
     weight_pct: Decimal | None = None
     shares_held: Decimal | None = None
+    cusip: str | None = None
+    sedol: str | None = None
 
 
 @dataclass(frozen=True)
@@ -146,6 +149,8 @@ def parse_sp500_holdings(content: bytes) -> Sp500Holdings:
                     industry=industry_label,
                     weight_pct=_decimal(_field(raw, "Weight")),
                     shares_held=_decimal(_field(raw, "Shares Held")),
+                    cusip=_field(raw, "Identifier", "CUSIP"),
+                    sedol=_field(raw, "SEDOL"),
                 )
             )
         as_of = _parse_sp500_as_of(metadata.get("holdings"))
@@ -342,4 +347,12 @@ def parse_nifty500_csv(text: str) -> list[NseSecurity]:
 
 
 def fetch_nifty500() -> list[NseSecurity]:
-    return parse_nifty500_csv(get(NIFTY500_ARCHIVE_URL).text)
+    return parse_nifty500_csv(fetch_nifty_index_csv("nifty500"))
+
+
+def fetch_nifty_index_csv(index: str) -> str:
+    """Fetch one official NSE index member file using its public archive URL."""
+    normalized = index.strip().casefold()
+    if not re.fullmatch(r"nifty[a-z0-9]+", normalized):
+        raise ValueError("unsupported NSE index list")
+    return get(NIFTY_ARCHIVE_URL.format(index=normalized)).text

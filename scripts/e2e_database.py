@@ -8,11 +8,12 @@ import secrets
 import shutil
 import sys
 import tempfile
+import time
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
-from sqlalchemy import create_engine, select, text
+from sqlalchemy import create_engine, delete, select, text
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import Session
 from tests.db.migrated_database import MigratedDatabase, create_migrated_database
@@ -22,6 +23,8 @@ from wealth.api.fund_check import add_weekly_fund_action
 from wealth.db.models import (
     Account,
     Action,
+    FundBasket,
+    FundBasketWeight,
     FxRate,
     GoldPrice,
     HoldingLot,
@@ -88,6 +91,13 @@ def seed_market_data(database: MigratedDatabase) -> None:
                     source="e2e",
                     source_url="https://example.test/market/fx",
                 ),
+                FxRate(
+                    pair="USD/INR",
+                    as_of=today,
+                    rate=Decimal("83.00000000"),
+                    source="e2e",
+                    source_url="https://example.test/market/fx",
+                ),
                 GoldPrice(
                     as_of=today,
                     inr_per_gram_24k=Decimal("6500.000000"),
@@ -137,9 +147,28 @@ def _setup_stack() -> int:
                 "schema_name": database.schema_name,
                 "temporary_dir": str(temporary_dir),
             }
-            sys.stdout.write(json.dumps(setup, separators=(",", ":")) + "\n")
-            sys.stdout.flush()
-            sys.stdin.buffer.read()
+            output_path = os.getenv("E2E_SETUP_OUTPUT_FILE")
+            release_path = os.getenv("E2E_SETUP_RELEASE_FILE")
+            if bool(output_path) != bool(release_path):
+                raise RuntimeError("Both e2e setup handoff paths are required")
+            if output_path and release_path:
+                handoff = Path(output_path)
+                pending = handoff.with_suffix(handoff.suffix + ".pending")
+                pending.write_text(
+                    json.dumps(setup, separators=(",", ":")) + "\n",
+                    encoding="utf-8",
+                )
+                pending.replace(handoff)
+                deadline = time.monotonic() + 20 * 60
+                release = Path(release_path)
+                while not release.exists() and time.monotonic() < deadline:
+                    time.sleep(0.1)
+                if not release.exists():
+                    raise RuntimeError("The local e2e stack did not release its database")
+            else:
+                sys.stdout.write(json.dumps(setup, separators=(",", ":")) + "\n")
+                sys.stdout.flush()
+                sys.stdin.buffer.read()
         _assert_no_e2e_resources(owner_url)
         return 0
     finally:
@@ -288,7 +317,7 @@ def _seed_denmark_buy_action(email: str) -> int:
         engine.dispose()
 
 
-def _seed_research_pack() -> int:
+def _seed_research_pack(email: str) -> int:
     engine, _schema_name = _owner_engine()
     iso = date.today().isocalendar()
     week = f"{iso.year}-W{iso.week:02}"
@@ -304,6 +333,18 @@ def _seed_research_pack() -> int:
                 text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
                 {"lock_key": "c43-e2e-research-pack"},
             )
+            user = session.scalar(select(User).where(User.email == email.casefold()))
+            if user is None:
+                raise RuntimeError("The synthetic Ideas household was not found")
+            member = session.scalar(
+                select(HouseholdMember).where(
+                    HouseholdMember.user_id == user.id,
+                    HouseholdMember.is_self.is_(True),
+                )
+            )
+            if member is None:
+                raise RuntimeError("The synthetic Ideas household has no owner member")
+            member.investing = {**dict(member.investing or {}), "us_stock_picks_opt_in": True}
             ideas: list[dict[str, object]] = []
             for market, symbol, name, currency, price in scenarios:
                 security = session.scalar(
@@ -349,6 +390,91 @@ def _seed_research_pack() -> int:
                         },
                     }
                 )
+            fund = session.scalar(
+                select(Security).where(
+                    Security.market == "IN",
+                    Security.symbol == "C47-E2E-SP500-FUND",
+                )
+            )
+            if fund is None:
+                fund = Security(
+                    market="IN",
+                    symbol="C47-E2E-SP500-FUND",
+                    name="Synthetic S&P 500 fund",
+                    security_type="mf",
+                    currency="INR",
+                    sleeve="equity_global",
+                    category="equity:global",
+                    sub_category="International / FoF Overseas",
+                )
+                session.add(fund)
+                session.flush()
+            existing_lot = session.scalar(
+                select(HoldingLot).where(
+                    HoldingLot.user_id == user.id,
+                    HoldingLot.security_id == fund.id,
+                )
+            )
+            if existing_lot is None:
+                session.add(
+                    HoldingLot(
+                        user_id=user.id,
+                        member_id=member.id,
+                        security_id=fund.id,
+                        quantity=Decimal(1),
+                        source="manual",
+                        currency="INR",
+                        statement_value=Decimal("2000000"),
+                        statement_date=date.today(),
+                    )
+                )
+            basket = session.get(FundBasket, "sp500")
+            if basket is None:
+                basket = FundBasket(
+                    id="sp500",
+                    label="S&P 500",
+                    as_of=date.today(),
+                    source="synthetic_e2e",
+                    source_url="https://example.test/synthetic-sp500",
+                    weights_estimated=True,
+                    weight_source="synthetic_e2e",
+                    members_total=3,
+                    members_found=3,
+                )
+                session.add(basket)
+            else:
+                basket.as_of = date.today()
+                basket.members_total = 3
+                basket.members_found = 3
+            session.flush()
+            # A bulk delete runs now; ORM deletes would flush after the inserts below
+            # and trip the per-basket unique index when a second project reseeds.
+            session.execute(delete(FundBasketWeight).where(FundBasketWeight.basket_id == "sp500"))
+            session.add_all(
+                (
+                    FundBasketWeight(
+                        basket_id="sp500",
+                        market="US",
+                        symbol="C43-US-ONE",
+                        name="Synthetic US Test Company One",
+                        weight_pct=Decimal("1.5"),
+                    ),
+                    FundBasketWeight(
+                        basket_id="sp500",
+                        market="US",
+                        symbol="C43-US-TWO",
+                        name="Synthetic US Test Company Two",
+                        weight_pct=Decimal("50"),
+                    ),
+                    FundBasketWeight(
+                        basket_id="sp500",
+                        market="US",
+                        symbol="C47-E2E-OTHER",
+                        name="Synthetic S&P 500 company",
+                        weight_pct=Decimal("48.5"),
+                    ),
+                )
+            )
             pack = session.get(ResearchPackRecord, week)
             if pack is None:
                 session.add(ResearchPackRecord(week=week, pack={"ideas": ideas}))
@@ -379,8 +505,8 @@ def main(argv: list[str] | None = None) -> int:
         return _seed_action(args[1])
     if len(args) == 2 and args[0] == "seed-denmark-buy":
         return _seed_denmark_buy_action(args[1])
-    if args == ["seed-research-pack"]:
-        return _seed_research_pack()
+    if len(args) == 2 and args[0] == "seed-research-pack":
+        return _seed_research_pack(args[1])
     if len(args) == 2 and args[0] == "verify-deleted":
         return _verify_deleted(args[1])
     print(

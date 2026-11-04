@@ -15,6 +15,7 @@ from wealth.core.money import round_paise
 from wealth.policy.allocation import AllocationPlan
 from wealth.policy.debt_picker import DebtPick, load_debt_rules
 from wealth.policy.foundation import FoundationReport
+from wealth.policy.lookthrough import remaining_stock_room
 from wealth.policy.routes import RouteDecision
 from wealth.policy.rules import decimal_rule, integer_rule
 from wealth.schemas.common import Rupees
@@ -142,6 +143,7 @@ class WeekInput(BaseModel):
     debt_picks: list[DebtPick] = Field(default_factory=list)
     satellite_pct: Annotated[_INPUT_DECIMAL, Field(ge=Decimal(0), le=Decimal(25))]
     satellite_holdings: list[SatelliteHolding] = Field(default_factory=list)
+    through_fund_inr: dict[str, Rupees] = Field(default_factory=dict)
     ideas: list[SatelliteIdea] = Field(default_factory=list)
     index_valuation_percentile: dict[Market, _PERCENTILE] = Field(default_factory=dict)
     week: str = Field(pattern=r"^\d{4}-W(?:0[1-9]|[1-4][0-9]|5[0-3])$")
@@ -370,16 +372,18 @@ def build_action_list(
         remaining = Decimal("0.00")
 
     investment_actions: list[Action] = []
+    lookthrough_notes: list[str] = []
     for sleeve in _SLEEVES:
         amount = shares[sleeve]
         if amount <= 0:
             continue
         if sleeve == "equity_india":
-            india_actions, unused = _india_actions(
+            india_actions, unused, stock_notes = _india_actions(
                 amount, week_input, selected_rules, increment, min_action
             )
             investment_actions.extend(india_actions)
             carry_forward += unused
+            lookthrough_notes.extend(stock_notes)
             continue
         action = _sleeve_action(sleeve, amount, week_input, selected_rules, increment, min_action)
         if action is None:
@@ -401,6 +405,7 @@ def build_action_list(
         dropped = Decimal("0.00")
     carry_forward += dropped
     notes: list[str] = []
+    notes.extend(lookthrough_notes)
     if week_input.plan.new_money_only:
         notes.append("tilt_applied_via_new_money")
     if emergency_pick_unavailable:
@@ -593,13 +598,42 @@ def _buy_action(
     )
 
 
+def india_stock_room(
+    *,
+    max_stock: Decimal,
+    direct_value: Decimal,
+    through_funds_value: Decimal,
+    sector_room: Decimal,
+    satellite_gap: Decimal,
+    price: Decimal,
+    min_action: Decimal,
+    proposed: Decimal | None = None,
+) -> Decimal:
+    """Return India room only when whole shares can meet the minimum action."""
+    if price <= 0:
+        return Decimal(0)
+    limits = [max(Decimal(0), sector_room), max(Decimal(0), satellite_gap)]
+    if proposed is not None:
+        limits.append(max(Decimal(0), proposed))
+    room = remaining_stock_room(
+        max_stock,
+        direct_value,
+        through_funds_value,
+        *limits,
+    )
+    quantity = (room / price).to_integral_value(rounding=ROUND_FLOOR)
+    if round_paise(quantity * price) < min_action:
+        return Decimal(0)
+    return room
+
+
 def _india_actions(
     india_alloc: Decimal,
     week_input: WeekInput,
     rules: BuyingRules,
     increment: Decimal,
     min_action: Decimal,
-) -> tuple[list[Action], Decimal]:
+) -> tuple[list[Action], Decimal, list[str]]:
     satellite = rules["satellite"]
     india_target = week_input.plan.target_rupees.get("equity_india", Decimal(0))
     global_target = week_input.plan.target_rupees.get("equity_global", Decimal(0))
@@ -638,6 +672,7 @@ def _india_actions(
 
     confidence_rank = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
     eligible: list[tuple[tuple[int, int, Decimal, str], SatelliteIdea, Decimal, Decimal]] = []
+    notes: list[str] = []
     if proposed > 0 and total_equity_target > 0:
         for idea in week_input.ideas:
             if (
@@ -652,9 +687,27 @@ def _india_actions(
                 )
             ):
                 continue
-            stock_room = max_stock - security_values.get(idea.security_id, Decimal(0))
+            direct_value = security_values.get(idea.security_id, Decimal(0))
+            through_funds_value = week_input.through_fund_inr.get(idea.security_id, Decimal(0))
             sector_room = max_sector - sector_values.get(idea.sector, Decimal(0))
-            allowed = min(proposed, max(Decimal(0), stock_room), max(Decimal(0), sector_room))
+            direct_allowed = min(
+                proposed,
+                max(Decimal(0), max_stock - direct_value),
+                max(Decimal(0), sector_room),
+            )
+            stock_room = india_stock_room(
+                max_stock=max_stock,
+                direct_value=direct_value,
+                through_funds_value=through_funds_value,
+                sector_room=sector_room,
+                satellite_gap=satellite_gap,
+                price=idea.price,
+                min_action=min_action,
+                proposed=proposed,
+            )
+            allowed = stock_room
+            if through_funds_value > 0 and direct_allowed >= idea.price and allowed < idea.price:
+                notes.append(f"stock_owned_through_funds:{idea.security_id}")
             quantity = (allowed / idea.price).to_integral_value(rounding=ROUND_FLOOR)
             amount = round_paise(quantity * idea.price)
             if amount <= 0:
@@ -706,7 +759,7 @@ def _india_actions(
         )
     else:
         unused += core_amount
-    return actions, round_paise(unused)
+    return actions, round_paise(unused), list(dict.fromkeys(notes))
 
 
 def _sip_action(

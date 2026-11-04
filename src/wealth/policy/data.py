@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
 import yaml
@@ -18,6 +19,8 @@ from wealth.core.money import round_paise
 from wealth.db.models import (
     Account,
     BrokerCashFlowRecord,
+    FundBasket,
+    FundBasketWeight,
     HoldingLot,
     HouseholdMember,
     LoanEventRecord,
@@ -41,6 +44,15 @@ from wealth.policy.debt_yields import load_debt_yields
 from wealth.policy.global_split import GeoTilts
 from wealth.policy.household import MemberProfile
 from wealth.policy.loans import LoanCandidate
+from wealth.policy.lookthrough import (
+    CompanyKey,
+    FundHolding,
+    FundPart,
+    basket_for_holding,
+    load_lookthrough_rules,
+    matching_company_keys,
+    through_fund_result,
+)
 from wealth.policy.personalise import (
     HoldingInput,
     HoldingLotInput,
@@ -51,6 +63,7 @@ from wealth.policy.personalise import (
     ResearchPack,
     UserData,
     WeeklySpendInput,
+    _holding_value,
 )
 from wealth.policy.residency import load_residency_rules
 from wealth.rates.reference import RateUnavailable
@@ -598,9 +611,183 @@ def _holdings(
                 joint=bool(record["joint"]),
                 cost_value_inr=record["cost_value_inr"],  # type: ignore[arg-type]
                 fallback_value_inr=record["fallback_value_inr"],  # type: ignore[arg-type]
+                name=security.name,
+                isin=security.isin,
+                sub_category=security.sub_category,
             )
         )
     return tuple(holdings)
+
+
+def _load_fund_lookthrough(
+    session: Session,
+    holdings: tuple[HoldingInput, ...],
+    research: ResearchPack | None,
+    fx_rates: dict[str, Decimal],
+    as_of: date,
+) -> tuple[
+    dict[str, Decimal],
+    dict[tuple[str, str], Decimal],
+    dict[str, tuple[FundPart, ...]],
+    dict[str, date],
+    list[str],
+    dict[tuple[str, str], tuple[CompanyKey, ...]],
+]:
+    """Load fresh, target-only basket weights for the household's valued funds."""
+    rules = load_lookthrough_rules()
+    basket_choices: dict[str, Any] = {}
+    fund_rows: list[FundHolding] = []
+    notes: list[str] = []
+    for holding in holdings:
+        choice = basket_for_holding(holding, rules)
+        if choice is None:
+            continue
+        basket_choices[choice.basket_id] = choice
+        value = _holding_value(holding, fx_rates)
+        if value is None or value <= 0:
+            notes.append("lookthrough_fund_unvalued")
+            continue
+        fund_rows.append(
+            FundHolding(
+                name=holding.name or holding.symbol,
+                basket_id=choice.basket_id,
+                value_inr=value,
+                equity_share=choice.equity_share,
+                proxy=choice.proxy,
+                market=holding.market,
+                symbol=holding.symbol,
+                isin=holding.isin,
+                member_id=holding.member_id,
+            )
+        )
+
+    max_age_days = int(rules.get("max_age_days", 21))
+    fresh_reference_baskets = session.scalars(
+        select(FundBasket).where(
+            FundBasket.as_of >= as_of - timedelta(days=max_age_days),
+            FundBasket.as_of <= as_of,
+        )
+    ).all()
+    fresh_reference_by_id = {basket.id: basket for basket in fresh_reference_baskets}
+    fresh_baskets = {
+        basket_id: fresh_reference_by_id[basket_id]
+        for basket_id in basket_choices
+        if basket_id in fresh_reference_by_id
+    }
+    for basket_id in sorted(basket_choices):
+        if basket_id not in fresh_baskets:
+            notes.append(f"fund_lookthrough_missing:{basket_id}")
+    targets: dict[str, tuple[str, str | None, str | None]] = {}
+    for holding in holdings:
+        if holding.security_type == "equity" and holding.market in {"IN", "US"}:
+            targets[holding.security_id] = (holding.market, holding.isin, holding.symbol)
+    if research is not None:
+        for idea in research.ideas:
+            targets[idea.security_id] = (idea.market, idea.isin, idea.symbol)
+
+    isins = {isin.strip().upper() for _market, isin, _symbol in targets.values() if isin}
+    symbols_by_market: dict[str, set[str]] = defaultdict(set)
+    alias_groups = rules.get("same_company", [])
+    aliases: dict[str, set[str]] = defaultdict(set)
+    for group in alias_groups:
+        if isinstance(group, (list, tuple)) and group:
+            upper = {str(symbol).strip().upper() for symbol in group}
+            for symbol in upper:
+                aliases[symbol].update(upper)
+    for market, _isin, symbol in targets.values():
+        if not symbol:
+            continue
+        normalized = symbol.strip().upper()
+        symbols_by_market[market].add(normalized)
+        symbols_by_market[market].update(aliases.get(normalized, ()))
+
+    symbol_filters = [
+        and_(FundBasketWeight.market == market, FundBasketWeight.symbol.in_(sorted(symbols)))
+        for market, symbols in sorted(symbols_by_market.items())
+        if symbols
+    ]
+    fresh_reference_ids = sorted(fresh_reference_by_id)
+    reference_weights = []
+    if fresh_reference_ids and symbol_filters:
+        reference_weights = list(
+            session.scalars(
+                select(FundBasketWeight).where(
+                    FundBasketWeight.basket_id.in_(fresh_reference_ids),
+                    or_(*symbol_filters),
+                )
+            )
+        )
+    isins.update(row.isin.strip().upper() for row in reference_weights if row.isin)
+    weight_filters = list(symbol_filters)
+    if isins:
+        weight_filters.append(FundBasketWeight.isin.in_(sorted(isins)))
+    amount_weights = []
+    if fresh_baskets and weight_filters:
+        amount_weights = list(
+            session.scalars(
+                select(FundBasketWeight).where(
+                    FundBasketWeight.basket_id.in_(sorted(fresh_baskets)),
+                    or_(*weight_filters),
+                )
+            )
+        )
+    weights_by_key = {
+        (
+            row.basket_id,
+            row.market,
+            row.isin,
+            row.symbol,
+            row.name,
+            row.weight_pct,
+        ): row
+        for row in (*reference_weights, *amount_weights)
+    }
+    weights = list(weights_by_key.values())
+
+    valid_funds = [holding for holding in fund_rows if holding.basket_id in fresh_baskets]
+    all_result = through_fund_result(valid_funds, weights, rules=rules)
+    through_by_security: dict[str, Decimal] = {}
+    parts_by_security: dict[str, tuple[FundPart, ...]] = {}
+    through_by_member: dict[tuple[str, str], Decimal] = {}
+    member_ids = sorted({fund.member_id for fund in valid_funds if fund.member_id})
+    member_results = {
+        member_id: through_fund_result(
+            [fund for fund in valid_funds if fund.member_id == member_id],
+            weights,
+            rules=rules,
+        )
+        for member_id in member_ids
+    }
+    for security_id, (market, isin, symbol) in targets.items():
+        total, parts = matching_company_keys(
+            all_result,
+            market=market,
+            isin=isin,
+            symbol=symbol,
+            rules=rules,
+        )
+        through_by_security[security_id] = total
+        if parts:
+            parts_by_security[security_id] = parts
+        for member_id, result in member_results.items():
+            amount, _member_parts = matching_company_keys(
+                result,
+                market=market,
+                isin=isin,
+                symbol=symbol,
+                rules=rules,
+            )
+            if amount > 0:
+                through_by_member[(member_id, security_id)] = amount
+    used_as_of = {basket_id: row.as_of for basket_id, row in fresh_baskets.items()}
+    return (
+        through_by_security,
+        through_by_member,
+        parts_by_security,
+        used_as_of,
+        list(dict.fromkeys(notes)),
+        all_result.company_keys_by_symbol,
+    )
 
 
 @lru_cache(maxsize=1)
@@ -986,6 +1173,17 @@ def load_policy_inputs(
         gold = None
         notes.append("gold_price_missing_or_stale")
 
+    research = _research_pack(session, week)
+    (
+        through_fund_inr,
+        through_fund_by_member_security,
+        through_fund_parts,
+        lookthrough_as_of,
+        lookthrough_notes,
+        lookthrough_company_keys,
+    ) = _load_fund_lookthrough(session, holdings, research, fx_rates, as_of)
+    notes.extend(lookthrough_notes)
+
     yields, yield_as_of, yields_verified = load_debt_yields(as_of)
     if not yields_verified:
         notes.append(f"debt_yields_unverified_as_of:{yield_as_of.isoformat()}")
@@ -1012,6 +1210,11 @@ def load_policy_inputs(
         notes=tuple(notes),
         recorded_buys=_recorded_buy_inputs(recorded_buys),
         weekly_spending=weekly_spending,
+        through_fund_inr=through_fund_inr,
+        through_fund_by_member_security=through_fund_by_member_security,
+        through_fund_parts=through_fund_parts,
+        lookthrough_as_of=lookthrough_as_of,
+        lookthrough_company_keys=lookthrough_company_keys,
     )
     market = MarketContext(
         fx_rates=fx_rates,
@@ -1022,4 +1225,4 @@ def load_policy_inputs(
         yield_table_verified=yields_verified,
         notes=(),
     )
-    return user_data, market, _research_pack(session, week)
+    return user_data, market, research
