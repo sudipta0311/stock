@@ -190,6 +190,11 @@ def test_research_ideas_still_list_ideas_when_ownership_fails(
     idea = response.json()["ideas"][0]
     assert idea["symbol"] == "OWNFAIL"
     assert idea["owned"] is None
+    where = "inputs" if failing == "load_policy_inputs" else "idea"
+    error_header = response.headers["X-Ownership-Error"]
+    assert error_header.startswith(f"{where}:RuntimeError@personalisation.py:")
+    assert "@test_personalisation.py:" in error_header
+    assert "synthetic ownership failure" not in error_header
 
 
 def test_research_ideas_fall_back_to_last_saturdays_pack_during_the_week(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import traceback
 from collections.abc import Callable, Mapping
 from datetime import date, datetime
 from decimal import Decimal
@@ -520,17 +521,31 @@ def _idea_ownership(
     )
 
 
+def _error_location(error: BaseException) -> str:
+    """Name an error's type and code lines only: no message, so no values leave the server."""
+    frames = traceback.extract_tb(error.__traceback__)
+    ours = [frame for frame in frames if "/wealth/" in frame.filename.replace("\\", "/")]
+    parts = [type(error).__name__]
+    for frame in (ours[-1] if ours else None, frames[-1] if frames else None):
+        if frame is not None:
+            parts.append(f"{FilePath(frame.filename).name}:{frame.lineno}")
+    return "@".join(dict.fromkeys(parts))
+
+
 def _safe_idea_ownership(
     idea: SatelliteIdea,
     inputs: tuple[UserData, MarketContext, WeeklyPlan, Any] | None,
+    errors: list[str] | None = None,
 ) -> IdeaOwnership | None:
     if inputs is None:
         return None
     user_data, market, plan, member_contexts = inputs
     try:
         return _idea_ownership(idea, user_data, market, plan, member_contexts)
-    except Exception:
+    except Exception as error:
         _LOG.exception("research_idea_ownership_failed")
+        if errors is not None:
+            errors.append(f"idea:{_error_location(error)}")
         return None
 
 
@@ -835,6 +850,7 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
 
     @router.get("/v1/research/ideas", response_model=ResearchIdeasResponse)
     def get_research_ideas(
+        response: Response,
         user: Any = user_dependency,
         today: date = today_dependency,
         week: Annotated[str | None, Query(pattern=r"^\d{4}-W\d{2}$")] = None,
@@ -860,6 +876,7 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             )
         # "Already own" lines are extra: if they fail, Ideas still lists the ideas.
         ownership_inputs: tuple[UserData, MarketContext, WeeklyPlan, Any] | None
+        ownership_errors: list[str] = []
         try:
             # A savepoint keeps the request's transaction usable if a query fails here.
             with user.session.begin_nested():
@@ -880,8 +897,9 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                 )
                 member_contexts = _member_contexts_for_ownership(user_data, market, today)
             ownership_inputs = (user_data, market, current_plan, member_contexts)
-        except Exception:
+        except Exception as error:
             _LOG.exception("research_ideas_ownership_inputs_failed")
+            ownership_errors.append(f"inputs:{_error_location(error)}")
             ownership_inputs = None
         prepared_ideas: list[tuple[SatelliteIdea, Any, Any, UUID | None]] = []
         for raw in record.pack.get("ideas", []):
@@ -930,7 +948,7 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                         if isinstance(raw_why, dict)
                         else None
                     ),
-                    owned=_safe_idea_ownership(idea, ownership_inputs),
+                    owned=_safe_idea_ownership(idea, ownership_inputs, ownership_errors),
                 )
             )
         raw_picks = record.pack.get("core_picks", {})
@@ -946,6 +964,10 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
         raw_track_record = record.pack.get("track_record")
         track_record = raw_track_record if isinstance(raw_track_record, dict) else None
         suspended = record.pack.get("amc_international_suspended")
+        if ownership_errors:
+            # Temporary: where the "already own" lines fail in production (types and lines only).
+            first_errors = dict.fromkeys(ownership_errors[:3])
+            response.headers["X-Ownership-Error"] = ";".join(first_errors)[:300]
         return ResearchIdeasResponse(
             week=selected_week,
             ideas=ideas,

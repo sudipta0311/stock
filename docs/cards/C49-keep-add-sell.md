@@ -19,7 +19,7 @@ Read `AGENTS.md` first (agents research, code decides money; UX rules). Read `do
 
 ## Behaviour
 
-### A. Weekly stock checks (`wealth/research/stock_checks.py`, new table `stock_checks`, migration `0030`, or the next free number after C48)
+### A. Weekly stock checks (`wealth/research/stock_checks.py`, new table `stock_checks`, migration `0029`)
 - **Table:** public reference data, no user data; `SELECT` for `wealth_app`, as other reference tables.
   - `security_id` and `week` (together the PK), plus `as_of`
   - `quant_decile` (nullable) and `factor_coverage`
@@ -136,5 +136,7 @@ New check `stock_checks`:
 - No new dependencies. No LLM.
 - Don't change existing exit thresholds; only add `accumulate:` and `checks_max_age_days`.
 - **Markets:** the owner buys Indian shares from India, and from Denmark mainly ETFs plus some global shares in a share savings account (2026-11-04). Full checks cover `IN` and `US` shares in any account, including the share savings account. Shares from other markets (e.g. a European share) get `not_checked`, with no sell step and no "add more", because the app has no company results for them. ETFs and funds get no verdict; C47 already counts what they hold.
+- **No buying price:** since C48, a holding can be imported without a buying price (`cost_per_unit` is null). Its drawdown from cost is unknown, so checks built on it stay not triggered, and the tax shows only `tax_not_estimated`. The other checks still run. Test it.
+- **Migration number:** C48 added no migration, so this card's migration is `0029`, revising `0028`.
 - **US 200-day average:** the daily overseas job fetches `outputsize=compact` (about 100 sessions), so `dma200` for US shares fills in only as stored prices build up. Until then the risk check stays unknown. That's expected; don't add a new price source.
 - Out of scope: Danish share tax estimates, DK/EU fundamentals, recording sells (a later card), weekly email copy for verdicts.
