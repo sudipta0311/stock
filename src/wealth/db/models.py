@@ -700,6 +700,56 @@ class FundamentalPIT(Base):
     )
 
 
+class StockCheck(Base):
+    """Weekly public reference facts used to review directly held shares."""
+
+    __tablename__ = "stock_checks"
+    __table_args__ = (
+        CheckConstraint(
+            "week ~ '^[0-9]{4}-W(0[1-9]|[1-4][0-9]|5[0-3])$'",
+            name="ck_stock_checks_week",
+        ),
+        CheckConstraint(
+            "quant_decile IS NULL OR quant_decile BETWEEN 1 AND 10",
+            name="ck_stock_checks_quant_decile",
+        ),
+        CheckConstraint(
+            "pe_percentile IS NULL OR pe_percentile BETWEEN 0 AND 100",
+            name="ck_stock_checks_pe_percentile",
+        ),
+        CheckConstraint(
+            "price IS NULL OR price > 0",
+            name="ck_stock_checks_price_positive",
+        ),
+        CheckConstraint(
+            "dma200 IS NULL OR dma200 > 0",
+            name="ck_stock_checks_dma200_positive",
+        ),
+        Index("ix_stock_checks_week", "week"),
+    )
+
+    security_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("securities.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    week: Mapped[str] = mapped_column(String(8), primary_key=True)
+    as_of: Mapped[date] = mapped_column(Date, nullable=False)
+    quant_decile: Mapped[int | None] = mapped_column(SmallInteger)
+    factor_coverage: Mapped[str | None] = mapped_column(String(32))
+    pe_percentile: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))
+    pe_vs_sector: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
+    revenue_yoy_pct: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    price: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
+    dma200: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
+    below_dma200: Mapped[bool | None] = mapped_column(Boolean)
+    sources: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
+
+
 class UniverseMember(Base):
     __tablename__ = "universe_members"
     __table_args__ = (
