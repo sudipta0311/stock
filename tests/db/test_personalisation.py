@@ -148,6 +148,50 @@ def test_research_ideas_reads_selector_and_track_record_from_existing_pack(
     assert payload["track_record"]["markets"]["IN"]["status"] == "available"
 
 
+@pytest.mark.parametrize("failing", ["load_policy_inputs", "_idea_ownership"])
+def test_research_ideas_still_list_ideas_when_ownership_fails(
+    api_client: tuple[TestClient, str, object],
+    migrated_database: MigratedDatabase,
+    monkeypatch: pytest.MonkeyPatch,
+    failing: str,
+) -> None:
+    client, secret, _application = api_client
+    headers, _subject = _auth(secret, f"ownership-fails-{failing}")
+    week = "2026-W38" if failing == "load_policy_inputs" else "2026-W37"
+    with Session(migrated_database.owner_engine) as session, session.begin():
+        session.add(
+            ResearchPackRecord(
+                week=week,
+                pack={
+                    "ideas": [
+                        {
+                            "security_id": "synthetic-ownership-idea",
+                            "symbol": "OWNFAIL",
+                            "market": "IN",
+                            "sector": "Industrials",
+                            "price": "100.00",
+                            "quant_decile": 8,
+                            "dossier_status": "APPROVED",
+                            "valuation_percentile": "45",
+                            "confidence": "HIGH",
+                        }
+                    ]
+                },
+            )
+        )
+
+    def fail(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("synthetic ownership failure")
+
+    monkeypatch.setattr(f"wealth.api.personalisation.{failing}", fail)
+    response = client.get("/v1/research/ideas", params={"week": week}, headers=headers)
+
+    assert response.status_code == 200
+    idea = response.json()["ideas"][0]
+    assert idea["symbol"] == "OWNFAIL"
+    assert idea["owned"] is None
+
+
 def test_research_ideas_fall_back_to_last_saturdays_pack_during_the_week(
     api_client: tuple[TestClient, str, object],
     migrated_database: MigratedDatabase,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Mapping
 from datetime import date, datetime
 from decimal import Decimal
@@ -61,6 +62,8 @@ from wealth.policy.personalise import (
 from wealth.policy.store import actions_for_week, latest_plan, save_weekly_plan
 from wealth.schemas.common import LiquidityClass, Rupees, Sleeve
 from wealth.schemas.profile import InvestingPrefs, Residency, ResidencyInput, residency_from_stored
+
+_LOG = logging.getLogger(__name__)
 
 
 class ApiModel(BaseModel):
@@ -517,6 +520,20 @@ def _idea_ownership(
     )
 
 
+def _safe_idea_ownership(
+    idea: SatelliteIdea,
+    inputs: tuple[UserData, MarketContext, WeeklyPlan, Any] | None,
+) -> IdeaOwnership | None:
+    if inputs is None:
+        return None
+    user_data, market, plan, member_contexts = inputs
+    try:
+        return _idea_ownership(idea, user_data, market, plan, member_contexts)
+    except Exception:
+        _LOG.exception("research_idea_ownership_failed")
+        return None
+
+
 def _compute_if_stale(user: Any, today: date) -> WeeklyPlanResponse:
     week = current_week(today)
     household_owner_id = user.household_owner_id
@@ -841,22 +858,31 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                 index_funds=index_funds,
                 us_market=us_market,
             )
-        user_data, market, research = load_policy_inputs(
-            user.session,
-            user.household_owner_id,
-            selected_week,
-            today,
-            deployment_mode=getattr(user, "deployment_mode", "personal"),
-        )
-        current_plan = personalise(
-            user_data,
-            market,
-            research,
-            selected_week,
-            today,
-            apply_weekly_spending=False,
-        )
-        member_contexts = _member_contexts_for_ownership(user_data, market, today)
+        # "Already own" lines are extra: if they fail, Ideas still lists the ideas.
+        ownership_inputs: tuple[UserData, MarketContext, WeeklyPlan, Any] | None
+        try:
+            # A savepoint keeps the request's transaction usable if a query fails here.
+            with user.session.begin_nested():
+                user_data, market, research = load_policy_inputs(
+                    user.session,
+                    user.household_owner_id,
+                    selected_week,
+                    today,
+                    deployment_mode=getattr(user, "deployment_mode", "personal"),
+                )
+                current_plan = personalise(
+                    user_data,
+                    market,
+                    research,
+                    selected_week,
+                    today,
+                    apply_weekly_spending=False,
+                )
+                member_contexts = _member_contexts_for_ownership(user_data, market, today)
+            ownership_inputs = (user_data, market, current_plan, member_contexts)
+        except Exception:
+            _LOG.exception("research_ideas_ownership_inputs_failed")
+            ownership_inputs = None
         prepared_ideas: list[tuple[SatelliteIdea, Any, Any, UUID | None]] = []
         for raw in record.pack.get("ideas", []):
             if not isinstance(raw, dict):
@@ -904,13 +930,7 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                         if isinstance(raw_why, dict)
                         else None
                     ),
-                    owned=_idea_ownership(
-                        idea,
-                        user_data,
-                        market,
-                        current_plan,
-                        member_contexts,
-                    ),
+                    owned=_safe_idea_ownership(idea, ownership_inputs),
                 )
             )
         raw_picks = record.pack.get("core_picks", {})
