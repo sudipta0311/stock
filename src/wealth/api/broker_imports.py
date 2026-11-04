@@ -39,6 +39,7 @@ from wealth.importer.brokers import (
     detect_layout,
     fifo_lots,
     header_fingerprint,
+    load_broker_config,
     load_layouts,
     normalize_header,
     parse_cash_flows,
@@ -215,7 +216,7 @@ def _holding_payload(holding: BrokerHolding) -> dict[str, Any]:
         "symbol": holding.symbol,
         "name": holding.name or holding.symbol or holding.isin or "Unknown security",
         "quantity": format(holding.quantity, "f"),
-        "avg_price": format(holding.avg_price, "f"),
+        "avg_price": format(holding.avg_price, "f") if holding.avg_price is not None else None,
         "last_price": format(holding.last_price, "f") if holding.last_price is not None else None,
         "statement_value": format(round_paise(value), "f") if value is not None else None,
         "exchange": holding.exchange,
@@ -298,7 +299,9 @@ def stage_broker_items(
     report.update({"kind": layout.kind, "broker": layout.broker})
 
     if layout.kind == "holdings":
-        for holding in parse_holdings(rows, layout):
+        holdings = parse_holdings(rows, layout)
+        report["has_missing_cost"] = any(holding.avg_price is None for holding in holdings)
+        for holding in holdings:
             security = _security_match(
                 session,
                 isin=holding.isin,
@@ -364,10 +367,12 @@ def stage_broker_items(
             )
         report["warnings"] = []
     else:
-        trades = parse_tradebook(rows, layout)
+        skipped_rows: dict[str, int] = {}
+        trades = parse_tradebook(rows, layout, skipped_rows=skipped_rows)
         cash_flows = parse_cash_flows(rows, layout)
         report["cash_flows"] = [_cash_flow_payload(flow) for flow in cash_flows]
         report["cash_flow_count"] = len(cash_flows)
+        report["skipped_rows"] = skipped_rows
         trades_by_key: dict[str, list[Trade]] = defaultdict(list)
         for trade in trades:
             trades_by_key[trade.security_key].append(trade)
@@ -649,6 +654,10 @@ def _security_for_confirmation(
         return session.scalar(select(Security).where(Security.id == item.match_security_id))
     payload = item.payload
     isin = str(payload.get("isin") or "").upper()
+    if isin:
+        existing_by_isin = session.scalar(select(Security).where(Security.isin == isin))
+        if existing_by_isin is not None:
+            return existing_by_isin
     if not can_create_security(payload):
         return None
     market = str(payload.get("market") or ("IN" if isin.startswith("IN") else "US")).upper()
@@ -740,7 +749,8 @@ def confirm_broker_items(
                 )
                 lots = list(session.scalars(query))
                 for lot in lots:
-                    lot.cost_per_unit = Decimal(str(payload["avg_price"]))
+                    if payload.get("avg_price") is not None:
+                        lot.cost_per_unit = Decimal(str(payload["avg_price"]))
                     lot.currency = str(payload.get("currency") or security.currency)
                     if job.account_id is not None and lot.account_id is None:
                         lot.account_id = job.account_id
@@ -757,7 +767,11 @@ def confirm_broker_items(
                     joint=account.joint if account is not None else False,
                     security_id=security.id,
                     quantity=Decimal(str(payload["quantity"])),
-                    cost_per_unit=Decimal(str(payload["avg_price"])),
+                    cost_per_unit=(
+                        Decimal(str(payload["avg_price"]))
+                        if payload.get("avg_price") is not None
+                        else None
+                    ),
                     acquired_on=None,
                     source="broker",
                     statement_value=(
@@ -970,7 +984,7 @@ def template_layout(
 def valid_template_mapping(kind: str, columns: Mapping[str, str], headers: list[str]) -> bool:
     normalized_headers = {normalize_header(header) for header in headers}
     if kind == "holdings":
-        required_groups = ({"isin", "symbol"}, {"quantity"}, {"avg_price"})
+        required_groups = ({"isin", "symbol", "name"}, {"quantity"})
     elif kind == "tradebook":
         has_securities = any(field in columns for field in {"isin", "symbol"}) and all(
             field in columns for field in ("trade_date", "trade_type", "quantity", "price")
@@ -986,8 +1000,12 @@ def valid_template_mapping(kind: str, columns: Mapping[str, str], headers: list[
     return all(normalize_header(header) in normalized_headers for header in columns.values())
 
 
-def mapping_suggestions(headers: list[str]) -> dict[str, str | None]:
-    return suggested_mapping(headers)
+def mapping_suggestions(
+    headers: list[str],
+    kind: str | None = None,
+    rows: list[dict[str, Any]] | None = None,
+) -> dict[str, str | None]:
+    return suggested_mapping(headers, kind, rows)
 
 
 def header_names(headers: list[str]) -> list[str]:
@@ -1068,9 +1086,17 @@ def update_tax_wrapper_report(
 
 
 def broker_defaults(broker: str) -> tuple[str, str]:
-    if broker in {"nordnet", "saxo", "danske_bank"}:
-        return "DK", "DKK"
-    return "US", "USD"
+    config = load_broker_config().get(broker)
+    if config is None:
+        raise ValueError("Unknown broker selection.")
+    return config["market"], config["currency"]
+
+
+def broker_label(broker: str) -> str:
+    config = load_broker_config().get(broker)
+    if config is None:
+        raise ValueError("Unknown broker selection.")
+    return config["label"]
 
 
 def broker_for_account(broker: str, account: Account | None) -> str:

@@ -220,6 +220,40 @@ def _seed_action(email: str) -> int:
         engine.dispose()
 
 
+def _seed_broker_import_account(email: str) -> int:
+    engine, _schema_name = _owner_engine()
+    try:
+        with Session(engine) as session, session.begin():
+            user = session.scalar(select(User).where(User.email == email.casefold()))
+            if user is None:
+                raise RuntimeError("The synthetic e2e user was not found")
+            member = session.scalar(
+                select(HouseholdMember).where(
+                    HouseholdMember.user_id == user.id,
+                    HouseholdMember.is_self.is_(True),
+                )
+            )
+            if member is None:
+                raise RuntimeError("The synthetic e2e household has no owner member")
+            member.residency = {
+                **dict(member.residency or {}),
+                "status": "NRI",
+                "country": "DK",
+            }
+            session.add(
+                Account(
+                    user_id=user.id,
+                    member_id=member.id,
+                    institution="Synthetic Nordnet account",
+                    account_type="investment",
+                    tax_wrapper=None,
+                )
+            )
+        return 0
+    finally:
+        engine.dispose()
+
+
 def _seed_denmark_buy_action(email: str) -> int:
     engine, _schema_name = _owner_engine()
     try:
@@ -503,6 +537,8 @@ def main(argv: list[str] | None = None) -> int:
         return _setup_stack()
     if len(args) == 2 and args[0] == "seed-action":
         return _seed_action(args[1])
+    if len(args) == 2 and args[0] == "seed-broker-import-account":
+        return _seed_broker_import_account(args[1])
     if len(args) == 2 and args[0] == "seed-denmark-buy":
         return _seed_denmark_buy_action(args[1])
     if len(args) == 2 and args[0] == "seed-research-pack":

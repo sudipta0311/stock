@@ -1,4 +1,4 @@
-"""Header-driven CSV and XLSX broker statement parsing."""
+"""Header-driven broker statement parsing for common export formats."""
 
 from __future__ import annotations
 
@@ -11,49 +11,66 @@ from collections.abc import Mapping
 from contextlib import suppress
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+from functools import lru_cache
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
+from zipfile import BadZipFile
 
 import yaml
 from openpyxl import load_workbook
+from openpyxl.utils.datetime import WINDOWS_EPOCH, from_excel
 
 from wealth.core.dates import add_months
+from wealth.core.ids import isin_check_digit_ok
 from wealth.core.money import parse_inr
 from wealth.importer.brokers.types import BrokerCashFlow, BrokerHolding, Layout, Trade
 
-_ALIASES: dict[str, tuple[str, ...]] = {
-    "isin": ("isin", "isin code"),
-    "symbol": ("symbol", "trading symbol", "ticker", "scrip", "stock", "instrument"),
-    "name": ("name", "company name", "stock name", "security name", "instrument"),
-    "quantity": ("quantity", "qty", "shares", "units", "holdings"),
-    "avg_price": (
-        "avg price",
-        "average price",
-        "average cost value",
-        "buy price",
-        "cost price",
-        "avg cost",
-        "purchase price",
-        "acquisition price",
-        "avg buy price",
-    ),
-    "last_price": ("ltp", "last price", "current price", "market price", "close price", "cmp"),
-    "market_value": ("market value", "value", "net value", "position value"),
-    "security_type": ("security type", "asset category"),
-    "exchange": ("exchange",),
-    "market": ("market", "market code", "region"),
-    "currency": ("currency", "ccy", "currency code", "valuta"),
-    "tax_wrapper": ("tax wrapper", "account type", "account product", "wrapper"),
-    "trade_date": ("trade date", "date", "transaction date"),
-    "trade_type": ("trade type", "type", "action", "transaction type"),
-    "price": ("price", "trade price", "rate"),
-    "amount": ("amount", "cash amount", "net amount", "transaction amount"),
-    "commission": ("commission", "commission fee", "fees", "comm fee"),
-    "order_id": ("order id", "order number"),
-    "trade_id": ("trade id", "trade no", "trade number", "execution id"),
+_MAX_TABLE_ROWS = 100_000
+_MAX_TABLE_COLUMNS = 256
+_DATE_FORMATS = (
+    "%Y-%m-%d",
+    "%d-%m-%Y",
+    "%d/%m/%Y",
+    "%d-%b-%Y",
+    "%d.%m.%Y",
+    "%d-%m-%y",
+    "%Y/%m/%d",
+    "%d %b %Y",
+    "%b %d, %Y",
+)
+_BUY_WORDS = {"buy", "b", "bought", "purchase", "køb", "købt", "kjøpt", "köp", "köpt"}
+_SELL_WORDS = {"sell", "s", "sold", "sale", "salg", "solgt", "solgte", "sålt"}
+_MARKET_BY_ISIN_PREFIX = {"IN": "IN", "US": "US", "DK": "DK", "GB": "GB"}
+_CURRENCY_BY_MARKET = {"IN": "INR", "US": "USD", "DK": "DKK"}
+_CURRENCY_CODES = {"INR", "USD", "EUR", "DKK", "GBP", "SEK"}
+_MARKETS = {"IN", "US", "DK", "EU", "GB"}
+# Indian grouping with more than 2 decimals, which prices and fund units often have.
+_INR_LONG_FRACTION = re.compile(r"(?:\d+|\d{1,3}(?:,\d{3})+|\d{1,2}(?:,\d{2})+,\d{3})\.\d{3,}")
+_CURRENCY_MARKERS = re.compile(r"(?:INR|USD|EUR|DKK|GBP|SEK|RS\.?|KR\.?)", re.IGNORECASE)
+_MARKET_NAMES = {
+    "india": "IN",
+    "indian": "IN",
+    "united states": "US",
+    "usa": "US",
+    "us": "US",
+    "denmark": "DK",
+    "danish": "DK",
+    "europe": "EU",
+    "eu": "EU",
+    "united kingdom": "GB",
+    "uk": "GB",
 }
-_KNOWN_HEADERS = frozenset(alias for values in _ALIASES.values() for alias in values)
-_DATE_FORMATS = ("%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%d-%b-%Y")
+_CURRENCY_NAMES = {
+    "₹": "INR",
+    "rs": "INR",
+    "rs.": "INR",
+    "$": "USD",
+    "€": "EUR",
+    "£": "GBP",
+    "kr": "DKK",
+    "kr.": "DKK",
+}
 
 
 def normalize_header(value: object) -> str:
@@ -74,15 +91,81 @@ def header_fingerprint(headers: list[str] | tuple[str, ...]) -> str:
     return hashlib.sha256("\n".join(normalized).encode("utf-8")).hexdigest()
 
 
+def _rules_path(path: Path | None = None) -> Path:
+    return path or Path(__file__).resolve().parents[4] / "rules" / "brokers.yaml"
+
+
+@lru_cache(maxsize=4)
+def _load_broker_document(path_text: str) -> dict[str, Any]:
+    document = yaml.safe_load(Path(path_text).read_text(encoding="utf-8"))
+    return document if isinstance(document, dict) else {}
+
+
+def _broker_document(path: Path | None = None) -> dict[str, Any]:
+    return _load_broker_document(str(_rules_path(path).resolve()))
+
+
+def load_broker_config(path: Path | None = None) -> dict[str, dict[str, str]]:
+    """Load broker labels and defaults from the versioned rules file."""
+    result: dict[str, dict[str, str]] = {}
+    for broker, values in _broker_document(path).get("brokers", {}).items():
+        result[str(broker)] = {
+            "label": str(values["label"]),
+            "market": str(values["market"]).upper(),
+            "currency": str(values["currency"]).upper(),
+        }
+    return result
+
+
+def load_aliases(
+    kind: str | None = None, path: Path | None = None
+) -> dict[str, tuple[str, ...]] | dict[str, dict[str, tuple[str, ...]]]:
+    """Return canonical column aliases grouped by import kind."""
+    raw_aliases = _broker_document(path).get("aliases", {})
+    kinds = (kind,) if kind else tuple(raw_aliases)
+    result: dict[str, dict[str, tuple[str, ...]]] = {}
+    for selected_kind in kinds:
+        fields: dict[str, tuple[str, ...]] = {}
+        for canonical, language_groups in raw_aliases.get(selected_kind, {}).items():
+            values: list[str] = []
+            for language, aliases in language_groups.items():
+                if language == "fallback":
+                    for fallback_aliases in aliases.values():
+                        values.extend(str(alias) for alias in fallback_aliases)
+                elif isinstance(aliases, list):
+                    values.extend(str(alias) for alias in aliases)
+            fields[str(canonical)] = tuple(dict.fromkeys(values))
+        result[selected_kind] = fields
+    if kind:
+        return result.get(kind, {})
+    return result
+
+
+def _alias_entries(kind: str, canonical: str) -> tuple[tuple[str, bool], ...]:
+    groups = _broker_document().get("aliases", {}).get(kind, {}).get(canonical, {})
+    result: list[tuple[str, bool]] = []
+    for language, aliases in groups.items():
+        if language == "fallback":
+            result.extend(
+                (str(alias), True)
+                for fallback_aliases in aliases.values()
+                for alias in fallback_aliases
+            )
+        elif isinstance(aliases, list):
+            result.extend((str(alias), False) for alias in aliases)
+    return tuple(result)
+
+
 def load_layouts(path: Path | None = None) -> tuple[Layout, ...]:
-    source = path or Path(__file__).resolve().parents[4] / "rules" / "brokers.yaml"
-    document = yaml.safe_load(source.read_text(encoding="utf-8"))
+    document = _broker_document(path)
+    broker_config = load_broker_config(path)
     result: list[Layout] = []
     for entry in document.get("layouts", []):
         columns = {
             str(field): tuple(str(alias) for alias in aliases)
             for field, aliases in entry.get("columns", {}).items()
         }
+        broker_defaults = broker_config.get(entry["broker"], {})
         result.append(
             Layout(
                 broker=str(entry["broker"]),
@@ -91,8 +174,12 @@ def load_layouts(path: Path | None = None) -> tuple[Layout, ...]:
                 columns=columns,
                 verified=bool(entry.get("verified", True)),
                 source_note=str(entry.get("source_note", "")),
-                market_default=str(entry.get("market_default", "IN")),
-                currency_default=str(entry.get("currency_default", "INR")),
+                market_default=str(
+                    entry.get("market_default", broker_defaults.get("market", "IN"))
+                ),
+                currency_default=str(
+                    entry.get("currency_default", broker_defaults.get("currency", "INR"))
+                ),
             )
         )
     return tuple(result)
@@ -132,65 +219,366 @@ def detect_layout(
     return None
 
 
-def suggested_mapping(headers: list[str] | tuple[str, ...]) -> dict[str, str | None]:
-    by_normalized = {normalize_header(header): header for header in headers}
+def _mapping_for_kind(
+    headers: list[str] | tuple[str, ...], kind: str
+) -> tuple[dict[str, str | None], set[str], set[str]]:
     result: dict[str, str | None] = {}
-    for canonical, aliases in _ALIASES.items():
-        result[canonical] = next(
-            (by_normalized[alias] for alias in aliases if alias in by_normalized), None
-        )
-    return result
+    ambiguous: set[str] = set()
+    matched: set[str] = set()
+    normalized_headers = [(normalize_header(header), header) for header in headers]
+    for canonical in load_aliases(kind):
+        alias_scores = {
+            normalize_header(alias): (0 if fallback else 1, len(normalize_header(alias)))
+            for alias, fallback in _alias_entries(kind, canonical)
+        }
+        hits: list[tuple[tuple[int, int], str]] = []
+        for normalized, original in normalized_headers:
+            score = alias_scores.get(normalized)
+            if score is not None:
+                hits.append((score, original))
+        if not hits:
+            result[canonical] = None
+            continue
+        matched.add(canonical)
+        best_score = max(score for score, _header in hits)
+        best_headers = list(dict.fromkeys(header for score, header in hits if score == best_score))
+        if len(best_headers) != 1:
+            result[canonical] = None
+            ambiguous.add(canonical)
+        else:
+            result[canonical] = best_headers[0]
+    return result, ambiguous, matched
+
+
+def _required_fields(kind: str) -> set[str]:
+    if kind == "holdings":
+        return {"quantity"}
+    return {"trade_date", "trade_type", "quantity", "price"}
+
+
+def _structurally_fits(kind: str, mapping: Mapping[str, str | None], matched: set[str]) -> bool:
+    required = _required_fields(kind)
+    if not all(mapping.get(field) is not None for field in required):
+        return False
+    identity_fields = ("isin", "symbol") if kind == "tradebook" else ("isin", "symbol", "name")
+    return any(mapping.get(field) is not None for field in identity_fields)
+
+
+def _trade_words_in_rows(rows: list[dict[str, Any]], type_header: str | None) -> tuple[int, int]:
+    if not type_header:
+        return 0, 0
+    recognized = 0
+    populated = 0
+    for row in rows:
+        value = _normal_trade_word(row.get(type_header))
+        if not value:
+            continue
+        populated += 1
+        if value in _BUY_WORDS or value in _SELL_WORDS:
+            recognized += 1
+    return recognized, populated
+
+
+def _guess_kind(
+    headers: list[str] | tuple[str, ...], rows: list[dict[str, Any]]
+) -> tuple[str, dict[str, str | None], set[str], set[str]]:
+    holdings, holdings_ambiguous, holdings_matched = _mapping_for_kind(headers, "holdings")
+    trades, trades_ambiguous, trades_matched = _mapping_for_kind(headers, "tradebook")
+    holdings_fit = _structurally_fits("holdings", holdings, holdings_matched)
+    trades_fit = _structurally_fits("tradebook", trades, trades_matched)
+    if holdings_fit and trades_fit:
+        recognized, populated = _trade_words_in_rows(rows, trades.get("trade_type"))
+        choose_tradebook = populated > 0 and recognized * 2 > populated
+    else:
+        choose_tradebook = trades_fit
+    if choose_tradebook:
+        return "tradebook", trades, trades_ambiguous, trades_matched
+    if holdings_fit:
+        return "holdings", holdings, holdings_ambiguous, holdings_matched
+    if any(trades.get(field) for field in ("trade_type", "trade_date")):
+        return "tradebook", trades, trades_ambiguous, trades_matched
+    return "holdings", holdings, holdings_ambiguous, holdings_matched
+
+
+def suggested_mapping(
+    headers: list[str] | tuple[str, ...],
+    kind: str | None = None,
+    rows: list[dict[str, Any]] | None = None,
+) -> dict[str, str | None]:
+    """Suggest one header per field, preferring specific labels and exposing ties as blank."""
+    selected_kind = kind or _guess_kind(headers, rows or [])[0]
+    return _mapping_for_kind(headers, selected_kind)[0]
+
+
+def auto_map(
+    headers: list[str] | tuple[str, ...],
+    rows: list[dict[str, Any]],
+    *,
+    broker: str,
+    market_default: str,
+    currency_default: str,
+) -> tuple[Layout | None, str, dict[str, str | None]]:
+    """Return an unambiguous layout when headers cover a safe set of required fields."""
+    kind, mapping, ambiguous, matched = _guess_kind(headers, rows)
+    identity_fields = {"isin", "symbol"} if kind == "tradebook" else {"isin", "symbol", "name"}
+    required = _required_fields(kind)
+    required_ambiguous = required & ambiguous
+    identity_is_ambiguous = not any(mapping.get(field) for field in identity_fields) and bool(
+        identity_fields & ambiguous
+    )
+    if (
+        not _structurally_fits(kind, mapping, matched)
+        or required_ambiguous
+        or identity_is_ambiguous
+        or ambiguous
+    ):
+        return None, kind, mapping
+    columns = {field: header for field, header in mapping.items() if header is not None}
+    return (
+        Layout(
+            broker=broker,
+            kind=kind,  # type: ignore[arg-type]
+            fingerprint=frozenset(),
+            columns=columns,
+            source_note="Automatically matched from column names.",
+            market_default=market_default,
+            currency_default=currency_default,
+        ),
+        kind,
+        mapping,
+    )
+
+
+def _known_headers() -> frozenset[str]:
+    known = {
+        normalize_header(alias)
+        for kind in ("holdings", "tradebook")
+        for aliases in load_aliases(kind).values()
+        for alias in aliases
+    }
+    for layout in load_layouts():
+        known.update(layout.fingerprint)
+        for aliases in layout.columns.values():
+            values = (aliases,) if isinstance(aliases, str) else aliases
+            known.update(normalize_header(alias) for alias in values)
+    return frozenset(known)
 
 
 def _header_row(rows: list[tuple[Any, ...]]) -> int | None:
+    known_headers = _known_headers()
     for index, row in enumerate(rows):
         non_empty = [value for value in row if value is not None and str(value).strip()]
         if len(non_empty) >= 3 and any(
-            normalize_header(value) in _KNOWN_HEADERS for value in non_empty
+            normalize_header(value) in known_headers for value in non_empty
         ):
             return index
     return None
 
 
-def read_table(data: bytes, filename: str) -> tuple[list[str], list[dict[str, Any]]]:
-    """Read a CSV or first suitable XLSX worksheet without evaluating formulas."""
-    suffix = Path(filename).suffix.casefold()
-    if suffix == ".xlsx" and data.startswith(b"PK"):
-        workbook = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
-        try:
-            for worksheet in workbook.worksheets:
-                values = list(worksheet.iter_rows(values_only=True))
-                row_index = _header_row(values)
-                if row_index is None:
-                    continue
-                return _rows_from_values(values, row_index)
-        finally:
-            workbook.close()
-        raise ValueError("No worksheet contains a recognizable header row.")
-    if suffix != ".csv" or data.startswith(b"PK"):
-        raise ValueError("The file does not match a supported CSV or XLSX format.")
-
-    decoded: str | None = None
-    for encoding in ("utf-8-sig", "cp1252"):
+def _decode_table_text(data: bytes) -> str | None:
+    if not data:
+        return None
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        encodings = ("utf-16",)
+    else:
+        sample = data[:4096]
+        even_zeroes = sample[::2].count(0)
+        odd_zeroes = sample[1::2].count(0)
+        sample_pairs = max(1, len(sample) // 2)
+        if odd_zeroes / sample_pairs > 0.2 and odd_zeroes > even_zeroes * 2:
+            encodings = ("utf-16-le", "utf-8-sig", "cp1252")
+        elif even_zeroes / sample_pairs > 0.2 and even_zeroes > odd_zeroes * 2:
+            encodings = ("utf-16-be", "utf-8-sig", "cp1252")
+        else:
+            encodings = ("utf-8-sig", "cp1252")
+    for encoding in encodings:
         try:
             decoded = data.decode(encoding)
-            break
         except UnicodeDecodeError:
             continue
+        if all(character in "\t\n\r\f" or ord(character) >= 32 for character in decoded):
+            return decoded
+    return None
+
+
+def _has_table_delimiter(text: str) -> bool:
+    return any(
+        max(line.count(delimiter) for delimiter in (",", ";", "\t")) >= 2
+        for line in text.splitlines()[:20]
+    )
+
+
+def detect_broker_file(data: bytes, filename: str) -> str | None:
+    """Shared content and extension check for upload validation and table parsing."""
+    suffix = Path(filename).suffix.casefold()
+    if suffix == ".pdf" and data.startswith(b"%PDF"):
+        return "pdf"
+    if suffix == ".xlsx" and data.startswith(b"PK"):
+        return "xlsx"
+    if suffix in {".csv", ".tsv", ".txt"}:
+        decoded = _decode_table_text(data)
+        if decoded is not None and _has_table_delimiter(decoded):
+            return "text"
+    if suffix == ".xls":
+        if data.startswith(bytes.fromhex("D0CF11E0")):
+            return "xls"
+        decoded = _decode_table_text(data)
+        if decoded is not None and (
+            decoded.lstrip().startswith("<") or re.search(r"<\s*table\b", decoded, re.I)
+        ):
+            return "html_xls"
+    return None
+
+
+class _FirstHTMLTable(HTMLParser):
+    """Collect text from the first HTML table without loading linked resources."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.rows: list[tuple[str, ...]] = []
+        self._active = False
+        self._finished = False
+        self._row: list[str] | None = None
+        self._cell: list[str] | None = None
+        self._ignored_depth = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        del attrs
+        lowered = tag.casefold()
+        if lowered in {"script", "style"}:
+            self._ignored_depth += 1
+            return
+        if self._ignored_depth or self._finished:
+            return
+        if lowered == "table" and not self._active:
+            self._active = True
+        elif self._active and lowered == "tr" and self._row is None:
+            self._row = []
+        elif self._active and lowered in {"td", "th"} and self._row is not None:
+            self._cell = []
+
+    def handle_endtag(self, tag: str) -> None:
+        lowered = tag.casefold()
+        if lowered in {"script", "style"} and self._ignored_depth:
+            self._ignored_depth -= 1
+            return
+        if self._ignored_depth or not self._active:
+            return
+        if lowered in {"td", "th"} and self._cell is not None and self._row is not None:
+            if len(self._row) >= _MAX_TABLE_COLUMNS:
+                raise ValueError("The table has too many columns.")
+            self._row.append("".join(self._cell).strip())
+            self._cell = None
+        elif lowered == "tr" and self._row is not None:
+            if len(self.rows) >= _MAX_TABLE_ROWS:
+                raise ValueError("The table has too many rows.")
+            self.rows.append(tuple(self._row))
+            self._row = None
+        elif lowered == "table":
+            self._active = False
+            self._finished = True
+
+    def handle_data(self, data: str) -> None:
+        if self._cell is not None and self._ignored_depth == 0:
+            self._cell.append(data)
+
+
+def _rows_from_xlsx(data: bytes) -> tuple[list[str], list[dict[str, Any]]]:
+    try:
+        workbook = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    except (BadZipFile, OSError, ValueError) as error:
+        raise ValueError("The XLSX workbook could not be read.") from error
+    try:
+        for worksheet in workbook.worksheets:
+            values: list[tuple[Any, ...]] = []
+            for row in worksheet.iter_rows(values_only=True):
+                if len(row) > _MAX_TABLE_COLUMNS:
+                    raise ValueError("The table has too many columns.")
+                if len(values) >= _MAX_TABLE_ROWS:
+                    raise ValueError("The table has too many rows.")
+                values.append(tuple(row))
+            row_index = _header_row(values)
+            if row_index is not None:
+                return _rows_from_values(values, row_index)
+    finally:
+        workbook.close()
+    raise ValueError("No worksheet contains a recognizable header row.")
+
+
+def _rows_from_xls(data: bytes) -> tuple[list[str], list[dict[str, Any]]]:
+    try:
+        import xlrd
+    except ImportError as error:
+        raise ValueError("The XLS reader is not installed.") from error
+    try:
+        workbook = xlrd.open_workbook(file_contents=data, on_demand=True)
+    except (OSError, ValueError, xlrd.XLRDError) as error:
+        raise ValueError("The XLS workbook could not be read.") from error
+    try:
+        for sheet in workbook.sheets():
+            if sheet.ncols > _MAX_TABLE_COLUMNS or sheet.nrows > _MAX_TABLE_ROWS:
+                raise ValueError("The table exceeds the supported row or column limit.")
+            values: list[tuple[Any, ...]] = []
+            for row_index in range(sheet.nrows):
+                cells: list[Any] = []
+                for column_index in range(sheet.ncols):
+                    cell = sheet.cell(row_index, column_index)
+                    if cell.ctype == xlrd.XL_CELL_DATE:
+                        cells.append(xlrd.xldate_as_datetime(cell.value, workbook.datemode))
+                    else:
+                        cells.append(cell.value)
+                values.append(tuple(cells))
+            header_index = _header_row(values)
+            if header_index is not None:
+                return _rows_from_values(values, header_index)
+    finally:
+        workbook.release_resources()
+    raise ValueError("No worksheet contains a recognizable header row.")
+
+
+def read_table(data: bytes, filename: str) -> tuple[list[str], list[dict[str, Any]]]:
+    """Read a text table, HTML XLS export, XLSX, or cached-value XLS workbook."""
+    file_type = detect_broker_file(data, filename)
+    if file_type == "xlsx":
+        return _rows_from_xlsx(data)
+    if file_type == "xls":
+        return _rows_from_xls(data)
+    if file_type == "html_xls":
+        decoded = _decode_table_text(data)
+        if decoded is None:
+            raise ValueError("The HTML table encoding is not supported.")
+        parser = _FirstHTMLTable()
+        parser.feed(decoded)
+        parser.close()
+        if not parser.rows:
+            raise ValueError("The HTML file does not contain a table.")
+        row_index = _header_row(parser.rows)
+        if row_index is None:
+            raise ValueError("No recognizable header row was found.")
+        return _rows_from_values(parser.rows, row_index)
+    if file_type != "text":
+        raise ValueError("The file does not match a supported broker table format.")
+    decoded = _decode_table_text(data)
     if decoded is None:
-        raise ValueError("The CSV encoding is not supported.")
+        raise ValueError("The table encoding is not supported.")
     try:
         dialect = csv.Sniffer().sniff(decoded[:8192], delimiters=",;\t")
     except csv.Error:
-        dialect = csv.excel
-    rows = list(csv.reader(io.StringIO(decoded, newline=""), dialect=dialect))
-    row_index = _header_row([tuple(row) for row in rows])
+        dialect = csv.excel_tab if Path(filename).suffix.casefold() == ".tsv" else csv.excel
+    rows: list[tuple[Any, ...]] = []
+    for row in csv.reader(io.StringIO(decoded, newline=""), dialect=dialect):
+        if len(row) > _MAX_TABLE_COLUMNS:
+            raise ValueError("The table has too many columns.")
+        if len(rows) >= _MAX_TABLE_ROWS:
+            raise ValueError("The table has too many rows.")
+        rows.append(tuple(row))
+    row_index = _header_row(rows)
     if row_index is None:
         if rows and len([cell for cell in rows[0] if cell.strip()]) >= 3:
             row_index = 0
         else:
             raise ValueError("No recognizable header row was found.")
-    return _rows_from_values([tuple(row) for row in rows], row_index)
+    return _rows_from_values(rows, row_index)
 
 
 def _rows_from_values(
@@ -199,7 +587,11 @@ def _rows_from_values(
     raw_headers = list(values[row_index])
     while raw_headers and (raw_headers[-1] is None or not str(raw_headers[-1]).strip()):
         raw_headers.pop()
+    if len(raw_headers) > _MAX_TABLE_COLUMNS:
+        raise ValueError("The table has too many columns.")
     headers = [str(value or "").strip() for value in raw_headers]
+    if len(values) - row_index - 1 > _MAX_TABLE_ROWS:
+        raise ValueError("The table has too many rows.")
     rows: list[dict[str, Any]] = []
     for row in values[row_index + 1 :]:
         if not row or not any(value is not None and str(value).strip() for value in row):
@@ -227,55 +619,87 @@ def _column_value(row: Mapping[str, Any], layout: Layout, canonical: str) -> Any
 
 
 def _decimal_value(value: Any, *, field: str) -> Decimal:
-    if isinstance(value, bool) or value is None:
-        raise ValueError(f"{field} must be a number")
-    raw = str(value).strip().replace("₹", "").replace("₨", "").replace("INR", "")
-    raw = raw.replace("Rs.", "").replace("rs.", "").strip()
-    if not raw:
-        raise ValueError(f"{field} must be a number")
-    try:
-        # The shared C02 parser validates Indian comma grouping and rupee precision.
-        return parse_inr(raw)
-    except ValueError:
-        cleaned = raw.replace(",", "")
-        if not re.fullmatch(r"-?\d+(?:\.\d+)?", cleaned):
-            raise ValueError(f"{field} must be a number") from None
-        try:
-            number = Decimal(cleaned)
-        except InvalidOperation as error:
-            raise ValueError(f"{field} must be a number") from error
-        if not number.is_finite():
-            raise ValueError(f"{field} must be finite") from None
-        return number
+    return _parse_decimal(value, field=field, currency="INR")
 
 
 def _currency_decimal(value: Any, *, field: str, currency: str) -> Decimal:
-    """Read native currency numbers, including comma decimals in Danish exports."""
-    if currency == "INR":
-        return _decimal_value(value, field=field)
+    """Read a broker amount while keeping INR grouping strict."""
+    return _parse_decimal(value, field=field, currency=currency)
+
+
+def _parse_decimal(value: Any, *, field: str, currency: str) -> Decimal:
     if isinstance(value, bool) or value is None:
         raise ValueError(f"{field} must be a number")
-    raw = str(value).strip().replace("\u00a0", "").replace(" ", "")
-    raw = re.sub(r"\b(?:USD|EUR|DKK|GBP|SEK)\b", "", raw, flags=re.IGNORECASE)
+    raw = str(value).strip().replace("−", "-")
     if not raw:
         raise ValueError(f"{field} must be a number")
+    negative = raw.startswith("(") and raw.endswith(")")
+    if negative:
+        raw = raw[1:-1].strip()
+    raw = raw.replace("\u00a0", "").replace("\u202f", "").replace(" ", "")
+    for marker in ("₹", "€", "$", "£"):
+        raw = raw.replace(marker, "")
+    raw = _CURRENCY_MARKERS.sub("", raw)
+    raw = raw.replace("−", "-")
+    if raw.startswith("-"):
+        negative = not negative
+        raw = raw[1:]
+    if raw.startswith("+"):
+        raw = raw[1:]
+    if not raw or "-" in raw or "+" in raw:
+        raise ValueError(f"{field} must be a number")
+
+    if currency == "INR":
+        try:
+            number = parse_inr(raw)
+        except ValueError as error:
+            # parse_inr stops at paise; an average price like 1543.2367 is still exact.
+            if _INR_LONG_FRACTION.fullmatch(raw) is None:
+                raise ValueError(f"{field} must be a valid INR amount") from error
+            number = Decimal(raw.replace(",", ""))
+        return -number if negative else number
+
     if "," in raw and "." in raw:
         decimal_separator = "," if raw.rfind(",") > raw.rfind(".") else "."
         grouping_separator = "." if decimal_separator == "," else ","
-        raw = raw.replace(grouping_separator, "").replace(decimal_separator, ".")
+        integer, fraction = raw.rsplit(decimal_separator, 1)
+        if not fraction.isdigit():
+            raise ValueError(f"{field} must be a number")
+        groups = integer.split(grouping_separator)
+        if len(groups) > 1 and not _valid_grouping(groups, grouping_separator):
+            raise ValueError(f"{field} must be a number")
+        raw = "".join(groups) + "." + fraction
     elif "," in raw:
         left, _, right = raw.rpartition(",")
-        if currency in {"DKK", "EUR", "GBP", "SEK"} and len(right) in {1, 2}:
-            raw = left.replace(",", "") + "." + right
+        groups = left.split(",")
+        if right.isdigit() and _valid_grouping([*groups, right], ","):
+            raw = "".join([*groups, right])
+        elif right.isdigit() and len(right) != 3 and "," not in left:
+            raw = left + "." + right
         else:
-            raw = raw.replace(",", "")
+            raise ValueError(f"{field} must be a number")
+    elif raw.count(".") > 1:
+        groups = raw.split(".")
+        if not _valid_grouping(groups, "."):
+            raise ValueError(f"{field} must be a number")
+        raw = "".join(groups)
+    if not re.fullmatch(r"\d+(?:\.\d+)?", raw):
+        raise ValueError(f"{field} must be a number")
     try:
         number = Decimal(raw)
     except InvalidOperation as error:
         raise ValueError(f"{field} must be a number") from error
     if not number.is_finite():
         raise ValueError(f"{field} must be finite") from None
-    return number
+    return -number if negative else number
+
+
+def _valid_grouping(groups: list[str], separator: str) -> bool:
+    if len(groups) < 2 or not all(group.isdigit() for group in groups):
+        return False
+    if separator == "," and len(groups) > 2 and all(len(group) == 2 for group in groups[1:-1]):
+        return len(groups[0]) in {1, 2} and len(groups[-1]) == 3
+    return len(groups[0]) in {1, 2, 3} and all(len(group) == 3 for group in groups[1:])
 
 
 def _date_value(value: Any) -> date:
@@ -283,6 +707,15 @@ def _date_value(value: Any) -> date:
         return value.date()
     if isinstance(value, date):
         return value
+    if isinstance(value, (int, float, Decimal)) and not isinstance(value, bool):
+        try:
+            excel_date = from_excel(float(value), WINDOWS_EPOCH)
+        except (OverflowError, TypeError, ValueError):
+            excel_date = None
+        if isinstance(excel_date, datetime):
+            return excel_date.date()
+        if isinstance(excel_date, date):
+            return excel_date
     text = str(value or "").strip()
     for pattern in _DATE_FORMATS:
         try:
@@ -295,6 +728,82 @@ def _date_value(value: Any) -> date:
 def _text(value: Any) -> str | None:
     text = str(value).strip() if value is not None else ""
     return text or None
+
+
+def _normal_trade_word(value: Any) -> str:
+    text = unicodedata.normalize("NFKC", str(value or "")).casefold().strip()
+    return re.sub(r"[^\w]+", " ", text).strip()
+
+
+def _market_without_default(
+    row: Mapping[str, Any],
+    layout: Layout,
+    isin: str | None,
+    default_market: str | None = None,
+) -> str | None:
+    raw_market = _text(_column_value(row, layout, "market"))
+    if raw_market:
+        normalized_market = raw_market.strip().casefold()
+        market = _MARKET_NAMES.get(normalized_market, raw_market.upper())
+        if market in _MARKETS:
+            return market
+    if isin and len(isin) == 12 and isin_check_digit_ok(isin.upper()):
+        market = _MARKET_BY_ISIN_PREFIX.get(isin[:2].upper())
+        if market is not None:
+            return market
+        # An ISIN's country is where a company is registered, not where it trades:
+        # Accenture (IE...) trades in New York, so an Indian or US broker keeps its market.
+        if default_market in {"IN", "US"}:
+            return default_market
+        return "EU"
+    return None
+
+
+def mapping_default_requirements(
+    rows: list[dict[str, Any]], columns: Mapping[str, str | None]
+) -> tuple[bool, bool]:
+    """Report whether any mapped row can supply market and currency itself."""
+    layout = Layout(
+        broker="mapped",
+        kind="holdings",
+        fingerprint=frozenset(),
+        columns={field: header for field, header in columns.items() if header is not None},
+    )
+    market_inferred = False
+    currency_inferred = False
+    for row in rows:
+        isin = _text(_column_value(row, layout, "isin"))
+        market = _market_without_default(row, layout, isin)
+        market_inferred = market_inferred or market is not None
+        explicit_currency = _text(_column_value(row, layout, "currency"))
+        if explicit_currency:
+            normalized_currency = explicit_currency.strip().casefold()
+            currency = _CURRENCY_NAMES.get(normalized_currency, explicit_currency.upper())
+            currency_inferred = currency_inferred or currency in _CURRENCY_CODES
+        if market in _CURRENCY_BY_MARKET:
+            currency_inferred = True
+    return not market_inferred, not currency_inferred
+
+
+def _row_market_currency(
+    row: Mapping[str, Any], layout: Layout, isin: str | None
+) -> tuple[str, str] | None:
+    default_market = layout.market_default.upper()
+    market = _market_without_default(row, layout, isin, default_market) or default_market
+    if market not in _MARKETS:
+        return None
+
+    explicit_currency = _text(_column_value(row, layout, "currency"))
+    if explicit_currency:
+        normalized_currency = explicit_currency.strip().casefold()
+        currency = _CURRENCY_NAMES.get(normalized_currency, explicit_currency.upper())
+    else:
+        currency = ""
+    if currency not in _CURRENCY_CODES:
+        currency = _CURRENCY_BY_MARKET.get(market, layout.currency_default.upper())
+    if currency not in _CURRENCY_CODES:
+        return None
+    return market, currency
 
 
 def _is_summary(row: Mapping[str, Any], layout: Layout) -> bool:
@@ -312,32 +821,33 @@ def parse_holdings(rows: list[dict[str, Any]], layout: Layout) -> list[BrokerHol
         if _is_summary(row, layout):
             continue
         isin_text = _text(_column_value(row, layout, "isin"))
-        currency = (
-            _text(_column_value(row, layout, "currency")) or layout.currency_default
-        ).upper()
-        market_value = _text(_column_value(row, layout, "market"))
-        market = (
-            market_value
-            or ("IN" if isin_text and isin_text.upper().startswith("IN") else layout.market_default)
-        ).upper()
-        if not _text(_column_value(row, layout, "currency")) and market == "IN":
-            currency = "INR"
-        if currency not in {"INR", "USD", "EUR", "DKK", "GBP", "SEK"}:
+        market_currency = _row_market_currency(row, layout, isin_text)
+        if market_currency is None:
             continue
-        if market not in {"IN", "US", "DK", "EU", "GB"}:
-            continue
+        market, currency = market_currency
         try:
             quantity = _currency_decimal(
                 _column_value(row, layout, "quantity"), field="quantity", currency=currency
             )
-            avg_price = _currency_decimal(
-                _column_value(row, layout, "avg_price"),
-                field="average price",
-                currency=currency,
-            )
         except ValueError:
             continue
-        if quantity <= 0 or avg_price < 0:
+        if quantity <= 0:
+            continue
+        raw_avg_price = _column_value(row, layout, "avg_price")
+        raw_cost_value = _column_value(row, layout, "cost_value")
+        avg_price: Decimal | None = None
+        if raw_avg_price not in (None, ""):
+            with suppress(ValueError):
+                avg_price = _currency_decimal(
+                    raw_avg_price, field="average price", currency=currency
+                )
+        elif raw_cost_value not in (None, ""):
+            with suppress(ValueError):
+                cost_value = _currency_decimal(
+                    raw_cost_value, field="cost value", currency=currency
+                )
+                avg_price = cost_value / quantity
+        if avg_price is not None and avg_price < 0:
             continue
         symbol = _text(_column_value(row, layout, "symbol"))
         name = _text(_column_value(row, layout, "name"))
@@ -348,11 +858,11 @@ def parse_holdings(rows: list[dict[str, Any]], layout: Layout) -> list[BrokerHol
         if raw_last not in (None, ""):
             with suppress(ValueError):
                 last_price = _currency_decimal(raw_last, field="last price", currency=currency)
-        market_value = None
+        parsed_market_value = None
         raw_market_value = _column_value(row, layout, "market_value")
         if raw_market_value not in (None, ""):
             with suppress(ValueError):
-                market_value = _currency_decimal(
+                parsed_market_value = _currency_decimal(
                     raw_market_value, field="market value", currency=currency
                 )
         isin = _text(_column_value(row, layout, "isin"))
@@ -370,42 +880,39 @@ def parse_holdings(rows: list[dict[str, Any]], layout: Layout) -> list[BrokerHol
                 exchange=_text(_column_value(row, layout, "exchange")),
                 market=market,
                 currency=currency,
-                market_value=market_value,
+                market_value=parsed_market_value,
                 security_type="etf" if raw_security_type in {"etf", "etfs"} else "equity",
             )
         )
     return result
 
 
-def parse_tradebook(rows: list[dict[str, Any]], layout: Layout) -> list[Trade]:
+def parse_tradebook(
+    rows: list[dict[str, Any]],
+    layout: Layout,
+    *,
+    skipped_rows: dict[str, int] | None = None,
+) -> list[Trade]:
     if layout.kind != "tradebook":
         raise ValueError("A tradebook layout is required.")
     result: list[Trade] = []
     for row in rows:
         if _is_summary(row, layout):
             continue
-        raw_type = str(_column_value(row, layout, "trade_type") or "").strip().casefold()
-        if raw_type in {"buy", "b", "purchase"}:
+        raw_type = _normal_trade_word(_column_value(row, layout, "trade_type"))
+        if raw_type in _BUY_WORDS:
             trade_type = "buy"
-        elif raw_type in {"sell", "s", "sale"}:
+        elif raw_type in _SELL_WORDS:
             trade_type = "sell"
         else:
+            if skipped_rows is not None:
+                skipped_rows["not_a_trade"] = skipped_rows.get("not_a_trade", 0) + 1
             continue
         isin_text = _text(_column_value(row, layout, "isin"))
-        currency = (
-            _text(_column_value(row, layout, "currency")) or layout.currency_default
-        ).upper()
-        market_value = _text(_column_value(row, layout, "market"))
-        market = (
-            market_value
-            or ("IN" if isin_text and isin_text.upper().startswith("IN") else layout.market_default)
-        ).upper()
-        if not _text(_column_value(row, layout, "currency")) and market == "IN":
-            currency = "INR"
-        if currency not in {"INR", "USD", "EUR", "DKK", "GBP", "SEK"}:
+        market_currency = _row_market_currency(row, layout, isin_text)
+        if market_currency is None:
             continue
-        if market not in {"IN", "US", "DK", "EU", "GB"}:
-            continue
+        market, currency = market_currency
         try:
             trade_date = _date_value(_column_value(row, layout, "trade_date"))
             quantity = abs(

@@ -2659,6 +2659,11 @@
             ],
             "title": "Account Id"
           },
+          "auto_mapped": {
+            "default": false,
+            "title": "Auto Mapped",
+            "type": "boolean"
+          },
           "broker": {
             "anyOf": [
               {
@@ -2674,6 +2679,13 @@
             "default": 0,
             "title": "Cash Flow Count",
             "type": "integer"
+          },
+          "columns_used": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Columns Used",
+            "type": "object"
           },
           "confirmed_at": {
             "anyOf": [
@@ -2727,6 +2739,11 @@
             ],
             "title": "Error Code"
           },
+          "has_missing_cost": {
+            "default": false,
+            "title": "Has Missing Cost",
+            "type": "boolean"
+          },
           "headers": {
             "anyOf": [
               {
@@ -2753,6 +2770,21 @@
             "title": "Items",
             "type": "array"
           },
+          "mapping_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "holdings",
+                  "tradebook"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mapping Kind"
+          },
           "market_default": {
             "default": "US",
             "enum": [
@@ -2777,6 +2809,16 @@
             ],
             "title": "Member Id"
           },
+          "needs_currency_default": {
+            "default": false,
+            "title": "Needs Currency Default",
+            "type": "boolean"
+          },
+          "needs_market_default": {
+            "default": false,
+            "title": "Needs Market Default",
+            "type": "boolean"
+          },
           "samples": {
             "items": {
               "items": {
@@ -2786,6 +2828,13 @@
             },
             "title": "Samples",
             "type": "array"
+          },
+          "skipped_rows": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Skipped Rows",
+            "type": "object"
           },
           "source": {
             "anyOf": [
@@ -3192,12 +3241,20 @@
           "broker": {
             "default": "other",
             "enum": [
+              "zerodha",
+              "hdfc_securities",
+              "groww",
+              "icici_direct",
+              "angel_one",
+              "upstox",
+              "other_indian_broker",
+              "indmoney",
+              "vested",
               "nordnet",
               "saxo",
               "danske_bank",
+              "other_danish_broker",
               "ibkr",
-              "vested",
-              "indmoney",
               "other"
             ],
             "title": "Broker",

@@ -105,6 +105,13 @@ class ImportDetailResponse(ImportJobResponse):
     headers: list[str] | None = None
     samples: list[list[str]] = Field(default_factory=list)
     suggested_mapping: dict[str, str | None] = Field(default_factory=dict)
+    mapping_kind: Literal["holdings", "tradebook"] | None = None
+    auto_mapped: bool = False
+    columns_used: dict[str, str] = Field(default_factory=dict)
+    has_missing_cost: bool = False
+    skipped_rows: dict[str, int] = Field(default_factory=dict)
+    needs_market_default: bool = False
+    needs_currency_default: bool = False
     broker: str | None = None
     market_default: Literal["IN", "US", "DK", "EU", "GB"] = "US"
     currency_default: Literal["INR", "USD", "EUR", "DKK", "GBP", "SEK"] = "USD"
@@ -117,9 +124,23 @@ class ImportMappingRequest(ImportApiModel):
     kind: Literal["holdings", "tradebook"]
     columns: dict[str, str]
     save_as: str | None = None
-    broker: Literal["nordnet", "saxo", "danske_bank", "ibkr", "vested", "indmoney", "other"] = (
-        "other"
-    )
+    broker: Literal[
+        "zerodha",
+        "hdfc_securities",
+        "groww",
+        "icici_direct",
+        "angel_one",
+        "upstox",
+        "other_indian_broker",
+        "indmoney",
+        "vested",
+        "nordnet",
+        "saxo",
+        "danske_bank",
+        "other_danish_broker",
+        "ibkr",
+        "other",
+    ] = "other"
     market_default: Literal["IN", "US", "DK", "EU", "GB"] = "US"
     currency_default: Literal["INR", "USD", "EUR", "DKK", "GBP", "SEK"] = "USD"
 
@@ -218,17 +239,10 @@ def _decimal_string(value: Decimal) -> str:
     return format(value, "f")
 
 
-def _looks_like_text_csv(data: bytes) -> bool:
-    if not data or data.startswith(b"PK") or b"\x00" in data:
-        return False
-    try:
-        decoded = data.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        try:
-            decoded = data.decode("cp1252")
-        except UnicodeDecodeError:
-            return False
-    return all(character in "\t\n\r\f" or ord(character) >= 32 for character in decoded)
+def _looks_like_text_csv(data: bytes, filename: str = "statement.csv") -> bool:
+    from wealth.importer.brokers.parser import detect_broker_file
+
+    return detect_broker_file(data, filename) == "text"
 
 
 def _money_value(holding: ParsedHolding) -> Decimal | None:
@@ -479,15 +493,9 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             if broker_value is not None and not isinstance(broker_value, str):
                 return _problem(request, 422, "invalid_upload", "The broker selection is invalid.")
             broker_name = (broker_value or "other").strip().casefold()
-            if broker_name not in {
-                "nordnet",
-                "saxo",
-                "danske_bank",
-                "ibkr",
-                "vested",
-                "indmoney",
-                "other",
-            }:
+            from wealth.importer.brokers.parser import load_broker_config
+
+            if broker_name not in load_broker_config():
                 return _problem(request, 422, "invalid_broker", "Choose a supported broker.")
             doc_type = (doc_type_value or "cas")[:32]
             if doc_type_value is not None and len(doc_type_value) > 32:
@@ -499,24 +507,35 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
 
         filename = file.filename or ""
         suffix = Path(filename).suffix.casefold()
-        is_pdf = suffix == ".pdf" and data.startswith(b"%PDF")
-        is_xlsx = suffix == ".xlsx" and data.startswith(b"PK")
-        is_csv = suffix == ".csv" and _looks_like_text_csv(data)
-        if not (is_pdf or is_xlsx or is_csv):
+        from wealth.importer.brokers.parser import detect_broker_file
+
+        file_type = detect_broker_file(data, filename)
+        is_pdf = file_type == "pdf"
+        is_broker_file = file_type in {"text", "xlsx", "xls", "html_xls"}
+        is_text_file = file_type == "text"
+        if doc_type_value == "broker_statement" and suffix == ".pdf" and is_pdf:
             return _problem(
                 request,
                 415,
-                "unsupported_format" if suffix in {".csv", ".xlsx"} else "not_a_pdf",
-                "Choose a PDF, CSV, or XLSX file that matches its file type.",
+                "broker_pdf",
+                "This looks like a PDF. Please download the Excel or CSV version from your broker.",
+            )
+        if not (is_pdf or is_broker_file):
+            return _problem(
+                request,
+                415,
+                "unsupported_format"
+                if suffix in {".csv", ".tsv", ".xls", ".xlsx"}
+                else "not_a_pdf",
+                "Choose a PDF, CSV, TSV, text, XLS, or XLSX file that matches its file type.",
             )
 
-        if is_csv or is_xlsx:
+        if is_broker_file:
             from wealth.api.broker_imports import (
                 available_templates,
                 broker_defaults,
                 broker_for_account,
                 find_layout,
-                header_names,
                 infer_tax_wrapper,
                 keep_pending_rows,
                 mapping_suggestions,
@@ -531,10 +550,11 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                 is_activity_statement_csv,
                 parse_activity_statement_csv,
             )
+            from wealth.importer.brokers.parser import auto_map, mapping_default_requirements
 
             activity = None
             try:
-                if is_csv and is_activity_statement_csv(data):
+                if is_text_file and is_activity_statement_csv(data):
                     activity = await asyncio.wait_for(
                         asyncio.to_thread(parse_activity_statement_csv, data),
                         timeout=PARSE_TIMEOUT_SECONDS,
@@ -610,6 +630,32 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             market_default, currency_default = broker_defaults(broker_name)
             templates = available_templates(user.session, user.household_owner_id)
             layout = find_layout(headers, templates) if activity is None else None
+            auto_mapped = False
+            mapping_kind: str | None = None
+            mapping: dict[str, str | None] = {}
+            if layout is None and activity is None:
+                automatic_layout, mapping_kind, mapping = auto_map(
+                    headers,
+                    rows,
+                    broker=broker_name,
+                    market_default=market_default,
+                    currency_default=currency_default,
+                )
+                if automatic_layout is not None:
+                    layout = automatic_layout
+                    auto_mapped = True
+            if layout is None:
+                mapping = mapping or mapping_suggestions(headers, mapping_kind, rows)
+                needs_market_default, needs_currency_default = mapping_default_requirements(
+                    rows, mapping
+                )
+            elif auto_mapped:
+                needs_market_default, needs_currency_default = mapping_default_requirements(
+                    rows, mapping
+                )
+            else:
+                needs_market_default = False
+                needs_currency_default = False
             now = datetime.now(UTC)
             job = ImportJob(
                 user_id=user.household_owner_id,
@@ -625,6 +671,11 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                     "broker": broker_name,
                     "market_default": market_default,
                     "currency_default": currency_default,
+                    "auto_mapped": auto_mapped,
+                    "mapping_kind": layout.kind if auto_mapped and layout is not None else None,
+                    "columns_used": {},
+                    "needs_market_default": needs_market_default,
+                    "needs_currency_default": needs_currency_default,
                 },
                 file_deleted_at=now,
             )
@@ -643,13 +694,13 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                     warnings=list(report.get("warnings", [])),
                 )
             if layout is None:
-                display_headers = header_names(headers)
-                mapping = mapping_suggestions(headers)
+                mapping = mapping or mapping_suggestions(headers, mapping_kind, rows)
                 job.parse_report = {
                     **(job.parse_report or {}),
-                    "headers": display_headers,
+                    "headers": headers,
                     "samples": masked_samples(headers, rows),
                     "suggested_mapping": mapping,
+                    "mapping_kind": mapping_kind,
                     "warnings": [],
                 }
                 explicit_wrapper = infer_tax_wrapper(headers, rows)
@@ -665,6 +716,25 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                     counts=job.counts,
                     warnings=[],
                 )
+            if auto_mapped:
+                report = dict(job.parse_report or {})
+                report.update(
+                    {
+                        "headers": headers,
+                        "samples": masked_samples(headers, rows),
+                        "suggested_mapping": mapping,
+                        "mapping_kind": layout.kind,
+                        "columns_used": {
+                            field: header
+                            for field, header in layout.columns.items()
+                            if isinstance(header, str)
+                        },
+                        "needs_market_default": needs_market_default,
+                        "needs_currency_default": needs_currency_default,
+                    }
+                )
+                job.parse_report = report
+                keep_pending_rows(job.id, headers, rows)
             counts = stage_broker_items(
                 user.session, user.household_owner_id, job, headers, rows, layout
             )
@@ -760,6 +830,13 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             "headers": report.get("headers"),
             "samples": report.get("samples", []),
             "suggested_mapping": report.get("suggested_mapping", {}),
+            "mapping_kind": report.get("mapping_kind"),
+            "auto_mapped": report.get("auto_mapped", False),
+            "columns_used": report.get("columns_used", {}),
+            "has_missing_cost": report.get("has_missing_cost", False),
+            "skipped_rows": report.get("skipped_rows", {}),
+            "needs_market_default": report.get("needs_market_default", False),
+            "needs_currency_default": report.get("needs_currency_default", False),
             "broker": report.get("broker"),
             "market_default": report.get("market_default", "US"),
             "currency_default": report.get("currency_default", "USD"),
@@ -797,7 +874,9 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
         )
         if job is None:
             return _problem(request, 404, "not_found", "The import was not found.")
-        if job.status != "needs_mapping":
+        report = dict(job.parse_report or {})
+        fixing_auto_mapping = job.status == "ready" and report.get("auto_mapped") is True
+        if job.status != "needs_mapping" and not fixing_auto_mapping:
             return _problem(
                 request, 409, "mapping_not_needed", "This import no longer needs a mapping."
             )
@@ -817,6 +896,7 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                 "name",
                 "quantity",
                 "avg_price",
+                "cost_value",
                 "last_price",
                 "exchange",
                 "market",
@@ -882,7 +962,6 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             if job.account_id is not None
             else None
         )
-        report = dict(job.parse_report or {})
         selected_broker = payload.broker
         if selected_broker == "other":
             selected_broker = str(report.get("broker") or "other")
@@ -901,6 +980,17 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             market_default=market_default,
             currency_default=currency_default,
         )
+        if fixing_auto_mapping:
+            user.session.execute(
+                delete(ImportItem).where(
+                    ImportItem.user_id == user.household_owner_id,
+                    ImportItem.job_id == job.id,
+                )
+            )
+            report.pop("columns_used", None)
+            report["auto_mapped"] = False
+            report["mapping_kind"] = payload.kind
+            job.parse_report = report
         job.counts = stage_broker_items(
             user.session, user.household_owner_id, job, headers, rows, layout
         )
@@ -932,6 +1022,13 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             "headers": (job.parse_report or {}).get("headers"),
             "samples": (job.parse_report or {}).get("samples", []),
             "suggested_mapping": (job.parse_report or {}).get("suggested_mapping", {}),
+            "mapping_kind": (job.parse_report or {}).get("mapping_kind"),
+            "auto_mapped": (job.parse_report or {}).get("auto_mapped", False),
+            "columns_used": (job.parse_report or {}).get("columns_used", {}),
+            "has_missing_cost": (job.parse_report or {}).get("has_missing_cost", False),
+            "skipped_rows": (job.parse_report or {}).get("skipped_rows", {}),
+            "needs_market_default": (job.parse_report or {}).get("needs_market_default", False),
+            "needs_currency_default": (job.parse_report or {}).get("needs_currency_default", False),
             "broker": (job.parse_report or {}).get("broker"),
             "market_default": (job.parse_report or {}).get("market_default", "US"),
             "currency_default": (job.parse_report or {}).get("currency_default", "USD"),
@@ -1033,7 +1130,12 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                     "quantity_choice_required",
                     "Choose which holdings to keep for every quantity difference.",
                 )
-            from wealth.api.broker_imports import confirm_broker_items
+            from wealth.api.broker_imports import (
+                broker_label,
+                confirm_broker_items,
+                persist_template,
+                take_pending_rows,
+            )
             from wealth.db.models import Account
 
             report = dict(job.parse_report or {})
@@ -1087,6 +1189,31 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                 confirmed_security_ids,
             )
             applied["recorded_buys_matched"] = recorded_buys_matched
+            if report.get("auto_mapped") is True:
+                columns_used = report.get("columns_used")
+                headers = report.get("headers")
+                kind = report.get("mapping_kind")
+                broker = str(report.get("broker") or "other")
+                if (
+                    isinstance(columns_used, dict)
+                    and isinstance(headers, list)
+                    and kind in {"holdings", "tradebook"}
+                ):
+                    persist_template(
+                        user.session,
+                        user.household_owner_id,
+                        name=broker_label(broker),
+                        kind=kind,
+                        headers=[str(header) for header in headers],
+                        columns={
+                            str(field): str(header)
+                            for field, header in columns_used.items()
+                            if isinstance(header, str)
+                        },
+                        market_default=str(report.get("market_default") or "US"),
+                        currency_default=str(report.get("currency_default") or "USD"),
+                    )
+            take_pending_rows(job.id)
             job.status = "confirmed"
             job.confirmed_at = datetime.now(UTC)
             user.session.add(

@@ -149,7 +149,7 @@ def test_0014_international_assets_migration_downgrades_and_upgrades(
         assert {"domicile", "exchange"} <= set(columns)
 
 
-def test_unknown_file_maps_once_and_reuses_household_template(
+def test_unknown_file_auto_maps_once_and_reuses_household_template(
     broker_api_client: tuple[TestClient, str], migrated_database: MigratedDatabase
 ) -> None:
     client, secret = broker_api_client
@@ -158,18 +158,22 @@ def test_unknown_file_maps_once_and_reuses_household_template(
 
     uploaded = _upload(client, headers, "synthetic.csv", unknown_file)
     assert uploaded.status_code == 201, uploaded.text
-    assert uploaded.json()["status"] == "needs_mapping"
+    assert uploaded.json()["status"] == "ready"
     job_id = uploaded.json()["job_id"]
     detail = client.get(f"/v1/imports/{job_id}", headers=headers).json()
     assert detail["headers"] == [
-        "ticker",
-        "units",
-        "buy price",
-        "venue",
-        "security id",
-        "average value",
+        "Ticker",
+        "Units",
+        "Buy price",
+        "Venue",
+        "Security ID",
+        "Average value",
     ]
     assert len(detail["samples"]) == 1
+    assert detail["auto_mapped"] is True
+    assert detail["mapping_kind"] == "holdings"
+    assert detail["columns_used"]["symbol"] == "Ticker"
+    assert detail["columns_used"]["quantity"] == "Units"
     sample = detail["samples"][0]
     assert "SYNTH" not in "".join(sample)
     assert all(
@@ -178,29 +182,15 @@ def test_unknown_file_maps_once_and_reuses_household_template(
         for character in value
     )
 
-    mapped = client.post(
-        f"/v1/imports/{job_id}/mapping",
-        headers=headers,
-        json={
-            "kind": "holdings",
-            "columns": {
-                "isin": "security id",
-                "symbol": "ticker",
-                "quantity": "units",
-                "avg_price": "buy price",
-            },
-            "save_as": "Synthetic holdings",
-        },
-    )
-    assert mapped.status_code == 200, mapped.text
-    assert mapped.json()["status"] == "ready"
-    assert mapped.json()["items"][0]["status"] == "new"
+    first_confirm = client.post(f"/v1/imports/{job_id}/confirm", headers=headers)
+    assert first_confirm.status_code == 200, first_confirm.text
 
     second = _upload(client, headers, "synthetic.csv", unknown_file)
     assert second.status_code == 201, second.text
     assert second.json()["status"] == "ready"
-    assert second.json()["counts"]["new"] == 1
     second_job = second.json()["job_id"]
+    second_detail = client.get(f"/v1/imports/{second_job}", headers=headers).json()
+    assert second_detail["auto_mapped"] is False
     confirmed = client.post(f"/v1/imports/{second_job}/confirm", headers=headers)
     assert confirmed.status_code == 200, confirmed.text
 
@@ -223,6 +213,8 @@ def test_unknown_file_maps_once_and_reuses_household_template(
             )
             == 1
         )
+        template = session.scalar(select(ImportTemplate).where(ImportTemplate.user_id == user_id))
+        assert template is not None and template.name == "Other"
         lot = session.scalar(
             select(HoldingLot).where(
                 HoldingLot.user_id == user_id,
@@ -231,6 +223,127 @@ def test_unknown_file_maps_once_and_reuses_household_template(
         )
         assert lot is not None and lot.member_id == member.id
         assert lot.quantity == Decimal("20.000000")
+
+
+def test_broker_pdf_and_unknown_broker_return_friendly_errors(
+    broker_api_client: tuple[TestClient, str],
+) -> None:
+    client, secret = broker_api_client
+    headers, _claims = _identity(secret, "upload-errors")
+
+    pdf = client.post(
+        "/v1/imports",
+        headers=headers,
+        files={"file": ("synthetic.pdf", b"%PDF-1.4 synthetic statement", "application/pdf")},
+        data={"doc_type": "broker_statement", "broker": "nordnet"},
+    )
+    assert pdf.status_code == 415
+    assert pdf.json()["code"] == "broker_pdf"
+    assert pdf.json()["detail"] == (
+        "This looks like a PDF. Please download the Excel or CSV version from your broker."
+    )
+
+    unknown_broker = client.post(
+        "/v1/imports",
+        headers=headers,
+        files={
+            "file": (
+                "synthetic.csv",
+                b"Symbol,Quantity,Name\nSYNTH,2,Synthetic share\n",
+                "text/csv",
+            )
+        },
+        data={"doc_type": "broker_statement", "broker": "unsupported"},
+    )
+    assert unknown_broker.status_code == 422
+    assert unknown_broker.json()["code"] == "invalid_broker"
+
+
+def test_holdings_without_cost_confirm_and_existing_isin_security_keeps_its_symbol(
+    broker_api_client: tuple[TestClient, str], migrated_database: MigratedDatabase
+) -> None:
+    client, secret = broker_api_client
+    headers, claims = _identity(secret, "cost-and-isin")
+    user_id = _user_id(migrated_database, claims)
+    with system_session(migrated_database.owner_engine) as session:
+        member = ensure_self_household_member(session, user_id)
+        existing = Security(
+            market="US",
+            symbol="AAPL",
+            isin="US0378331005",
+            exchange="NASDAQ",
+            name="Synthetic existing security",
+            security_type="equity",
+            currency="USD",
+            sleeve="equity_global",
+        )
+        session.add(existing)
+        session.flush()
+        existing_security_id = existing.id
+
+    no_cost_upload = _upload(
+        client,
+        headers,
+        "synthetic-no-cost.csv",
+        b"Symbol,Quantity,Name\nSYNTHCO,2,Synthetic company\n",
+        broker="other",
+    )
+    assert no_cost_upload.status_code == 201, no_cost_upload.text
+    no_cost_job = no_cost_upload.json()["job_id"]
+    no_cost_detail = client.get(f"/v1/imports/{no_cost_job}", headers=headers).json()
+    assert no_cost_detail["auto_mapped"] is True
+    assert no_cost_detail["has_missing_cost"] is True
+    no_cost_confirm = client.post(f"/v1/imports/{no_cost_job}/confirm", headers=headers)
+    assert no_cost_confirm.status_code == 200, no_cost_confirm.text
+
+    share_upload = _upload(
+        client,
+        headers,
+        "synthetic-us-share.csv",
+        ("Symbol,ISIN,Quantity,Avg Cost Price\nAAPL.O,US0378331005,2,100.00\n").encode("ascii"),
+        broker="indmoney",
+    )
+    assert share_upload.status_code == 201, share_upload.text
+    share_job = share_upload.json()["job_id"]
+    share_detail = client.get(f"/v1/imports/{share_job}", headers=headers).json()
+    assert share_detail["items"][0]["market"] == "US"
+    assert share_detail["items"][0]["currency"] == "USD"
+    share_confirm = client.post(f"/v1/imports/{share_job}/confirm", headers=headers)
+    assert share_confirm.status_code == 200, share_confirm.text
+
+    with system_session(migrated_database.owner_engine) as session:
+        member = session.scalar(
+            select(HouseholdMember).where(
+                HouseholdMember.user_id == user_id,
+                HouseholdMember.is_self.is_(True),
+            )
+        )
+        assert member is not None
+        existing = session.get(Security, existing_security_id)
+        assert existing is not None
+        assert (existing.market, existing.symbol, existing.exchange) == (
+            "US",
+            "AAPL",
+            "NASDAQ",
+        )
+        linked_lot = session.scalar(
+            select(HoldingLot).where(
+                HoldingLot.user_id == user_id,
+                HoldingLot.security_id == existing_security_id,
+                HoldingLot.source == "broker",
+            )
+        )
+        assert linked_lot is not None and linked_lot.member_id == member.id
+        no_cost_lot = session.scalar(
+            select(HoldingLot)
+            .join(Security)
+            .where(
+                HoldingLot.user_id == user_id,
+                HoldingLot.source == "broker",
+                Security.symbol == "SYNTHCO",
+            )
+        )
+        assert no_cost_lot is not None and no_cost_lot.cost_per_unit is None
 
 
 def test_holdings_enrich_and_tradebook_choices_preserve_manual_lots(

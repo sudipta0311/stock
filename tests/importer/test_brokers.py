@@ -7,17 +7,26 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
+import yaml
 from openpyxl import Workbook
+from openpyxl.utils.datetime import WINDOWS_EPOCH, to_excel
+from xlwt import Workbook as XlsWorkbook
 
 from wealth.api.broker_imports import mapping_suggestions, masked_samples
+from wealth.api.imports import _looks_like_text_csv
 from wealth.core.ids import isin_check_digit_ok
 from wealth.importer.brokers import (
     Layout,
     Trade,
+    auto_map,
+    detect_broker_file,
     detect_layout,
     fifo_lots,
     is_activity_statement_csv,
+    load_broker_config,
     load_layouts,
+    mapping_default_requirements,
     normalize_header,
     parse_activity_statement_csv,
     parse_cash_flows,
@@ -25,7 +34,12 @@ from wealth.importer.brokers import (
     parse_tradebook,
     read_table,
 )
-from wealth.importer.brokers.parser import header_fingerprint
+from wealth.importer.brokers.parser import (
+    _currency_decimal,
+    _date_value,
+    header_fingerprint,
+    suggested_mapping,
+)
 
 FIXTURES = Path(__file__).parents[1] / "fixtures" / "brokers"
 
@@ -41,6 +55,19 @@ def _xlsx(headers: list[str], rows: list[list[object]]) -> bytes:
     sheet.append(headers)
     for row in rows:
         sheet.append(row)
+    output = io.BytesIO()
+    workbook.save(output)
+    return output.getvalue()
+
+
+def _xls(headers: list[str], rows: list[list[object]]) -> bytes:
+    workbook = XlsWorkbook()
+    sheet = workbook.add_sheet("Synthetic")
+    for column, header in enumerate(headers):
+        sheet.write(0, column, header)
+    for row_index, row in enumerate(rows, start=1):
+        for column, value in enumerate(row):
+            sheet.write(row_index, column, value)
     output = io.BytesIO()
     workbook.save(output)
     return output.getvalue()
@@ -112,6 +139,77 @@ def test_unknown_headers_are_not_guessed_as_a_broker_layout() -> None:
     }
 
 
+def test_all_broker_choices_have_configured_market_and_currency_defaults() -> None:
+    config = load_broker_config()
+    expected_indian = {
+        "zerodha",
+        "hdfc_securities",
+        "groww",
+        "icici_direct",
+        "angel_one",
+        "upstox",
+        "other_indian_broker",
+    }
+    expected_us = {"indmoney", "vested", "ibkr", "other"}
+    expected_danish = {"nordnet", "saxo", "danske_bank", "other_danish_broker"}
+
+    assert set(config) == expected_indian | expected_us | expected_danish
+    assert all(
+        (config[broker]["market"], config[broker]["currency"]) == ("IN", "INR")
+        for broker in expected_indian
+    )
+    assert all(
+        (config[broker]["market"], config[broker]["currency"]) == ("US", "USD")
+        for broker in expected_us
+    )
+    assert all(
+        (config[broker]["market"], config[broker]["currency"]) == ("DK", "DKK")
+        for broker in expected_danish
+    )
+
+
+def test_norwegian_aliases_and_trade_date_fallback_are_loaded() -> None:
+    broker_rules = yaml.safe_load(
+        (Path(__file__).parents[2] / "rules" / "brokers.yaml").read_text(encoding="utf-8")
+    )
+    assert set(broker_rules["aliases"]["holdings"]["name"]) == {"en", "da", "no", "sv"}
+    norwegian = suggested_mapping(["Verdipapir", "Antall", "Gjennomsnittskurs"], kind="holdings")
+    assert (norwegian["name"], norwegian["quantity"], norwegian["avg_price"]) == (
+        "Verdipapir",
+        "Antall",
+        "Gjennomsnittskurs",
+    )
+    holdings = suggested_mapping(["Værdipapir", "Antal", "Kurs"], kind="holdings")
+    trades = suggested_mapping(
+        ["Handelsdag", "Transaktionstype", "Antal", "Kurs", "ISIN"],
+        kind="tradebook",
+    )
+    assert (holdings["last_price"], holdings.get("price")) == ("Kurs", None)
+    assert trades["price"] == "Kurs"
+    assert (
+        suggested_mapping(
+            ["Booking Date", "Trade Type", "Quantity", "Price", "Symbol"],
+            kind="tradebook",
+        )["trade_date"]
+        == "Booking Date"
+    )
+
+
+def test_mapping_defaults_are_asked_only_without_a_row_market_or_currency() -> None:
+    assert mapping_default_requirements(
+        [{"Symbol": "SYNTH", "Quantity": "2"}],
+        {"symbol": "Symbol", "quantity": "Quantity"},
+    ) == (True, True)
+    assert mapping_default_requirements(
+        [{"ISIN": "US0378331005", "Quantity": "2"}],
+        {"isin": "ISIN", "quantity": "Quantity"},
+    ) == (False, False)
+    assert mapping_default_requirements(
+        [{"Market": "EU", "Quantity": "2"}],
+        {"market": "Market", "quantity": "Quantity"},
+    ) == (False, True)
+
+
 def test_saved_template_is_selected_for_the_same_normalized_headers() -> None:
     headers = ["Ticker", "Units", "Buy price", "Venue", "Security ID", "Average value"]
     template = {
@@ -145,6 +243,407 @@ def test_csv_reader_handles_bom_and_cp1252_without_writing_files() -> None:
         headers, rows = read_table(data, "synthetic.csv")
         assert headers == ["Symbol", "Quantity", "Average price", "Company name"]
         assert rows[0]["Company name"] in {"Synthetic share", "Synthetic € class"}
+
+
+def test_detection_matrix_and_table_reader_share_file_checks() -> None:
+    utf8 = b"Symbol,Quantity,Name\nSYNTH,2,Synthetic share\n"
+    utf8_bom_semicolon = "Symbol;Quantity;Name\nSYNTH;2;Synthetic share\n".encode("utf-8-sig")
+    utf16_bom = "Værdipapir\tAntal\tNavn\nSynthetic share\t2\tSynthetic\n".encode("utf-16")
+    utf16_no_bom = "Symbol\tQuantity\tName\nSYNTH\t2\tSynthetic\n".encode("utf-16-le")
+    cp1252 = "Symbol,Quantity,Name\nSYNTH,2,Synthetic € class\n".encode("cp1252")
+    html_xls = (
+        b"<html><script>not executed</script><table><tr><th>Symbol</th>"
+        b"<th>Quantity</th><th>Name</th></tr><tr><td>SYNTH</td><td>2</td>"
+        b"<td>Synthetic share</td></tr></table></html>"
+    )
+    real_xls = _xls(["Symbol", "Quantity", "Name"], [["SYNTH", 2, "Synthetic share"]])
+    xlsx = _xlsx(["Symbol", "Quantity", "Name"], [["SYNTH", 2, "Synthetic share"]])
+    cases = [
+        (utf8, "synthetic.csv", "text"),
+        (utf8_bom_semicolon, "synthetic.csv", "text"),
+        (utf16_bom, "synthetic.tsv", "text"),
+        (utf16_no_bom, "synthetic.tsv", "text"),
+        (cp1252, "synthetic.csv", "text"),
+        (html_xls, "synthetic.xls", "html_xls"),
+        (real_xls, "synthetic.xls", "xls"),
+        (xlsx, "synthetic.xlsx", "xlsx"),
+        (b"%PDF-1.4 synthetic statement", "synthetic.pdf", "pdf"),
+    ]
+
+    for data, filename, expected_type in cases:
+        assert detect_broker_file(data, filename) == expected_type
+        assert _looks_like_text_csv(data, filename) is (expected_type == "text")
+        if expected_type == "pdf":
+            with pytest.raises(ValueError):
+                read_table(data, filename)
+            continue
+        headers, rows = read_table(data, filename)
+        assert len(headers) == 3
+        assert rows[0].get("Symbol") == "SYNTH" or "Værdipapir" in rows[0]
+
+
+def test_plain_text_without_table_delimiters_is_not_an_uploadable_table() -> None:
+    data = b"not a PDF"
+    assert detect_broker_file(data, "wrong.txt") is None
+    assert not _looks_like_text_csv(data, "wrong.txt")
+
+
+@pytest.mark.parametrize(
+    ("raw", "currency", "expected"),
+    [
+        ("1,23,456.78", "INR", "123456.78"),
+        ("₹ 1,23,456.78", "INR", "123456.78"),
+        ("INR -12.34", "INR", "-12.34"),
+        ("(₹1,000.00)", "INR", "-1000.00"),
+        ("−₹ 1,234.56", "INR", "-1234.56"),
+        ("1.234,56", "DKK", "1234.56"),
+        ("1 234,56", "DKK", "1234.56"),
+        ("1\u00a0234,56", "DKK", "1234.56"),
+        ("1\u202f234,56", "EUR", "1234.56"),
+        ("−1.234,56", "EUR", "-1234.56"),
+        ("(1.234,56)", "DKK", "-1234.56"),
+        ("DKK 1.234,56", "DKK", "1234.56"),
+        ("€ 1.234,56", "EUR", "1234.56"),
+        ("$1,234.56", "USD", "1234.56"),
+        ("1,23", "USD", "1.23"),
+        ("1,234", "USD", "1234"),
+        ("1543.2367", "INR", "1543.2367"),
+        ("1,23,456.7891", "INR", "123456.7891"),
+        ("12,345.678", "INR", "12345.678"),
+        ("312,4567", "DKK", "312.4567"),
+    ],
+)
+def test_broker_numbers_accept_indian_european_and_symbol_formats(
+    raw: str, currency: str, expected: str
+) -> None:
+    assert _currency_decimal(raw, field="amount", currency=currency) == Decimal(expected)
+
+
+@pytest.mark.parametrize(
+    ("raw", "currency"),
+    [
+        ("12,34", "INR"),
+        ("1,234,56.78", "INR"),
+        ("1,234,56.789", "INR"),
+        ("1,234,56", "USD"),
+        ("1..2", "DKK"),
+        ("--1", "EUR"),
+        ("not money", "USD"),
+    ],
+)
+def test_broker_numbers_reject_malformed_grouping_and_text(raw: str, currency: str) -> None:
+    with pytest.raises(ValueError):
+        _currency_decimal(raw, field="amount", currency=currency)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "2024-01-10",
+        "10-01-2024",
+        "10/01/2024",
+        "10-Jan-2024",
+        "10.01.2024",
+        "10-01-24",
+        "2024/01/10",
+        "10 Jan 2024",
+        "Jan 10, 2024",
+    ],
+)
+def test_broker_dates_accept_supported_text_formats(raw: str) -> None:
+    assert _date_value(raw) == date(2024, 1, 10)
+
+
+def test_broker_dates_accept_excel_serial_values() -> None:
+    serial = to_excel(date(2024, 1, 10), WINDOWS_EPOCH)
+    assert _date_value(serial) == date(2024, 1, 10)
+
+
+def _synthetic_isin(prefix: str) -> str:
+    for check_digit in range(10):
+        candidate = f"{prefix}00000000A{check_digit}"
+        if isin_check_digit_ok(candidate):
+            return candidate
+    raise AssertionError("Could not make a check-digit-valid synthetic ISIN.")
+
+
+def test_danish_headers_auto_map_and_market_follows_each_isin() -> None:
+    headers = [
+        "Værdipapir",
+        "ISIN",
+        "Antal",
+        "GAK",
+        "Kurs",
+        "Markedsværdi",
+        "Valuta",
+    ]
+    rows = [
+        {
+            "Værdipapir": "Synthetic US share",
+            "ISIN": "US0378331005",
+            "Antal": "2",
+            "GAK": "10.50",
+            "Kurs": "12.50",
+            "Markedsværdi": "25.00",
+            "Valuta": "USD",
+        },
+        {
+            "Værdipapir": "Synthetic EU fund",
+            "ISIN": _synthetic_isin("IE"),
+            "Antal": "3",
+            "GAK": "1.234,56",
+            "Kurs": "1.300,00",
+            "Markedsværdi": "3.900,00",
+            "Valuta": "EUR",
+        },
+    ]
+    layout, kind, mapping = auto_map(
+        headers,
+        rows,
+        broker="nordnet",
+        market_default="DK",
+        currency_default="DKK",
+    )
+
+    assert kind == "holdings"
+    assert layout is not None
+    assert mapping["last_price"] == "Kurs"
+    holdings = parse_holdings(rows, layout)
+    assert [(holding.market, holding.currency) for holding in holdings] == [
+        ("US", "USD"),
+        ("EU", "EUR"),
+    ]
+    assert holdings[0].name == "Synthetic US share"
+    assert holdings[1].avg_price == Decimal("1234.56")
+
+    invalid_market_rows = [{"ISIN": rows[0]["ISIN"], "Market": "unknown", "Quantity": "1"}]
+    explicit_layout = Layout(
+        broker="nordnet",
+        kind="holdings",
+        fingerprint=frozenset(),
+        columns={"isin": "ISIN", "market": "Market", "quantity": "Quantity"},
+        market_default="DK",
+        currency_default="DKK",
+    )
+    explicit_market_fallback = parse_holdings(invalid_market_rows, explicit_layout)[0]
+    assert (explicit_market_fallback.market, explicit_market_fallback.currency) == (
+        "US",
+        "USD",
+    )
+
+
+def test_danish_trade_words_skip_other_rows_and_prefer_trade_date() -> None:
+    headers = [
+        "Værdipapirer",
+        "ISIN",
+        "Antal",
+        "Handelsdag",
+        "Bogføringsdag",
+        "Transaktionstype",
+        "Kurs",
+        "Beløb",
+        "Kurtage",
+        "Valuta",
+    ]
+    isin = _synthetic_isin("DK")
+    rows = [
+        {
+            "Værdipapirer": "Synthetic Danish fund",
+            "ISIN": isin,
+            "Antal": "2",
+            "Handelsdag": "2024-01-10",
+            "Bogføringsdag": "2024-01-12",
+            "Transaktionstype": "KØBT",
+            "Kurs": "10,00",
+            "Beløb": "20,00",
+            "Kurtage": "1,00",
+            "Valuta": "DKK",
+        },
+        {
+            "Værdipapirer": "Synthetic Danish fund",
+            "ISIN": isin,
+            "Antal": "1",
+            "Handelsdag": "2024-02-10",
+            "Bogføringsdag": "2024-02-12",
+            "Transaktionstype": "KØBT",
+            "Kurs": "11,00",
+            "Beløb": "11,00",
+            "Kurtage": "1,00",
+            "Valuta": "DKK",
+        },
+        {
+            "Værdipapirer": "Synthetic Danish fund",
+            "ISIN": isin,
+            "Antal": "1",
+            "Handelsdag": "2024-03-10",
+            "Bogføringsdag": "2024-03-12",
+            "Transaktionstype": "SOLGT",
+            "Kurs": "12,00",
+            "Beløb": "12,00",
+            "Kurtage": "1,00",
+            "Valuta": "DKK",
+        },
+        {
+            "Værdipapirer": "Synthetic Danish fund",
+            "ISIN": isin,
+            "Antal": "0",
+            "Handelsdag": "2024-04-10",
+            "Bogføringsdag": "2024-04-12",
+            "Transaktionstype": "UDBYTTE",
+            "Kurs": "",
+            "Beløb": "2,00",
+            "Kurtage": "",
+            "Valuta": "DKK",
+        },
+        {
+            "Værdipapirer": "Synthetic Danish fund",
+            "ISIN": isin,
+            "Antal": "0",
+            "Handelsdag": "2024-05-10",
+            "Bogføringsdag": "2024-05-12",
+            "Transaktionstype": "INDBETALING",
+            "Kurs": "",
+            "Beløb": "100,00",
+            "Kurtage": "",
+            "Valuta": "DKK",
+        },
+    ]
+    layout, kind, mapping = auto_map(
+        headers,
+        rows,
+        broker="nordnet",
+        market_default="DK",
+        currency_default="DKK",
+    )
+    assert kind == "tradebook"
+    assert layout is not None
+    assert mapping["trade_date"] == "Handelsdag"
+    skipped: dict[str, int] = {}
+    trades = parse_tradebook(rows, layout, skipped_rows=skipped)
+    assert [trade.trade_type for trade in trades] == ["buy", "buy", "sell"]
+    assert [trade.trade_date for trade in trades] == [
+        date(2024, 1, 10),
+        date(2024, 2, 10),
+        date(2024, 3, 10),
+    ]
+    assert all(trade.market == "DK" and trade.currency == "DKK" for trade in trades)
+    assert skipped == {"not_a_trade": 2}
+
+
+def test_indian_and_us_headers_auto_map_and_cost_value_is_divided_exactly() -> None:
+    indian_headers = ["Scrip Name", "ISIN", "Qty", "Avg Cost Price", "LTP"]
+    indian_rows = [
+        {
+            "Scrip Name": "Synthetic Indian share",
+            "ISIN": _synthetic_isin("IN"),
+            "Qty": "4",
+            "Avg Cost Price": "12.50",
+            "LTP": "14.00",
+        },
+        {
+            "Scrip Name": "Synthetic Indian fund",
+            "ISIN": "",
+            "Qty": "2",
+            "Avg Cost Price": "10.00",
+            "LTP": "11.00",
+        },
+    ]
+    indian_layout, _kind, _mapping = auto_map(
+        indian_headers,
+        indian_rows,
+        broker="hdfc_securities",
+        market_default="IN",
+        currency_default="INR",
+    )
+    assert indian_layout is not None
+    indian = parse_holdings(indian_rows, indian_layout)
+    assert [(holding.market, holding.currency) for holding in indian] == [
+        ("IN", "INR"),
+        ("IN", "INR"),
+    ]
+
+    us_headers = ["Symbol", "Quantity", "Invested Value"]
+    us_rows = [{"Symbol": "SYNTH", "Quantity": "3", "Invested Value": "100.00"}]
+    us_layout, _kind, _mapping = auto_map(
+        us_headers,
+        us_rows,
+        broker="indmoney",
+        market_default="US",
+        currency_default="USD",
+    )
+    assert us_layout is not None
+    holding = parse_holdings(us_rows, us_layout)[0]
+    assert holding.avg_price == Decimal("100.00") / Decimal("3")
+    assert (holding.market, holding.currency) == ("US", "USD")
+
+
+def test_shares_registered_abroad_keep_an_indian_or_us_brokers_market() -> None:
+    headers = ["Symbol", "ISIN", "Quantity", "Average Price"]
+    rows = [
+        {
+            "Symbol": "SYNIE",
+            "ISIN": _synthetic_isin("IE"),
+            "Quantity": "2",
+            "Average Price": "310.25",
+        }
+    ]
+    for broker, market, currency in (("indmoney", "US", "USD"), ("zerodha", "IN", "INR")):
+        layout, _kind, _mapping = auto_map(
+            headers, rows, broker=broker, market_default=market, currency_default=currency
+        )
+        assert layout is not None
+        holding = parse_holdings(rows, layout)[0]
+        assert (holding.market, holding.currency) == (market, currency)
+
+    layout, _kind, _mapping = auto_map(
+        headers, rows, broker="nordnet", market_default="DK", currency_default="DKK"
+    )
+    assert layout is not None
+    assert parse_holdings(rows, layout)[0].market == "EU"
+
+
+def test_indian_average_prices_with_more_than_two_decimals_are_kept_exactly() -> None:
+    headers = ["Scrip Name", "ISIN", "Qty", "Avg Cost Price", "LTP"]
+    rows = [
+        {
+            "Scrip Name": "Synthetic Indian share",
+            "ISIN": _synthetic_isin("IN"),
+            "Qty": "3",
+            "Avg Cost Price": "1543.2367",
+            "LTP": "1601.05",
+        }
+    ]
+    layout, _kind, _mapping = auto_map(
+        headers, rows, broker="zerodha", market_default="IN", currency_default="INR"
+    )
+    assert layout is not None
+    holding = parse_holdings(rows, layout)[0]
+    assert holding.avg_price == Decimal("1543.2367")
+
+
+def test_missing_buying_price_is_kept_and_equal_alias_ties_require_mapping() -> None:
+    headers = ["Name", "Quantity", "Last Price"]
+    rows = [{"Name": "Synthetic holding", "Quantity": "2", "Last Price": "12.00"}]
+    layout, _kind, _mapping = auto_map(
+        headers,
+        rows,
+        broker="other",
+        market_default="US",
+        currency_default="USD",
+    )
+    assert layout is not None
+    holding = parse_holdings(rows, layout)[0]
+    assert holding.avg_price is None
+
+    ambiguous, _kind, suggestions = auto_map(
+        ["Symbol", "Quantity", "LTP", "CMP"],
+        [{"Symbol": "SYNTH", "Quantity": "2", "LTP": "12", "CMP": "13"}],
+        broker="other",
+        market_default="US",
+        currency_default="USD",
+    )
+    assert ambiguous is None
+    assert suggestions["last_price"] is None
 
 
 def test_holdings_parse_decimal_prices_and_skips_summary_rows() -> None:

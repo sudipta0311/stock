@@ -45,6 +45,11 @@ import {
   progressLabel,
 } from "./progress";
 import { takeSharedFile } from "./share-target";
+import {
+  BROKER_GROUPS,
+  readBrokerForMember,
+  saveBrokerForMember,
+} from "./brokers";
 import { markValueMoment } from "../pwa/install";
 import * as englishCopy from "../copy/sections/index";
 
@@ -69,18 +74,8 @@ const sourceCopy: Record<
 };
 
 const FILE_PICKER_ACCEPT = importFeatureSupport.broker
-  ? ".pdf,.csv,.xlsx,application/pdf,text/csv"
+  ? ".pdf,.csv,.tsv,.txt,.xls,.xlsx,application/pdf,text/csv,text/tab-separated-values"
   : ".pdf,application/pdf";
-
-const brokerOptions = [
-  ["nordnet", englishCopy.imports.broker_nordnet],
-  ["saxo", englishCopy.imports.broker_saxo],
-  ["danske_bank", englishCopy.imports.broker_danske],
-  ["ibkr", englishCopy.imports.broker_ibkr],
-  ["vested", englishCopy.imports.broker_vested],
-  ["indmoney", englishCopy.imports.broker_indmoney],
-  ["other", englishCopy.imports.broker_other],
-] as const;
 
 function sourceLabel(source: string | null): string {
   switch (source) {
@@ -137,6 +132,18 @@ export function ImportPage() {
   const [selectedAccountId, setSelectedAccountId] = useState("");
   const [selectedMemberId, setSelectedMemberId] = useState("");
   const [broker, setBroker] = useState("other");
+  const brokerMember = useMemo(() => {
+    const accountMemberId = accounts.find(
+      (account) => account.id === selectedAccountId,
+    )?.member_id;
+    const memberId = accountMemberId ?? selectedMemberId ?? meMemberId;
+    return (
+      members.find((member) => member.id === memberId) ??
+      members.find((member) => member.id === meMemberId)
+    );
+  }, [accounts, meMemberId, members, selectedAccountId, selectedMemberId]);
+  const brokerMemberId = brokerMember?.id;
+  const brokerMemberCountry = brokerMember?.residency.country;
   const [file, setFile] = useState<File | null>(null);
   const [password, setPassword] = useState("");
   const [problem, setProblem] = useState<{
@@ -158,6 +165,11 @@ export function ImportPage() {
   useEffect(() => {
     if (meMemberId && !selectedMemberId) setSelectedMemberId(meMemberId);
   }, [meMemberId, selectedMemberId]);
+
+  useEffect(() => {
+    if (!brokerMemberId) return;
+    setBroker(readBrokerForMember(brokerMemberId, brokerMemberCountry));
+  }, [brokerMemberId, brokerMemberCountry]);
 
   useEffect(() => {
     if (format !== "broker_statement") return;
@@ -415,14 +427,23 @@ export function ImportPage() {
                 <select
                   id="broker-name"
                   value={broker}
-                  onChange={(event) => setBroker(event.currentTarget.value)}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    setBroker(value);
+                    if (brokerMember)
+                      saveBrokerForMember(brokerMember.id, value);
+                  }}
                   disabled={busy}
                   className="min-h-12 rounded-xl border border-line bg-surface px-3 text-base"
                 >
-                  {brokerOptions.map(([value, label]) => (
-                    <option key={value} value={value}>
-                      {label}
-                    </option>
+                  {BROKER_GROUPS.map((group) => (
+                    <optgroup key={group.label} label={group.label}>
+                      {group.options.map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
               </label>
@@ -760,6 +781,7 @@ export function ImportReviewPage() {
     "ordinary",
   );
   const [cashFlowsSaved, setCashFlowsSaved] = useState(false);
+  const [fixingMapping, setFixingMapping] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -979,6 +1001,22 @@ export function ImportReviewPage() {
     }
   }
 
+  function applyMappedImport(mapped: ImportDetail) {
+    setDetail(mapped);
+    setFixingMapping(false);
+    setTaxWrapper(mapped.tax_wrapper ?? "ordinary");
+    setCategoryById(
+      Object.fromEntries(
+        mapped.items.map((item) => [item.id, categoryForItem(item)]),
+      ),
+    );
+    setSelectedById(
+      Object.fromEntries(
+        mapped.items.map((item) => [item.id, initialSelection(item)]),
+      ),
+    );
+  }
+
   if (loading) {
     return <Card role="status">Loading your statement review…</Card>;
   }
@@ -992,25 +1030,11 @@ export function ImportReviewPage() {
   if (!detail) return null;
 
   if (detail.status === "needs_mapping") {
-    return (
-      <BrokerMappingPanel
-        detail={detail}
-        onMapped={(mapped) => {
-          setDetail(mapped);
-          setTaxWrapper(mapped.tax_wrapper ?? "ordinary");
-          setCategoryById(
-            Object.fromEntries(
-              mapped.items.map((item) => [item.id, categoryForItem(item)]),
-            ),
-          );
-          setSelectedById(
-            Object.fromEntries(
-              mapped.items.map((item) => [item.id, initialSelection(item)]),
-            ),
-          );
-        }}
-      />
-    );
+    return <BrokerMappingPanel detail={detail} onMapped={applyMappedImport} />;
+  }
+
+  if (fixingMapping) {
+    return <BrokerMappingPanel detail={detail} onMapped={applyMappedImport} />;
   }
 
   if (
@@ -1113,6 +1137,24 @@ export function ImportReviewPage() {
           Your file isn’t kept. A password is kept only if you chose to remember
           it.
         </p>
+        {detail.auto_mapped ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+            <span>{englishCopy.imports.auto_mapped_notice}</span>
+            <Button
+              type="button"
+              variant="ghost"
+              className="min-h-10 px-2"
+              onClick={() => setFixingMapping(true)}
+            >
+              {englishCopy.imports.fix_columns}
+            </Button>
+          </div>
+        ) : null}
+        {detail.has_missing_cost ? (
+          <p className="text-sm text-muted-foreground">
+            {englishCopy.imports.missing_cost}
+          </p>
+        ) : null}
         {detail.cash_flow_count > 0 ? (
           <p className="text-sm text-muted-foreground">
             {englishCopy.imports.cash_flow_count.replace(
@@ -1473,12 +1515,16 @@ export function ImportReviewPage() {
   );
 }
 
-const HOLDINGS_FIELDS = [
+const HOLDINGS_REQUIRED_FIELDS = [
   ["isin", "mapping_security_code"],
   ["symbol", "mapping_symbol"],
   ["name", "mapping_name"],
   ["quantity", "mapping_quantity"],
+] as const;
+
+const HOLDINGS_MORE_FIELDS = [
   ["avg_price", "mapping_average_price"],
+  ["cost_value", "mapping_cost_value"],
   ["last_price", "mapping_last_price"],
   ["exchange", "mapping_exchange"],
   ["market", "mapping_market"],
@@ -1488,13 +1534,17 @@ const HOLDINGS_FIELDS = [
   ["tax_wrapper", "mapping_tax_wrapper"],
 ] as const;
 
-const TRADEBOOK_FIELDS = [
+const TRADEBOOK_REQUIRED_FIELDS = [
   ["isin", "mapping_security_code"],
   ["symbol", "mapping_symbol"],
   ["trade_date", "mapping_trade_date"],
   ["trade_type", "mapping_trade_type"],
   ["quantity", "mapping_quantity"],
   ["price", "mapping_price"],
+] as const;
+
+const TRADEBOOK_MORE_FIELDS = [
+  ["name", "mapping_name"],
   ["exchange", "mapping_exchange"],
   ["market", "mapping_market"],
   ["currency", "mapping_currency"],
@@ -1506,22 +1556,13 @@ const TRADEBOOK_FIELDS = [
   ["tax_wrapper", "mapping_tax_wrapper"],
 ] as const;
 
-const marketDefaultOptions = [
-  ["US", englishCopy.imports.market_us],
-  ["DK", englishCopy.imports.market_dk],
-  ["EU", englishCopy.imports.market_eu],
-  ["GB", englishCopy.imports.market_gb],
-  ["IN", englishCopy.imports.mapping_india],
-] as const;
-
-const currencyDefaultOptions = [
-  ["USD", englishCopy.imports.currency_usd],
-  ["EUR", englishCopy.imports.currency_eur],
-  ["DKK", englishCopy.imports.currency_dkk],
-  ["GBP", englishCopy.imports.currency_gbp],
-  ["SEK", englishCopy.imports.currency_sek],
-  ["INR", englishCopy.imports.currency_inr],
-] as const;
+function brokerDisplayName(broker: string | null | undefined): string {
+  for (const group of BROKER_GROUPS) {
+    const match = group.options.find(([value]) => value === broker);
+    if (match) return match[1];
+  }
+  return englishCopy.imports.mapping_save_as_default;
+}
 
 function BrokerMappingPanel({
   detail,
@@ -1530,7 +1571,9 @@ function BrokerMappingPanel({
   detail: ImportDetail;
   onMapped(mapped: ImportDetail): void;
 }) {
-  const [kind, setKind] = useState<"holdings" | "tradebook">("holdings");
+  const [kind, setKind] = useState<"holdings" | "tradebook">(
+    detail.mapping_kind ?? "holdings",
+  );
   const [columns, setColumns] = useState<Record<string, string>>({});
   const [marketDefault, setMarketDefault] = useState<
     ImportMappingRequest["market_default"]
@@ -1539,7 +1582,9 @@ function BrokerMappingPanel({
     ImportMappingRequest["currency_default"]
   >(detail.currency_default);
   const [saveAs, setSaveAs] = useState(
-    englishCopy.imports.mapping_save_as_default,
+    detail.auto_mapped
+      ? brokerDisplayName(detail.broker)
+      : englishCopy.imports.mapping_save_as_default,
   );
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -1556,7 +1601,10 @@ function BrokerMappingPanel({
     );
   }, [detail]);
 
-  const fields = kind === "holdings" ? HOLDINGS_FIELDS : TRADEBOOK_FIELDS;
+  const requiredFields =
+    kind === "holdings" ? HOLDINGS_REQUIRED_FIELDS : TRADEBOOK_REQUIRED_FIELDS;
+  const moreFields =
+    kind === "holdings" ? HOLDINGS_MORE_FIELDS : TRADEBOOK_MORE_FIELDS;
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1605,8 +1653,17 @@ function BrokerMappingPanel({
           id="mapping-kind"
           value={kind}
           onChange={(event) => {
-            setKind(event.currentTarget.value as "holdings" | "tradebook");
-            setColumns({});
+            const selectedKind = event.currentTarget.value as
+              "holdings" | "tradebook";
+            setKind(selectedKind);
+            setColumns(
+              Object.fromEntries(
+                Object.entries(detail.suggested_mapping ?? {}).filter(
+                  (entry): entry is [string, string] =>
+                    typeof entry[1] === "string",
+                ),
+              ),
+            );
           }}
           className="min-h-12 rounded-xl border border-line bg-surface px-3 text-base"
         >
@@ -1651,56 +1708,11 @@ function BrokerMappingPanel({
         </div>
       </details>
       <form className="grid gap-3" onSubmit={(event) => void submit(event)}>
+        <p className="text-sm text-muted-foreground">
+          {englishCopy.imports.mapping_identity_help}
+        </p>
         <div className="grid gap-3 sm:grid-cols-2">
-          <label
-            className="grid gap-1.5 text-sm font-medium"
-            htmlFor="mapping-market-default"
-          >
-            {englishCopy.imports.mapping_market_default}
-            <select
-              id="mapping-market-default"
-              value={marketDefault}
-              onChange={(event) =>
-                setMarketDefault(
-                  event.currentTarget
-                    .value as ImportMappingRequest["market_default"],
-                )
-              }
-              className="min-h-12 rounded-xl border border-line bg-surface px-3 text-base"
-            >
-              {marketDefaultOptions.map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label
-            className="grid gap-1.5 text-sm font-medium"
-            htmlFor="mapping-currency-default"
-          >
-            {englishCopy.imports.mapping_currency_default}
-            <select
-              id="mapping-currency-default"
-              value={currencyDefault}
-              onChange={(event) =>
-                setCurrencyDefault(
-                  event.currentTarget
-                    .value as ImportMappingRequest["currency_default"],
-                )
-              }
-              className="min-h-12 rounded-xl border border-line bg-surface px-3 text-base"
-            >
-              {currencyDefaultOptions.map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {fields.map(([field, labelKey]) => (
+          {requiredFields.map(([field, labelKey]) => (
             <label
               key={field}
               className="grid gap-1.5 text-sm font-medium"
@@ -1733,6 +1745,96 @@ function BrokerMappingPanel({
             </label>
           ))}
         </div>
+        <details className="rounded-xl border border-line p-3 text-sm">
+          <summary className="min-h-10 cursor-pointer font-medium">
+            {englishCopy.imports.mapping_more_columns}
+          </summary>
+          <div className="grid gap-3 pt-3 sm:grid-cols-2">
+            {moreFields.map(([field, labelKey]) => (
+              <label
+                key={field}
+                className="grid gap-1.5 text-sm font-medium"
+                htmlFor={`mapping-${field}`}
+              >
+                {englishCopy.imports[labelKey]}
+                <select
+                  id={`mapping-${field}`}
+                  value={columns[field] ?? ""}
+                  onChange={(event) => {
+                    const selectedHeader = event.currentTarget.value;
+                    setColumns((current) => {
+                      const next = { ...current };
+                      if (selectedHeader) next[field] = selectedHeader;
+                      else delete next[field];
+                      return next;
+                    });
+                  }}
+                  className="min-h-12 rounded-xl border border-line bg-surface px-3 text-base"
+                >
+                  <option value="">
+                    {englishCopy.imports.mapping_skip_column}
+                  </option>
+                  {(detail.headers ?? []).map((header, index) => (
+                    <option key={`${header}-${index}`} value={header}>
+                      {header}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))}
+          </div>
+        </details>
+        {detail.needs_market_default ? (
+          <label
+            className="grid gap-1.5 text-sm font-medium"
+            htmlFor="mapping-market-default"
+          >
+            {englishCopy.imports.mapping_market_default}
+            <select
+              id="mapping-market-default"
+              value={marketDefault}
+              onChange={(event) =>
+                setMarketDefault(
+                  event.currentTarget
+                    .value as ImportMappingRequest["market_default"],
+                )
+              }
+              className="min-h-12 rounded-xl border border-line bg-surface px-3 text-base"
+            >
+              <option value="IN">{englishCopy.imports.mapping_india}</option>
+              <option value="US">{englishCopy.imports.market_us}</option>
+              <option value="DK">{englishCopy.imports.market_dk}</option>
+              <option value="EU">{englishCopy.imports.market_eu}</option>
+              <option value="GB">{englishCopy.imports.market_gb}</option>
+            </select>
+          </label>
+        ) : null}
+        {detail.needs_currency_default ? (
+          <label
+            className="grid gap-1.5 text-sm font-medium"
+            htmlFor="mapping-currency-default"
+          >
+            {englishCopy.imports.mapping_currency_default}
+            <select
+              id="mapping-currency-default"
+              value={currencyDefault}
+              onChange={(event) =>
+                setCurrencyDefault(
+                  event.currentTarget
+                    .value as ImportMappingRequest["currency_default"],
+                )
+              }
+              className="min-h-12 rounded-xl border border-line bg-surface px-3 text-base"
+            >
+              <option value="INR">{englishCopy.imports.currency_inr}</option>
+              <option value="USD">{englishCopy.imports.currency_usd}</option>
+              <option value="EUR">{englishCopy.imports.currency_eur}</option>
+              <option value="DKK">{englishCopy.imports.currency_dkk}</option>
+              <option value="GBP">{englishCopy.imports.currency_gbp}</option>
+              <option value="SEK">{englishCopy.imports.currency_sek}</option>
+            </select>
+          </label>
+        ) : null}
         <label
           className="grid gap-1.5 text-sm font-medium"
           htmlFor="mapping-save-as"

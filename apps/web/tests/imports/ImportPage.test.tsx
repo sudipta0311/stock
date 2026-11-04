@@ -68,10 +68,17 @@ function reviewDetail(overrides: Partial<ImportDetail> = {}): ImportDetail {
     source: "nsdl",
     statement_date: "2026-10-01",
     counts: { new: 1, changed: 1, duplicate: 1, unknown: 1 },
+    auto_mapped: false,
     cash_flow_count: 0,
+    columns_used: {},
+    has_missing_cost: false,
+    skipped_rows: {},
+    mapping_kind: null,
     tax_wrapper_question: false,
     currency_default: "INR",
     market_default: "IN",
+    needs_market_default: false,
+    needs_currency_default: false,
     created_at: "2026-10-02T00:00:00Z",
     confirmed_at: null,
     items: [
@@ -133,12 +140,35 @@ describe("statement upload screen", () => {
     expect(post).not.toHaveBeenCalled();
   });
 
+  it("shows the grouped broker picker and the one-line download hint", async () => {
+    const user = userEvent.setup();
+    renderUpload();
+
+    await user.click(
+      screen.getByRole("button", { name: "Broker file (Excel or CSV)" }),
+    );
+
+    const picker = screen.getByLabelText("Where did you get this file?");
+    expect(picker).toContainElement(
+      screen.getByRole("group", { name: "India" }),
+    );
+    expect(screen.getByRole("option", { name: "HDFC Securities" })).toHaveValue(
+      "hdfc_securities",
+    );
+    expect(
+      screen.getByText(
+        "In your broker's portfolio or reports page, choose Export or Download, and pick Excel or CSV.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("clears the password after submit and never writes it to browser storage", async () => {
     const user = userEvent.setup();
-    let sentPassword: FormDataEntryValue | null = null;
+    const sentPasswords: Array<FormDataEntryValue | null> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => {
-      sentPassword =
-        (init?.body as FormData | undefined)?.get("password") ?? null;
+      sentPasswords.push(
+        (init?.body as FormData | undefined)?.get("password") ?? null,
+      );
       return Promise.resolve(
         new Response(
           JSON.stringify({
@@ -167,7 +197,7 @@ describe("statement upload screen", () => {
 
     expect(screen.getByLabelText(/Statement password/)).toHaveValue("");
     expect(await screen.findByText("Review route loaded")).toBeInTheDocument();
-    expect(sentPassword).toBe("demo-passphrase");
+    expect(sentPasswords).toContain("demo-passphrase");
     expect(localStorageWrite).not.toHaveBeenCalled();
     expect(sessionStorageWrite).not.toHaveBeenCalled();
     expect(indexedDbWrite).not.toHaveBeenCalled();
@@ -390,6 +420,8 @@ describe("statement import review", () => {
               avg_price: "buy price",
               exchange: "venue",
             },
+            needs_market_default: true,
+            needs_currency_default: true,
           }),
         ),
       ),
@@ -401,6 +433,8 @@ describe("statement import review", () => {
     renderReview();
 
     await screen.findByRole("heading", { name: "Match the file columns" });
+    expect(screen.getByLabelText("Market when missing")).toBeInTheDocument();
+    expect(screen.getByLabelText("Currency when missing")).toBeInTheDocument();
     await user.selectOptions(
       screen.getByLabelText("Security code"),
       "security id",
@@ -419,6 +453,74 @@ describe("statement import review", () => {
       },
       save_as: "My broker format",
     });
+  });
+
+  it("shows automatic column matching, missing buying prices, and a prefilled fix flow", async () => {
+    const user = userEvent.setup();
+    const autoMapped = reviewDetail({
+      source: "broker",
+      broker: "hdfc_securities",
+      auto_mapped: true,
+      mapping_kind: "holdings",
+      columns_used: {
+        isin: "ISIN",
+        name: "Scrip Name",
+        quantity: "Qty",
+      },
+      suggested_mapping: {
+        isin: "ISIN",
+        name: "Scrip Name",
+        quantity: "Qty",
+      },
+      headers: ["Scrip Name", "ISIN", "Qty", "LTP"],
+      samples: [["xxxxxxxx", "xx9999999999", "99", "99.00"]],
+      has_missing_cost: true,
+      needs_market_default: false,
+      needs_currency_default: false,
+      items: [item({ id: "auto-item", status: "new", action: "new" })],
+      counts: { new: 1, changed: 0, duplicate: 0, unknown: 0 },
+    });
+    let mappingBody: Record<string, unknown> | null = null;
+    server.use(
+      http.get(`/v1/imports/${jobId}`, () => HttpResponse.json(autoMapped)),
+      http.post(`/v1/imports/${jobId}/mapping`, async ({ request }) => {
+        mappingBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ ...autoMapped, auto_mapped: false });
+      }),
+    );
+    const rendered = renderReview();
+
+    expect(
+      await screen.findByText("We matched your file's columns automatically."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "This file has no buying prices, so tax estimates and some checks will be missing. A trade history file fills them in.",
+      ),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Fix columns" }));
+    expect(
+      await screen.findByRole("heading", { name: "Match the file columns" }),
+    ).toBeInTheDocument();
+    const moreColumns = screen.getByText("More columns").closest("details");
+    expect(moreColumns).not.toHaveAttribute("open");
+    expect(screen.getByLabelText("Security code")).toHaveValue("ISIN");
+    expect(screen.getByLabelText("Quantity")).toHaveValue("Qty");
+    expect(screen.queryByLabelText("Market when missing")).toBeNull();
+    expect(screen.queryByLabelText("Currency when missing")).toBeNull();
+    expect((await axe(rendered.container)).violations).toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: "Use these columns" }));
+    await screen.findByRole("heading", { name: "Review your import" });
+    expect(mappingBody).toMatchObject({
+      kind: "holdings",
+      broker: "hdfc_securities",
+      columns: { isin: "ISIN", name: "Scrip Name", quantity: "Qty" },
+      save_as: "HDFC Securities",
+    });
+    expect(
+      screen.queryByText("We matched your file's columns automatically."),
+    ).not.toBeInTheDocument();
   });
 
   it("asks before discarding and deletes the import", async () => {

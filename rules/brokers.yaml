@@ -1,3 +1,157 @@
+brokers:
+  zerodha: {label: Zerodha, market: IN, currency: INR}
+  hdfc_securities: {label: HDFC Securities, market: IN, currency: INR}
+  groww: {label: Groww, market: IN, currency: INR}
+  icici_direct: {label: ICICI Direct, market: IN, currency: INR}
+  angel_one: {label: Angel One, market: IN, currency: INR}
+  upstox: {label: Upstox, market: IN, currency: INR}
+  other_indian_broker: {label: Other Indian broker, market: IN, currency: INR}
+  indmoney: {label: INDmoney, market: US, currency: USD}
+  vested: {label: Vested, market: US, currency: USD}
+  nordnet: {label: Nordnet, market: DK, currency: DKK}
+  saxo: {label: Saxo, market: DK, currency: DKK}
+  danske_bank: {label: Danske Bank, market: DK, currency: DKK}
+  other_danish_broker: {label: Other Danish broker, market: DK, currency: DKK}
+  ibkr: {label: Interactive Brokers, market: US, currency: USD}
+  other: {label: Other, market: US, currency: USD}
+
+aliases:
+  holdings:
+    isin:
+      en: [isin, isin code, isin no]
+    symbol:
+      en: [symbol, trading symbol, ticker, ticker symbol, scrip, scrip code, stock, kortnavn, nse symbol]
+    name:
+      en: [name, company name, stock name, security, security name, instrument, instrument name, description, company, scrip name, fund name]
+      da: [værdipapir, værdipapirer, papir, navn]
+      "no": [verdipapir, verdipapirer, navn]
+      sv: [värdepapper, värdepapperen, namn]
+    quantity:
+      en: [quantity, qty, shares, units, holdings, quantity available, total qty, free qty, net qty, no of shares, number of shares, shares owned, units held]
+      da: [antal, beholdning]
+      "no": [antall, beholdning]
+      sv: [antal, innehav]
+    avg_price:
+      en: [avg price, average price, average cost value, buy price, cost price, avg cost, purchase price, acquisition price, avg buy price, avg cost price, average cost price, average buy price, cost basis per share]
+      da: [gak, gns. købskurs, gns kurs, anskaffelseskurs, købskurs]
+      "no": [snittkurs, gjennomsnittskurs, kjøpskurs]
+      sv: [snittkurs, genomsnittskurs, inköpskurs]
+    cost_value:
+      en: [invested value, investment value, total cost, cost basis, buy value]
+      da: [indkøbsværdi, anskaffelsesværdi]
+      "no": [investert verdi, kostpris]
+      sv: [investerat värde, anskaffningsvärde]
+    last_price:
+      en: [ltp, cmp, last price, current price, market price, close price, current market price, closing price]
+      da: [seneste kurs, senest, kurs]
+      "no": [siste kurs, sist]
+      sv: [senaste kurs, senast, kurs]
+    market_value:
+      en: [market value, value, net value, position value, current value, present value]
+      da: [markedsværdi, værdi]
+      "no": [markedsverdi, verdi]
+      sv: [marknadsvärde, värde]
+    security_type:
+      en: [security type, asset category]
+    exchange:
+      en: [exchange, venue, market center]
+    market:
+      en: [market, market code, region]
+    currency:
+      en: [currency, ccy, currency code]
+      da: [valuta]
+      "no": [valuta]
+      sv: [valuta]
+    tax_wrapper:
+      en: [tax wrapper, account type, account product, wrapper]
+    trade_date:
+      en: [trade date, execution date, date, transaction date, order date]
+      da: [handelsdag, handelsdato]
+      "fallback":
+        en: [booking date, posting date, value date]
+        da: [bogføringsdag, valørdag]
+    trade_type:
+      en: [trade type, type, action, transaction type, buy/sell, side, b/s]
+      da: [transaktionstype]
+    amount:
+      en: [amount, cash amount, net amount, transaction amount, total amount]
+      da: [beløb]
+      "no": [beløp]
+      sv: [belopp]
+    commission:
+      en: [commission, commission fee, fees, comm fee, brokerage]
+      da: [kurtage, samlede afgifter]
+      "no": [kurtasje]
+      sv: [courtage]
+    order_id:
+      en: [order id, order number]
+    trade_id:
+      en: [trade id, trade no, trade number, execution id]
+      da: [verifikationsnummer, trade no]
+
+  tradebook:
+    isin:
+      en: [isin, isin code, isin no]
+    symbol:
+      en: [symbol, trading symbol, ticker, ticker symbol, scrip, scrip code, stock, kortnavn, nse symbol]
+    name:
+      en: [name, company name, stock name, security, security name, instrument, instrument name, description, company, scrip name, fund name]
+      da: [værdipapir, værdipapirer, papir, navn]
+      "no": [verdipapir, verdipapirer, navn]
+      sv: [värdepapper, värdepapperen, namn]
+    quantity:
+      en: [quantity, qty, shares, units, holdings, quantity available, total qty, free qty, net qty, no of shares, number of shares, shares owned, units held]
+      da: [antal, beholdning]
+      "no": [antall, beholdning]
+      sv: [antal, innehav]
+    trade_date:
+      en: [trade date, execution date, date, transaction date, order date]
+      da: [handelsdag, handelsdato]
+      "fallback":
+        en: [booking date, posting date, value date]
+        da: [bogføringsdag, valørdag]
+    trade_type:
+      en: [trade type, type, action, transaction type, buy/sell, side, b/s]
+      da: [transaktionstype]
+    price:
+      en: [price, trade price, rate, execution price]
+      da: [kurs, pris]
+      "no": [kurs, pris]
+      sv: [kurs, pris]
+    market_value:
+      en: [market value, value, net value, position value, current value, present value]
+      da: [markedsværdi, værdi]
+      "no": [markedsverdi, verdi]
+      sv: [marknadsvärde, värde]
+    security_type:
+      en: [security type, asset category]
+    exchange:
+      en: [exchange, venue, market center]
+    market:
+      en: [market, market code, region]
+    currency:
+      en: [currency, ccy, currency code]
+      da: [valuta]
+      "no": [valuta]
+      sv: [valuta]
+    tax_wrapper:
+      en: [tax wrapper, account type, account product, wrapper]
+    amount:
+      en: [amount, cash amount, net amount, transaction amount, total amount]
+      da: [beløb]
+      "no": [beløp]
+      sv: [belopp]
+    commission:
+      en: [commission, commission fee, fees, comm fee, brokerage]
+      da: [kurtage, samlede afgifter]
+      "no": [kurtasje]
+      sv: [courtage]
+    order_id:
+      en: [order id, order number]
+    trade_id:
+      en: [trade id, trade no, trade number, execution id]
+      da: [verifikationsnummer, trade no]
+
 layouts:
   - broker: zerodha
     kind: holdings

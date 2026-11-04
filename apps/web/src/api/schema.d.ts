@@ -1,4 +1,4 @@
-// OpenAPI SHA256: c295482347189bce7f30986e01f5ed957178e2d61fcb1bf70c0d7fc3806c9f50
+// OpenAPI SHA256: 3022b92db0317ce3365c92bd70eda5e62dcc410ab9ddbcf47439f6dc153b1868
 export interface paths {
     "/healthz": {
         parameters: {
@@ -2091,6 +2091,11 @@ export interface components {
         ImportDetailResponse: {
             /** Account Id */
             account_id?: string | null;
+            /**
+             * Auto Mapped
+             * @default false
+             */
+            auto_mapped: boolean;
             /** Broker */
             broker?: string | null;
             /**
@@ -2098,6 +2103,10 @@ export interface components {
              * @default 0
              */
             cash_flow_count: number;
+            /** Columns Used */
+            columns_used?: {
+                [key: string]: string;
+            };
             /** Confirmed At */
             confirmed_at: string | null;
             /** Counts */
@@ -2119,6 +2128,11 @@ export interface components {
             doc_type: string;
             /** Error Code */
             error_code: string | null;
+            /**
+             * Has Missing Cost
+             * @default false
+             */
+            has_missing_cost: boolean;
             /** Headers */
             headers?: string[] | null;
             /**
@@ -2128,6 +2142,8 @@ export interface components {
             id: string;
             /** Items */
             items: components["schemas"]["ImportItemResponse"][];
+            /** Mapping Kind */
+            mapping_kind?: ("holdings" | "tradebook") | null;
             /**
              * Market Default
              * @default US
@@ -2136,8 +2152,22 @@ export interface components {
             market_default: "IN" | "US" | "DK" | "EU" | "GB";
             /** Member Id */
             member_id?: string | null;
+            /**
+             * Needs Currency Default
+             * @default false
+             */
+            needs_currency_default: boolean;
+            /**
+             * Needs Market Default
+             * @default false
+             */
+            needs_market_default: boolean;
             /** Samples */
             samples?: string[][];
+            /** Skipped Rows */
+            skipped_rows?: {
+                [key: string]: number;
+            };
             /** Source */
             source: ("nsdl" | "cdsl" | "cams_kfin" | "broker") | null;
             /** Statement Date */
@@ -2248,7 +2278,7 @@ export interface components {
              * @default other
              * @enum {string}
              */
-            broker: "nordnet" | "saxo" | "danske_bank" | "ibkr" | "vested" | "indmoney" | "other";
+            broker: "zerodha" | "hdfc_securities" | "groww" | "icici_direct" | "angel_one" | "upstox" | "other_indian_broker" | "indmoney" | "vested" | "nordnet" | "saxo" | "danske_bank" | "other_danish_broker" | "ibkr" | "other";
             /** Columns */
             columns: {
                 [key: string]: string;

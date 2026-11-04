@@ -59,6 +59,18 @@ describe("import file checks and copy", () => {
     expect(
       validateImportFile({ name: "holdings.xlsx", size: 100 }, true),
     ).toBeNull();
+    for (const extension of ["csv", "tsv", "txt", "xls", "xlsx"]) {
+      expect(
+        validateImportFile({ name: `holdings.${extension}`, size: 100 }, true),
+      ).toBeNull();
+    }
+  });
+
+  it("shows a broker-specific next step for PDF uploads", () => {
+    expect(importErrorCopy("broker_pdf")).toEqual({
+      message: "This looks like a PDF.",
+      nextStep: "Please download the Excel or CSV version from your broker.",
+    });
   });
 
   it.each([

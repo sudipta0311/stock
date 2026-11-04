@@ -27,7 +27,7 @@ class BrokerHolding:
     symbol: str | None
     name: str | None
     quantity: Decimal
-    avg_price: Decimal
+    avg_price: Decimal | None
     last_price: Decimal | None
     exchange: str | None
     market: str = "IN"

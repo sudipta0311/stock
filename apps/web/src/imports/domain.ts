@@ -31,7 +31,8 @@ export function validateImportFile(
   }
   const name = file.name.toLocaleLowerCase();
   const allowed =
-    name.endsWith(".pdf") || (allowBroker && /\.(csv|xlsx)$/.test(name));
+    name.endsWith(".pdf") ||
+    (allowBroker && /\.(csv|tsv|txt|xls|xlsx)$/.test(name));
   if (!allowed) {
     return {
       code: "unsupported_format",
@@ -56,6 +57,11 @@ export function importErrorCopy(code: string): {
       return {
         message: "We couldn't read this as a PDF.",
         nextStep: "Download a fresh CAS PDF and select it here.",
+      };
+    case "broker_pdf":
+      return {
+        message: "This looks like a PDF.",
+        nextStep: "Please download the Excel or CSV version from your broker.",
       };
     case "too_large":
       return {
