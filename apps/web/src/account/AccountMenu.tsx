@@ -45,6 +45,7 @@ export function AccountMenu() {
         <span className="grid size-8 place-items-center rounded-full bg-brand/10 text-xs font-semibold text-brand">
           {nameInitials(name)}
         </span>
+        {/* Without this space the visible text runs together and no longer matches the label. */}{" "}
         <span className="hidden max-w-24 truncate min-[400px]:inline">
           {firstName}
         </span>

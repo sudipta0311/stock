@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { AuthProvider } from "../../src/auth/AuthContext";
@@ -172,7 +172,7 @@ it("quietly restores the saved sign-in after the API starts answering", async ()
     await screen.findByText(/We couldn't reach the server/),
   ).toBeInTheDocument();
   expect(getRefreshToken()).toBe("synthetic-refresh");
-  expect(retryCallback).toBeDefined();
+  await waitFor(() => expect(retryCallback).toBeDefined());
   await act(async () => {
     retryCallback?.();
   });

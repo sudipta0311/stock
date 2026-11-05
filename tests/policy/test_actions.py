@@ -521,6 +521,86 @@ def test_india_fund_amount_does_not_reduce_the_direct_satellite_gap() -> None:
     assert stock.amount == Decimal("50000.00")
 
 
+def test_held_add_more_share_precedes_new_idea_and_uses_next_tranche() -> None:
+    held = SatelliteIdea(
+        security_id="synthetic-held",
+        symbol="HOLD",
+        market="IN",
+        sector="Industrials",
+        price=Decimal("1000"),
+        quant_decile=9,
+        dossier_status="APPROVED",
+        valuation_percentile=Decimal("60"),
+        confidence="HIGH",
+        is_held_add_more=True,
+    )
+    new_idea = SatelliteIdea(
+        security_id="synthetic-new",
+        symbol="NEW",
+        market="IN",
+        sector="Technology",
+        price=Decimal("1000"),
+        quant_decile=10,
+        dossier_status="APPROVED",
+        valuation_percentile=Decimal("60"),
+        confidence="HIGH",
+    )
+    result = build_action_list(
+        _week_input(
+            plan=_india_target_plan("6000000", gap="100000"),
+            new_money="100000",
+            capacity="0",
+            holdings=[
+                SatelliteHolding(
+                    security_id="synthetic-held",
+                    sector="Industrials",
+                    value=Decimal("100000"),
+                )
+            ],
+            through_fund_inr={"synthetic-held": Decimal("50000")},
+            ideas=[new_idea, held],
+        )
+    )
+    stock = next(action for action in result.actions if action.kind == "BUY_STOCK_TRANCHE")
+
+    assert stock.security_id == "synthetic-held"
+    assert stock.tranche == {"n": "2", "of": "3"}
+    assert stock.reason_code == "add_more_held_share"
+
+
+def test_through_fund_room_can_block_held_add_more() -> None:
+    held = SatelliteIdea(
+        security_id="synthetic-held-room",
+        symbol="ROOM",
+        market="IN",
+        sector="Industrials",
+        price=Decimal("1000"),
+        quant_decile=9,
+        dossier_status="APPROVED",
+        valuation_percentile=Decimal("60"),
+        confidence="HIGH",
+        is_held_add_more=True,
+    )
+    result = build_action_list(
+        _week_input(
+            plan=_india_target_plan("6000000", gap="100000"),
+            new_money="100000",
+            capacity="0",
+            holdings=[
+                SatelliteHolding(
+                    security_id="synthetic-held-room",
+                    sector="Industrials",
+                    value=Decimal("100000"),
+                )
+            ],
+            through_fund_inr={"synthetic-held-room": Decimal("250000")},
+            ideas=[held],
+        )
+    )
+
+    assert not any(action.kind == "BUY_STOCK_TRANCHE" for action in result.actions)
+
+
 @pytest.mark.parametrize("gate", ["valuation", "dossier", "decile", "sector"])
 def test_satellite_idea_gates_send_all_india_money_to_core(gate: str) -> None:
     """A failed approval, quant, valuation, or sector cap leaves all ₹50,000 for core."""

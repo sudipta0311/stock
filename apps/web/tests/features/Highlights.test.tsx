@@ -1,6 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
+import { MemoryRouter } from "react-router";
 import { Highlights } from "../../src/features/Highlights";
 
 describe("policy highlights", () => {
@@ -86,5 +87,28 @@ describe("policy highlights", () => {
         "Today's rate for this option isn't known yet. Check it before you add money.",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("links the holding review note to Money", () => {
+    render(
+      <MemoryRouter>
+        <Highlights
+          items={[
+            {
+              key: "holding_reviews",
+              screen: "home",
+              title: "2 shares to look at",
+              body: "Some checks suggest you should look at these shares.",
+              learn_more_key: "holding_reviews",
+              severity: "info",
+            },
+          ]}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(
+      screen.getByRole("link", { name: "See them on Money" }),
+    ).toHaveAttribute("href", "/money");
   });
 });

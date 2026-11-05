@@ -135,6 +135,9 @@ class HealthFacts:
     missing_email_count: int
     email_sending_configured: bool
     fund_baskets: tuple[FundBasketHealthFact, ...] = ()
+    stock_checks_as_of: date | None = None
+    held_listed_count: int = 0
+    held_listed_fresh_count: int = 0
 
 
 def _iso_utc(value: datetime) -> str:
@@ -545,6 +548,40 @@ def _check_fund_lookthrough(facts: HealthFacts, now: datetime) -> dict[str, Any]
     )
 
 
+def _check_stock_checks(facts: HealthFacts, now: datetime) -> dict[str, Any]:
+    latest = facts.stock_checks_as_of
+    age = (now.date() - latest).days if latest is not None else None
+    coverage = (
+        Decimal(facts.held_listed_fresh_count) / Decimal(facts.held_listed_count)
+        if facts.held_listed_count
+        else Decimal(1)
+    )
+    output = {
+        "latest_date": latest.isoformat() if latest is not None else None,
+        "age_days": age,
+        "held_in_lists": facts.held_listed_count,
+        "held_with_fresh_checks": facts.held_listed_fresh_count,
+        "held_coverage_pct": format(coverage * Decimal(100), ".2f"),
+    }
+    stale = age is None or age < 0 or age > 9
+    low_coverage = facts.held_listed_count > 0 and coverage < Decimal("0.9")
+    if not stale and not low_coverage:
+        return _check("stock_checks", "ok", "Weekly share checks are current.", output)
+    messages: list[str] = []
+    if stale:
+        messages.append(
+            "No weekly share checks are stored. Rerun Weekly research."
+            if age is None
+            else f"Weekly share checks are {age} days old. Rerun Weekly research."
+        )
+    if low_coverage:
+        messages.append(
+            f"Only {facts.held_listed_fresh_count} of {facts.held_listed_count} held shares in the "
+            "main lists have fresh checks."
+        )
+    return _check("stock_checks", "warning", " ".join(messages), output)
+
+
 def _check_ask_rules(now: datetime) -> dict[str, Any]:
     """Warn when the current year has no exact share savings account cap rule."""
     try:
@@ -605,6 +642,7 @@ def evaluate_health(facts: HealthFacts, now: datetime) -> dict[str, Any]:
     checks.append(_check_weekly_plans(current, facts))
     checks.append(_check_weekly_email(current, facts))
     checks.append(_check_fund_lookthrough(facts, current))
+    checks.append(_check_stock_checks(facts, current))
     checks.append(_check_ask_rules(current))
     return {
         "ok": all(item["level"] != "problem" for item in checks),
@@ -885,6 +923,49 @@ def load_health_facts(
             )
             for row in basket_rows
         )
+        stock_checks_as_of = connection.execute(
+            text("SELECT max(as_of) FROM stock_checks WHERE as_of <= :as_of"),
+            {"as_of": current.date()},
+        ).scalar_one()
+        held_listed = connection.execute(
+            text(
+                """
+                WITH held AS (
+                    SELECT security_id
+                    FROM holdings_lots
+                    WHERE quantity > 0
+                    UNION
+                    SELECT security_id
+                    FROM recorded_buys
+                    WHERE status = 'waiting'
+                      AND security_type = 'equity'
+                      AND security_id IS NOT NULL
+                ), listed AS (
+                    SELECT DISTINCT held.security_id
+                    FROM held
+                    JOIN securities ON securities.id = held.security_id
+                    JOIN universe_members ON universe_members.security_id = held.security_id
+                    WHERE universe_members.removed_on IS NULL
+                      AND ((securities.market = 'IN' AND universe_members.universe = 'nifty500')
+                        OR (securities.market = 'US' AND universe_members.universe = 'sp500'))
+                )
+                SELECT count(*)::int AS total,
+                       count(*) FILTER (
+                           WHERE latest.as_of >= :fresh_after
+                             AND latest.as_of <= :as_of
+                       )::int AS fresh
+                FROM listed
+                LEFT JOIN LATERAL (
+                    SELECT stock_checks.as_of
+                    FROM stock_checks
+                    WHERE stock_checks.security_id = listed.security_id
+                    ORDER BY stock_checks.as_of DESC
+                    LIMIT 1
+                ) AS latest ON TRUE
+                """
+            ),
+            {"as_of": current.date(), "fresh_after": current.date() - timedelta(days=14)},
+        ).one()
         run_rows = connection.execute(
             text(
                 "SELECT started_at, status, counts, errors FROM marketdata_runs "
@@ -920,6 +1001,9 @@ def load_health_facts(
         missing_email_count=missing_emails,
         email_sending_configured=email_sending_configured,
         fund_baskets=fund_baskets,
+        stock_checks_as_of=stock_checks_as_of,
+        held_listed_count=int(held_listed.total),
+        held_listed_fresh_count=int(held_listed.fresh),
     )
 
 

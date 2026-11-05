@@ -14,6 +14,7 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, PlainSeriali
 from wealth.core.money import round_paise
 from wealth.policy.allocation import AllocationPlan
 from wealth.policy.debt_picker import DebtPick, load_debt_rules
+from wealth.policy.exits import load_exit_rules
 from wealth.policy.foundation import FoundationReport
 from wealth.policy.lookthrough import remaining_stock_room
 from wealth.policy.routes import RouteDecision
@@ -116,10 +117,19 @@ class SatelliteIdea(BaseModel):
     exchange: str | None = None
     isin: str | None = None
     currency: str | None = None
+    is_held_add_more: bool = False
+    direct_value: Rupees = Decimal(0)
 
 
 # Packs also carry display-only fields (`why`, `entry_hint`, ...); the policy reads only these.
-_PACK_IDEA_FIELDS = frozenset(SatelliteIdea.model_fields) - {"name", "exchange", "isin", "currency"}
+_PACK_IDEA_FIELDS = frozenset(SatelliteIdea.model_fields) - {
+    "name",
+    "exchange",
+    "isin",
+    "currency",
+    "is_held_add_more",
+    "direct_value",
+}
 
 
 def satellite_idea_from_pack(item: Mapping[str, Any]) -> SatelliteIdea:
@@ -671,19 +681,33 @@ def _india_actions(
         )
 
     confidence_rank = {"HIGH": 0, "MEDIUM": 1, "LOW": 2}
-    eligible: list[tuple[tuple[int, int, Decimal, str], SatelliteIdea, Decimal, Decimal]] = []
+    eligible: list[
+        tuple[tuple[int, int, Decimal, Decimal, str], SatelliteIdea, Decimal, Decimal]
+    ] = []
     notes: list[str] = []
     if proposed > 0 and total_equity_target > 0:
+        accumulate = load_exit_rules()["accumulate"]
+        held_min_decile = int(accumulate["min_quant_decile"])
+        held_max_pe = Decimal(str(accumulate["max_pe_percentile"]))
         for idea in week_input.ideas:
+            held_add_more = idea.is_held_add_more
             if (
                 idea.market != "IN"
-                or idea.dossier_status != "APPROVED"
+                or (not held_add_more and idea.dossier_status != "APPROVED")
                 or idea.quant_decile
-                < integer_rule(satellite["min_quant_decile"], "satellite.min_quant_decile")
+                < (
+                    held_min_decile
+                    if held_add_more
+                    else integer_rule(satellite["min_quant_decile"], "satellite.min_quant_decile")
+                )
                 or idea.valuation_percentile
-                >= decimal_rule(
-                    satellite["max_valuation_percentile"],
-                    "satellite.max_valuation_percentile",
+                >= (
+                    held_max_pe
+                    if held_add_more
+                    else decimal_rule(
+                        satellite["max_valuation_percentile"],
+                        "satellite.max_valuation_percentile",
+                    )
                 )
             ):
                 continue
@@ -713,8 +737,11 @@ def _india_actions(
             if amount <= 0:
                 continue
             key = (
+                0 if held_add_more and direct_value < max_stock else 1,
                 -idea.quant_decile,
-                confidence_rank[idea.confidence],
+                idea.valuation_percentile
+                if held_add_more
+                else Decimal(confidence_rank[idea.confidence]),
                 idea.valuation_percentile,
                 idea.security_id,
             )
@@ -724,6 +751,14 @@ def _india_actions(
     stock_amount = Decimal(0)
     if eligible:
         _, idea, quantity, stock_amount = min(eligible, key=lambda item: item[0])
+        tranche_count = integer_rule(satellite["tranches"], "satellite.tranches")
+        tranche_number = 1
+        if idea.is_held_add_more and tranche_amount > 0:
+            direct_value = security_values.get(idea.security_id, Decimal(0))
+            tranche_number = min(
+                tranche_count,
+                int((direct_value / tranche_amount).to_integral_value(rounding=ROUND_FLOOR)) + 1,
+            )
         actions.append(
             _action(
                 kind="BUY_STOCK_TRANCHE",
@@ -734,10 +769,12 @@ def _india_actions(
                 security_id=idea.security_id,
                 quantity=quantity,
                 tranche={
-                    "n": "1",
-                    "of": str(integer_rule(satellite["tranches"], "satellite.tranches")),
+                    "n": str(tranche_number),
+                    "of": str(tranche_count),
                 },
-                reason_code="approved_satellite_idea",
+                reason_code=(
+                    "add_more_held_share" if idea.is_held_add_more else "approved_satellite_idea"
+                ),
                 params={"price": _money_string(idea.price)},
             )
         )

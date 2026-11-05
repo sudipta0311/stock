@@ -341,9 +341,9 @@
         },
         "valuation_stretch": {
           "key": "valuation_stretch",
-          "status": "unknown",
+          "status": "ok",
           "threshold": "own PE percentile >90 and sector multiple >1.5x",
-          "value": null
+          "value": "50 percentile; 1.0x sector"
         }
       },
       "urgency": "LOW"
@@ -379,7 +379,57 @@
       "status": "gap"
     }
   ],
-  "inputs_digest": "85c83a023fe20eb432b333f49be4df8ad0eead94a40f87a6ccced7af4f454bc6",
+  "holding_reviews": [
+    {
+      "add_more_room_inr": "22549.10",
+      "checked_on": "2026-10-28",
+      "checks": [
+        {
+          "key": "company_results",
+          "status": "unknown"
+        },
+        {
+          "key": "company_events",
+          "status": "unknown"
+        },
+        {
+          "key": "price_history",
+          "status": "ok"
+        },
+        {
+          "key": "position_size",
+          "status": "triggered"
+        },
+        {
+          "key": "price_and_cost",
+          "status": "unknown"
+        },
+        {
+          "key": "goal_timing",
+          "status": "unknown"
+        },
+        {
+          "key": "company_strength",
+          "status": "watch"
+        }
+      ],
+      "member_id": "self",
+      "reasons": [
+        {
+          "code": "drift",
+          "params": {
+            "share_of_equity_pct": "21.2"
+          }
+        }
+      ],
+      "security_id": "synthetic-india-equity",
+      "tax": {
+        "estimated_tax": "0.00"
+      },
+      "verdict": "sell_some"
+    }
+  ],
+  "inputs_digest": "9facd49c2402915f302d40b881c9c2fcbb3fa38d49d61f5d60ef293cafdf5b78",
   "insurance_reviews": [],
   "members": [
     {

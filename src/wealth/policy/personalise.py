@@ -24,6 +24,7 @@ from wealth.policy.actions import (
     Sip,
     WeekInput,
     build_action_list,
+    india_stock_room,
     load_buying_rules,
 )
 from wealth.policy.allocation import AllocationPlan, build_targets
@@ -43,15 +44,22 @@ from wealth.policy.denmark import (
     round_dkk_for_display,
 )
 from wealth.policy.denmark_picks import (
+    US_STOCK_MAX_PER_STOCK_PCT,
     approved_us_stock_buys,
     load_eu_etfs,
     pick_india_vehicle,
     plain_fund_name,
     ranked_etfs_for_member,
+    us_stock_room,
 )
 from wealth.policy.exits import ExitCard, HoldingFacts, build_exit_card, load_exit_rules
 from wealth.policy.foundation import FoundationItem, FoundationReport, foundation_check
 from wealth.policy.global_split import GeoTilts, load_global_rules, split_equity
+from wealth.policy.holding_review import (
+    StockCheckFacts,
+    holding_review_decision,
+    thesis_status_from_revenue,
+)
 from wealth.policy.household import (
     MemberContext,
     MemberProfile,
@@ -83,7 +91,7 @@ from wealth.policy.routes import RouteContext, RouteDecision, select_route
 from wealth.policy.rules import decimal_rule, resolve_rules
 from wealth.policy.snapshot import WealthSnapshot
 from wealth.policy.stress import load_stress_rules, stress_compare, stress_test
-from wealth.policy.tax import Lot, load_tax_rules, ltcg_harvest
+from wealth.policy.tax import Lot, TaxContext, load_tax_rules, ltcg_harvest
 from wealth.policy.us_situs import us_situs_value_usd
 from wealth.schemas.assets import AnyAsset, TraditionalPolicyAsset
 from wealth.schemas.common import LiquidityClass, Sleeve
@@ -150,7 +158,9 @@ class HoldingInput:
     fallback_value_inr: Decimal = Decimal(0)
     name: str = ""
     isin: str | None = None
+    exchange: str | None = None
     sub_category: str | None = None
+    account_tax_wrapper: str | None = None
 
 
 @dataclass(frozen=True)
@@ -227,6 +237,9 @@ class MarketContext:
     amc_international_suspended: bool = False
     etf_inav_premium_pct: Decimal | None = None
     notes: tuple[str, ...] = ()
+    stock_checks: Mapping[str, StockCheckFacts] = field(default_factory=dict)
+    governance_events: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    stock_check_week: str | None = None
 
 
 @dataclass(frozen=True)
@@ -282,6 +295,7 @@ class WeeklyPlan(BaseModel):
     actions: list[dict[str, Any]]
     abroad_buy_list: list[dict[str, Any]] = Field(default_factory=list)
     exit_cards: list[dict[str, Any]]
+    holding_reviews: list[dict[str, Any]] = Field(default_factory=list)
     stress: dict[str, Any]
     notes: list[str]
     warnings: list[dict[str, Any]] = Field(default_factory=list)
@@ -348,6 +362,7 @@ def _digest_inputs(
         "as_of": as_of,
         "user_data": user_data,
         "market": market,
+        "stock_check_week": market.stock_check_week,
         "research": research,
         "denmark_ask_rules": ask_rule_inputs,
     }
@@ -443,6 +458,15 @@ def _merge_weekly_actions(
 ) -> tuple[list[Action], Decimal]:
     """Order buys and actionable exit cards together, cap the week, and carry omitted buys."""
     sell_actions = [action for card in exit_cards if (action := _exit_action(card)) is not None]
+    urgency_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+    sell_actions = sorted(
+        sell_actions,
+        key=lambda action: (
+            urgency_order.get(action.urgency or "LOW", 4),
+            -action.amount,
+            action.security_id or "",
+        ),
+    )[:1]
     candidates = [*buy_list.actions, *sell_actions]
     ordered = [
         action
@@ -665,6 +689,7 @@ def _abroad_action_rows(
     research: ResearchPack | None,
     through_fund_by_member_security: Mapping[tuple[str, str], Decimal],
     lookthrough_company_keys: Mapping[tuple[str, str], tuple[CompanyKey, ...]] | None = None,
+    holding_reviews: Sequence[Mapping[str, Any]] = (),
 ) -> tuple[list[Action], list[dict[str, Any]], Decimal, list[str]]:
     """Replace Danish foreign buys with sourced instruments and code-sized DKK lines."""
     profiles = {member.id: member for member in members}
@@ -754,7 +779,55 @@ def _abroad_action_rows(
             investable_inr = max(Decimal(0), context.snapshot.investable_total)
             investable_dkk = dkk_from_inr(investable_inr, inr_per_dkk)
             stock_budget = total_dkk * member.investing.us_stock_picks_pct / Decimal(100)
-            selected_ideas = research.ideas if research is not None else ()
+            held_ideas: list[SatelliteIdea] = []
+            for review in holding_reviews:
+                if review.get("verdict") != "add_more" or review.get("member_id") != member.id:
+                    continue
+                holding = next(
+                    (
+                        item
+                        for item in holdings
+                        if item.security_id == review.get("security_id")
+                        and item.member_id == member.id
+                        and item.market == "US"
+                        and item.security_type == "equity"
+                    ),
+                    None,
+                )
+                check = market.stock_checks.get(str(review.get("security_id")))
+                if (
+                    holding is None
+                    or check is None
+                    or check.quant_decile is None
+                    or check.pe_percentile is None
+                    or (check.price or holding.price) is None
+                ):
+                    continue
+                share_price = (check.price or holding.price).quantize(
+                    Decimal("0.01"), rounding=ROUND_HALF_UP
+                )
+                held_ideas.append(
+                    SatelliteIdea(
+                        security_id=holding.security_id,
+                        symbol=holding.symbol,
+                        market="US",
+                        sector=holding.sector or "unknown",
+                        price=share_price,
+                        quant_decile=check.quant_decile,
+                        dossier_status="APPROVED",
+                        valuation_percentile=check.pe_percentile,
+                        confidence="HIGH",
+                        name=holding.name or None,
+                        exchange=holding.exchange,
+                        isin=holding.isin,
+                        currency=holding.currency,
+                        is_held_add_more=True,
+                    )
+                )
+            selected_ideas = [
+                *held_ideas,
+                *(research.ideas if research is not None else ()),
+            ]
             eu_etf_rules = load_eu_etfs()
             stock_pick_rules = eu_etf_rules.get("selection", {}).get("stock_picks", {})
             ask_eligible_markets = [
@@ -1165,66 +1238,270 @@ def _exit_cards(
     market: MarketContext,
     as_of: date,
     notes: list[str],
-) -> list[ExitCard]:
+    *,
+    allocation: AllocationPlan,
+    satellite_holdings: Sequence[SatelliteHolding],
+    through_fund_inr: Mapping[str, Decimal],
+    through_fund_by_member_security: Mapping[tuple[str, str], Decimal],
+    satellite_pct: Decimal,
+) -> tuple[list[ExitCard], list[dict[str, Any]]]:
     context_by_id = {member.member_id: member for member in member_contexts}
     self_member = next((member for member in member_contexts if member.member.is_self), None)
     if self_member is None:
-        return []
+        return [], []
     exit_rules = load_exit_rules()
     target_weight = Decimal(
         str(exit_rules["satellite"]["drift"]["max_weight_of_equity_pct"])  # type: ignore[index]
     )
+    buying_rules = load_buying_rules()
+    min_action_inr = Decimal(str(buying_rules["min_action_inr"]))
     cards: list[ExitCard] = []
+    reviews: list[dict[str, Any]] = []
     for holding in holdings:
         if holding.security_type != "equity":
             continue
-        value = _holding_value(holding, market.fx_rates)
+        security_id = holding.security_id
+        check = market.stock_checks.get(security_id)
+        member_id = holding.member_id or self_member.member_id
+        owner = context_by_id.get(member_id, self_member)
+        current_price = holding.price or (check.price if check is not None else None)
+        priced_holding = replace(holding, price=current_price)
+        value = _holding_value(priced_holding, market.fx_rates)
         if value is None:
-            if holding.price is None:
+            if current_price is None:
                 notes.append(f"holding_price_missing:{holding.symbol}")
             else:
                 notes.append(f"holding_fx_missing:{holding.symbol}")
         holding_fx = _currency_fx_to_inr(holding.currency, market.fx_rates)
         price_inr = (
-            holding.price * holding_fx
-            if holding.price is not None and holding_fx is not None
+            current_price * holding_fx
+            if current_price is not None and holding_fx is not None
             else Decimal("0")
         )
-        lots = _normalised_lots(holding, market.fx_rates, notes)
-        owner = context_by_id.get(holding.member_id or self_member.member_id, self_member)
+        lots = _normalised_lots(priced_holding, market.fx_rates, notes)
         equity_total = owner.snapshot.amount_for(Sleeve.EQUITY_INDIA) + owner.snapshot.amount_for(
             Sleeve.EQUITY_GLOBAL
         )
         weight_pct = (
             value * Decimal(100) / equity_total if value is not None and equity_total else None
         )
-        facts = HoldingFacts(
-            security_id=holding.security_id,
-            symbol=holding.symbol,
-            sector=holding.sector or "unknown",
-            is_core=False,
-            lots=lots,
-            price=price_inr,
-            weight_pct_of_equity=weight_pct,
-            target_weight_pct=target_weight,
+        room, minimum_buy = _add_more_room(
+            holding,
+            owner,
+            holdings,
+            market,
+            allocation,
+            satellite_holdings,
+            through_fund_inr,
+            through_fund_by_member_security,
+            satellite_pct=satellite_pct,
+            min_action_inr=min_action_inr,
         )
-        card = build_exit_card(facts, as_of, owner.tax_context)
-        tax_notes = list(card.tax_estimate.notes)
-        tax_notes.extend(_acquisition_fx_notes(holding))
-        if tax_notes != list(card.tax_estimate.notes):
-            card = replace(
-                card,
-                tax_estimate=replace(card.tax_estimate, notes=tuple(dict.fromkeys(tax_notes))),
+        fresh = check is not None and 0 <= (as_of - check.as_of).days <= int(
+            exit_rules["checks_max_age_days"]
+        )
+        card: ExitCard | None = None
+        facts: HoldingFacts | None = None
+        if fresh and holding.market in {"IN", "US"}:
+            assert check is not None
+            facts = HoldingFacts(
+                security_id=security_id,
+                symbol=holding.symbol,
+                sector=holding.sector or "unknown",
+                is_core=False,
+                lots=lots,
+                price=price_inr,
+                weight_pct_of_equity=weight_pct,
+                target_weight_pct=target_weight,
+                revenue_yoy_pct_last_quarters=list(check.revenue_yoy_pct),
+                governance_events=list(market.governance_events.get(security_id, ())),
+                pe_own_band_percentile=check.pe_percentile,
+                pe_vs_sector_multiple=check.pe_vs_sector,
+                below_200dma=check.below_dma200,
+                thesis_status=thesis_status_from_revenue(check.revenue_yoy_pct),
             )
-        cards.append(
-            replace(
+            tax_context = owner.tax_context
+            if holding.account_tax_wrapper == "ask" or owner.residency.country == "DK":
+                tax_context = TaxContext(
+                    slab_pct=Decimal(0),
+                    surcharge_pct=Decimal(0),
+                    fy_realised_equity_ltcg=Decimal(0),
+                    fy_realised_equity_stcg=Decimal(0),
+                    residency_status=owner.tax_context.residency_status,
+                    us_person=owner.tax_context.us_person,
+                )
+            card = build_exit_card(facts, as_of, tax_context)
+            tax_notes = list(card.tax_estimate.notes)
+            tax_notes.extend(_acquisition_fx_notes(holding))
+            if tax_notes != list(card.tax_estimate.notes):
+                card = replace(
+                    card,
+                    tax_estimate=replace(card.tax_estimate, notes=tuple(dict.fromkeys(tax_notes))),
+                )
+            card = replace(
                 card,
                 member_id=owner.member_id,
                 member_name=owner.name,
                 member_relationship=owner.relationship,
             )
+            cards.append(card)
+
+        decision = holding_review_decision(
+            market=holding.market,
+            as_of=as_of,
+            check=check,
+            card=card,
+            facts=facts,
+            add_more_room=room,
+            minimum_buy=minimum_buy,
+            position_size_known=weight_pct is not None,
         )
-    return cards
+        tax = _holding_review_tax(holding, owner, card)
+        reviews.append(
+            {
+                "security_id": security_id,
+                "member_id": owner.member_id,
+                "verdict": decision.verdict,
+                "reasons": list(decision.reasons),
+                "tax": tax,
+                "checked_on": check.as_of.isoformat() if check is not None else None,
+                "add_more_room_inr": (
+                    format(round_paise(room), ".2f") if room is not None else None
+                ),
+                "checks": list(decision.checks),
+            }
+        )
+    return cards, reviews
+
+
+def _add_more_room(
+    holding: HoldingInput,
+    owner: MemberContext,
+    holdings: Sequence[HoldingInput],
+    market: MarketContext,
+    allocation: AllocationPlan,
+    satellite_holdings: Sequence[SatelliteHolding],
+    through_fund_inr: Mapping[str, Decimal],
+    through_fund_by_member_security: Mapping[tuple[str, str], Decimal],
+    *,
+    satellite_pct: Decimal,
+    min_action_inr: Decimal,
+) -> tuple[Decimal | None, Decimal]:
+    if holding.market == "IN":
+        rules = load_buying_rules()["satellite"]
+        total_equity_target = (
+            allocation.target_rupees["equity_india"] + allocation.target_rupees["equity_global"]
+        )
+        max_stock = (
+            total_equity_target
+            * Decimal(str(rules["max_stock_pct_of_total_equity"]))
+            / Decimal(100)
+        )
+        satellite_target = allocation.target_rupees["equity_india"] * satellite_pct / Decimal(100)
+        satellite_gap = max(
+            Decimal(0),
+            satellite_target - sum((item.value for item in satellite_holdings), Decimal(0)),
+        )
+        max_sector = (
+            satellite_target * Decimal(str(rules["max_sector_pct_of_satellite"])) / Decimal(100)
+        )
+        direct_value = sum(
+            (item.value for item in satellite_holdings if item.security_id == holding.security_id),
+            Decimal(0),
+        )
+        sector_value = sum(
+            (
+                item.value
+                for item in satellite_holdings
+                if item.sector == (holding.sector or "unknown")
+            ),
+            Decimal(0),
+        )
+        check = market.stock_checks.get(holding.security_id)
+        price = holding.price or (check.price if check is not None else None)
+        if price is None or price <= 0:
+            return Decimal(0), min_action_inr
+        room = india_stock_room(
+            max_stock=max_stock,
+            direct_value=direct_value,
+            through_funds_value=through_fund_inr.get(holding.security_id, Decimal(0)),
+            sector_room=max_sector - sector_value,
+            satellite_gap=satellite_gap,
+            price=price,
+            min_action=min_action_inr,
+        )
+        return room, min_action_inr
+
+    if (
+        holding.market != "US"
+        or owner.residency.country != "DK"
+        or not owner.member.investing.us_stock_picks_opt_in
+    ):
+        return None, min_action_inr
+    inr_per_dkk = market.fx_rates.get("DKK/INR")
+    if inr_per_dkk is None or inr_per_dkk <= 0:
+        return None, min_action_inr
+    stock_rules = load_eu_etfs().get("selection", {}).get("stock_picks", {})
+    minimum_buy_dkk = Decimal(str(stock_rules.get("minimum_buy_dkk", "2000")))
+    investable_dkk = dkk_from_inr(max(Decimal(0), owner.snapshot.investable_total), inr_per_dkk)
+    per_stock_cap = investable_dkk * US_STOCK_MAX_PER_STOCK_PCT / Decimal(100)
+    direct_inr = sum(
+        (
+            _holding_value(item, market.fx_rates) or Decimal(0)
+            for item in holdings
+            if item.member_id == owner.member_id
+            and item.security_id == holding.security_id
+            and item.market == "US"
+            and item.security_type == "equity"
+        ),
+        Decimal(0),
+    )
+    through_inr = through_fund_by_member_security.get(
+        (owner.member_id, holding.security_id), Decimal(0)
+    )
+    held_dkk = dkk_from_inr(direct_inr + through_inr, inr_per_dkk)
+    room_dkk = us_stock_room(
+        per_stock_cap=per_stock_cap,
+        held_dkk=held_dkk,
+        available_dkk=per_stock_cap,
+        minimum_buy_dkk=minimum_buy_dkk,
+    )
+    return room_dkk * inr_per_dkk, minimum_buy_dkk * inr_per_dkk
+
+
+def _holding_review_tax(
+    holding: HoldingInput,
+    owner: MemberContext,
+    card: ExitCard | None,
+) -> dict[str, str]:
+    if holding.account_tax_wrapper == "ask":
+        return {"note_code": "ask_same_tax"}
+    if owner.residency.country == "DK":
+        return {"note_code": "tax_not_estimated"}
+    missing_basis = any(
+        lot.acquired_on is None
+        or (
+            ((lot.currency or holding.currency) == "INR" and lot.cost_per_unit is None)
+            or (
+                (lot.currency or holding.currency) != "INR"
+                and (lot.fx_missing or lot.cost_per_unit_inr is None)
+            )
+        )
+        for lot in holding.lots
+    )
+    if missing_basis or (holding.quantity > 0 and not holding.lots):
+        return {"note_code": "tax_not_estimated"}
+    if card is None or not card.lots_to_sell:
+        return {}
+    tax: dict[str, str] = {"estimated_tax": format(card.tax_estimate.total_tax, "f")}
+    wait_until = card.params.get("wait_until")
+    tax_saved = card.params.get("tax_saved")
+    if isinstance(wait_until, date):
+        tax["note_code"] = "tax_wait"
+        tax["wait_until"] = wait_until.isoformat()
+        if isinstance(tax_saved, Decimal):
+            tax["tax_saved"] = format(tax_saved, "f")
+    return tax
 
 
 def _acquisition_fx_notes(holding: HoldingInput) -> tuple[str, ...]:
@@ -1646,7 +1923,59 @@ def personalise(
                     value=value,
                 )
             )
+    exits, holding_reviews = _exit_cards(
+        user_data.holdings,
+        member_contexts,
+        market,
+        as_of,
+        notes,
+        allocation=allocation,
+        satellite_holdings=satellite_holdings,
+        through_fund_inr=user_data.through_fund_inr,
+        through_fund_by_member_security=user_data.through_fund_by_member_security,
+        satellite_pct=user_data.investing.satellite_pct,
+    )
     ideas = list(selected_research.ideas) if selected_research is not None else []
+    held_values: dict[str, Decimal] = {}
+    for item in satellite_holdings:
+        held_values[item.security_id] = held_values.get(item.security_id, Decimal(0)) + item.value
+    held_by_security = {item.security_id: item for item in user_data.holdings}
+    for review in holding_reviews:
+        if review["verdict"] != "add_more":
+            continue
+        holding = held_by_security.get(str(review["security_id"]))
+        check = market.stock_checks.get(str(review["security_id"]))
+        if (
+            holding is None
+            or check is None
+            or holding.market != "IN"
+            or holding.security_type != "equity"
+            or check.quant_decile is None
+            or check.pe_percentile is None
+        ):
+            continue
+        share_price = check.price or holding.price
+        if share_price is None or share_price <= 0:
+            continue
+        share_price = share_price.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        ideas.append(
+            SatelliteIdea(
+                security_id=holding.security_id,
+                symbol=holding.symbol,
+                market="IN",
+                sector=holding.sector or "unknown",
+                price=share_price,
+                quant_decile=check.quant_decile,
+                dossier_status="APPROVED",
+                valuation_percentile=check.pe_percentile,
+                confidence="HIGH",
+                name=holding.name or None,
+                isin=holding.isin,
+                currency=holding.currency,
+                is_held_add_more=True,
+                direct_value=held_values.get(holding.security_id, Decimal(0)),
+            )
+        )
     existing_sips = [sip for member in member_profiles for sip in member.investing.existing_sips]
     week_input = WeekInput(
         plan=allocation,
@@ -1824,7 +2153,6 @@ def personalise(
         }
     )
     breaches = band_breaches(allocation)
-    exits = _exit_cards(user_data.holdings, member_contexts, market, as_of, notes)
     ltcg_by_member = _member_ltcg_harvest(
         user_data.holdings,
         member_contexts,
@@ -1842,6 +2170,7 @@ def personalise(
         selected_research,
         user_data.through_fund_by_member_security,
         user_data.lookthrough_company_keys,
+        holding_reviews,
     )
     carry_forward = round_paise(carry_forward + abroad_carry)
     if apply_weekly_spending:
@@ -1979,6 +2308,7 @@ def personalise(
         actions=[action.model_dump(mode="json") for action in weekly_actions],
         abroad_buy_list=abroad_buy_list,
         exit_cards=[_jsonable(card) for card in exits],
+        holding_reviews=holding_reviews,
         stress=_stress_json(current_stress, target_stress),
         notes=list(dict.fromkeys(notes)),
         residency=residency,

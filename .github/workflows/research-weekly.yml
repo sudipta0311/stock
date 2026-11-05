@@ -52,6 +52,14 @@ jobs:
           python -m wealth.research.watchers --week "$WEEK" ||
             echo "::warning::The rate and rulebook check failed; research continues."
           python -m wealth.research.run start --week "$WEEK" --mode weekly --budget-usd "$RESEARCH_BUDGET_USD"
+      - name: Build weekly stock checks
+        if: >-
+          always() && ((github.event_name == 'workflow_dispatch' && inputs.step == 'start') ||
+          github.event.schedule == '0 0 * * 6')
+        run: |
+          WEEK=$(date -u +%G-W%V)
+          python -m wealth.research.stock_checks --week "$WEEK" ||
+            echo "::warning::Weekly stock checks failed; plans can still use the latest stored checks."
       - name: Continue the open weekly run
         if: >-
           (github.event_name == 'workflow_dispatch' && inputs.step == 'continue') ||

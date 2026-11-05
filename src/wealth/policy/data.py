@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 from pathlib import Path
@@ -30,6 +30,8 @@ from wealth.db.models import (
     RecordedBuy,
     ResearchPackRecord,
     Security,
+    SentinelEvent,
+    StockCheck,
 )
 from wealth.db.models import (
     Action as ActionRow,
@@ -41,7 +43,9 @@ from wealth.marketdata import store
 from wealth.marketdata.provider import DbPriceProvider
 from wealth.policy.actions import SatelliteIdea, satellite_idea_from_pack
 from wealth.policy.debt_yields import load_debt_yields
+from wealth.policy.exits import load_exit_rules
 from wealth.policy.global_split import GeoTilts
+from wealth.policy.holding_review import StockCheckFacts
 from wealth.policy.household import MemberProfile
 from wealth.policy.loans import LoanCandidate
 from wealth.policy.lookthrough import (
@@ -440,13 +444,17 @@ def _holdings(
     recorded_buys: tuple[RecordedBuy, ...] = (),
 ) -> tuple[HoldingInput, ...]:
     statement = (
-        select(HoldingLot, Security)
+        select(HoldingLot, Security, Account.tax_wrapper)
         .join(Security, Security.id == HoldingLot.security_id)
+        .outerjoin(
+            Account,
+            and_(Account.user_id == HoldingLot.user_id, Account.id == HoldingLot.account_id),
+        )
         .where(HoldingLot.user_id == user_id)
         .order_by(HoldingLot.security_id, HoldingLot.acquired_on, HoldingLot.id)
     )
     grouped: dict[tuple[UUID, UUID], dict[str, object]] = {}
-    for lot, security in session.execute(statement):
+    for lot, security, tax_wrapper in session.execute(statement):
         owner_key = (security.id, lot.member_id)
         record = grouped.setdefault(
             owner_key,
@@ -463,8 +471,10 @@ def _holdings(
                 "joint": lot.joint,
                 "cost_value_inr": Decimal(0),
                 "fallback_value_inr": Decimal(0),
+                "tax_wrappers": [],
             },
         )
+        record["tax_wrappers"].append(tax_wrapper)  # type: ignore[union-attr]
         record["quantity"] = record["quantity"] + lot.quantity  # type: ignore[operator]
         if lot.statement_value is not None:
             record["statement_value"] = (
@@ -512,8 +522,10 @@ def _holdings(
                 "joint": False,
                 "cost_value_inr": Decimal(0),
                 "fallback_value_inr": Decimal(0),
+                "tax_wrappers": [],
             },
         )
+        record["tax_wrappers"].append(buy.account_type)  # type: ignore[union-attr]
         if buy.units is None:
             if buy.amount_inr is not None:
                 record["cost_value_inr"] = record["cost_value_inr"] + buy.amount_inr  # type: ignore[operator]
@@ -613,7 +625,17 @@ def _holdings(
                 fallback_value_inr=record["fallback_value_inr"],  # type: ignore[arg-type]
                 name=security.name,
                 isin=security.isin,
+                exchange=security.exchange,
                 sub_category=security.sub_category,
+                account_tax_wrapper=(
+                    "ask"
+                    if record["tax_wrappers"]
+                    and all(wrapper == "ask" for wrapper in record["tax_wrappers"])  # type: ignore[union-attr]
+                    else "ordinary"
+                    if record["tax_wrappers"]
+                    and all(wrapper == "ordinary" for wrapper in record["tax_wrappers"])  # type: ignore[union-attr]
+                    else None
+                ),
             )
         )
     return tuple(holdings)
@@ -1128,6 +1150,67 @@ def required_fx_currencies(
     return tuple(sorted(currencies))
 
 
+def _stock_check_inputs(
+    session: Session,
+    holdings: tuple[HoldingInput, ...],
+    as_of: date,
+) -> tuple[dict[str, StockCheckFacts], dict[str, tuple[str, ...]], str | None]:
+    security_ids = {
+        UUID(holding.security_id) for holding in holdings if holding.security_type == "equity"
+    }
+    newest_week = session.scalar(select(func.max(StockCheck.week)))
+    if not security_ids:
+        return {}, {}, newest_week
+
+    check_rows = session.execute(
+        select(StockCheck, Security.market)
+        .join(Security, Security.id == StockCheck.security_id)
+        .where(StockCheck.security_id.in_(security_ids), StockCheck.as_of <= as_of)
+        .order_by(StockCheck.security_id, StockCheck.as_of.desc(), StockCheck.week.desc())
+    ).all()
+    stock_checks: dict[str, StockCheckFacts] = {}
+    for row, market in check_rows:
+        key = str(row.security_id)
+        if key in stock_checks:
+            continue
+        stock_checks[key] = StockCheckFacts(
+            security_id=key,
+            week=row.week,
+            as_of=row.as_of,
+            market=market,
+            quant_decile=row.quant_decile,
+            factor_coverage=row.factor_coverage,
+            pe_percentile=row.pe_percentile,
+            pe_vs_sector=row.pe_vs_sector,
+            revenue_yoy_pct=tuple(Decimal(str(value)) for value in row.revenue_yoy_pct),
+            price=row.price,
+            dma200=row.dma200,
+            below_dma200=row.below_dma200,
+        )
+
+    governance_codes = load_exit_rules()["satellite"]["governance_break"]["events"]
+    start = datetime.combine(as_of - timedelta(days=90), time.min, tzinfo=UTC)
+    end = datetime.combine(as_of, time.max, tzinfo=UTC)
+    event_rows = session.execute(
+        select(SentinelEvent.security_id, SentinelEvent.event_code)
+        .where(
+            SentinelEvent.security_id.in_(security_ids),
+            SentinelEvent.detected_at >= start,
+            SentinelEvent.detected_at <= end,
+            SentinelEvent.event_code.in_(governance_codes),
+        )
+        .order_by(SentinelEvent.security_id, SentinelEvent.detected_at, SentinelEvent.id)
+    ).all()
+    events: dict[str, set[str]] = defaultdict(set)
+    for security_id, event_code in event_rows:
+        events[str(security_id)].add(event_code)
+    return (
+        stock_checks,
+        {key: tuple(sorted(values)) for key, values in events.items()},
+        newest_week,
+    )
+
+
 def load_policy_inputs(
     session: Session,
     user_id: UUID,
@@ -1157,6 +1240,9 @@ def load_policy_inputs(
     prices = DbPriceProvider(session)
     valued_assets, notes = _manual_assets(session, user_id, as_of, prices)
     holdings = _holdings(session, user_id, as_of, prices, recorded_buys)
+    stock_checks, governance_events, stock_check_week = _stock_check_inputs(
+        session, holdings, as_of
+    )
 
     goals = _goals(session, user_id)
     fx_rates: dict[str, Decimal] = {}
@@ -1224,5 +1310,8 @@ def load_policy_inputs(
         yield_table_as_of=yield_as_of,
         yield_table_verified=yields_verified,
         notes=(),
+        stock_checks=stock_checks,
+        governance_events=governance_events,
+        stock_check_week=stock_check_week,
     )
     return user_data, market, research

@@ -1,5 +1,11 @@
 version: 1
 watch_fraction: "0.8"
+# Maximum age in days for stock checks used in holding reviews.
+checks_max_age_days: 14
+# Conditions that allow a strong holding to receive an add-more suggestion.
+accumulate:
+  min_quant_decile: 8
+  max_pe_percentile: "80"
 satellite:
   thesis_break:
     revenue_yoy_negative_quarters: 2

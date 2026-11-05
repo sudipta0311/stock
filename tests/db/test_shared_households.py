@@ -38,9 +38,11 @@ from wealth.db.models import (
     ImportJob,
     ImportTemplate,
     ManualAsset,
+    PriceEod,
     Profile,
     PushSubscription,
     Security,
+    StockCheck,
 )
 from wealth.db.session import system_session, user_session
 
@@ -235,11 +237,89 @@ def test_shared_household_grant_uses_linked_member_and_enforces_viewer_rls(
     )
     assert client.get("/v1/me/residency", headers=owner_headers).json() == owner_residency.json()
 
+    owner_member_id = UUID(client.get("/v1/me", headers=owner_headers).json()["me_member_id"])
+    review_security = Security(
+        market="IN",
+        symbol="SYNTH-REVIEW",
+        name="Synthetic reviewed share",
+        security_type="equity",
+        currency="INR",
+        sleeve="equity_india",
+        sector="Synthetic sector",
+        industry="Synthetic industry",
+    )
+    anchor_security = Security(
+        market="IN",
+        symbol="SYNTH-ANCHOR",
+        name="Synthetic broad fund",
+        security_type="mf",
+        currency="INR",
+        sleeve="equity_global",
+        category="equity:global",
+    )
+    with Session(database.owner_engine) as session, session.begin():
+        session.add_all((review_security, anchor_security))
+        session.flush()
+        review_security_id = str(review_security.id)
+        session.add_all(
+            (
+                HoldingLot(
+                    user_id=owner_id,
+                    member_id=owner_member_id,
+                    security_id=review_security.id,
+                    quantity=Decimal("1"),
+                    cost_per_unit=None,
+                    acquired_on=None,
+                    source="manual",
+                    currency="INR",
+                ),
+                HoldingLot(
+                    user_id=owner_id,
+                    member_id=owner_member_id,
+                    security_id=anchor_security.id,
+                    quantity=Decimal("1"),
+                    statement_value=Decimal("1000000"),
+                    statement_date=_TODAY,
+                    source="manual",
+                    currency="INR",
+                ),
+                PriceEod(
+                    security_id=review_security.id,
+                    as_of=_TODAY,
+                    close=Decimal("100"),
+                    source="synthetic_test",
+                    source_url="https://example.test/synthetic-price",
+                ),
+                StockCheck(
+                    security_id=review_security.id,
+                    week="2026-W44",
+                    as_of=_TODAY,
+                    quant_decile=7,
+                    factor_coverage="medium",
+                    pe_percentile=Decimal("50"),
+                    pe_vs_sector=Decimal("1"),
+                    revenue_yoy_pct=[],
+                    price=Decimal("100"),
+                    sources={"fixture": "synthetic"},
+                ),
+            )
+        )
+
     owner_plan = client.get("/v1/plan", headers=owner_headers)
     partner_plan = client.get("/v1/plan", headers=_household(partner_headers, owner_id))
     assert owner_plan.status_code == partner_plan.status_code == 200
     assert owner_plan.json()["inputs_digest"] == partner_plan.json()["inputs_digest"]
     assert owner_plan.json()["me_member_id"] != partner_plan.json()["me_member_id"]
+    owner_review = next(
+        item
+        for item in owner_plan.json()["holding_reviews"]
+        if item["security_id"] == review_security_id
+    )
+    assert owner_review["verdict"] == "keep"
+    assert any(
+        item["security_id"] == review_security_id and item["verdict"] == "keep"
+        for item in partner_plan.json()["holding_reviews"]
+    )
 
     action_id = uuid4()
     with database.owner_engine.begin() as connection:
@@ -272,6 +352,16 @@ def test_shared_household_grant_uses_linked_member_and_enforces_viewer_rls(
         json={"token": viewer_token, "bring_my_data": False},
     )
     assert viewer_join.status_code == 200
+    viewer_plan = client.get("/v1/plan", headers=_household(viewer_headers, owner_id))
+    assert viewer_plan.status_code == 200
+    assert any(
+        item["security_id"] == review_security_id and item["verdict"] == "keep"
+        for item in viewer_plan.json()["holding_reviews"]
+    )
+    assert not any(
+        action["kind"] in {"SELL_EXIT", "SELL_TRIM", "REVIEW_EXIT", "SWAP"}
+        for action in viewer_plan.json()["actions"]
+    )
     assert client.get("/v1/assets", headers=_household(viewer_headers, owner_id)).status_code == 200
     blocked_write = client.post(
         "/v1/assets",

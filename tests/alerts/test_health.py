@@ -88,6 +88,7 @@ def _healthy_facts() -> HealthFacts:
         eligible_email_count=0,
         missing_email_count=0,
         email_sending_configured=False,
+        stock_checks_as_of=date(2026, 10, 30),
         fund_baskets=tuple(
             FundBasketHealthFact(
                 basket_id=basket_id,
@@ -111,6 +112,24 @@ def test_fresh_market_data_and_empty_history_baseline_are_ok() -> None:
     assert all(item["level"] == "ok" for item in result["checks"])
     assert _checks(result, "india_prices")[0]["facts"]["expected_date"] == "2026-10-30"
     assert _checks(result, "fund_lookthrough")[0]["level"] == "ok"
+    assert _checks(result, "stock_checks")[0]["level"] == "ok"
+
+
+def test_stock_checks_warn_when_the_week_is_old_or_held_coverage_is_low() -> None:
+    stale = replace(_healthy_facts(), stock_checks_as_of=date(2026, 10, 23))
+    low_coverage = replace(
+        _healthy_facts(),
+        held_listed_count=10,
+        held_listed_fresh_count=8,
+    )
+
+    stale_check = _checks(evaluate_health(stale, _NOW), "stock_checks")[0]
+    coverage_check = _checks(evaluate_health(low_coverage, _NOW), "stock_checks")[0]
+
+    assert stale_check["level"] == "warning"
+    assert "10 days old" in stale_check["message"]
+    assert coverage_check["level"] == "warning"
+    assert "8 of 10" in coverage_check["message"]
 
 
 def test_ask_rules_warn_when_the_current_year_has_no_exact_cap() -> None:

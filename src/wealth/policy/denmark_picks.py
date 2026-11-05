@@ -19,6 +19,7 @@ _RULES_PATH = Path(__file__).resolve().parents[3] / "rules" / "eu_etfs.yaml"
 _SIZE_RANK = {"small": 0, "medium": 1, "large": 2}
 _CURRENCY_RANK = {"DKK": 0, "EUR": 1, "USD": 2, "GBP": 3}
 _BROKERS = {"nordnet", "saxo", "danske_bank", "other"}
+US_STOCK_MAX_PER_STOCK_PCT = Decimal("5")
 
 
 @dataclass(frozen=True)
@@ -253,7 +254,7 @@ def approved_us_stock_buys(
     investable_wealth_dkk: Decimal,
     available_dkk: Decimal,
     satellite_pct: Decimal,
-    max_per_stock_pct: Decimal = Decimal("5"),
+    max_per_stock_pct: Decimal = US_STOCK_MAX_PER_STOCK_PCT,
     minimum_buy_dkk: Decimal = Decimal("2000"),
     held_dkk_by_security: Mapping[str, Decimal] | None = None,
 ) -> list[tuple[Mapping[str, Any] | SatelliteIdea, Decimal]]:
@@ -268,6 +269,7 @@ def approved_us_stock_buys(
     sorted_ideas = sorted(
         ideas,
         key=lambda idea: (
+            0 if _idea_value(idea, "is_held_add_more") is True else 1,
             -int(_idea_value(idea, "quant_decile") or 0),
             str(_idea_value(idea, "security_id") or ""),
         ),
@@ -276,7 +278,10 @@ def approved_us_stock_buys(
     for idea in sorted_ideas:
         if (
             _idea_value(idea, "market") != "US"
-            or _idea_value(idea, "dossier_status") != "APPROVED"
+            or (
+                _idea_value(idea, "is_held_add_more") is not True
+                and _idea_value(idea, "dossier_status") != "APPROVED"
+            )
             or not all(
                 _idea_value(idea, field) for field in ("name", "isin", "exchange", "currency")
             )

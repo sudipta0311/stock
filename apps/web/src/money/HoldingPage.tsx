@@ -1,8 +1,6 @@
-import { CircleAlert, CircleCheck, CircleHelp, Eye } from "lucide-react";
 import { useParams } from "react-router";
 import { formatInr } from "../lib/money";
-import { exitLabel, labelForCode, triggerKeyLabel } from "../lib/labels";
-import { asArray, asRecord, reasonCopy, textValue } from "../features/data";
+import { asArray, asRecord, textValue } from "../features/data";
 import * as englishCopy from "../copy/sections/index";
 import {
   ComingSoon,
@@ -15,144 +13,165 @@ import { getNetworth } from "./api";
 import type { NetworthResponse } from "./api";
 import { getPlan } from "../planning/api";
 import type { WeeklyPlan } from "../planning/api";
-import { Badge, Card } from "../ui";
+import { Card } from "../ui";
 import { exactQuantity, quantityLabel } from "./quantity";
 
-function statusIcon(status: string) {
-  if (status === "ok")
-    return <CircleCheck aria-hidden="true" className="size-4 text-brand" />;
-  if (status === "watch")
-    return <Eye aria-hidden="true" className="size-4 text-muted-foreground" />;
-  if (status === "triggered")
-    return (
-      <CircleAlert
-        aria-hidden="true"
-        className="size-4 text-warning-foreground"
-      />
-    );
-  return (
-    <CircleHelp aria-hidden="true" className="size-4 text-muted-foreground" />
-  );
+function reviewFor(plan: WeeklyPlan, securityId: string): unknown {
+  const priority: Record<string, number> = {
+    sell: 0,
+    review: 1,
+    sell_some: 2,
+    add_more: 3,
+    keep: 4,
+    not_checked: 5,
+  };
+  return asArray(plan.holding_reviews)
+    .map(asRecord)
+    .filter((item) => textValue(item.security_id) === securityId)
+    .sort(
+      (left, right) =>
+        (priority[textValue(left.verdict)] ?? 6) -
+        (priority[textValue(right.verdict)] ?? 6),
+    )[0];
 }
 
-export function ExitCard({ value }: { value: unknown }) {
-  const card = asRecord(value);
-  const triggers = asRecord(card.triggers ?? card.trigger_statuses);
-  const tax = asRecord(card.tax_estimate);
-  const action = textValue(card.action, "");
-  const taxValue = textValue(
-    tax.tax_due ?? tax.tax_estimate ?? tax.estimated_tax ?? tax.total_tax,
-  );
-  const longTermDate = textValue(
-    tax.long_term_date ??
-      tax.long_term_since ??
-      asRecord(card.params).long_term_date,
-  );
-  const taxNotes = new Set(asArray(tax.notes).map((note) => textValue(note)));
+function checkedDate(value: unknown): string {
+  const isoDate = textValue(value);
+  if (!isoDate) return "";
+  const parsed = new Date(`${isoDate}T00:00:00Z`);
+  return Number.isNaN(parsed.getTime())
+    ? isoDate
+    : new Intl.DateTimeFormat("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        timeZone: "UTC",
+      }).format(parsed);
+}
+
+function plainPercent(value: string): string {
+  return value.replace(/^-/, "").replace(/(?:\.0+|(\.\d*?)0+)$/, "$1");
+}
+
+function reasonText(raw: unknown): string {
+  const reason = asRecord(raw);
+  const code = textValue(reason.code, "default");
+  const copy = englishCopy.holding_review.reasons as Record<string, string>;
+  const params = asRecord(reason.params);
+  const copyKey =
+    code === "revenue_down_quarters" && textValue(params.count) === "1"
+      ? "revenue_down_quarter"
+      : code;
+  const template = copy[copyKey] ?? copy.default ?? "";
+  return template.replace(/\{([a-z_]+)\}/g, (_match, key: string) => {
+    const value = textValue(params[key]);
+    return key === "drawdown_pct" && value ? plainPercent(value) : value;
+  });
+}
+
+function taxText(raw: unknown): string {
+  const tax = asRecord(raw);
+  const copy = englishCopy.holding_review.tax as Record<string, string>;
+  const noteCode = textValue(tax.note_code);
+  if (noteCode === "ask_same_tax" || noteCode === "tax_not_estimated") {
+    return copy[noteCode] ?? "";
+  }
+  if (noteCode === "tax_wait") {
+    const saved = textValue(tax.tax_saved);
+    return saved
+      ? (copy.tax_wait ?? "")
+          .replace("{date}", checkedDate(tax.wait_until))
+          .replace("{amount}", formatInr(saved, "compact"))
+      : (copy.tax_wait_plain ?? "").replace(
+          "{date}",
+          checkedDate(tax.wait_until),
+        );
+  }
+  const estimate = textValue(tax.estimated_tax);
+  return estimate
+    ? (copy.estimated_tax ?? "").replace(
+        "{amount}",
+        formatInr(estimate, "compact"),
+      )
+    : "";
+}
+
+export function OurView({ value }: { value: unknown }) {
+  const review = asRecord(value);
+  const copy = englishCopy.holding_review;
+  const verdict = textValue(review.verdict, "not_checked");
+  const verdicts = copy.verdicts as Record<string, string>;
+  const checkLabels = copy.checks as Record<string, string>;
+  const statuses = copy.statuses as Record<string, string>;
+  const reasons = asArray(review.reasons)
+    .filter((reason) => textValue(asRecord(reason).code) !== "tax_wait")
+    .slice(0, 3);
+  const taxLine = taxText(review.tax);
+  const checkedOn = checkedDate(review.checked_on);
+
   return (
     <Card className="grid gap-3">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-base font-semibold">Exit Card</h2>
-        {textValue(card.urgency) ? (
-          <Badge>{plainUrgency(textValue(card.urgency))}</Badge>
-        ) : null}
-      </div>
-      <div className="grid gap-2">
-        {Object.entries(triggers).map(([key, raw]) => {
-          const trigger = asRecord(raw);
-          const status = textValue(trigger.status, "unknown");
-          const valueText = textValue(trigger.value);
-          const threshold = textValue(trigger.threshold);
-          return (
-            <div
-              key={key}
-              className="flex min-h-12 items-start justify-between gap-3 border-t border-line pt-2 first:border-0 first:pt-0"
-            >
-              <div className="flex items-start gap-2">
-                <span className="mt-0.5">{statusIcon(status)}</span>
-                <div>
-                  <p className="text-sm font-medium">{triggerKeyLabel(key)}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {labelForCode(status)}
-                  </p>
-                </div>
-              </div>
-              <p className="text-right text-sm tabular-nums">
-                {valueText || "—"}
-                {threshold ? (
-                  <span className="block text-xs text-muted-foreground">
-                    Threshold {threshold}
-                  </span>
-                ) : null}
-              </p>
-            </div>
-          );
-        })}
-      </div>
-      <div className="border-t border-line pt-3">
-        <p className="text-sm text-muted-foreground">Suggested action</p>
-        <p className="mt-1 text-base font-semibold">
-          {action ? exitLabel(action) : "Not enough data"}
-        </p>
-      </div>
-      {asArray(card.reason_codes).length ? (
-        <ul className="grid gap-1 border-t border-line pt-3 text-sm text-muted-foreground">
-          {asArray(card.reason_codes).map((code, index) => (
-            <li key={`${textValue(code)}-${index}`}>
-              {reasonCopy(textValue(code))}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {taxValue ? (
-        <p className="text-sm">
-          Estimated tax if sold:{" "}
-          <strong className="tabular-nums">
-            {formatInr(taxValue, "compact")}
-          </strong>
-        </p>
+      <h2 className="text-base font-semibold">{copy.title}</h2>
+      {verdict === "not_checked" ? (
+        <p className="text-sm text-muted-foreground">{copy.not_checked}</p>
       ) : (
-        <p className="text-sm text-muted-foreground">
-          Tax estimate is unavailable for this holding.
-        </p>
+        <>
+          <p className="text-lg font-semibold">
+            {verdicts[verdict] ?? verdicts.keep}
+          </p>
+          {reasons.length ? (
+            <ul className="grid gap-2 text-sm text-muted-foreground">
+              {reasons.map((reason, index) => (
+                <li key={`${textValue(asRecord(reason).code)}-${index}`}>
+                  {reasonText(reason)}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </>
       )}
-      {taxNotes.has("acquisition_fx_missing") ? (
+      {taxLine ? <p className="text-sm">{taxLine}</p> : null}
+      {checkedOn ? (
         <p className="text-sm text-muted-foreground">
-          {englishCopy.imports.tax_fx_missing}
+          {copy.checked_on.replace("{date}", checkedOn)}
         </p>
       ) : null}
-      {taxNotes.has("acquisition_fx_approximation") ? (
-        <p className="text-sm text-muted-foreground">
-          {englishCopy.imports.tax_fx_approximation}
-        </p>
-      ) : null}
-      {longTermDate ? (
-        <p className="text-sm text-muted-foreground">
-          Long-term date: {longTermDate}
-        </p>
-      ) : null}
+      <details className="border-t border-line pt-2">
+        <summary className="min-h-12 cursor-pointer py-2 text-sm font-medium">
+          {copy.how_we_check}
+        </summary>
+        <ul className="grid gap-2 border-t border-line pt-2">
+          {asArray(review.checks).map((raw, index) => {
+            const check = asRecord(raw);
+            const key = textValue(check.key);
+            const status = textValue(check.status, "unknown");
+            const symbol =
+              status === "ok"
+                ? "✓"
+                : status === "watch" || status === "triggered"
+                  ? "!"
+                  : "—";
+            return (
+              <li
+                key={`${key}-${index}`}
+                className="flex min-h-10 items-start gap-2 text-sm"
+              >
+                <span aria-label={statuses[status] ?? statuses.unknown}>
+                  {symbol}
+                </span>
+                <span className="flex-1">
+                  {checkLabels[key] ?? key}
+                  <span className="ml-2 text-muted-foreground">
+                    {statuses[status] ?? statuses.unknown}
+                  </span>
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      </details>
     </Card>
   );
-}
-
-function plainUrgency(value: string): string {
-  return value.toLowerCase() === "critical"
-    ? "Review soon"
-    : `${value.toLowerCase()} priority`;
-}
-
-function exitCardFor(
-  plan: WeeklyPlan,
-  securityId: string,
-  symbol: string,
-): unknown {
-  return asArray(plan.exit_cards).find((raw) => {
-    const card = asRecord(raw);
-    return (
-      textValue(card.security_id) === securityId ||
-      textValue(card.symbol) === symbol
-    );
-  });
 }
 
 export function HoldingPage() {
@@ -174,11 +193,11 @@ export function HoldingPage() {
     (networth.error && !isMissingFeature(networth.error)) ||
     (plan.error && !isMissingFeature(plan.error))
   )
-    return <ScreenError title="This holding couldn’t load" />;
+    return <ScreenError title="This holding couldn't load" />;
   const networthData = networth.data as NetworthResponse | undefined;
   const planData = plan.data as WeeklyPlan | undefined;
   if (!networthData || !planData)
-    return <ScreenError title="This holding couldn’t load" />;
+    return <ScreenError title="This holding couldn't load" />;
   const holding = networthData.holdings.find(
     (candidate) => candidate.security_id === id,
   );
@@ -194,8 +213,7 @@ export function HoldingPage() {
   const extra = asRecord(holding);
   const costKnown = textValue(extra.cost_basis ?? extra.cost_value);
   const pnl = textValue(extra.profit_loss ?? extra.pnl);
-  const longTermDate = textValue(extra.long_term_date ?? extra.long_term_since);
-  const card = exitCardFor(planData, holding.security_id, holding.symbol);
+  const review = reviewFor(planData, holding.security_id);
   return (
     <div className="grid gap-4">
       <header>
@@ -222,25 +240,10 @@ export function HoldingPage() {
           </p>
         </div>
         <div>
-          <p className="text-sm text-muted-foreground">Long-term date</p>
-          <p className="mt-1 text-sm">
-            {longTermDate ||
-              textValue(
-                asRecord(asRecord(card).tax_estimate).long_term_date,
-                "Not available",
-              )}
-          </p>
-        </div>
-        <div>
           <p className="text-sm text-muted-foreground">Price as of</p>
           <p className="mt-1 text-sm">
             {holding.price_as_of
-              ? new Intl.DateTimeFormat("en-GB", {
-                  day: "numeric",
-                  month: "short",
-                  year: "numeric",
-                  timeZone: "UTC",
-                }).format(new Date(`${holding.price_as_of}T00:00:00Z`))
+              ? checkedDate(holding.price_as_of)
               : "Not available"}
           </p>
         </div>
@@ -266,10 +269,9 @@ export function HoldingPage() {
           ) : null}
         </dl>
       </details>
-      {/* Without a review there is nothing to show; a placeholder only adds noise. */}
-      {card ? <ExitCard value={card} /> : null}
+      {review ? <OurView value={review} /> : null}
     </div>
   );
 }
 
-export { exitCardFor };
+export { reviewFor };

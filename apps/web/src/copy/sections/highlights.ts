@@ -2,6 +2,7 @@ const section = {
   "dismiss": "Hide",
   "why": "Why?",
   "see_all": "See all notes ({count})",
+  "holding_reviews_link": "See them on Money",
   "missing_yield_named_body": "Today's {name} rate isn't known yet. Check it before you add money.",
   "instrument_names": {
     "arbitrage_fund": "arbitrage fund",
@@ -216,9 +217,21 @@ const section = {
         "ideas",
         "money"
       ]
+    },
+    "holding_reviews": {
+      "title": "1 share to look at",
+      "title_plural": "{count} shares to look at",
+      "body": "Some checks suggest you should look at these shares.",
+      "learn_more_key": "holding_reviews",
+      "severity": "info",
+      "needs_action_now": true,
+      "screens": [
+        "home"
+      ]
     }
   },
   "learn_more": {
+    "holding_reviews": "Open Money to see the latest checks and reasons.",
     "high_interest_debt_gap": "The suggested next step uses the debt details in your plan.",
     "loan_debt_load_attention": "Monthly payments use 30–50% of the income you entered.",
     "loan_debt_load_high": "Monthly payments use more than half of the income you entered.",

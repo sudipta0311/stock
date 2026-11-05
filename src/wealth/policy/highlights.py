@@ -197,6 +197,22 @@ def _candidate_rows(plan: Mapping[str, Any]) -> list[_Candidate]:
                 instrument_code=_instrument_code(raw_option.get("instrument")),
             )
 
+    reviews = plan.get("holding_reviews", ())
+    actions = plan.get("actions", ())
+    if isinstance(reviews, Sequence) and not isinstance(reviews, str):
+        needs_look = {
+            str(item.get("security_id"))
+            for item in reviews
+            if isinstance(item, Mapping) and item.get("verdict") in {"sell", "review"}
+        }
+        has_sell_step = isinstance(actions, Sequence) and any(
+            isinstance(item, Mapping)
+            and item.get("kind") in {"SELL_EXIT", "SELL_TRIM", "REVIEW_EXIT"}
+            for item in actions
+        )
+        if needs_look and not has_sell_step:
+            add("holding_reviews", amount=Decimal(len(needs_look)))
+
     return list(rows.values())
 
 
@@ -251,14 +267,24 @@ def highlights(plan: Any, context: HighlightContext) -> list[Highlight]:
         relevant = context.screen in screens
         title = str(definition.get("title", "Review a plan detail"))
         body = str(definition.get("body", "One detail may change what to do next."))
-        amount_text = format_inr(candidate.amount, style="compact") if candidate.amount else ""
         rate_text = (
             f"{format(candidate.rate_pct.normalize(), 'f')}%"
             if candidate.rate_pct is not None
             else ""
         )
-        title = title.format(amount=amount_text, rate=rate_text)
-        body = body.format(amount=amount_text, rate=rate_text)
+        if candidate.key == "holding_reviews":
+            count = int(candidate.amount or Decimal(0))
+            title_template = (
+                definition.get("title")
+                if count == 1
+                else definition.get("title_plural", definition.get("title"))
+            )
+            title = str(title_template).format(count=count)
+            body = str(body).format(count=count)
+        else:
+            amount_text = format_inr(candidate.amount, style="compact") if candidate.amount else ""
+            title = title.format(amount=amount_text, rate=rate_text)
+            body = body.format(amount=amount_text, rate=rate_text)
         severity = definition.get("severity", "info")
         if severity not in {"info", "attention"}:
             severity = "info"

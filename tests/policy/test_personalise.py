@@ -17,6 +17,8 @@ import wealth.policy.personalise as personalise_module
 from wealth.policy.actions import Action, ActionList, SatelliteIdea
 from wealth.policy.denmark import ask_rule_for_year
 from wealth.policy.exits import HoldingFacts, build_exit_card
+from wealth.policy.holding_review import StockCheckFacts
+from wealth.policy.household import MemberProfile
 from wealth.policy.personalise import (
     HoldingInput,
     HoldingLotInput,
@@ -37,7 +39,7 @@ from wealth.policy.residency import load_residency_rules
 from wealth.policy.tax import Lot, TaxContext
 from wealth.schemas.assets import parse_asset
 from wealth.schemas.common import ValuationMethod
-from wealth.schemas.profile import FinancialContext, Goal, InvestingPrefs
+from wealth.schemas.profile import FinancialContext, Goal, InvestingPrefs, MemberTax, Residency
 from wealth.valuation import Valuation
 
 _AS_OF = date(2026, 10, 28)
@@ -223,6 +225,16 @@ def synthetic_user_data() -> UserData:
 
 
 def synthetic_market() -> MarketContext:
+    stock_check = StockCheckFacts(
+        security_id="synthetic-india-equity",
+        week=_WEEK,
+        as_of=_AS_OF,
+        market="IN",
+        quant_decile=6,
+        pe_percentile=Decimal("50"),
+        pe_vs_sector=Decimal("1.0"),
+        price=Decimal("450"),
+    )
     return MarketContext(
         fx_rates={"USD/INR": Decimal("83.50")},
         debt_yields={
@@ -238,6 +250,8 @@ def synthetic_market() -> MarketContext:
         gold_price_per_gram=Decimal("7500"),
         yield_table_as_of=date(2026, 10, 28),
         yield_table_verified=False,
+        stock_checks={stock_check.security_id: stock_check},
+        stock_check_week=_WEEK,
     )
 
 
@@ -273,6 +287,15 @@ def test_weekly_spending_is_part_of_the_plan_digest() -> None:
     )
 
     assert _plan_json(user_data)["inputs_digest"] != _plan_json(with_spending)["inputs_digest"]
+
+
+def test_stock_check_week_is_part_of_the_plan_digest() -> None:
+    market = synthetic_market()
+    following_week = replace(market, stock_check_week="2026-W45")
+
+    assert _digest_inputs(synthetic_user_data(), market, None, _WEEK, _AS_OF) != _digest_inputs(
+        synthetic_user_data(), following_week, None, _WEEK, _AS_OF
+    )
 
 
 def test_new_ask_year_rule_changes_the_plan_digest(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -352,6 +375,148 @@ def test_no_research_pack_cannot_create_satellite_stock_buy_actions() -> None:
     assert all(action["kind"] != "BUY_STOCK_TRANCHE" for action in plan["actions"])
 
 
+def test_india_add_more_plan_accepts_a_six_decimal_check_price() -> None:
+    user_data = synthetic_user_data()
+    original_holding = user_data.holdings[0]
+    smaller_holding = replace(
+        original_holding,
+        quantity=Decimal("1"),
+        lots=(replace(original_holding.lots[0], quantity=Decimal("1")),),
+    )
+    user_data = replace(user_data, holdings=(smaller_holding, *user_data.holdings[1:]))
+    check = StockCheckFacts(
+        security_id="synthetic-india-equity",
+        week=_WEEK,
+        as_of=_AS_OF,
+        market="IN",
+        quant_decile=9,
+        pe_percentile=Decimal("50"),
+        price=Decimal("1543.256789"),
+    )
+    market = replace(synthetic_market(), stock_checks={"synthetic-india-equity": check})
+
+    plan = personalise(user_data, market, None, _WEEK, _AS_OF)
+
+    assert (
+        next(
+            review
+            for review in plan.holding_reviews
+            if review["security_id"] == "synthetic-india-equity"
+        )["verdict"]
+        == "add_more"
+    )
+
+
+def test_denmark_add_more_rounds_held_us_share_before_new_idea() -> None:
+    base = synthetic_user_data()
+    investing = base.investing.model_copy(
+        update={
+            "new_money_this_week": Decimal("2000000"),
+            "monthly_sip_capacity": Decimal("0"),
+            "existing_sips": [],
+            "has_lrs_broker": True,
+            "us_stock_picks_opt_in": True,
+            "us_stock_picks_pct": Decimal("25"),
+        }
+    )
+    held = HoldingInput(
+        security_id="synthetic-held-us-share",
+        symbol="HOLDX",
+        market="US",
+        currency="USD",
+        security_type="equity",
+        sleeve="equity_global",
+        category="equity:global",
+        quantity=Decimal("0.01"),
+        price=Decimal("123.45"),
+        lots=(
+            HoldingLotInput(
+                lot_id="synthetic-held-us-lot",
+                quantity=Decimal("0.01"),
+                cost_per_unit=Decimal("120"),
+                acquired_on=date(2024, 1, 1),
+                currency="USD",
+            ),
+        ),
+        price_as_of=_AS_OF,
+        sector="industrials",
+        member_id="self",
+        name="Synthetic Held Company",
+        isin="US0000000101",
+        exchange="NASDAQ",
+    )
+    user_data = replace(
+        base,
+        holdings=(base.holdings[1], held),
+        financial_context=base.financial_context.model_copy(
+            update={"monthly_expenses": Decimal("10000"), "dependants": 0}
+        ),
+        investing=investing,
+        members=(
+            MemberProfile(
+                id="self",
+                name="Synthetic Member",
+                relationship="self",
+                is_self=True,
+                residency=Residency(status="NRI", country="DK"),
+                tax=MemberTax(),
+                investing=investing,
+            ),
+        ),
+    )
+    check = StockCheckFacts(
+        security_id=held.security_id,
+        week=_WEEK,
+        as_of=_AS_OF,
+        market="US",
+        quant_decile=9,
+        pe_percentile=Decimal("50"),
+        price=Decimal("123.456789"),
+    )
+    market = replace(
+        synthetic_market(),
+        fx_rates={"USD/INR": Decimal("83.50"), "DKK/INR": Decimal("12.5")},
+        stock_checks={
+            **synthetic_market().stock_checks,
+            held.security_id: check,
+        },
+    )
+    new_idea = SatelliteIdea(
+        security_id="synthetic-new-us-share",
+        symbol="NEWX",
+        market="US",
+        sector="technology",
+        price=Decimal("100"),
+        quant_decile=10,
+        dossier_status="APPROVED",
+        valuation_percentile=Decimal("35"),
+        confidence="HIGH",
+        name="Synthetic New Company",
+        isin="US0000000102",
+        exchange="NASDAQ",
+        currency="USD",
+    )
+
+    plan = personalise(
+        user_data,
+        market,
+        ResearchPack(week=_WEEK, ideas=(new_idea,)),
+        _WEEK,
+        _AS_OF,
+    )
+
+    assert (
+        next(
+            review for review in plan.holding_reviews if review["security_id"] == held.security_id
+        )["verdict"]
+        == "add_more"
+    )
+    tickers = [line["instrument"]["ticker"] for line in plan.abroad_buy_list]
+    assert held.symbol in tickers
+    assert new_idea.symbol in tickers
+    assert tickers.index(held.symbol) < tickers.index(new_idea.symbol)
+
+
 def test_personaliser_merges_triggered_exit_cards_with_buys() -> None:
     plan = _plan_json()
     actions = plan["actions"]
@@ -368,6 +533,64 @@ def test_personaliser_merges_triggered_exit_cards_with_buys() -> None:
     assert sell["lots_to_sell"]
     assert sell["tax_estimate"]["gross_proceeds"] == sell["amount"]
     assert isinstance(plan["carry_forward"], str)
+
+
+def test_home_has_one_sell_step_and_keeps_both_holding_reviews() -> None:
+    base = synthetic_user_data()
+    holdings = tuple(
+        HoldingInput(
+            security_id=security_id,
+            symbol=symbol,
+            market="IN",
+            currency="INR",
+            security_type="equity",
+            sleeve="equity_india",
+            category="equity:india",
+            quantity=Decimal(quantity),
+            price=Decimal("1000"),
+            lots=(
+                HoldingLotInput(
+                    lot_id=f"{security_id}-lot",
+                    quantity=Decimal(quantity),
+                    cost_per_unit=Decimal("500"),
+                    acquired_on=date(2024, 1, 1),
+                ),
+            ),
+            price_as_of=_AS_OF,
+            sector="industrials",
+        )
+        for security_id, symbol, quantity in (
+            ("synthetic-sale-small", "SELLS", "10"),
+            ("synthetic-sale-large", "SELLL", "20"),
+        )
+    )
+    user_data = replace(base, holdings=holdings)
+    market = replace(
+        synthetic_market(),
+        stock_checks={
+            holding.security_id: StockCheckFacts(
+                security_id=holding.security_id,
+                week=_WEEK,
+                as_of=_AS_OF,
+                market="IN",
+                quant_decile=4,
+                pe_percentile=Decimal("50"),
+                price=Decimal("1000"),
+                revenue_yoy_pct=(Decimal("-5"), Decimal("-3")),
+            )
+            for holding in holdings
+        },
+    )
+
+    plan = _plan_json(user_data=user_data, market=market)
+
+    sells = [action for action in plan["actions"] if action["kind"].startswith("SELL_")]
+    assert len(sells) == 1
+    assert sells[0]["symbol"] == "SELLL"
+    assert {review["security_id"] for review in plan["holding_reviews"]} == {
+        holding.security_id for holding in holdings
+    }
+    assert all(review["verdict"] == "sell" for review in plan["holding_reviews"])
 
 
 def test_foreign_tax_lots_use_acquisition_fx_and_skip_missing_basis() -> None:
@@ -490,10 +713,10 @@ def test_critical_and_high_exit_actions_precede_foundation_and_buy_actions() -> 
 
     assert [action.kind for action in merged] == [
         "SELL_EXIT",
-        "SELL_EXIT",
         "BUILD_EMERGENCY_FUND",
+        "REBALANCE_SIPS",
     ]
-    assert [action.symbol for action in merged[:2]] == ["SYNTH-CRITICAL", "SYNTH-HIGH"]
+    assert [action.symbol for action in merged[:1]] == ["SYNTH-CRITICAL"]
     assert merged[0].quantity == Decimal("10")
     assert merged[0].lots_to_sell
     assert merged[0].tax_estimate is not None
@@ -664,7 +887,8 @@ def test_review_and_swap_exit_cards_use_sell_side_action_kinds() -> None:
 
     merged, _carry_forward = _merge_weekly_actions(buy_list, [swap, review])
 
-    assert [action.kind for action in merged] == ["REVIEW_EXIT", "SWAP", "BUY_LUMPSUM"]
+    assert [action.kind for action in merged] == ["SWAP", "BUY_LUMPSUM"]
+    assert merged[0].security_id == "synthetic-swap"
 
 
 def test_plan_health_weights_allocation_gaps_and_open_foundation_items() -> None:

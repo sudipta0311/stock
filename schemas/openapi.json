@@ -8515,6 +8515,14 @@
             "title": "Highlights By Screen",
             "type": "object"
           },
+          "holding_reviews": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Holding Reviews",
+            "type": "array"
+          },
           "inputs_digest": {
             "pattern": "^[0-9a-f]{64}$",
             "title": "Inputs Digest",

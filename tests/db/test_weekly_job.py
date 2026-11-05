@@ -24,6 +24,7 @@ from wealth.db.models import (
     PriceEod,
     Profile,
     Security,
+    StockCheck,
     User,
     WeeklyPlan,
 )
@@ -163,6 +164,18 @@ def test_weekly_cli_runs_for_seeded_golden_user(migrated_database: MigratedDatab
                     rate=Decimal("83.50"),
                     source="synthetic_fixture",
                     source_url="https://example.test/fx",
+                ),
+                StockCheck(
+                    security_id=india_security_id,
+                    week=week,
+                    as_of=as_of,
+                    quant_decile=5,
+                    factor_coverage="medium",
+                    pe_percentile=Decimal("50"),
+                    pe_vs_sector=Decimal("1"),
+                    revenue_yoy_pct=[],
+                    price=Decimal("450"),
+                    sources={"fixture": "synthetic"},
                 ),
             ]
         )

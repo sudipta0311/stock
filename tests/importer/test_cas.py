@@ -7,8 +7,10 @@ from contextlib import contextmanager
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from shutil import rmtree
+from tempfile import gettempdir
 from time import perf_counter
+from uuid import uuid4
 
 import pytest
 from tests.fixtures.cas.make_pdf import write_encrypted_pdf
@@ -34,9 +36,13 @@ def _lines(name: str) -> list[str]:
 
 @contextmanager
 def _temporary_pdf(lines: list[str], filename: str) -> Iterator[Path]:
-    with TemporaryDirectory(dir=_FIXTURES) as temporary_directory:
-        path = Path(temporary_directory) / filename
+    temporary_directory = Path(gettempdir()) / f"wealth-cas-{uuid4().hex}"
+    temporary_directory.mkdir()
+    try:
+        path = temporary_directory / filename
         yield write_encrypted_pdf(lines, _PASSWORD, path)
+    finally:
+        rmtree(temporary_directory)
 
 
 @pytest.mark.parametrize(

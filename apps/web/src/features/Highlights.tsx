@@ -1,4 +1,5 @@
 import { CircleHelp, Info, TriangleAlert } from "lucide-react";
+import { Link } from "react-router";
 import { Button } from "../ui";
 import * as englishCopy from "../copy/sections/index";
 
@@ -50,6 +51,14 @@ function HighlightItem({
         <div className="min-w-0">
           <h3 className="text-sm font-semibold">{item.title}</h3>
           <p className="mt-1 text-sm text-muted-foreground">{body}</p>
+          {item.key === "holding_reviews" ? (
+            <Link
+              to="/money"
+              className="mt-2 inline-flex min-h-12 items-center text-sm font-medium text-brand underline underline-offset-4"
+            >
+              {englishCopy.highlights.holding_reviews_link}
+            </Link>
+          ) : null}
         </div>
       </div>
       <div className="flex min-h-12 items-center justify-between gap-3 border-t border-line/70 pt-1">

@@ -24,6 +24,16 @@ import { HouseholdControls } from "../../src/household/HouseholdControls";
 
 const memberId = "member-test-1";
 
+function localDateFromToday(days: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, "0"),
+    String(date.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
 function networth(overrides: Partial<NetworthResponse> = {}): NetworthResponse {
   return {
     net_worth: "1000000.00",
@@ -436,7 +446,8 @@ describe("Money Map", () => {
           ],
           maturity_calendar: [
             {
-              date: "2026-11-05",
+              // Due today: it must still show after midnight has passed.
+              date: localDateFromToday(0),
               asset_id: "asset-test-1",
               kind: "loan_payment",
               amount: "34500.00",

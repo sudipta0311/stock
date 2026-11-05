@@ -43,6 +43,7 @@ import { markValueMoment } from "../pwa/install";
 import * as englishCopy from "../copy/sections/index";
 import { apiPathAvailable } from "../api/feature-support";
 import { useHousehold } from "../household/HouseholdContext";
+import { asArray, asRecord, textValue } from "../features/data";
 import { quantityLabel } from "./quantity";
 import { assetTitles } from "./titles";
 import { getPlan, removeRecordedBuy, updateRecordedBuy } from "../planning/api";
@@ -120,6 +121,30 @@ function sleeveRows(
 }
 
 const HOLDINGS_SHOWN = 8;
+
+function verdictForHolding(
+  reviews: unknown,
+  securityId: string | null,
+): string {
+  if (!securityId) return "";
+  const priority: Record<string, number> = {
+    sell: 0,
+    review: 1,
+    sell_some: 2,
+    add_more: 3,
+    keep: 4,
+    not_checked: 5,
+  };
+  const matching = asArray(reviews)
+    .map(asRecord)
+    .filter((review) => textValue(review.security_id) === securityId)
+    .sort(
+      (left, right) =>
+        (priority[textValue(left.verdict)] ?? 6) -
+        (priority[textValue(right.verdict)] ?? 6),
+    );
+  return textValue(matching[0]?.verdict);
+}
 
 /** "2026-10-28" → "28 Oct 2026". */
 function plainDate(isoDate: string): string {
@@ -394,6 +419,7 @@ function HoldingsGroup({
   fxQuote,
   showSecondary,
   onSelectRecordedBuy,
+  holdingReviews,
 }: {
   title: string;
   holdings: NetworthResponse["holdings"];
@@ -403,6 +429,7 @@ function HoldingsGroup({
   fxQuote: DkkInrRate | undefined;
   showSecondary: boolean;
   onSelectRecordedBuy(holding: NetworthResponse["holdings"][number]): void;
+  holdingReviews?: unknown;
 }) {
   if (!holdings.length) return null;
   return (
@@ -420,6 +447,18 @@ function HoldingsGroup({
         {byValue(holdings)
           .slice(0, showAll ? undefined : HOLDINGS_SHOWN)
           .map((holding, index) => {
+            const verdict =
+              holding.security_type === "equity"
+                ? verdictForHolding(holdingReviews, holding.security_id)
+                : "";
+            const verdictLabels = englishCopy.holding_review
+              .money_labels as Record<string, string>;
+            const verdictTone =
+              verdict === "add_more"
+                ? "success"
+                : verdict === "review" || verdict === "sell_some"
+                  ? "warning"
+                  : "neutral";
             const row = (
               <>
                 <span className="flex w-0 min-w-0 flex-1 items-center gap-3">
@@ -430,13 +469,20 @@ function HoldingsGroup({
                     <strong className="block truncate text-sm">
                       <span data-security>{holding.name}</span>
                     </strong>
-                    <span className="block truncate text-xs text-muted-foreground">
+                    <span className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                       {holding.added_by_you
                         ? englishCopy.money_ui.added_by_you
                         : quantityLabel(
                             holding.quantity,
                             holding.security_type,
                           )}
+                      {verdict &&
+                      verdict !== "keep" &&
+                      verdict !== "not_checked" ? (
+                        <Badge tone={verdictTone}>
+                          {verdictLabels[verdict] ?? verdictLabels.review}
+                        </Badge>
+                      ) : null}
                     </span>
                   </span>
                 </span>
@@ -786,12 +832,14 @@ function HouseholdInsights({
     const pctValue = (toMinorUnits(value) * 100n) / total;
     return Number(pctValue > 100n ? 100n : pctValue);
   };
-  const now = new Date();
-  const oneYear = new Date(now);
+  // Count from midnight so something due today still shows today.
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const oneYear = new Date(today);
   oneYear.setFullYear(oneYear.getFullYear() + 1);
   const upcoming = networth.maturity_calendar.filter((event) => {
     const date = new Date(`${event.date}T00:00:00`);
-    return date >= now && date <= oneYear;
+    return date >= today && date <= oneYear;
   });
   const debtPercent = networth.debt_insight.debt_pct_including_locked;
   return (
@@ -1290,6 +1338,7 @@ export function MoneyMapPage() {
         <HoldingsGroup
           title={englishCopy.money_ui.shares}
           holdings={shareHoldings}
+          holdingReviews={plan?.holding_reviews}
           showAll={showAllHoldings}
           onToggleShowAll={() => setShowAllHoldings((shown) => !shown)}
           primaryCurrency={primaryCurrency}

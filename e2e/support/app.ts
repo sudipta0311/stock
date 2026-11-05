@@ -302,6 +302,10 @@ export function seedBrokerImportAccount(email: string): Promise<void> {
   return runDatabaseCommand(["seed-broker-import-account", email]);
 }
 
+export function seedHoldingReviews(email: string): Promise<void> {
+  return runDatabaseCommand(["seed-holding-reviews", email]);
+}
+
 export function seedDenmarkBuyAction(email: string): Promise<void> {
   return runDatabaseCommand(["seed-denmark-buy", email]);
 }

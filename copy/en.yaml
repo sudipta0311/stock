@@ -17,8 +17,9 @@ reasons:
   thesis_break: "The original investment case no longer holds."
   geopolitical_break: "Geopolitical exposure may have changed the investment case."
   risk_stop: "A risk limit has been reached."
-  valuation_stretch: "The valuation is above the level set in the Exit Card."
+  valuation_stretch: "The price looks high against the checks for this share."
   drift: "The holding is above its planned share of your equity."
+  add_more_held_share: "This share already meets the rules for adding more."
   opportunity_cost_swap: "A stronger alternative met the rules for a swap."
   swap_not_worth_tax: "The possible swap did not justify its estimated tax cost."
   swap_threshold_not_met: "The alternative has not cleared the swap rules."
@@ -75,6 +76,7 @@ highlights:
   dismiss: "Hide"
   why: "Why?"
   see_all: "See all notes ({count})"
+  holding_reviews_link: "See them on Money"
   missing_yield_named_body: "Today's {name} rate isn't known yet. Check it before you add money."
   instrument_names:
     arbitrage_fund: "arbitrage fund"
@@ -207,7 +209,16 @@ highlights:
       learn_more_key: plan_details
       severity: info
       screens: [home, plan, ideas, money]
+    holding_reviews:
+      title: "1 share to look at"
+      title_plural: "{count} shares to look at"
+      body: "Some checks suggest you should look at these shares."
+      learn_more_key: holding_reviews
+      severity: info
+      needs_action_now: true
+      screens: [home]
   learn_more:
+    holding_reviews: "Open Money to see the latest checks and reasons."
     high_interest_debt_gap: "The suggested next step uses the debt details in your plan."
     loan_debt_load_attention: "Monthly payments use 30–50% of the income you entered."
     loan_debt_load_high: "Monthly payments use more than half of the income you entered."
@@ -899,6 +910,53 @@ plan_ui:
     gold:
       button: "Add gold"
       name: "Your gold"
+holding_review:
+  title: "Our view"
+  verdicts:
+    keep: "Keep"
+    add_more: "Add more"
+    sell_some: "Sell some"
+    review: "Think about selling"
+    sell: "Sell"
+  not_checked: "We don't follow this company's results yet, so we only check its price and size."
+  checked_on: "Checked on {date}"
+  how_we_check: "How we check"
+  checks:
+    company_results: "Company results"
+    company_events: "Company events"
+    price_history: "Price history"
+    position_size: "Position size"
+    price_and_cost: "Price and cost"
+    goal_timing: "Goal timing"
+    company_strength: "Company strength"
+  statuses:
+    ok: "Looks okay"
+    watch: "Worth a look"
+    triggered: "Needs attention"
+    unknown: "Not enough information"
+  reasons:
+    add_more: "Recent checks support adding more shares."
+    governance_break: "A recent company event needs a closer look."
+    thesis_break: "Recent company results raise a concern."
+    revenue_down_quarter: "Company revenue fell last quarter compared with a year earlier."
+    revenue_down_quarters: "Company revenue fell for {count} quarters in a row."
+    geopolitical_break: "A recent event may affect this company."
+    risk_stop: "The price is down {drawdown_pct}% from your recorded cost."
+    valuation_stretch: "The price looks high against its own history."
+    drift: "This share is {share_of_equity_pct}% of your stock investments."
+    goal_approach: "A goal is coming up soon."
+    default: "One of the latest checks needs a closer look."
+  tax:
+    ask_same_tax: "In your share savings account, tax is the same whether you sell or keep."
+    tax_not_estimated: "Tax is not estimated for this account."
+    tax_wait: "Waiting until {date} could lower the tax by {amount}."
+    tax_wait_plain: "Waiting until {date} could lower the tax."
+    estimated_tax: "Estimated tax if sold: {amount}"
+  money_labels:
+    add_more: "Add more"
+    sell_some: "Sell some"
+    review: "Think about selling"
+    sell: "Sell"
 money_ui:
   add_update: "Add or update"
   upload_statement: "Upload a statement"

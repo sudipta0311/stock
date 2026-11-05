@@ -1,4 +1,4 @@
-// OpenAPI SHA256: 3022b92db0317ce3365c92bd70eda5e62dcc410ab9ddbcf47439f6dc153b1868
+// OpenAPI SHA256: 61d1330e2f858627a0477cc9cfd25901ce3893d179caa8c87dadba34ff93d0cc
 export interface paths {
     "/healthz": {
         parameters: {
@@ -4218,6 +4218,10 @@ export interface components {
             highlights_by_screen?: {
                 [key: string]: components["schemas"]["Highlight"][];
             };
+            /** Holding Reviews */
+            holding_reviews?: {
+                [key: string]: unknown;
+            }[];
             /** Inputs Digest */
             inputs_digest: string;
             /** Insurance Reviews */

@@ -13,6 +13,7 @@ export { default as offline } from "./offline";
 export { default as push } from "./push";
 export { default as home } from "./home";
 export { default as plan_ui } from "./plan_ui";
+export { default as holding_review } from "./holding_review";
 export { default as money_ui } from "./money_ui";
 export { default as inbox } from "./inbox";
 export { default as email } from "./email";

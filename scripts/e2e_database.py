@@ -9,7 +9,7 @@ import shutil
 import sys
 import tempfile
 import time
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -33,6 +33,7 @@ from wealth.db.models import (
     PriceEod,
     ResearchPackRecord,
     Security,
+    StockCheck,
     User,
 )
 from wealth.db.session import normalize_database_url
@@ -249,6 +250,169 @@ def _seed_broker_import_account(email: str) -> int:
                     tax_wrapper=None,
                 )
             )
+        return 0
+    finally:
+        engine.dispose()
+
+
+def _seed_holding_reviews(email: str) -> int:
+    engine, _schema_name = _owner_engine()
+    today = date.today()
+    iso = today.isocalendar()
+    week = f"{iso.year}-W{iso.week:02}"
+    try:
+        with Session(engine) as session, session.begin():
+            session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+                {"lock_key": "c49-e2e-holding-reviews"},
+            )
+            user = session.scalar(select(User).where(User.email == email.casefold()))
+            if user is None:
+                raise RuntimeError("The synthetic holding-review user was not found")
+            member = session.scalar(
+                select(HouseholdMember).where(
+                    HouseholdMember.user_id == user.id,
+                    HouseholdMember.is_self.is_(True),
+                )
+            )
+            if member is None:
+                raise RuntimeError("The synthetic holding-review household has no owner member")
+            member.investing = {
+                **dict(member.investing or {}),
+                "new_money_this_week": "2500000",
+                "satellite_pct": "20",
+            }
+
+            scenarios = (
+                ("C49-E2E-ADD", "Synthetic share to add", "100", "9", "60", "1.0", [], "99"),
+                (
+                    "C49-E2E-SELL",
+                    "Synthetic share to sell",
+                    "50",
+                    "4",
+                    "45",
+                    "1.0",
+                    ["-5", "-4"],
+                    "60",
+                ),
+            )
+            for symbol, name, raw_price, decile, percentile, sector_ratio, revenue, dma in scenarios:
+                price = Decimal(raw_price)
+                security = session.scalar(
+                    select(Security).where(Security.market == "IN", Security.symbol == symbol)
+                )
+                if security is None:
+                    security = Security(
+                        market="IN",
+                        symbol=symbol,
+                        name=name,
+                        security_type="equity",
+                        currency="INR",
+                        sleeve="equity_india",
+                        category="equity:india",
+                        sector="Synthetic sector",
+                        industry="Synthetic industry",
+                    )
+                    session.add(security)
+                    session.flush()
+                price_row = session.scalar(
+                    select(PriceEod).where(
+                        PriceEod.security_id == security.id,
+                        PriceEod.as_of == today,
+                        PriceEod.source == "synthetic_c49",
+                    )
+                )
+                if price_row is None:
+                    session.add(
+                        PriceEod(
+                            security_id=security.id,
+                            as_of=today,
+                            close=price,
+                            source="synthetic_c49",
+                            source_url="https://example.test/synthetic-c49-price",
+                        )
+                    )
+                else:
+                    price_row.close = price
+                check = session.get(StockCheck, (security.id, week))
+                values = {
+                    "as_of": today,
+                    "quant_decile": int(decile),
+                    "factor_coverage": "medium",
+                    "pe_percentile": Decimal(percentile),
+                    "pe_vs_sector": Decimal(sector_ratio),
+                    "revenue_yoy_pct": revenue,
+                    "price": price,
+                    "dma200": Decimal(dma),
+                    "below_dma200": price < Decimal(dma),
+                    "sources": {"fixture": "synthetic"},
+                }
+                if check is None:
+                    session.add(StockCheck(security_id=security.id, week=week, **values))
+                else:
+                    for key, value in values.items():
+                        setattr(check, key, value)
+                quantity = Decimal("10") if symbol.endswith("ADD") else Decimal("2")
+                existing_lot = session.scalar(
+                    select(HoldingLot).where(
+                        HoldingLot.user_id == user.id,
+                        HoldingLot.security_id == security.id,
+                    )
+                )
+                if existing_lot is None:
+                    session.add(
+                        HoldingLot(
+                            user_id=user.id,
+                            member_id=member.id,
+                            security_id=security.id,
+                            quantity=quantity,
+                            cost_per_unit=None if symbol.endswith("ADD") else Decimal("40"),
+                            acquired_on=None
+                            if symbol.endswith("ADD")
+                            else today - timedelta(days=400),
+                            source="manual",
+                            currency="INR",
+                        )
+                    )
+
+            anchor_symbol = "C49-E2E-ANCHOR"
+            anchor = session.scalar(
+                select(Security).where(
+                    Security.market == "IN",
+                    Security.symbol == anchor_symbol,
+                )
+            )
+            if anchor is None:
+                anchor = Security(
+                    market="IN",
+                    symbol=anchor_symbol,
+                    name="Synthetic broad fund",
+                    security_type="mf",
+                    currency="INR",
+                    sleeve="equity_global",
+                    category="equity:global",
+                )
+                session.add(anchor)
+                session.flush()
+            anchor_lot = session.scalar(
+                select(HoldingLot).where(
+                    HoldingLot.user_id == user.id,
+                    HoldingLot.security_id == anchor.id,
+                )
+            )
+            if anchor_lot is None:
+                session.add(
+                    HoldingLot(
+                        user_id=user.id,
+                        member_id=member.id,
+                        security_id=anchor.id,
+                        quantity=Decimal("1"),
+                        statement_value=Decimal("1000000"),
+                        statement_date=today,
+                        source="manual",
+                        currency="INR",
+                    )
+                )
         return 0
     finally:
         engine.dispose()
@@ -539,6 +703,8 @@ def main(argv: list[str] | None = None) -> int:
         return _seed_action(args[1])
     if len(args) == 2 and args[0] == "seed-broker-import-account":
         return _seed_broker_import_account(args[1])
+    if len(args) == 2 and args[0] == "seed-holding-reviews":
+        return _seed_holding_reviews(args[1])
     if len(args) == 2 and args[0] == "seed-denmark-buy":
         return _seed_denmark_buy_action(args[1])
     if len(args) == 2 and args[0] == "seed-research-pack":
@@ -546,7 +712,7 @@ def main(argv: list[str] | None = None) -> int:
     if len(args) == 2 and args[0] == "verify-deleted":
         return _verify_deleted(args[1])
     print(
-        "Use setup, seed-action <synthetic-email>, seed-research-pack, "
+        "Use setup, seed-action <synthetic-email>, seed-holding-reviews, seed-research-pack, "
         "or verify-deleted <synthetic-email>."
     )
     return 2
