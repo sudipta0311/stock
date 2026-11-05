@@ -1,16 +1,10 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import {
-  CheckCircle2,
-  FileUp,
-  LoaderCircle,
-  ShieldCheck,
-  X,
-} from "lucide-react";
+import { CheckCircle2, FileUp, LoaderCircle, X } from "lucide-react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { ApiError } from "../api/client";
 import { formatInr } from "../lib/money";
-import { Badge, Button, Card, Sheet, Term } from "../ui";
+import { Badge, Button, Card, Sheet } from "../ui";
 import { useHousehold } from "../household/HouseholdContext";
 import { listAccounts } from "../money/api";
 import type { AccountResponse } from "../money/api";
@@ -58,11 +52,11 @@ const sourceCopy: Record<
   { title: string; help: string; steps?: string[]; note?: string }
 > = {
   nsdl_cas: {
-    title: "Depository statement (PDF)",
-    help: "Your monthly statement usually arrives by email. You can also request it from your depository.",
+    title: englishCopy.imports.combined_statement_title,
+    help: englishCopy.imports.combined_statement_help,
   },
   cams_kfin_cas: {
-    title: englishCopy.fund_check.cams_title,
+    title: englishCopy.imports.mutual_fund_statement_title,
     help: englishCopy.fund_check.cams_request,
     steps: englishCopy.fund_check.cams_steps,
     note: englishCopy.fund_check.cams_summary_note,
@@ -72,6 +66,12 @@ const sourceCopy: Record<
     help: englishCopy.imports.broker_help,
   },
 };
+
+const formatOrder: ImportFormat[] = [
+  "nsdl_cas",
+  "broker_statement",
+  "cams_kfin_cas",
+];
 
 const FILE_PICKER_ACCEPT = importFeatureSupport.broker
   ? ".pdf,.csv,.tsv,.txt,.xls,.xlsx,application/pdf,text/csv,text/tab-separated-values"
@@ -325,20 +325,8 @@ export function ImportPage() {
     <div data-copy-screen="import" className="grid gap-4">
       <Card className="grid gap-4">
         <div>
-          <h2 className="text-xl font-semibold">
-            Upload your{" "}
-            <Term
-              explanation="A combined statement of your investment accounts."
-              prompt="What's this?"
-              learnMoreHref="/help#term-cas"
-            >
-              CAS
-            </Term>{" "}
-            statement
-          </h2>
           <p className="mt-1 text-base text-muted-foreground">
-            Choose a statement. We will show every holding before you save
-            anything.
+            {englishCopy.imports.upload_intro}
           </p>
         </div>
 
@@ -346,13 +334,13 @@ export function ImportPage() {
           <legend className="mb-2 text-sm font-medium">
             What are you uploading?
           </legend>
-          {(Object.keys(sourceCopy) as ImportFormat[]).map((option) => {
+          {formatOrder.map((option) => {
             const disabled =
               option === "broker_statement" && !importFeatureSupport.broker;
             return (
               <div
                 key={option}
-                className={`rounded-2xl border p-3 ${format === option ? "border-brand bg-brand/5" : "border-line bg-background"} ${disabled ? "opacity-70" : ""}`}
+                className={`rounded-xl border px-3 py-1 ${format === option ? "border-brand bg-brand/5" : "border-line bg-background"} ${disabled ? "opacity-70" : ""}`}
               >
                 <button
                   type="button"
@@ -363,7 +351,7 @@ export function ImportPage() {
                     setFile(null);
                     setProblem(null);
                   }}
-                  className="flex min-h-10 w-full items-center justify-between gap-3 text-left text-sm font-semibold focus-visible:outline-2 focus-visible:outline-brand disabled:cursor-not-allowed"
+                  className="flex min-h-11 w-full items-center justify-between gap-3 text-left text-sm font-semibold focus-visible:outline-2 focus-visible:outline-brand disabled:cursor-not-allowed"
                 >
                   <span>{sourceCopy[option].title}</span>
                   {disabled ? <Badge>Coming soon</Badge> : null}
@@ -374,8 +362,8 @@ export function ImportPage() {
                     />
                   ) : null}
                 </button>
-                <details className="mt-1 text-sm text-muted-foreground">
-                  <summary className="min-h-10 cursor-pointer py-2 text-foreground">
+                <details className="text-sm text-muted-foreground">
+                  <summary className="min-h-11 cursor-pointer py-2 text-foreground focus-visible:outline-2 focus-visible:outline-brand">
                     How to get it
                   </summary>
                   <p className="pb-2 text-base">{sourceCopy[option].help}</p>
@@ -589,24 +577,13 @@ export function ImportPage() {
             disabled={!file || busy}
             loading={inFlight}
           >
-            <FileUp aria-hidden="true" className="size-4" /> Upload statement
+            <FileUp aria-hidden="true" className="size-4" />
+            {englishCopy.imports.upload_button}
           </Button>
           <p className="text-center text-small text-muted-foreground">
-            Your file and password are used once to read your holdings and are
-            not stored.
+            {englishCopy.imports.privacy_upload}
           </p>
         </form>
-      </Card>
-
-      <Card className="flex gap-3 text-sm text-muted-foreground">
-        <ShieldCheck
-          aria-hidden="true"
-          className="mt-0.5 size-5 shrink-0 text-brand"
-        />
-        <p>
-          The file is cleared after it is read. Your password is sent only with
-          this upload.
-        </p>
       </Card>
     </div>
   );

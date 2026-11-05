@@ -131,7 +131,12 @@ describe("Home this week", () => {
     expect(
       screen.queryByText(englishCopy.home.nothing_to_buy),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Money/ })).toBeVisible();
+    expect(
+      screen.getByRole("link", { name: "No holdings added yet" }),
+    ).toBeVisible();
+    const addHoldings = screen.getByRole("link", { name: "Add holdings" });
+    expect(addHoldings).toHaveAttribute("href", "/money?add=1");
+    expect(addHoldings).toHaveAttribute("data-primary", "true");
     const root = document.querySelector<HTMLElement>(
       '[data-copy-screen="home"]',
     );
@@ -140,6 +145,28 @@ describe("Home this week", () => {
     expect(
       root?.querySelectorAll(":scope > section").length,
     ).toBeLessThanOrEqual(4);
+  });
+
+  it("keeps Home steps and the normal Money link when assets fail", async () => {
+    server.use(...baseHomeHandlers([action()]));
+    server.use(
+      http.get(/\/v1\/assets$/, () =>
+        HttpResponse.json({ detail: "Synthetic failure" }, { status: 500 }),
+      ),
+    );
+    renderHome();
+
+    expect(
+      await screen.findByRole("button", { name: "Show steps" }),
+    ).toBeVisible();
+    expect(
+      await screen.findByText(englishCopy.home.amount_question),
+    ).toBeVisible();
+    expect(screen.queryByText("Your week couldn't load")).toBeNull();
+    expect(screen.getByRole("link", { name: /Money:/ })).toHaveAttribute(
+      "href",
+      "/money",
+    );
   });
 
   it("hides Coming up when there are no due items", async () => {
@@ -161,8 +188,8 @@ describe("Home this week", () => {
     );
     renderHome();
     expect(
-      await screen.findByText(englishCopy.home.nothing_to_buy),
-    ).toBeVisible();
+      await screen.findByRole("link", { name: "Add holdings" }),
+    ).toHaveAttribute("href", "/money?add=1");
     expect(
       screen.queryByLabelText(englishCopy.home.monthly_amount),
     ).not.toBeInTheDocument();
@@ -244,7 +271,7 @@ describe("Home this week", () => {
     );
 
     expect(
-      await screen.findByRole("link", { name: /DKK 80,000/ }),
+      await screen.findByRole("link", { name: "No holdings added yet" }),
     ).toBeInTheDocument();
     await user.click(
       await screen.findByRole("button", {
@@ -349,7 +376,9 @@ describe("Home this week", () => {
   it("keeps cached content visible with an updating chip during a slow refresh", async () => {
     server.use(...baseHomeHandlers([]));
     const { queryClient } = renderHome();
-    expect(await screen.findByRole("link", { name: /Money/ })).toBeVisible();
+    expect(
+      await screen.findByRole("link", { name: "No holdings added yet" }),
+    ).toBeVisible();
     let requestStarted = false;
     let releaseRequest: (() => void) | undefined;
     server.use(
@@ -376,7 +405,7 @@ describe("Home this week", () => {
     await refresh;
   });
 
-  it("shows one action and removes it after Mark done succeeds", async () => {
+  it("shows one action and removes it after Done succeeds", async () => {
     const user = userEvent.setup();
     const onlyAction = action({
       kind: "BUILD_EMERGENCY_FUND",
@@ -397,19 +426,17 @@ describe("Home this week", () => {
       }),
     );
     renderHome();
-    expect(
-      await screen.findByRole("button", { name: "Mark done" }),
-    ).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Done" })).toBeVisible();
     expect(screen.getByText("₹10,000")).toBeInTheDocument();
     const root = document.querySelector<HTMLElement>(
       '[data-copy-screen="home"]',
     );
     expect(root?.querySelectorAll('[data-primary="true"]')).toHaveLength(1);
-    await user.click(screen.getByRole("button", { name: "Mark done" }));
+    await user.click(screen.getByRole("button", { name: "Done" }));
     await waitFor(() => expect(patched).toBe(true));
     await waitFor(() =>
       expect(
-        screen.queryByRole("button", { name: "Mark done" }),
+        screen.queryByRole("button", { name: "Done" }),
       ).not.toBeInTheDocument(),
     );
     expect(
@@ -475,7 +502,9 @@ describe("Home this week", () => {
     );
     renderHome();
 
-    await user.click(await screen.findByRole("button", { name: "Mark done" }));
+    await user.click(
+      await screen.findByRole("button", { name: "I bought it" }),
+    );
     const sheet = screen.getByRole("dialog", {
       name: englishCopy.home.buy_sheet_title,
     });
@@ -555,7 +584,9 @@ describe("Home this week", () => {
     server.use(...baseHomeHandlers([stockAction]));
     renderHome();
 
-    await user.click(await screen.findByRole("button", { name: "Mark done" }));
+    await user.click(
+      await screen.findByRole("button", { name: "I bought it" }),
+    );
     const sheet = screen.getByRole("dialog", {
       name: englishCopy.home.buy_sheet_title,
     });
@@ -599,7 +630,7 @@ describe("Home this week", () => {
     await screen.findByText(englishCopy.home.amount_question);
     await waitFor(() => expect(actionReads).toBeGreaterThan(1));
     expect(
-      screen.queryByRole("button", { name: "Mark done" }),
+      screen.queryByRole("button", { name: "I bought it" }),
     ).not.toBeInTheDocument();
   });
 
@@ -634,7 +665,9 @@ describe("Home this week", () => {
     );
     renderHome();
 
-    await user.click(await screen.findByRole("button", { name: "Mark done" }));
+    await user.click(
+      await screen.findByRole("button", { name: "I bought it" }),
+    );
     const sheet = screen.getByRole("dialog", {
       name: englishCopy.home.buy_sheet_title,
     });
@@ -650,7 +683,7 @@ describe("Home this week", () => {
     ).not.toBeInTheDocument();
     await waitFor(() => expect(actionReads).toBeGreaterThan(1));
     expect(
-      screen.queryByRole("button", { name: "Mark done" }),
+      screen.queryByRole("button", { name: "I bought it" }),
     ).not.toBeInTheDocument();
   });
 
@@ -685,14 +718,14 @@ describe("Home this week", () => {
     );
     renderHome();
 
-    await user.click(await screen.findByRole("button", { name: "Mark done" }));
+    await user.click(await screen.findByRole("button", { name: "Done" }));
 
     expect(await screen.findByRole("status")).toHaveTextContent(
       englishCopy.home.step_updated,
     );
     await waitFor(() => expect(actionReads).toBeGreaterThan(1));
     expect(
-      screen.queryByRole("button", { name: "Mark done" }),
+      screen.queryByRole("button", { name: "Done" }),
     ).not.toBeInTheDocument();
     expect(screen.getAllByText(englishCopy.home.step_updated)).toHaveLength(1);
   });
@@ -722,7 +755,9 @@ describe("Home this week", () => {
     server.use(...baseHomeHandlers([buyAction]));
     renderHome();
 
-    await user.click(await screen.findByRole("button", { name: "Mark done" }));
+    await user.click(
+      await screen.findByRole("button", { name: "I bought it" }),
+    );
     const sheet = screen.getByRole("dialog", {
       name: englishCopy.home.buy_sheet_title,
     });
@@ -765,6 +800,12 @@ describe("Home this week", () => {
     renderHome();
     const articles = await screen.findAllByRole("article");
     expect(articles).toHaveLength(3);
+    expect(
+      within(articles[0]!).getByRole("button", { name: "Show steps" }),
+    ).toHaveAttribute("data-primary", "true");
+    expect(
+      within(articles[1]!).getByRole("button", { name: "Show steps" }),
+    ).not.toHaveAttribute("data-primary");
     expect(articles[2]).toHaveTextContent(
       englishCopy.labels.action_kinds.BUILD_EMERGENCY_FUND,
     );
@@ -797,7 +838,9 @@ describe("Home this week", () => {
     });
     expect(within(article).getByText("₹12,300")).toBeInTheDocument();
 
-    await user.click(within(article).getByRole("button", { name: "How to" }));
+    await user.click(
+      within(article).getByRole("button", { name: "Show steps" }),
+    );
     expect(
       screen.getByRole("dialog", { name: "How to take this step" }),
     ).toHaveTextContent("monthly investment for ₹12,345.67");
@@ -810,13 +853,38 @@ describe("Home this week", () => {
       payload: {
         kind: "SELL_TRIM",
         security_id: "security-test",
-        quantity: "2.500",
+        quantity: "2.000000",
         tax_estimate: { estimated_tax: "250.00" },
         reason_code: "valuation_stretch",
         params: { security_id: "security-test" },
       },
     });
     server.use(
+      http.get(/\/v1\/networth$/, () =>
+        HttpResponse.json(
+          networth({
+            holdings: [
+              {
+                added_by_you: false,
+                currency: "INR",
+                fx_as_of: null,
+                fx_missing: false,
+                name: "Synthetic holding name",
+                price_as_of: null,
+                price_source: "test",
+                quantity: "1",
+                security_id: "security-test",
+                security_type: "equity",
+                status: "priced",
+                units_entered: false,
+                symbol: "SYNTH",
+                value: "500.00",
+                value_usd: null,
+              },
+            ],
+          }),
+        ),
+      ),
       http.get(/\/v1\/plan$/, () =>
         HttpResponse.json(
           weeklyPlan({
@@ -844,17 +912,16 @@ describe("Home this week", () => {
       ...baseHomeHandlers([sell]),
     );
     renderHome();
+    expect(await screen.findByText("Sell some")).toBeInTheDocument();
     expect(
-      await screen.findByText(englishCopy.labels.action_kinds.SELL_TRIM),
+      await screen.findByText("Synthetic holding name"),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "How to" }));
+    await user.click(screen.getByRole("button", { name: "Show steps" }));
     const dialog = screen.getByRole("dialog", {
       name: "How to take this step",
     });
     expect(
-      within(dialog).getByText(
-        englishCopy.home.sell_quantity.replace("{quantity}", "2.500"),
-      ),
+      within(dialog).getByText("Quantity: 2 shares", { exact: true }),
     ).toBeInTheDocument();
     expect(within(dialog).getByText("₹250")).toBeInTheDocument();
     await user.click(within(dialog).getByText("Why?"));
@@ -867,6 +934,188 @@ describe("Home this week", () => {
     expect(
       screen.queryByText(englishCopy.labels.trigger_keys.governance_break),
     ).not.toBeInTheDocument();
+  });
+
+  it("shows a singular share quantity in the sell steps sheet", async () => {
+    const user = userEvent.setup();
+    const sell = action({
+      kind: "SELL_TRIM",
+      payload: {
+        kind: "SELL_TRIM",
+        security_id: "security-one-share",
+        quantity: "1.000000",
+        reason_code: "valuation_stretch",
+      },
+    });
+    server.use(...baseHomeHandlers([sell]));
+    renderHome();
+
+    await user.click(await screen.findByRole("button", { name: "Show steps" }));
+    const dialog = screen.getByRole("dialog", {
+      name: "How to take this step",
+    });
+    expect(
+      within(dialog).getByText("Quantity: 1 share", { exact: true }),
+    ).toBeInTheDocument();
+  });
+
+  it.each([
+    ["SELL_EXIT", "Sell", "I sold it", englishCopy.home.sell_steps],
+    ["SELL_TRIM", "Sell some", "I sold it", englishCopy.home.sell_steps],
+    [
+      "REVIEW_EXIT",
+      "Think about selling",
+      "Done",
+      englishCopy.home.review_steps,
+    ],
+  ])(
+    "shows matching instructions and buttons for %s",
+    async (kind, title, completion, instructions) => {
+      const user = userEvent.setup();
+      const exit = action({
+        kind,
+        payload: {
+          kind,
+          security_id: "security-sell-step",
+          quantity: "2",
+          amount: "100.00",
+          reason_code: "valuation_stretch",
+        },
+      });
+      server.use(...baseHomeHandlers([exit]));
+      renderHome();
+
+      const article = await screen.findByRole("article");
+      expect(within(article).getByText(title)).toBeVisible();
+      expect(within(article).queryByText("security-sell-step")).toBeNull();
+      const showSteps = within(article).getByRole("button", {
+        name: "Show steps",
+      });
+      const completionButton = within(article).getByRole("button", {
+        name: completion,
+      });
+      expect(showSteps).toHaveAttribute("data-primary", "true");
+      expect(completionButton).not.toHaveAttribute("data-primary");
+
+      await user.click(showSteps);
+      const dialog = screen.getByRole("dialog", {
+        name: "How to take this step",
+      });
+      expect(dialog).toHaveTextContent(instructions);
+      expect(dialog).not.toHaveTextContent(
+        /invest as planned|monthly investment|buy order/i,
+      );
+    },
+  );
+
+  it("uses a symbol only when no matching holding name is loaded", async () => {
+    const symbolAction = action({
+      kind: "SELL_EXIT",
+      payload: {
+        kind: "SELL_EXIT",
+        symbol: "SYNTH",
+        security_id: "security-unlisted",
+      },
+    });
+    server.use(...baseHomeHandlers([symbolAction]));
+    renderHome();
+    const article = await screen.findByRole("article");
+    expect(within(article).getByText("SYNTH")).toBeVisible();
+    expect(within(article).queryByText("security-unlisted")).toBeNull();
+  });
+
+  it("keeps the monthly editor open below steps when no amount is set", async () => {
+    server.use(...baseHomeHandlers([action()]));
+    renderHome();
+    await screen.findByRole("article");
+    expect(screen.getByText(englishCopy.home.amount_question)).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: englishCopy.home.amount_save }),
+    ).not.toHaveAttribute("data-primary");
+  });
+
+  it("marks a sell step done with the existing action update", async () => {
+    const user = userEvent.setup();
+    const sell = action({
+      kind: "SELL_EXIT",
+      payload: { kind: "SELL_EXIT", security_id: "security-sell-step" },
+    });
+    let updatedStatus = "";
+    server.use(
+      ...baseHomeHandlers([sell]),
+      http.patch(/\/v1\/actions\/action-test-1$/, async ({ request }) => {
+        updatedStatus = ((await request.json()) as { status: string }).status;
+        return HttpResponse.json({ ...sell, status: "done" });
+      }),
+    );
+    renderHome();
+    await user.click(await screen.findByRole("button", { name: "I sold it" }));
+    await waitFor(() => expect(updatedStatus).toBe("done"));
+  });
+
+  it("does not borrow trigger rows from a different holding", async () => {
+    const user = userEvent.setup();
+    const exit = action({
+      kind: "SELL_EXIT",
+      payload: {
+        kind: "SELL_EXIT",
+        security_id: "security-current-step",
+        reason_code: "valuation_stretch",
+      },
+    });
+    server.use(
+      http.get(/\/v1\/plan$/, () =>
+        HttpResponse.json(
+          weeklyPlan({
+            exit_cards: [
+              {
+                security_id: "security-other-holding",
+                action: "EXIT",
+                triggers: {
+                  valuation_stretch: {
+                    status: "triggered",
+                    value: "Synthetic value",
+                    threshold: "Synthetic threshold",
+                  },
+                },
+              },
+            ],
+          }),
+        ),
+      ),
+      ...baseHomeHandlers([exit]),
+    );
+    renderHome();
+    await user.click(await screen.findByRole("button", { name: "Show steps" }));
+    const dialog = screen.getByRole("dialog", {
+      name: "How to take this step",
+    });
+    await user.click(within(dialog).getByText("Why?"));
+    expect(
+      screen.queryByText(englishCopy.home.triggered_rows),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Synthetic value")).not.toBeInTheDocument();
+  });
+
+  it("closes the monthly editor below actions when an amount is set", async () => {
+    const user = userEvent.setup();
+    server.use(
+      ...baseHomeHandlers([action()], {
+        monthly_sip_capacity: "25000.00",
+        new_money_this_week: "0.00",
+      }),
+    );
+    renderHome();
+    await screen.findByRole("article");
+    const monthlySummary = screen.getByText("Monthly investment");
+    expect(monthlySummary.closest("details")).not.toHaveAttribute("open");
+    expect(
+      screen.queryByLabelText(englishCopy.home.monthly_amount),
+    ).not.toBeInTheDocument();
+    await user.click(monthlySummary);
+    expect(
+      await screen.findByLabelText(englishCopy.home.monthly_amount),
+    ).toBeVisible();
   });
 
   it.each([
@@ -883,17 +1132,23 @@ describe("Home this week", () => {
     const user = userEvent.setup();
     server.use(...baseHomeHandlers([withRoute(route)]));
     renderHome();
-    await user.click(await screen.findByRole("button", { name: "How to" }));
+    await user.click(await screen.findByRole("button", { name: "Show steps" }));
     expect(
       screen.getByRole("dialog", { name: "How to take this step" }),
     ).toHaveTextContent(expected);
   });
 
-  it("explains the reason and action parameters inside How", async () => {
+  it("shows the reason without raw action parameters inside Why", async () => {
     const user = userEvent.setup();
-    server.use(...baseHomeHandlers([action()]));
+    const parameterAction = action({
+      payload: {
+        ...action().payload,
+        params: { market: "IN", account_type: "ASK", unknown_key: "synthetic" },
+      },
+    });
+    server.use(...baseHomeHandlers([parameterAction]));
     renderHome();
-    await user.click(await screen.findByRole("button", { name: "How to" }));
+    await user.click(await screen.findByRole("button", { name: "Show steps" }));
     const dialog = screen.getByRole("dialog", {
       name: "How to take this step",
     });
@@ -901,7 +1156,11 @@ describe("Home this week", () => {
     expect(dialog).toHaveTextContent(
       "This brings this part of your plan closer to its target.",
     );
-    expect(within(dialog).getByText("market")).toBeInTheDocument();
+    expect(within(dialog).queryByText("Market")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("Account type")).not.toBeInTheDocument();
+    expect(within(dialog).queryByText("IN", { exact: true })).toBeNull();
+    expect(within(dialog).queryByText("ASK", { exact: true })).toBeNull();
+    expect(dialog).not.toHaveTextContent("unknown_key");
   });
 
   it("has no axe violations", async () => {

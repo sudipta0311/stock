@@ -1,12 +1,17 @@
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router";
+import { useState } from "react";
 import { describe, expect, it } from "vitest";
 import { axe } from "vitest-axe";
 import englishCopy from "../../src/copy/en.json";
 import { AddAssetPage } from "../../src/money/AssetFormPage";
 import { MoneyMapPage } from "../../src/money/MoneyMapPage";
+import {
+  clearOfflineAssetWrites,
+  listQueuedAssetWrites,
+} from "../../src/money/offline-queue";
 import type {
   AssetResponse,
   LoanListResponse,
@@ -124,22 +129,46 @@ function baseHandlers(
   ];
 }
 
+function MapHarness() {
+  const [renderCount, setRenderCount] = useState(0);
+  const location = useLocation();
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Rerender map"
+        className="sr-only"
+        onClick={() => setRenderCount((current) => current + 1)}
+      >
+        {renderCount}
+      </button>
+      <output data-testid="map-search">{location.search}</output>
+      <HouseholdControls />
+      <Routes>
+        <Route path="/money" element={<MoneyMapPage />} />
+        <Route path="/money/add/:type" element={<AddAssetPage />} />
+      </Routes>
+    </>
+  );
+}
+
 function renderMap(initial = "/money") {
   return renderWithQueries(
     <HouseholdProvider>
       <MemoryRouter initialEntries={[initial]}>
-        <HouseholdControls />
-        <Routes>
-          <Route path="/money" element={<MoneyMapPage />} />
-          <Route path="/money/add/:type" element={<AddAssetPage />} />
-        </Routes>
+        <MapHarness />
       </MemoryRouter>
     </HouseholdProvider>,
   );
 }
 
 async function openWhatElse(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(await screen.findByText("What else do you have?"));
+  await user.click(await screen.findByText("Add manually"));
+}
+
+async function openQuickAdd(user: ReturnType<typeof userEvent.setup>) {
+  await openWhatElse(user);
+  await user.click(screen.getByText("Quick add", { selector: "summary" }));
 }
 
 describe("Money Map", () => {
@@ -256,7 +285,7 @@ describe("Money Map", () => {
       ),
     );
     renderMap();
-    await openWhatElse(user);
+    await openQuickAdd(user);
 
     await user.type(
       await screen.findByLabelText("Quick add"),
@@ -325,7 +354,7 @@ describe("Money Map", () => {
         http.post(/\/v1\/assets\/quick-add$/, () => HttpResponse.json(result)),
       );
       renderMap();
-      await openWhatElse(user);
+      await openQuickAdd(user);
       const input = await screen.findByLabelText("Quick add");
       await user.type(input, phrase);
       await user.click(screen.getByRole("button", { name: "Add details" }));
@@ -369,9 +398,7 @@ describe("Money Map", () => {
     ).toBeInTheDocument();
     await user.type(screen.getByLabelText(/Current EPF balance/), "8L");
     await screen.findByText("Saved");
-    await user.click(
-      screen.getByRole("button", { name: "Continue to next item" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Save and continue" }));
     expect(
       await screen.findByRole("heading", { name: "Fixed deposit" }),
     ).toBeInTheDocument();
@@ -383,9 +410,7 @@ describe("Money Map", () => {
       target: { value: "2027-03" },
     });
     await waitFor(() => expect(created).toHaveLength(2), { timeout: 2500 });
-    await user.click(
-      screen.getByRole("button", { name: "Continue to next item" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Save and continue" }));
     expect(
       await screen.findByRole("heading", { name: "NPS" }),
     ).toBeInTheDocument();
@@ -395,18 +420,44 @@ describe("Money Map", () => {
     ).toEqual(["nps", "fd", "epf"]);
   });
 
-  it("shows only the percentage when no checklist categories were selected", async () => {
+  it("keeps checklist progress plain without a completion percentage", async () => {
     const user = userEvent.setup();
     server.use(...baseHandlers());
     renderMap();
     await openWhatElse(user);
+    await screen.findByText("Add manually");
     expect(
-      await screen.findByText("Money Map 80% complete"),
-    ).toBeInTheDocument();
+      screen.queryByText(/Money Map \d+% complete/),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText(/add EPF to finish/)).not.toBeInTheDocument();
     expect(
       screen.queryByText(/everything is up to date/),
     ).not.toBeInTheDocument();
+  });
+
+  it("hides the step count and returns after one selected item", async () => {
+    const user = userEvent.setup();
+    localStorage.removeItem(CHECKLIST_STORAGE_KEY);
+    server.use(...baseHandlers());
+    renderMap();
+    await openWhatElse(user);
+    await user.click(
+      await screen.findByRole("button", { name: "Fixed deposits" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Continue (1 selected)" }),
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Fixed deposit" }),
+    ).toBeVisible();
+    expect(screen.queryByText("1 of 1")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Save and return" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Save and continue" }),
+    ).toBeNull();
   });
 
   it("names the next incomplete category the household selected", async () => {
@@ -425,9 +476,7 @@ describe("Money Map", () => {
     renderMap();
     await openWhatElse(user);
 
-    expect(
-      await screen.findByText("Money Map 0% complete"),
-    ).toBeInTheDocument();
+    await screen.findByText("Add manually");
     expect(screen.getByText("Add Savings to finish")).toBeInTheDocument();
     expect(screen.queryByText(/add EPF to finish/)).not.toBeInTheDocument();
   });
@@ -473,7 +522,7 @@ describe("Money Map", () => {
     expect(screen.queryByText(/46\.88/)).not.toBeInTheDocument();
   });
 
-  it("shows one Add or update action and keeps rare details closed", async () => {
+  it("shows one Add holdings action and keeps rare details closed", async () => {
     server.use(
       ...baseHandlers(
         networth({
@@ -485,7 +534,7 @@ describe("Money Map", () => {
     const { container } = renderMap();
     await screen.findByText("Net worth");
     const root = await screen
-      .findByRole("button", { name: "Add or update" })
+      .findByRole("button", { name: "Add holdings" })
       .then(() => container.querySelector('[data-copy-screen="money"]'));
     expect(root?.firstElementChild).toHaveTextContent("Net worth");
     expect(root?.querySelectorAll('[data-primary="true"]')).toHaveLength(1);
@@ -495,27 +544,109 @@ describe("Money Map", () => {
       ).not.toBeInTheDocument();
     }
     for (const section of [
-      "Imports",
+      "Previous uploads",
       "Check an investment",
-      "What else do you have?",
-      "Monthly amounts",
+      "Add manually",
     ]) {
       const details = Array.from(root?.querySelectorAll("details") ?? []).find(
         (item) => item.querySelector("summary")?.textContent === section,
       );
       expect(details).not.toHaveAttribute("open");
     }
-    await user.click(screen.getByRole("button", { name: "Add or update" }));
-    const sheet = screen.getByRole("dialog", { name: "Add or update" });
+    expect(screen.queryByText("Monthly amounts")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Add holdings" }));
+    const sheet = screen.getByRole("dialog", { name: "Add holdings" });
     expect(
-      within(sheet).getByRole("link", { name: "Upload a statement" }),
+      within(sheet).getByRole("link", { name: "Upload a file" }),
     ).toBeVisible();
     expect(
       within(sheet).getByRole("link", { name: "Get statements from Gmail" }),
     ).toBeVisible();
     expect(
-      within(sheet).getByRole("button", { name: "Add one by hand" }),
+      within(sheet).getByRole("button", { name: "Add manually" }),
     ).toBeVisible();
+  });
+
+  it("opens the same add sheet from the empty action and the add query", async () => {
+    const user = userEvent.setup();
+    server.use(...baseHandlers(networth(), { ...loanSummary(), loans: [] }));
+    server.use(
+      http.get(/\/v1\/plan$/, () =>
+        HttpResponse.json({
+          members: [
+            {
+              id: memberId,
+              name: "Synthetic family member",
+              net_worth: "0.00",
+            },
+          ],
+        }),
+      ),
+    );
+    renderMap();
+    await screen.findByRole("heading", { name: "Add your first holding" });
+    expect(screen.queryByText("Monthly amounts")).not.toBeInTheDocument();
+    expect(screen.queryByText("By family member")).not.toBeInTheDocument();
+    await user.click(
+      await screen.findByRole("button", { name: "Add holdings" }),
+    );
+    expect(screen.getByRole("dialog", { name: "Add holdings" })).toBeVisible();
+  });
+
+  it("opens the add sheet for ?add=1", async () => {
+    const user = userEvent.setup();
+    server.use(...baseHandlers(networth(), { ...loanSummary(), loans: [] }));
+    renderMap("/money?add=1");
+    const dialog = await screen.findByRole("dialog", { name: "Add holdings" });
+    expect(dialog).toBeVisible();
+    expect(
+      within(dialog).getByRole("heading", { name: "Add holdings" }),
+    ).toHaveClass("outline-none");
+    expect(
+      within(dialog).getByRole("link", { name: "Upload a file" }),
+    ).toHaveAttribute("href", "/import");
+    await waitFor(() =>
+      expect(screen.getByTestId("map-search")).toHaveTextContent(""),
+    );
+    await user.click(within(dialog).getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Add holdings" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Rerender map" }));
+    expect(screen.queryByRole("dialog", { name: "Add holdings" })).toBeNull();
+  });
+
+  it("opens and focuses the manual chooser for either manual entry", async () => {
+    const user = userEvent.setup();
+    server.use(...baseHandlers(networth(), { ...loanSummary(), loans: [] }));
+    const { unmount } = renderMap();
+    await screen.findByRole("heading", { name: "Add your first holding" });
+    await user.click(
+      await screen.findByRole("button", { name: "Add holdings" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Add manually" }));
+    const chooser = screen.getByText("Add manually").closest("details");
+    await waitFor(() => expect(chooser).toHaveAttribute("open"));
+    await waitFor(() =>
+      expect(chooser?.querySelector("summary")).toHaveFocus(),
+    );
+    expect(
+      screen.getByText("Quick add", { selector: "summary" }).closest("details"),
+    ).not.toHaveAttribute("open");
+    expect(
+      screen.queryByText(/Money Map \d+% complete/),
+    ).not.toBeInTheDocument();
+
+    unmount();
+    renderMap("/money?add=manual");
+    await waitFor(() => {
+      expect(
+        screen.getByText("Add manually").closest("details"),
+      ).toHaveAttribute("open");
+    });
+    await waitFor(() =>
+      expect(
+        screen.getByText("Add manually", { selector: "summary" }),
+      ).toHaveFocus(),
+    );
   });
 
   it("groups holdings by their stored security type", async () => {
@@ -837,7 +968,29 @@ describe("Money Map", () => {
           },
         }),
       ),
-      ...baseHandlers(),
+      ...baseHandlers(
+        networth({
+          holdings: [
+            {
+              added_by_you: false,
+              currency: "INR",
+              fx_as_of: null,
+              fx_missing: false,
+              name: "Recorded synthetic fund",
+              price_as_of: null,
+              price_source: "test",
+              quantity: "10",
+              security_id: "security-recorded-fund",
+              security_type: "mf",
+              status: "priced",
+              units_entered: false,
+              symbol: "SYNTH",
+              value: "10000.00",
+              value_usd: null,
+            },
+          ],
+        }),
+      ),
     );
     renderMap();
 
@@ -961,10 +1114,55 @@ describe("Money Map", () => {
     });
   });
 
+  it("queues an offline deposit and leaves with the waiting status", async () => {
+    const user = userEvent.setup();
+    const wasOnline = navigator.onLine;
+    Object.defineProperty(navigator, "onLine", {
+      configurable: true,
+      value: false,
+    });
+    await clearOfflineAssetWrites();
+    server.use(...baseHandlers(networth(), { ...loanSummary(), loans: [] }));
+    try {
+      renderMap("/money/add/fd");
+      await user.type(
+        screen.getByLabelText(/Bank or post office/),
+        "Demo Bank",
+      );
+      await user.type(screen.getByLabelText(/Amount deposited/), "5L");
+      await user.type(screen.getByLabelText(/Interest rate \(%\)/), "7.1");
+      fireEvent.change(screen.getByLabelText(/Matures \(month and year\)/), {
+        target: { value: "2027-03" },
+      });
+      await user.click(screen.getByRole("button", { name: "Save and return" }));
+
+      await screen.findByText("Net worth");
+      expect(
+        await screen.findByText(
+          "Saved on this device · waiting for connection",
+        ),
+      ).toBeVisible();
+      const queued = await listQueuedAssetWrites();
+      expect(queued).toHaveLength(1);
+      expect(queued[0]?.body).toMatchObject({
+        bank: "Demo Bank",
+        principal: "500000.00",
+        rate_pct: "7.1",
+        maturity: "2027-03",
+      });
+    } finally {
+      await clearOfflineAssetWrites();
+      Object.defineProperty(navigator, "onLine", {
+        configurable: true,
+        value: wasOnline,
+      });
+    }
+  });
+
   it("has no axe violations on the Money tab", async () => {
     server.use(...baseHandlers());
     const { container } = renderMap();
-    await screen.findByText("What else do you have?");
+    await screen.findByText("Add manually");
     const results = await axe(container);
     expect(results.violations).toEqual([]);
   });

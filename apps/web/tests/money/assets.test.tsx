@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { axe } from "vitest-axe";
 import { AddAssetPage, AssetDetailPage } from "../../src/money/AssetFormPage";
 import type { AssetDetailResponse, AssetResponse } from "../../src/money/api";
+import { HouseholdProvider } from "../../src/household/HouseholdContext";
 import { server } from "../msw";
 import { renderWithQueries } from "../features/render";
 
@@ -55,8 +56,23 @@ async function fillFdForm(user: ReturnType<typeof userEvent.setup>) {
   });
 }
 
-function memberList() {
-  return http.get(/\/v1\/members$/, () => HttpResponse.json([]));
+function memberList(members: Record<string, unknown>[] = []) {
+  return http.get(/\/v1\/members$/, () => HttpResponse.json(members));
+}
+
+function renderAssetDetail() {
+  return renderWithQueries(
+    <HouseholdProvider>
+      <MemoryRouter initialEntries={["/money/asset/asset-test-1"]}>
+        <main>
+          <Routes>
+            <Route path="/money/add/:type" element={<AddAssetPage />} />
+            <Route path="/money/asset/:id" element={<AssetDetailPage />} />
+          </Routes>
+        </main>
+      </MemoryRouter>
+    </HouseholdProvider>,
+  );
 }
 
 describe("asset forms and autosave", () => {
@@ -85,7 +101,7 @@ describe("asset forms and autosave", () => {
     expect(screen.getByText("Saved")).toBeInTheDocument();
   });
 
-  it("patches an edited principal only after the debounce", async () => {
+  it("shows the asset summary and saves the latest edit before returning", async () => {
     const user = userEvent.setup();
     const original = assetResponse({
       asset_type: "fd",
@@ -98,10 +114,28 @@ describe("asset forms and autosave", () => {
     });
     let patchBody: Record<string, unknown> | null = null;
     server.use(
-      memberList(),
-      http.post(/\/v1\/assets$/, () =>
-        HttpResponse.json(original, { status: 201 }),
+      http.get(/\/v1\/me$/, () =>
+        HttpResponse.json({
+          id: "user-test",
+          display_name: "Synthetic user",
+          me_member_id: "member-test-1",
+          household_owner_id: "household-test",
+          role: "owner",
+          members: [],
+        }),
       ),
+      http.get(/\/v1\/households$/, () => HttpResponse.json([])),
+      memberList([
+        {
+          id: "member-test-1",
+          display_name: "Synthetic user",
+          is_self: true,
+          relationship: "self",
+          residency: { country: "IN", status: "RI" },
+          tax: {},
+          investing: {},
+        },
+      ]),
       http.get(/\/v1\/assets\/asset-test-1$/, () =>
         HttpResponse.json({
           ...original,
@@ -116,16 +150,26 @@ describe("asset forms and autosave", () => {
         });
       }),
     );
-    fdForm();
-    await fillFdForm(user);
-    await screen.findByText("Saved");
-    await user.click(screen.getByRole("button", { name: "View asset" }));
+    renderAssetDetail();
+    expect(
+      await screen.findByRole("button", { name: "Edit details" }),
+    ).toBeVisible();
+    expect(screen.getByText("Demo Bank")).toBeVisible();
+    expect(screen.getByText("You")).toBeVisible();
+    expect(screen.getByText("Matures")).toBeVisible();
+    expect(screen.getByText("March 2027")).toBeVisible();
+    expect(document.body.textContent).not.toMatch(/\{[^}]*\}/);
+    expect(document.body).not.toHaveTextContent("remind you");
+    await user.click(screen.getByRole("button", { name: "Edit details" }));
     const principal = await screen.findByLabelText(/Amount deposited/);
     await user.clear(principal);
     await user.type(principal, "6L");
-    fireEvent.blur(principal);
+    await user.click(screen.getByRole("button", { name: "Save and return" }));
     await waitFor(() => expect(patchBody).not.toBeNull(), { timeout: 2500 });
     expect(patchBody).toMatchObject({ principal: "600000.00" });
+    expect(
+      await screen.findByRole("button", { name: "Edit details" }),
+    ).toBeVisible();
   });
 
   it("shows the certificate prompt for a rate_needed response", async () => {
@@ -176,6 +220,105 @@ describe("asset forms and autosave", () => {
       "aria-invalid",
       "true",
     );
+  });
+
+  it("keeps the form open when required input is invalid", async () => {
+    const user = userEvent.setup();
+    server.use(memberList());
+    fdForm();
+
+    await user.click(screen.getByRole("button", { name: "Save and return" }));
+
+    expect(
+      screen.getByRole("heading", { name: "Fixed deposit" }),
+    ).toBeVisible();
+    expect(screen.getByLabelText(/Bank or post office/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/Amount deposited/)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "check the highlighted",
+    );
+  });
+
+  it("keeps the typed draft when saving fails", async () => {
+    const user = userEvent.setup();
+    server.use(
+      memberList(),
+      http.post(/\/v1\/assets$/, () =>
+        HttpResponse.json(
+          { detail: "Synthetic save failure" },
+          { status: 500 },
+        ),
+      ),
+    );
+    fdForm();
+    await fillFdForm(user);
+
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(screen.getByLabelText(/Bank or post office/)).toHaveValue(
+      "Demo Bank",
+    );
+    expect(screen.getByLabelText(/Amount deposited/)).toHaveValue("500000.00");
+    expect(screen.getByLabelText(/Interest rate \(%\)/)).toHaveValue("7.10");
+    expect(screen.getByLabelText(/Matures \(month and year\)/)).toHaveValue(
+      "2027-03",
+    );
+  });
+
+  it("asks before closing an item and lets the user keep it", async () => {
+    const user = userEvent.setup();
+    const original = assetResponse({
+      asset_type: "fd",
+      bank: "Demo Bank",
+      principal: "500000.00",
+      rate_pct: "7.10",
+      maturity: "2027-03",
+    });
+    server.use(
+      http.get(/\/v1\/me$/, () =>
+        HttpResponse.json({
+          id: "user-test",
+          display_name: "Synthetic user",
+          me_member_id: "member-test-1",
+          household_owner_id: "household-test",
+          role: "owner",
+          members: [],
+        }),
+      ),
+      http.get(/\/v1\/households$/, () => HttpResponse.json([])),
+      memberList([
+        {
+          id: "member-test-1",
+          display_name: "Synthetic user",
+          is_self: true,
+          relationship: "self",
+          residency: { country: "IN", status: "RI" },
+          tax: {},
+          investing: {},
+        },
+      ]),
+      http.get(/\/v1\/assets\/asset-test-1$/, () =>
+        HttpResponse.json({
+          ...original,
+          history: [],
+        } satisfies AssetDetailResponse),
+      ),
+    );
+    renderAssetDetail();
+    await screen.findByRole("button", { name: "Edit details" });
+    await user.click(screen.getByText("Edit history"));
+    await user.click(screen.getByRole("button", { name: "Mark as closed" }));
+
+    expect(
+      screen.getByText(
+        "This removes the item from your current totals. Its history stays saved.",
+      ),
+    ).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Keep it" }));
+    expect(
+      screen.queryByText(
+        "This removes the item from your current totals. Its history stays saved.",
+      ),
+    ).not.toBeInTheDocument();
   });
 
   it("has no axe violations on the fixed deposit form", async () => {

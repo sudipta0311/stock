@@ -17,8 +17,6 @@ test("another account sees no assets and cannot open a saved item", async ({
   await startReadyAccount(page, "isolation-owner");
   await openFixedDepositForm(page);
   await completeFixedDeposit(page);
-  // In the setup flow the next step finishes setup; the saved item opens from Money.
-  await page.getByRole("button", { name: "Finish Money Map setup" }).click();
   await page
     .getByRole("link", { name: /Synthetic Bank/ })
     .first()
@@ -42,13 +40,15 @@ test("another account sees no assets and cannot open a saved item", async ({
       }),
     ).toBeVisible();
     await secondPage
-      .getByRole("button", { name: "Set up my Money Map" })
+      .getByRole("button", { name: "Get started" })
       .click();
     await secondPage.getByRole("button", { name: /^Just me/ }).click();
     await secondPage
       .getByRole("button", { name: "Continue", exact: true })
       .click();
-    await secondPage.getByRole("button", { name: "View your plan" }).click();
+    await secondPage
+      .getByRole("button", { name: "Explore the app" })
+      .click();
     await gotoApp(secondPage, "/money");
     await expect(
       secondPage.getByText("0 items", { exact: true }),

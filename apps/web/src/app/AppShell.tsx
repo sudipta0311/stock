@@ -7,6 +7,7 @@ import { HouseholdControls } from "../household/HouseholdControls";
 import { AccountMenu } from "../account/AccountMenu";
 import { useHousehold } from "../household/HouseholdContext";
 import { helpArticleForPath } from "../help/context";
+import * as englishCopy from "../copy/sections/index";
 
 const InstallExperience = lazy(() =>
   import("./InstallExperience").then((module) => ({
@@ -26,7 +27,7 @@ const pageTitles: Array<[string, string]> = [
   ["/ideas", "Ideas"],
   ["/inbox", "Inbox"],
   ["/settings", "Settings"],
-  ["/import", "Import"],
+  ["/import", englishCopy.imports.upload_heading],
   ["/help", "Help"],
 ];
 

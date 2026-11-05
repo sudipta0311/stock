@@ -15,7 +15,7 @@ test("Ideas keeps long names and the world fund rows on screen", async ({
 }) => {
   const identity = makeIdentity("ideas-layout");
   await signIn(page, identity);
-  await page.getByRole("button", { name: "Set up my Money Map" }).click();
+  await page.getByRole("button", { name: "Get started" }).click();
   await page.getByRole("button", { name: /^Me and my spouse/ }).click();
   const residences = page.getByLabel("Tax residence");
   await expect(residences).toHaveCount(2);
@@ -23,10 +23,10 @@ test("Ideas keeps long names and the world fund rows on screen", async ({
   await residences.nth(1).selectOption("RI");
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Your plan is ready" }),
+    page.getByRole("heading", { name: "You're ready to start" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "View your plan" }).click();
-  await expect(page).toHaveURL(/\/plan$/);
+  await page.getByRole("button", { name: "Explore the app" }).click();
+  await expect(page).toHaveURL(/\/$/);
 
   await seedResearchPack(identity.email);
   await gotoApp(page, "/ideas");

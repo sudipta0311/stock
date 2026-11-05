@@ -110,6 +110,12 @@ export function InboxPage({
         <p className="mt-1 text-sm text-muted-foreground">
           Briefs, reminders and updates, newest first.
         </p>
+        <Link
+          to="/import"
+          className="mt-2 inline-flex min-h-11 items-center text-sm font-medium text-brand"
+        >
+          {englishCopy.money_ui.upload_statement}
+        </Link>
       </header>
       {!briefs.length && !reminders.length && !alerts.length ? (
         <EmptyState
@@ -122,7 +128,7 @@ export function InboxPage({
               data-primary="true"
               className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground"
             >
-              Review email settings
+              {englishCopy.inbox.email_settings}
             </Link>
           }
         />

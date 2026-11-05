@@ -58,5 +58,17 @@ test("held shares show weekly reviews and Home has one sell step", async ({
   await gotoApp(page, "/");
   await skipGuidedTour(page);
   await expect(page.getByTestId("action-SELL_EXIT")).toHaveCount(1);
+  const sellStep = page.getByTestId("action-SELL_EXIT");
+  await expect(
+    sellStep.getByRole("button", { name: "I sold it" }),
+  ).toBeVisible();
+  await sellStep.getByRole("button", { name: "Show steps" }).click();
+  const instructions = page.getByRole("dialog", {
+    name: "How to take this step",
+  });
+  await expect(instructions).toBeVisible();
+  await expect(instructions).not.toContainText(
+    /invest as planned|monthly investment|buy order/i,
+  );
   await expectFitsScreen(page);
 });

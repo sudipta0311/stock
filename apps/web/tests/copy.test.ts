@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { load } from "js-yaml";
 import { describe, expect, it } from "vitest";
+import * as englishCopy from "../src/copy/sections/index";
 import { bannedVisibleTerms } from "./plain-language";
 
 type HelpEntry = { term: string; meaning: string };
@@ -44,6 +45,24 @@ function generated(sourcePath: string, outputPath: string): void {
 }
 
 describe("generated copy", () => {
+  it("keeps the clear weekly-step and add-holdings labels", () => {
+    expect(englishCopy.home.sell_steps).toBe(
+      "Sell these shares in your investment account, then tap I sold it.",
+    );
+    expect(englishCopy.home.review_steps).toBe(
+      "Read the reasons, then decide whether to sell.",
+    );
+    expect(englishCopy.home.show_steps).toBe("Show steps");
+    expect(englishCopy.home.sold_it).toBe("I sold it");
+    expect(englishCopy.money_ui.add_update).toBe("Add holdings");
+    expect(englishCopy.money_ui.upload_statement).toBe("Upload a file");
+    expect(englishCopy.money_ui.add_by_hand).toBe("Add manually");
+    expect(englishCopy.imports.privacy_upload).toBe(
+      "Your file and password are used for this upload only. They are not stored.",
+    );
+    expect(englishCopy.inbox.email_settings).toBe("Email settings");
+  });
+
   it("keeps the PWA English copy in sync with the YAML source", () => {
     generated("../../../copy/en.yaml", "../src/copy/en.json");
   });

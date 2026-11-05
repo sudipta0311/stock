@@ -104,6 +104,7 @@ const section = {
   },
   "onboarding": {
     "title": "Who are we planning for?",
+    "get_started": "Get started",
     "description": "Add each adult's name and tax residence. You can add children and parents later.",
     "just_me": "Just me",
     "just_me_help": "Plan for your own money.",

@@ -154,7 +154,7 @@ export function Term({
           aria-expanded={open}
           aria-controls={explanationId}
           onClick={() => setOpen((value) => !value)}
-          className="cursor-pointer underline decoration-dotted underline-offset-2"
+          className="inline-flex min-h-11 cursor-pointer items-center px-2 underline decoration-dotted underline-offset-2 focus-visible:outline-2 focus-visible:outline-brand"
         >
           {prompt}
         </button>

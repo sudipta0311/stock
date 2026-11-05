@@ -56,9 +56,9 @@ const section = {
   },
   "note_default": "More details are not available yet.",
   "cams_title": "CAMS / KFintech statement (PDF)",
-  "cams_request": "Request a consolidated statement from MFCentral or CAMS.",
+  "cams_request": "Request a consolidated statement from MFCentral, CAMS or KFintech.",
   "cams_steps": [
-    "Open MFCentral or CAMS and request a consolidated statement.",
+    "Open MFCentral, CAMS or KFintech and request a consolidated statement.",
     "Choose Detailed and include transactions.",
     "Set a password, then enter it when you upload the file."
   ],

@@ -1,6 +1,13 @@
 const section = {
   "broker_title": "Broker file (Excel or CSV)",
   "broker_help": "Choose a holdings file or a file with buys and sells.",
+  "upload_heading": "Upload holdings",
+  "upload_intro": "Choose a file type. You'll see every holding before anything is saved.",
+  "upload_button": "Upload file",
+  "mutual_fund_statement_title": "Mutual fund statement (PDF)",
+  "combined_statement_title": "Combined investment statement (PDF)",
+  "combined_statement_help": "Request a combined statement from NSDL or CDSL.",
+  "privacy_upload": "Your file and password are used for this upload only. They are not stored.",
   "broker_source_label": "Broker file",
   "broker_security_label": "Equity",
   "broker_account_label": "Account (optional)",

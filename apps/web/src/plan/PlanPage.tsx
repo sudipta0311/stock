@@ -531,11 +531,11 @@ function AllocationCard({
         icon={<WalletCards aria-hidden="true" className="size-5" />}
         action={
           <Link
-            to="/money"
+            to="/money?add=1"
             data-primary="true"
             className="motion-safe:active:scale-[.98] inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground transition"
           >
-            {englishCopy.home.add_money}
+            {englishCopy.money_ui.add_update}
           </Link>
         }
       />
@@ -1098,21 +1098,56 @@ export function PlanPage() {
       )
     : members.find((member) => member.id === activeMemberId)?.display_name;
   // Statement imports land in holdings, not in the manual assets list.
-  const noAssets =
+  const noAssets = Boolean(
     assets.supported &&
+    networth.supported &&
+    loans.supported &&
+    assets.data &&
+    networth.data &&
+    loans.data &&
     !assets.isPending &&
     !assets.error &&
-    (assets.data?.length ?? 0) === 0 &&
+    assets.data.length === 0 &&
     !networth.isPending &&
-    (networth.data?.holdings?.length ?? 0) === 0;
+    !networth.error &&
+    networth.data.holdings.length === 0 &&
+    !loans.isPending &&
+    !loans.error &&
+    loans.data.loans.length === 0,
+  );
 
   if (!plan.supported || isMissingFeature(plan.error))
     return <ComingSoon title="Your plan is coming soon" />;
-  if (plan.isPending || (assets.supported && assets.isPending))
-    return <ScreenLoading label="Loading your plan" />;
-  if (plan.error && !isMissingFeature(plan.error))
-    return <ScreenError title="Your plan couldn’t load" />;
-  if (!planValue) return <ScreenError title="Your plan couldn’t load" />;
+  if (
+    (plan.error && !plan.data && !isMissingFeature(plan.error)) ||
+    (assets.error && !assets.data && !isMissingFeature(assets.error)) ||
+    (networth.error && !networth.data && !isMissingFeature(networth.error))
+  )
+    return (
+      <ScreenError
+        title="Your plan couldn’t load"
+        onRetry={() => {
+          void Promise.all([
+            plan.refetch(),
+            assets.refetch(),
+            networth.refetch(),
+          ]);
+        }}
+      />
+    );
+  if (
+    plan.isPending ||
+    (assets.supported && assets.isPending) ||
+    (networth.supported && networth.isPending)
+  )
+    return <ScreenLoading label={englishCopy.home.loading_plan} />;
+  if (!planValue)
+    return (
+      <ScreenError
+        title="Your plan couldn’t load"
+        onRetry={() => void plan.refetch()}
+      />
+    );
 
   return (
     <div data-copy-screen="plan" className="grid gap-4">

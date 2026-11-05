@@ -16,7 +16,7 @@ test("CAS password feedback, review, and confirmation update Money", async ({
     .getByLabel("Statement file")
     .setInputFiles(process.env.E2E_CAS_PATH ?? "");
   await page.getByLabel(/^Statement password/).fill("wrong synthetic password");
-  await page.getByRole("button", { name: "Upload statement" }).click();
+  await page.getByRole("button", { name: "Upload file" }).click();
   await expect(page.getByRole("alert")).toContainText(
     "That password didn't open the file.",
     {

@@ -1,5 +1,6 @@
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
@@ -122,6 +123,61 @@ function planHandlers(planOverrides: Partial<WeeklyPlan> = {}) {
 }
 
 describe("Plan page", () => {
+  it("takes an empty plan to the shared add holdings sheet", async () => {
+    server.use(...planHandlers());
+    server.use(
+      http.get(/\/v1\/assets$/, () => HttpResponse.json([])),
+      http.get(/\/v1\/networth$/, () => HttpResponse.json(networth())),
+      http.get(/\/v1\/loans$/, () =>
+        HttpResponse.json(loanSummary({ loans: [] })),
+      ),
+    );
+    renderPlan();
+    const addHoldingsLinks = await screen.findAllByRole("link", {
+      name: "Add holdings",
+    });
+    expect(addHoldingsLinks).toHaveLength(1);
+    expect(addHoldingsLinks[0]).toBeInTheDocument();
+    expect(addHoldingsLinks[0]).toHaveAttribute("href", "/money?add=1");
+  });
+
+  it("shows the loading label as visible text", async () => {
+    let release!: () => void;
+    server.use(...planHandlers());
+    server.use(
+      http.get(/\/v1\/plan$/, async () => {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return HttpResponse.json(weeklyPlan());
+      }),
+    );
+    renderPlan();
+    expect(await screen.findByText("Loading your plan…")).toBeVisible();
+    release();
+  });
+
+  it("retries the plan query after a visible error", async () => {
+    const user = userEvent.setup();
+    let calls = 0;
+    server.use(...planHandlers());
+    server.use(
+      http.get(/\/v1\/plan$/, () => {
+        calls += 1;
+        return calls === 1
+          ? HttpResponse.json({ detail: "Synthetic failure" }, { status: 500 })
+          : HttpResponse.json(weeklyPlan());
+      }),
+    );
+    renderPlan();
+    await waitFor(() => expect(calls).toBe(1));
+    await user.click(await screen.findByRole("button", { name: "Try again" }));
+    expect(
+      await screen.findByRole("heading", { name: "Your money vs your plan" }),
+    ).toBeVisible();
+    expect(calls).toBeGreaterThan(1);
+  });
+
   it("shows the money mix first and keeps supporting detail closed", async () => {
     const user = userEvent.setup();
     server.use(...planHandlers());

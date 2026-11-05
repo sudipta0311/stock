@@ -48,9 +48,15 @@ async function uploadBrokerFile(
     mimeType: string;
     buffer: Buffer;
     account?: string;
+    fromInbox?: boolean;
   },
 ): Promise<BrokerImportDetail> {
-  await page.goto(appUrl("/import"));
+  if (options.fromInbox) {
+    await page.goto(appUrl("/inbox"));
+    await page.getByRole("link", { name: "Upload a file" }).click();
+  } else {
+    await page.goto(appUrl("/import"));
+  }
   await page
     .getByRole("button", { name: "Broker file (Excel or CSV)" })
     .click();
@@ -72,7 +78,7 @@ async function uploadBrokerFile(
       response.request().method() === "GET" &&
       /\/v1\/imports\/[^/]+$/.test(new URL(response.url()).pathname),
   );
-  await page.getByRole("button", { name: "Upload statement" }).click();
+  await page.getByRole("button", { name: "Upload file" }).click();
   await expect(
     page.getByRole("heading", { name: "Review your import" }),
   ).toBeVisible({ timeout: 120_000 });
@@ -82,6 +88,24 @@ async function uploadBrokerFile(
   await expectFitsScreen(page);
   return (await (await reviewResponse).json()) as BrokerImportDetail;
 }
+
+test("Inbox upload reaches the broker import review", async ({ page }) => {
+  await startReadyAccount(page, "broker-import-from-inbox");
+  const isin = syntheticIsin("IN");
+  const htmlXls = Buffer.from(
+    `<html><table><tr><th>Scrip Name</th><th>ISIN</th><th>Qty</th><th>Avg Cost Price</th><th>LTP</th></tr><tr><td>Synthetic inbox share</td><td>${isin}</td><td>2</td><td>100.00</td><td>120.00</td></tr></table></html>`,
+    "utf8",
+  );
+  const detail = await uploadBrokerFile(page, {
+    broker: "hdfc_securities",
+    filename: "synthetic-inbox.xls",
+    mimeType: "application/vnd.ms-excel",
+    buffer: htmlXls,
+    fromInbox: true,
+  });
+  expect(detail.auto_mapped).toBe(true);
+  expect(detail.items[0]?.name).toBe("Synthetic inbox share");
+});
 
 async function confirmAndFindInMoney(page: Page, name: string): Promise<void> {
   await page.getByRole("button", { name: /Confirm import \(/ }).click();

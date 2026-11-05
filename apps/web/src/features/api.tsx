@@ -2,8 +2,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiPathAvailable } from "../api/feature-support";
 import { ApiError } from "../api/client";
 import { refreshActionQueries } from "../api/query-client";
-import { Badge, Card, EmptyState, Skeleton } from "../ui";
+import { Badge, Button, Card, EmptyState, Skeleton } from "../ui";
 import type { ReactNode } from "react";
+import * as englishCopy from "../copy/sections/index";
 
 export function useFeatureQuery<T>(
   queryKey: readonly unknown[],
@@ -62,6 +63,7 @@ export function ScreenLoading({
   return (
     <div className="grid gap-4" role="status" aria-label={label}>
       <Card className="grid gap-3">
+        <p className="text-sm text-muted-foreground">{label}</p>
         <Skeleton className="h-4 w-24" />
         <Skeleton className="h-10 w-52 max-w-full" />
         <Skeleton className="h-3 w-32" />
@@ -83,8 +85,10 @@ export function ScreenLoading({
 
 export function ScreenError({
   title = "We couldn’t load this yet",
+  onRetry,
 }: {
   title?: string;
+  onRetry?: () => void;
 }) {
   return (
     <Card>
@@ -92,6 +96,11 @@ export function ScreenError({
       <p className="mt-1 text-sm text-muted-foreground">
         Try again in a little while. Your saved information is safe.
       </p>
+      {onRetry ? (
+        <Button className="mt-4" variant="secondary" onClick={onRetry}>
+          {englishCopy.home.try_again}
+        </Button>
+      ) : null}
     </Card>
   );
 }

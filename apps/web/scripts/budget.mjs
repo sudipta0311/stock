@@ -71,7 +71,7 @@ const routeModules = [
 const routeGuards = [
   ["Ideas", /ideas[\\/]IdeasPage\.tsx$/, "Why this idea?"],
   ["Plan", /plan[\\/]PlanPage\.tsx$/, "Your money is close to your plan."],
-  ["Money", /money[\\/]MoneyMapPage\.tsx$/, "Add or update"],
+  ["Money", /money[\\/]MoneyMapPage\.tsx$/, "Add holdings"],
   ["Settings", /settings[\\/]SettingsPage\.tsx$/, "Delete my account"],
   ["Help", /help[\\/]HelpPage\.tsx$/, "Start with a rough picture"],
 ];

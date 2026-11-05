@@ -167,7 +167,7 @@ describe("loan amounts", () => {
     const details = original.closest("details");
     if (details) details.open = false;
 
-    await user.click(screen.getByRole("button", { name: "Save now" }));
+    await user.click(screen.getByRole("button", { name: "Save and return" }));
 
     expect(
       await screen.findByText("Please check the highlighted details."),

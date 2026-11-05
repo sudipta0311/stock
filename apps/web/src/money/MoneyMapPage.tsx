@@ -1,5 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Suspense, lazy, useEffect, useMemo, useState } from "react";
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
   ArrowRight,
@@ -8,7 +16,7 @@ import {
   ChevronRight,
   WalletCards,
 } from "lucide-react";
-import { Link, useNavigate } from "react-router";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 import { ApiError } from "../api/client";
 import { formatInr, sumInr } from "../lib/money";
 import {
@@ -466,7 +474,7 @@ function HoldingsGroup({
                     <Building2 aria-hidden="true" className="size-4" />
                   </span>
                   <span className="min-w-0">
-                    <strong className="block truncate text-sm">
+                    <strong className="block line-clamp-2 text-sm [overflow-wrap:anywhere]">
                       <span data-security>{holding.name}</span>
                     </strong>
                     <span className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
@@ -739,8 +747,8 @@ function QuickAddBar({
   return (
     <Card>
       <form className="grid gap-3" onSubmit={(event) => void submit(event)}>
-        <label htmlFor="quick-add" className="text-sm font-semibold">
-          Quick add
+        <label htmlFor="quick-add" className="sr-only">
+          {englishCopy.money_ui.quick_add_summary}
         </label>
         <div className="flex flex-col gap-2 sm:flex-row">
           <input
@@ -963,6 +971,7 @@ function HouseholdInsights({
 }
 
 export function MoneyMapPage() {
+  const location = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const {
@@ -981,6 +990,12 @@ export function MoneyMapPage() {
   const [showFundCheck, setShowFundCheck] = useState(false);
   const [showMonthlyAmounts, setShowMonthlyAmounts] = useState(false);
   const [addSheetOpen, setAddSheetOpen] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const saveQueued = Boolean(
+    (location.state as { saveQueued?: boolean } | null)?.saveQueued,
+  );
+  const chooserRef = useRef<HTMLDetailsElement>(null);
+  const chooserSummaryRef = useRef<HTMLElement>(null);
   const [editingRecordedBuy, setEditingRecordedBuy] = useState<
     NetworthResponse["holdings"][number] | null
   >(null);
@@ -1042,6 +1057,15 @@ export function MoneyMapPage() {
       : "";
   const offlineSummaryOnly = Boolean(
     networth && assetsQuery.error && !assetsQuery.data,
+  );
+  const noListedItems = Boolean(
+    !offlineSummaryOnly &&
+    listedItemCount === 0 &&
+    assetsQuery.data &&
+    networth &&
+    apiPathAvailable("/v1/loans") &&
+    loansQuery.data &&
+    (loanSummary?.loans.length ?? 0) === 0,
   );
 
   useEffect(() => {
@@ -1105,16 +1129,33 @@ export function MoneyMapPage() {
           .replace("{date}", plainDate(fxQuote.date))
       : null;
 
-  const completenessPct = Math.max(
-    0,
-    Math.min(100, Number(networth?.completeness.pct ?? 0)),
-  );
   const tickedCategories = networth?.completeness.ticked ?? [];
   const nextCategory = checklistTiles.find(
     (tile) =>
       tickedCategories.includes(tile.category) &&
       !networth?.completeness.done.includes(tile.category),
   )?.category;
+
+  const openManualChooser = useCallback(() => {
+    setAddSheetOpen(false);
+    requestAnimationFrame(() => {
+      const chooser = chooserRef.current;
+      if (!chooser) return;
+      chooser.open = true;
+      chooser.scrollIntoView?.({ block: "start" });
+      requestAnimationFrame(() => chooserSummaryRef.current?.focus());
+    });
+  }, []);
+
+  useEffect(() => {
+    const add = searchParams.get("add");
+    if (add !== "1" && add !== "manual") return;
+    if (add === "1") setAddSheetOpen(true);
+    else openManualChooser();
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("add");
+    setSearchParams(nextParams, { replace: true });
+  }, [openManualChooser, searchParams, setSearchParams]);
   async function toggleCategory(category: string) {
     if (isViewer) return;
     const updated = checklist.includes(category)
@@ -1201,6 +1242,11 @@ export function MoneyMapPage() {
 
   return (
     <div data-copy-screen="money" className="grid gap-4">
+      {saveQueued ? (
+        <p role="status" className="text-sm text-muted-foreground">
+          {englishCopy.money_ui.saved_offline}
+        </p>
+      ) : null}
       {pageError ? (
         <Card role="alert" className="border-danger/50 text-sm">
           {pageError}
@@ -1250,7 +1296,9 @@ export function MoneyMapPage() {
                 }
               />
             </div>
-            {selectedMemberId === "family" && familyMembers.length > 0 ? (
+            {!noListedItems &&
+            selectedMemberId === "family" &&
+            familyMembers.length > 0 ? (
               <details className="border-t border-line pt-2">
                 <summary className="min-h-12 cursor-pointer py-2 text-sm font-semibold">
                   {englishCopy.household.money.member_breakdown}
@@ -1286,7 +1334,7 @@ export function MoneyMapPage() {
         )}
       </Card>
 
-      {!offlineSummaryOnly ? (
+      {!offlineSummaryOnly && !noListedItems ? (
         <Button
           data-primary="true"
           onClick={() => setAddSheetOpen(true)}
@@ -1327,14 +1375,18 @@ export function MoneyMapPage() {
             setEditingRecordedBuy(holding);
           }}
         />
-        <details
-          onToggle={(event) => setShowMonthlyAmounts(event.currentTarget.open)}
-        >
-          <summary className="min-h-12 cursor-pointer py-3 text-sm font-semibold">
-            {englishCopy.money_ui.monthly_amounts}
-          </summary>
-          {showMonthlyAmounts ? <FundSipFineTune /> : null}
-        </details>
+        {!noListedItems ? (
+          <details
+            onToggle={(event) =>
+              setShowMonthlyAmounts(event.currentTarget.open)
+            }
+          >
+            <summary className="min-h-12 cursor-pointer py-3 text-sm font-semibold">
+              {englishCopy.money_ui.monthly_amounts}
+            </summary>
+            {showMonthlyAmounts ? <FundSipFineTune /> : null}
+          </details>
+        ) : null}
         <HoldingsGroup
           title={englishCopy.money_ui.shares}
           holdings={shareHoldings}
@@ -1405,7 +1457,10 @@ export function MoneyMapPage() {
                       <Building2 aria-hidden="true" className="size-4" />
                     </span>
                     <span className="min-w-0">
-                      <strong className="block truncate text-sm" data-security>
+                      <strong
+                        className="block line-clamp-2 text-sm [overflow-wrap:anywhere]"
+                        data-security
+                      >
                         {assetLabel(asset)}
                       </strong>
                       <span className="block truncate text-xs text-muted-foreground">
@@ -1441,31 +1496,22 @@ export function MoneyMapPage() {
               ))}
             </Card>
           ))
-        ) : offlineSummaryOnly ||
-          fundHoldings.length ||
-          shareHoldings.length ||
-          bondsAndGoldBonds.length ||
-          otherHoldings.length ||
-          loanSummary?.loans.length ? null : (
+        ) : noListedItems ? (
           <EmptyState
             title={englishCopy.household_ui.money_empty_title}
-            description="Choose one item below to add it to your Money Map."
+            description={englishCopy.household_ui.money_empty_description}
             icon={<WalletCards aria-hidden="true" className="size-5" />}
             action={
               <Button
                 type="button"
-                variant="secondary"
-                onClick={() =>
-                  document
-                    .getElementById("money-checklist")
-                    ?.scrollIntoView({ block: "start" })
-                }
+                data-primary="true"
+                onClick={() => setAddSheetOpen(true)}
               >
                 {englishCopy.household_ui.money_empty_action}
               </Button>
             }
           />
-        )}
+        ) : null}
         <LoansGroup summary={loanSummary} shownAmount={shownAmount} />
       </section>
       <ImportHistorySheet jobs={importJobs} />
@@ -1479,12 +1525,15 @@ export function MoneyMapPage() {
           </Suspense>
         ) : null}
       </details>
-      <details id="money-checklist">
-        <summary className="min-h-12 cursor-pointer py-3 text-base font-semibold">
-          What else do you have?
+      <details id="money-checklist" ref={chooserRef}>
+        <summary
+          ref={chooserSummaryRef}
+          tabIndex={-1}
+          className="min-h-12 cursor-pointer py-3 text-base font-semibold focus-visible:outline-2 focus-visible:outline-brand"
+        >
+          {englishCopy.money_ui.add_by_hand}
         </summary>
         <div className="grid gap-4">
-          {!isViewer ? <QuickAddBar onDraft={startQuickDraft} /> : null}
           <Card className="grid gap-4">
             <p className="text-sm text-muted-foreground">
               Tap everything that applies. Rough numbers are fine; you can edit
@@ -1492,7 +1541,6 @@ export function MoneyMapPage() {
             </p>
             {networth ? (
               <div className="grid gap-1 text-xs text-muted-foreground">
-                <p>Money Map {completenessPct}% complete</p>
                 {nextCategory ? (
                   <p>Add {categoryLabel(nextCategory)} to finish</p>
                 ) : tickedCategories.length ? (
@@ -1530,6 +1578,16 @@ export function MoneyMapPage() {
               Continue ({orderedSelected.length} selected)
             </Button>
           </Card>
+          {!isViewer ? (
+            <details className="rounded-xl border border-line px-3">
+              <summary className="min-h-12 cursor-pointer py-3 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-brand">
+                {englishCopy.money_ui.quick_add_summary}
+              </summary>
+              <div className="pb-3">
+                <QuickAddBar onDraft={startQuickDraft} />
+              </div>
+            </details>
+          ) : null}
         </div>
       </details>
       {networth ? (
@@ -1574,37 +1632,29 @@ export function MoneyMapPage() {
         title={englishCopy.money_ui.add_update}
       >
         <div className="grid gap-2">
-          <Link
-            to="/import"
-            onClick={() => setAddSheetOpen(false)}
-            className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground"
-          >
-            {englishCopy.money_ui.upload_statement}
-          </Link>
+          <div className="grid gap-1">
+            <Link
+              to="/import"
+              onClick={() => setAddSheetOpen(false)}
+              data-primary="true"
+              className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground"
+            >
+              {englishCopy.money_ui.upload_statement}
+            </Link>
+            <p className="text-sm text-muted-foreground">
+              {englishCopy.money_ui.upload_description}
+            </p>
+          </div>
+          <Button variant="secondary" onClick={openManualChooser}>
+            {englishCopy.money_ui.add_by_hand}
+          </Button>
           <Link
             to="/settings/gmail"
             onClick={() => setAddSheetOpen(false)}
-            className="inline-flex min-h-12 items-center justify-center rounded-xl border border-line px-4 py-3 text-sm font-semibold"
+            className="inline-flex min-h-11 items-center text-sm font-medium text-brand"
           >
             {englishCopy.money_ui.gmail_statements}
           </Link>
-          <Button
-            variant="secondary"
-            onClick={() => {
-              setAddSheetOpen(false);
-              const checklistDetails = document.getElementById(
-                "money-checklist",
-              ) as HTMLDetailsElement | null;
-              if (checklistDetails) {
-                checklistDetails.open = true;
-                requestAnimationFrame(() =>
-                  checklistDetails.scrollIntoView({ block: "start" }),
-                );
-              }
-            }}
-          >
-            {englishCopy.money_ui.add_by_hand}
-          </Button>
         </div>
       </Sheet>
       {editingRecordedBuy ? (

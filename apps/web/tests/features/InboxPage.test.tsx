@@ -31,6 +31,45 @@ function renderInbox(supported = false) {
 beforeEach(() => vi.mocked(apiPathAvailable).mockReturnValue(true));
 
 describe("Inbox and brief", () => {
+  it("shows the upload link with an empty inbox", async () => {
+    server.use(
+      http.get(/\/v1\/inbox$/, () => HttpResponse.json({})),
+      http.get(/\/v1\/statement-inbox\/items$/, () =>
+        HttpResponse.json({ items: [], cleanup_notice: null }),
+      ),
+    );
+    renderInbox(true);
+    expect(
+      await screen.findByRole("link", { name: "Upload a file" }),
+    ).toHaveAttribute("href", "/import");
+    expect(screen.getByRole("link", { name: "Email settings" })).toBeVisible();
+  });
+
+  it("keeps the upload link visible when emails are present", async () => {
+    server.use(
+      http.get(/\/v1\/inbox$/, () =>
+        HttpResponse.json({
+          briefs: [
+            {
+              id: "brief-upload-link",
+              week: "2026-W44",
+              subject: "Synthetic update",
+              status: "New",
+              created_at: "2026-10-28T00:00:00Z",
+            },
+          ],
+        }),
+      ),
+      http.get(/\/v1\/statement-inbox\/items$/, () =>
+        HttpResponse.json({ items: [], cleanup_notice: null }),
+      ),
+    );
+    renderInbox(true);
+    expect(
+      await screen.findByRole("link", { name: "Upload a file" }),
+    ).toHaveAttribute("href", "/import");
+  });
+
   it("shows a coming soon state when inbox paths are missing from generated OpenAPI types", async () => {
     let requested = false;
     server.use(

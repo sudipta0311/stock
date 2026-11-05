@@ -17,7 +17,7 @@ test("records a Denmark fund purchase and keeps it in Money after reload", async
   await skipGuidedTour(page);
 
   const buyAction = page.getByTestId("action-BUY_ABROAD");
-  await buyAction.getByRole("button", { name: "Mark done" }).click();
+  await buyAction.getByRole("button", { name: "I bought it" }).click();
   const sheet = page.getByRole("dialog", { name: "What did you buy?" });
   const fundRow = sheet.getByTestId("buy-row-0");
   await expect(fundRow).toBeVisible();

@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { MemoryRouter, Route, Routes } from "react-router";
@@ -28,6 +34,9 @@ function uploadedJob() {
 function renderUpload() {
   return render(
     <MemoryRouter initialEntries={["/import"]}>
+      <header>
+        <h1>Upload holdings</h1>
+      </header>
       <Routes>
         <Route path="/import" element={<ImportPage />} />
         <Route path="/import/:jobId" element={<p>Review route loaded</p>} />
@@ -118,6 +127,54 @@ function renderReview(path = `/import/${jobId}`) {
 }
 
 describe("statement upload screen", () => {
+  it("uses the three plain choices and one short privacy note", async () => {
+    const user = userEvent.setup();
+    renderUpload();
+    expect(
+      await screen.findByRole("heading", { name: "Upload holdings" }),
+    ).toBeVisible();
+    expect(
+      screen.getAllByRole("heading", { name: "Upload holdings" }),
+    ).toHaveLength(1);
+    expect(
+      screen.getByText(
+        "Choose a file type. You'll see every holding before anything is saved.",
+      ),
+    ).toBeVisible();
+    for (const label of [
+      "Broker file (Excel or CSV)",
+      "Mutual fund statement (PDF)",
+      "Combined investment statement (PDF)",
+    ]) {
+      expect(screen.getByRole("button", { name: label })).toHaveClass(
+        "min-h-11",
+      );
+    }
+    expect(
+      screen.getAllByText(
+        "Your file and password are used for this upload only. They are not stored.",
+      ),
+    ).toHaveLength(1);
+
+    const choices = screen.getByRole("group", {
+      name: "What are you uploading?",
+    });
+    const choiceButtons = within(choices).getAllByRole("button");
+    expect(choiceButtons[0]).toHaveAccessibleName(
+      "Combined investment statement (PDF)",
+    );
+    expect(choiceButtons[0]).toHaveAttribute("aria-pressed", "true");
+    const instructions = within(choices).getAllByText("How to get it");
+    await user.click(instructions[0]!);
+    expect(instructions[0]?.closest("details")).toHaveTextContent(
+      /NSDL.*CDSL/i,
+    );
+    await user.click(instructions[2]!);
+    expect(instructions[2]?.closest("details")).toHaveTextContent(
+      /CAMS.*KFintech/i,
+    );
+  });
+
   it("rejects files larger than ten megabytes before uploading", async () => {
     const user = userEvent.setup();
     const post = vi.fn();
@@ -193,7 +250,7 @@ describe("statement upload screen", () => {
       screen.getByLabelText(/Statement password/),
       "demo-passphrase",
     );
-    await user.click(screen.getByRole("button", { name: "Upload statement" }));
+    await user.click(screen.getByRole("button", { name: "Upload file" }));
 
     expect(screen.getByLabelText(/Statement password/)).toHaveValue("");
     expect(await screen.findByText("Review route loaded")).toBeInTheDocument();
@@ -220,16 +277,14 @@ describe("statement upload screen", () => {
       target: { files: [pdfFile()] },
     });
     fireEvent.submit(
-      screen.getByRole("button", { name: "Upload statement" }).closest("form")!,
+      screen.getByRole("button", { name: "Upload file" }).closest("form")!,
     );
 
     await waitFor(() => expect(signal).toBeDefined());
     fireEvent.click(screen.getByRole("button", { name: "Cancel upload" }));
 
     expect(signal?.aborted).toBe(true);
-    expect(
-      screen.getByRole("button", { name: "Upload statement" }),
-    ).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Upload file" })).toBeEnabled();
   });
 
   it("shows upload and review screens without accessibility violations", async () => {

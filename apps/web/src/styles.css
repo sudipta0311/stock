@@ -225,6 +225,19 @@ a[data-primary="true"] {
   outline-offset: 2px;
 }
 
+summary {
+  min-height: 44px;
+}
+
+summary:focus-visible {
+  outline: 3px solid var(--brand);
+  outline-offset: 2px;
+}
+
+details[open] > summary {
+  color: var(--brand);
+}
+
 :where(.card-surface) {
   padding: var(--space-card);
   box-shadow: var(--shadow-card);

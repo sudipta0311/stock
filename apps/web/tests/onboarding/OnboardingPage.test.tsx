@@ -1,11 +1,33 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
-import { MemoryRouter, Route, Routes } from "react-router";
+import {
+  MemoryRouter,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import { OnboardingPage } from "../../src/onboarding/OnboardingPage";
 import { server } from "../msw";
 import { axe } from "vitest-axe";
+
+function CurrentPath() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  return (
+    <>
+      <p>
+        {location.pathname}
+        {location.search}
+      </p>
+      <button type="button" onClick={() => navigate(-1)}>
+        Back
+      </button>
+    </>
+  );
+}
 
 vi.mock("../../src/auth/AuthContext", () => ({
   useAuth: () => ({ refreshProfile: async () => undefined }),
@@ -94,7 +116,7 @@ describe("Money Map onboarding", () => {
     );
   });
 
-  it("reaches the first plan in five taps when adding a spouse", async () => {
+  it("reaches the ready screen in five taps when adding a spouse", async () => {
     const user = userEvent.setup();
     localStorage.clear();
     const memberBodies: Record<string, unknown>[] = [];
@@ -145,14 +167,15 @@ describe("Money Map onboarding", () => {
       <MemoryRouter initialEntries={["/onboarding/welcome"]}>
         <Routes>
           <Route path="/onboarding/*" element={<OnboardingPage />} />
-          <Route path="/plan" element={<p>Plan screen</p>} />
+          <Route path="/money" element={<CurrentPath />} />
+          <Route path="/" element={<CurrentPath />} />
         </Routes>
       </MemoryRouter>,
     );
 
     let taps = 0;
     await user.click(
-      await screen.findByRole("button", { name: /Set up my Money Map/ }),
+      await screen.findByRole("button", { name: "Get started" }),
     );
     taps += 1;
     await screen.findByRole("heading", { name: "Who are we planning for?" });
@@ -168,7 +191,7 @@ describe("Money Map onboarding", () => {
     await user.click(screen.getByRole("button", { name: "Continue" }));
     taps += 1;
     expect(
-      await screen.findByRole("heading", { name: "Your plan is ready" }),
+      await screen.findByRole("heading", { name: "You're ready to start" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("progressbar", { name: "Onboarding progress" }),
@@ -188,9 +211,191 @@ describe("Money Map onboarding", () => {
     expect(document.querySelectorAll('[data-primary="true"]')).toHaveLength(1);
     expect(goalRequests).toBe(0);
     expect(riskRequests).toBe(0);
-    await user.click(screen.getByRole("button", { name: /View your plan/ }));
+    expect(screen.getByRole("button", { name: "Add holdings" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Add holdings" }));
     taps += 1;
-    expect(await screen.findByText("Plan screen")).toBeInTheDocument();
+    expect(await screen.findByText("/money?add=1")).toBeInTheDocument();
     expect(taps).toBeLessThanOrEqual(5);
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    await user.click(screen.getByRole("button", { name: "Explore the app" }));
+    expect(await screen.findByText("/")).toBeInTheDocument();
+  });
+
+  it("saves a typed goal before continuing and confirms the save", async () => {
+    const user = userEvent.setup();
+    localStorage.clear();
+    let goalBody: Record<string, unknown> | null = null;
+    server.use(
+      http.get(/\/v1\/me$/, () =>
+        HttpResponse.json({
+          id: "user-test",
+          display_name: "Synthetic user",
+          created_at: "2026-10-28T00:00:00Z",
+          profile: null,
+          members: [],
+          me_member_id: null,
+        }),
+      ),
+      http.get(/\/v1\/members$/, () => HttpResponse.json([])),
+      http.get(/\/v1\/goals$/, () => HttpResponse.json([])),
+      http.get(/\/v1\/meta\/risk-questions$/, () => HttpResponse.json([])),
+      http.post(/\/v1\/goals$/, async ({ request }) => {
+        goalBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json(
+          { id: "goal-synthetic", ...goalBody },
+          { status: 201 },
+        );
+      }),
+    );
+    render(
+      <MemoryRouter initialEntries={["/onboarding/goals"]}>
+        <Routes>
+          <Route path="/onboarding/*" element={<OnboardingPage />} />
+          <Route path="/" element={<CurrentPath />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByRole("heading", { name: "What are you saving for?" });
+    await user.type(screen.getByLabelText(/Target amount/), "500000");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(await screen.findByText("Goal saved")).toBeVisible();
+    expect(
+      screen.getByRole("link", { name: "Add another goal" }),
+    ).toBeVisible();
+    expect(goalBody).toMatchObject({
+      target_amount: "500000.00",
+      target_year: new Date().getFullYear() + 5,
+      currency: "INR",
+      priority: 1,
+    });
+  });
+
+  it("keeps the goal amount when saving fails", async () => {
+    const user = userEvent.setup();
+    localStorage.clear();
+    let goalPosts = 0;
+    server.use(
+      http.get(/\/v1\/me$/, () =>
+        HttpResponse.json({
+          id: "user-test",
+          display_name: "Synthetic user",
+          created_at: "2026-10-28T00:00:00Z",
+          profile: null,
+          members: [],
+          me_member_id: null,
+        }),
+      ),
+      http.get(/\/v1\/members$/, () => HttpResponse.json([])),
+      http.get(/\/v1\/goals$/, () => HttpResponse.json([])),
+      http.post(/\/v1\/goals$/, () => {
+        goalPosts += 1;
+        return HttpResponse.json(
+          { detail: "Synthetic failure" },
+          { status: 422 },
+        );
+      }),
+    );
+    render(
+      <MemoryRouter initialEntries={["/onboarding/goals"]}>
+        <Routes>
+          <Route path="/onboarding/*" element={<OnboardingPage />} />
+          <Route path="/onboarding/risk" element={<p>Risk step</p>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByRole("heading", { name: "What are you saving for?" });
+    const amount = screen.getByLabelText(/Target amount/);
+    await user.type(amount, "250000");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await waitFor(() => expect(goalPosts).toBe(1));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Enter a target amount and year, then try again.",
+    );
+    expect(amount).toHaveValue("250000.00");
+    expect(screen.queryByText("Risk step")).not.toBeInTheDocument();
+  });
+
+  it("continues setup with an empty goal and keeps one primary action", async () => {
+    const user = userEvent.setup();
+    localStorage.clear();
+    server.use(
+      http.get(/\/v1\/me$/, () =>
+        HttpResponse.json({
+          id: "user-test",
+          display_name: "Synthetic user",
+          created_at: "2026-10-28T00:00:00Z",
+          profile: null,
+          members: [],
+          me_member_id: null,
+        }),
+      ),
+      http.get(/\/v1\/members$/, () => HttpResponse.json([])),
+      http.get(/\/v1\/goals$/, () => HttpResponse.json([])),
+    );
+    render(
+      <MemoryRouter initialEntries={["/onboarding/goals"]}>
+        <Routes>
+          <Route path="/onboarding/*" element={<OnboardingPage />} />
+          <Route path="/onboarding/risk" element={<p>Risk step</p>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    await screen.findByRole("heading", { name: "What are you saving for?" });
+    expect(
+      screen.getByText("Pick a goal, then add a rough target and year."),
+    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Skip for now" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(await screen.findByText("Risk step")).toBeVisible();
+  });
+
+  it("uses a simple home return when a goal form is opened from Home", async () => {
+    localStorage.clear();
+    server.use(
+      http.get(/\/v1\/me$/, () =>
+        HttpResponse.json({
+          id: "user-test",
+          display_name: "Synthetic user",
+          created_at: "2026-10-28T00:00:00Z",
+          profile: null,
+          members: [],
+          me_member_id: null,
+        }),
+      ),
+      http.get(/\/v1\/members$/, () => HttpResponse.json([])),
+      http.get(/\/v1\/goals$/, () => HttpResponse.json([])),
+    );
+    render(
+      <MemoryRouter
+        initialEntries={[
+          { pathname: "/onboarding/goals", state: { returnTo: "/" } },
+        ]}
+      >
+        <Routes>
+          <Route path="/onboarding/*" element={<OnboardingPage />} />
+          <Route path="/" element={<CurrentPath />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Add a goal" }),
+    ).toBeVisible();
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    expect(
+      screen.getByText("Pick a goal, then add a rough target and year."),
+    ).toBeVisible();
+    const user = userEvent.setup();
+    expect(screen.getByRole("button", { name: "Save goal" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Skip for now" })).toBeNull();
+    expect(
+      screen.queryByText("You can skip goals and add them later."),
+    ).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Save goal" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Enter a target amount.",
+    );
+    await user.click(screen.getByRole("link", { name: "Back to Home" }));
+    expect(await screen.findByText("/")).toBeInTheDocument();
   });
 });

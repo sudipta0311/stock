@@ -30,7 +30,7 @@ test("Plan and Home show household values, closed details, and action status", a
   await skipGuidedTour(page);
   await expect(page.getByRole("heading", { name: "This week" })).toBeVisible();
   await expect(page.getByRole("article", { name: /For you/ })).toBeVisible();
-  await page.getByRole("button", { name: "Mark done" }).click();
+  await page.getByRole("button", { name: "Done" }).click();
   await expect(
     page.getByText("How much can you invest each month?", { exact: true }),
   ).toBeVisible();

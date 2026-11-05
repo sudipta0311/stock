@@ -58,9 +58,9 @@ const section = {
   },
   "exit_actions": {
     "KEEP": "Keep",
-    "TRIM_TO_TARGET": "Take some profit",
-    "EXIT": "Exit",
-    "REVIEW_THEN_EXIT": "Review, likely exit",
+    "TRIM_TO_TARGET": "Sell some",
+    "EXIT": "Sell",
+    "REVIEW_THEN_EXIT": "Think about selling",
     "SWAP": "Swap for better",
     "WAIT_FOR_LONG_TERM": "Wait for lower tax",
     "GLIDE_TO_DEBT": "Move to safer money"

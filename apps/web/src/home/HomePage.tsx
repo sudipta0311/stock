@@ -6,12 +6,17 @@ import {
   ChevronRight,
   MoveRight,
 } from "lucide-react";
-import { Link } from "react-router";
+import { Link, useLocation } from "react-router";
 import { ApiError } from "../api/client";
 import { refreshActionQueries } from "../api/query-client";
 import { getNetworth } from "../money/api";
 import { roundActionAmount } from "../lib/money";
-import { actionLabel, labelForCode, triggerKeyLabel } from "../lib/labels";
+import {
+  actionLabel,
+  exitLabel,
+  labelForCode,
+  triggerKeyLabel,
+} from "../lib/labels";
 import {
   asArray,
   asRecord,
@@ -47,6 +52,8 @@ import { MoneyValue } from "../household/currency-view";
 import { formatHouseholdAmount } from "../household/currency";
 import { dkkToInr, inrToDkk } from "../household/fx";
 import type { DkkInrRate } from "../household/fx";
+import { listAssets, listLoans } from "../money/api";
+import { quantityLabel } from "../money/quantity";
 import type { MemberResponse } from "../money/api";
 import { getInvestingPrefs, saveInvestingPrefs } from "../settings/api";
 import type { InvestingPrefs, InvestingPrefsInput } from "../settings/api";
@@ -60,12 +67,18 @@ function payloadFor(action: ActionResponse): Record<string, unknown> {
 function actionTitle(action: ActionResponse): string {
   const payload = payloadFor(action);
   const kind = textValue(payload.kind, action.kind);
+  const exitAction: Record<string, string> = {
+    SELL_EXIT: "EXIT",
+    SELL_TRIM: "TRIM_TO_TARGET",
+    REVIEW_EXIT: "REVIEW_THEN_EXIT",
+  };
   const tranche = asRecord(payload.tranche);
   if (kind === "BUY_STOCK_TRANCHE") {
     const part = textValue(tranche.n, "1");
     const of = textValue(tranche.of, "3");
     return `${actionLabel(kind)} (part ${part} of ${of})`;
   }
+  if (exitAction[kind]) return exitLabel(exitAction[kind] ?? kind);
   return actionLabel(kind);
 }
 
@@ -86,6 +99,33 @@ function isBuyAction(action: ActionResponse): boolean {
   return ["BUY_LUMPSUM", "BUY_STP", "BUY_ABROAD", "BUY_STOCK_TRANCHE"].includes(
     textValue(payloadFor(action).kind, action.kind),
   );
+}
+
+function isSellAction(action: ActionResponse): boolean {
+  return ["SELL_EXIT", "SELL_TRIM"].includes(
+    textValue(payloadFor(action).kind, action.kind),
+  );
+}
+
+function isReviewExitAction(action: ActionResponse): boolean {
+  return textValue(payloadFor(action).kind, action.kind) === "REVIEW_EXIT";
+}
+
+function sellStepName(
+  action: ActionResponse,
+  holdings: NonNullable<Awaited<ReturnType<typeof getNetworth>>["holdings"]>,
+): string {
+  const payload = payloadFor(action);
+  const params = asRecord(payload.params);
+  const securityId = textValue(
+    payload.security_id ?? params.security_id ?? asRecord(action).security_id,
+  );
+  const holdingName = securityId
+    ? textValue(
+        holdings.find((holding) => holding.security_id === securityId)?.name,
+      )
+    : "";
+  return holdingName || textValue(payload.symbol ?? params.symbol);
 }
 
 function buyStepName(action: ActionResponse): string {
@@ -377,8 +417,9 @@ function sellDetails(action: ActionResponse): {
   const tax = textValue(
     taxEstimate.estimated_tax ?? taxEstimate.tax_due ?? payload.estimated_tax,
   );
+  const rawQuantity = textValue(payload.quantity ?? payload.quantity_to_sell);
   return {
-    quantity: textValue(payload.quantity ?? payload.quantity_to_sell),
+    quantity: rawQuantity ? quantityLabel(rawQuantity, "equity") : "",
     tax: tax && isPositiveAmount(tax) ? tax : "",
   };
 }
@@ -424,15 +465,19 @@ function actionHowTo(
 ): string {
   const payload = payloadFor(action);
   const params = asRecord(payload.params);
+  const kind = textValue(payload.kind, action.kind);
+  if (isSellAction(action)) return englishCopy.home.sell_steps;
+  if (isReviewExitAction(action)) return englishCopy.home.review_steps;
   const member = person
     ? members.find((candidate) => candidate.id === person.id)
     : undefined;
-  if (textValue(payload.kind, action.kind) === "PAY_EXTRA_ON_LOAN") {
+  if (kind === "PAY_EXTRA_ON_LOAN") {
     return textValue(
       asRecord(payload.params).advice,
       "Use this amount for an extra loan payment.",
     );
   }
+  if (!isBuyAction(action)) return englishCopy.home.generic_steps;
   const accountType = textValue(params.account_type ?? payload.account_type);
   const rawAmount = rawActionAmount(action);
   const amount = rawAmount
@@ -463,7 +508,7 @@ function actionHowTo(
       ? formatHouseholdAmount(rawAmount, primaryCurrency, fxRate, false)
       : "",
   );
-  return base;
+  return base || englishCopy.home.generic_steps;
 }
 
 function exitCardForAction(
@@ -473,28 +518,14 @@ function exitCardForAction(
   const payload = payloadFor(action);
   const params = asRecord(payload.params);
   const securityId = textValue(
-    payload.security_id ?? payload.asset_id ?? params.security_id,
+    payload.security_id ?? params.security_id ?? asRecord(action).security_id,
   );
   const symbol = textValue(payload.symbol ?? params.symbol);
-  const targetAction: Record<string, string> = {
-    SELL_EXIT: "EXIT",
-    SELL_TRIM: "TRIM_TO_TARGET",
-    REVIEW_EXIT: "REVIEW_THEN_EXIT",
-    SWAP: "SWAP",
-  };
   const cards = asArray(plan?.exit_cards).map(asRecord);
-  return (
-    cards.find(
-      (card) =>
-        (securityId && textValue(card.security_id) === securityId) ||
-        (symbol && textValue(card.symbol) === symbol),
-    ) ??
-    cards.find(
-      (card) =>
-        textValue(card.action) ===
-        targetAction[textValue(payload.kind, action.kind)],
-    )
-  );
+  if (securityId)
+    return cards.find((card) => textValue(card.security_id) === securityId);
+  if (symbol) return cards.find((card) => textValue(card.symbol) === symbol);
+  return undefined;
 }
 
 function TriggeredExitRows({
@@ -621,6 +652,7 @@ function investingPrefsInput(
 function ActionCard({
   action,
   person,
+  holdingName,
   readOnly,
   onOpen,
   onDone,
@@ -629,6 +661,7 @@ function ActionCard({
 }: {
   action: ActionResponse;
   person?: ReturnType<typeof memberForAction>;
+  holdingName?: string;
   readOnly: boolean;
   onOpen(action: ActionResponse): void;
   onDone(action: ActionResponse): void;
@@ -643,6 +676,7 @@ function ActionCard({
     : "";
   const cardLabel = [
     actionTitle(action),
+    holdingName,
     actionCategory(action),
     actionOwner,
     action.status === "done" ? englishCopy.household_ui.completed : "",
@@ -662,6 +696,11 @@ function ActionCard({
         <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
           <div className="min-w-0">
             <h3 className="text-sm font-semibold">{actionTitle(action)}</h3>
+            {holdingName ? (
+              <p className="mt-1 break-words text-sm font-medium [overflow-wrap:anywhere]">
+                {holdingName}
+              </p>
+            ) : null}
             {actionCategory(action) ? (
               <p className="mt-1 text-xs text-muted-foreground">
                 {actionCategory(action)}
@@ -682,19 +721,22 @@ function ActionCard({
       </div>
       <div className="flex flex-wrap gap-2">
         <Button
-          variant="ghost"
-          aria-label="How to"
-          onClick={() => onOpen(action)}
-        >
-          How?
-        </Button>
-        <Button
           variant={primary ? undefined : "secondary"}
           data-primary={primary ? "true" : undefined}
+          onClick={() => onOpen(action)}
+        >
+          {englishCopy.home.show_steps}
+        </Button>
+        <Button
+          variant="secondary"
           aria-label={
             action.status === "done"
               ? englishCopy.household_ui.completed
-              : "Mark done"
+              : isBuyAction(action)
+                ? englishCopy.home.bought_it
+                : isSellAction(action)
+                  ? englishCopy.home.sold_it
+                  : "Done"
           }
           onClick={() => onDone(action)}
           loading={saving}
@@ -704,7 +746,11 @@ function ActionCard({
             ? englishCopy.household_ui.view_only
             : action.status === "done"
               ? englishCopy.household_ui.completed
-              : "Done"}
+              : isBuyAction(action)
+                ? englishCopy.home.bought_it
+                : isSellAction(action)
+                  ? englishCopy.home.sold_it
+                  : "Done"}
         </Button>
       </div>
     </article>
@@ -712,6 +758,9 @@ function ActionCard({
 }
 
 export function HomePage() {
+  const location = useLocation();
+  const goalSavedNotice =
+    (location.state as { goalSaved?: unknown } | null)?.goalSaved === true;
   const [sheetAction, setSheetAction] = useState<ActionResponse | null>(null);
   const [recordAction, setRecordAction] = useState<ActionResponse | null>(null);
   const [amountMode, setAmountMode] = useState<"monthly" | "weekly" | null>(
@@ -761,6 +810,16 @@ export function HomePage() {
     ["c27b", "networth", selectedHouseholdId, activeMemberId],
     "/v1/networth",
     () => getNetworth(activeMemberId),
+  );
+  const assets = useFeatureQuery(
+    ["c27b", "assets", selectedHouseholdId, activeMemberId],
+    "/v1/assets",
+    () => listAssets(activeMemberId),
+  );
+  const loans = useFeatureQuery(
+    ["c30", "loans", selectedHouseholdId],
+    "/v1/loans",
+    listLoans,
   );
   const plan = useFeatureQuery(
     ["c27b", "plan", selectedHouseholdId, activeMemberId],
@@ -866,7 +925,128 @@ export function HomePage() {
     investing.data?.monthly_sip_capacity,
   );
   const editorMode =
-    amountMode ?? (!monthlyAmountSet && !isViewer ? "monthly" : null);
+    amountMode ??
+    (!monthlyAmountSet || (actionList.length > 0 && !isViewer)
+      ? "monthly"
+      : null);
+  const showMonthlyDisclosure =
+    actionList.length > 0 &&
+    monthlyAmountSet &&
+    amountMode !== "weekly" &&
+    !isViewer;
+  const noRecordedItems = Boolean(
+    networth.supported &&
+    networth.data &&
+    assets.supported &&
+    assets.data &&
+    loans.supported &&
+    loans.data &&
+    networth.data.holdings.length === 0 &&
+    assets.data.length === 0 &&
+    loans.data.loans.length === 0,
+  );
+
+  function renderAmountForm(mode: "monthly" | "weekly") {
+    return (
+      <form
+        className="grid gap-3 border-t border-line pt-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const amount = amountDraft.trim();
+          setAmountMessage("");
+          if (!/^\d{1,12}(?:\.\d{1,2})?$/.test(amount)) {
+            setAmountMessage(englishCopy.home.amount_error);
+            return;
+          }
+          if (!isPositiveAmount(amount)) {
+            setAmountMessage(englishCopy.home.amount_required);
+            return;
+          }
+          const amountInr = amountInRupees(amount, amountCurrency, fxRate);
+          if (amountInr === null) {
+            setAmountMessage(englishCopy.home.amount_error);
+            return;
+          }
+          saveAmount.mutate({ amountInr, mode });
+        }}
+      >
+        {mode === "monthly" ? (
+          <p className="text-sm font-medium">
+            {englishCopy.home.amount_question}
+          </p>
+        ) : null}
+        <div className="grid gap-1">
+          <label
+            className="text-sm font-medium"
+            htmlFor="home-investing-amount"
+          >
+            {mode === "weekly"
+              ? englishCopy.home.weekly_amount
+              : englishCopy.home.monthly_amount}
+          </label>
+          <div className="flex items-center gap-2">
+            <input
+              id="home-investing-amount"
+              type="number"
+              min="0.01"
+              step="0.01"
+              inputMode="decimal"
+              value={amountDraft}
+              onChange={(event) => setAmountDraft(event.currentTarget.value)}
+              className="min-h-12 w-0 min-w-0 flex-1 rounded-xl border border-line bg-surface px-3 text-base tabular-nums"
+            />
+            <div
+              role="radiogroup"
+              aria-label={englishCopy.home.amount_currency}
+              className="flex shrink-0 rounded-xl border border-line bg-surface p-0.5"
+            >
+              <button
+                type="button"
+                role="radio"
+                aria-checked={amountCurrency === "DKK"}
+                disabled={!canUseDkk}
+                onClick={() => changeAmountCurrency("DKK")}
+                className={`min-h-11 min-w-11 rounded-lg px-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 ${amountCurrency === "DKK" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
+              >
+                kr
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={amountCurrency === "INR"}
+                onClick={() => changeAmountCurrency("INR")}
+                className={`min-h-11 min-w-11 rounded-lg px-2 text-sm font-medium ${amountCurrency === "INR" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
+              >
+                ₹
+              </button>
+            </div>
+          </div>
+          {!canUseDkk ? (
+            <p className="text-xs text-muted-foreground">
+              {englishCopy.home.dkk_rate_missing}
+            </p>
+          ) : null}
+        </div>
+        <Button
+          type="submit"
+          loading={saveAmount.isPending}
+          variant={
+            actionList.length || noRecordedItems ? "secondary" : undefined
+          }
+          data-primary={
+            actionList.length || noRecordedItems ? undefined : "true"
+          }
+        >
+          {englishCopy.home.amount_save}
+        </Button>
+        {amountMessage ? (
+          <p role="status" className="text-sm text-muted-foreground">
+            {amountMessage}
+          </p>
+        ) : null}
+      </form>
+    );
+  }
 
   if (
     (networth.supported && networth.isPending) ||
@@ -874,18 +1054,42 @@ export function HomePage() {
     (actions.supported && actions.isPending) ||
     (investing.supported && investing.isPending)
   ) {
-    return <ScreenLoading label="Loading your week" />;
+    return <ScreenLoading label={englishCopy.home.loading_week} />;
   }
   if (
     (networth.error && !networth.data && !isMissingFeature(networth.error)) ||
     (plan.error && !plan.data && !isMissingFeature(plan.error)) ||
     (actions.error && !actions.data && !isMissingFeature(actions.error))
   ) {
-    return <ScreenError title="Your week couldn't load" />;
+    return (
+      <ScreenError
+        title="Your week couldn't load"
+        onRetry={() => {
+          void Promise.all([
+            networth.refetch(),
+            plan.refetch(),
+            actions.refetch(),
+            investing.refetch(),
+          ]);
+        }}
+      />
+    );
   }
 
   return (
     <div data-copy-screen="home" className="grid gap-4">
+      {goalSavedNotice ? (
+        <Card className="flex flex-wrap items-center justify-between gap-2 text-sm">
+          <p>{englishCopy.household_ui.goal_saved}</p>
+          <Link
+            to="/onboarding/goals"
+            state={{ returnTo: "/" }}
+            className="inline-flex min-h-11 items-center font-medium text-brand"
+          >
+            {englishCopy.household_ui.add_another_goal}
+          </Link>
+        </Card>
+      ) : null}
       <Card
         className="home-hero grid gap-3"
         aria-labelledby="this-week-heading"
@@ -899,6 +1103,11 @@ export function HomePage() {
               <ActionCard
                 key={action.id}
                 action={action}
+                holdingName={
+                  isSellAction(action) || isReviewExitAction(action)
+                    ? sellStepName(action, networth.data?.holdings ?? [])
+                    : undefined
+                }
                 person={memberForAction(action, meMemberId, members, planValue)}
                 readOnly={isViewer}
                 saving={markDone.isPending || recordBuy.isPending}
@@ -925,6 +1134,14 @@ export function HomePage() {
               </Link>
             ) : null}
           </div>
+        ) : noRecordedItems && !isViewer ? (
+          <Link
+            to="/money?add=1"
+            data-primary="true"
+            className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground"
+          >
+            {englishCopy.money_ui.add_update}
+          </Link>
         ) : monthlyAmountSet ? (
           <div className="grid justify-items-center gap-3 py-3 text-center">
             <span className="grid size-11 place-items-center rounded-full bg-success-soft text-success-foreground">
@@ -956,103 +1173,19 @@ export function HomePage() {
             </p>
           </div>
         ))}
-        {editorMode ? (
-          <form
-            className="grid gap-3 border-t border-line pt-3"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const mode = editorMode;
-              const amount = amountDraft.trim();
-              setAmountMessage("");
-              if (!/^\d{1,12}(?:\.\d{1,2})?$/.test(amount)) {
-                setAmountMessage(englishCopy.home.amount_error);
-                return;
-              }
-              if (!isPositiveAmount(amount)) {
-                setAmountMessage(englishCopy.home.amount_required);
-                return;
-              }
-              const amountInr = amountInRupees(amount, amountCurrency, fxRate);
-              if (amountInr === null) {
-                setAmountMessage(englishCopy.home.amount_error);
-                return;
-              }
-              saveAmount.mutate({ amountInr, mode });
-            }}
+        {showMonthlyDisclosure ? (
+          <details
+            onToggle={(event) =>
+              setAmountMode(event.currentTarget.open ? "monthly" : null)
+            }
           >
-            {editorMode === "monthly" ? (
-              <p className="text-sm font-medium">
-                {englishCopy.home.amount_question}
-              </p>
-            ) : null}
-            <div className="grid gap-1">
-              <label
-                className="text-sm font-medium"
-                htmlFor="home-investing-amount"
-              >
-                {editorMode === "weekly"
-                  ? englishCopy.home.weekly_amount
-                  : englishCopy.home.monthly_amount}
-              </label>
-              <div className="flex items-center gap-2">
-                <input
-                  id="home-investing-amount"
-                  type="number"
-                  min="0.01"
-                  step="0.01"
-                  inputMode="decimal"
-                  value={amountDraft}
-                  onChange={(event) =>
-                    setAmountDraft(event.currentTarget.value)
-                  }
-                  className="min-h-12 w-0 min-w-0 flex-1 rounded-xl border border-line bg-surface px-3 text-base tabular-nums"
-                />
-                <div
-                  role="radiogroup"
-                  aria-label={englishCopy.home.amount_currency}
-                  className="flex shrink-0 rounded-xl border border-line bg-surface p-0.5"
-                >
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={amountCurrency === "DKK"}
-                    disabled={!canUseDkk}
-                    onClick={() => changeAmountCurrency("DKK")}
-                    className={`min-h-11 min-w-11 rounded-lg px-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-40 ${amountCurrency === "DKK" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
-                  >
-                    kr
-                  </button>
-                  <button
-                    type="button"
-                    role="radio"
-                    aria-checked={amountCurrency === "INR"}
-                    onClick={() => changeAmountCurrency("INR")}
-                    className={`min-h-11 min-w-11 rounded-lg px-2 text-sm font-medium ${amountCurrency === "INR" ? "bg-muted text-foreground" : "text-muted-foreground"}`}
-                  >
-                    ₹
-                  </button>
-                </div>
-              </div>
-              {!canUseDkk ? (
-                <p className="text-xs text-muted-foreground">
-                  {englishCopy.home.dkk_rate_missing}
-                </p>
-              ) : null}
-            </div>
-            <Button
-              type="submit"
-              loading={saveAmount.isPending}
-              variant={actionList.length ? "secondary" : undefined}
-              data-primary={actionList.length ? undefined : "true"}
-            >
-              {englishCopy.home.amount_save}
-            </Button>
-            {amountMessage ? (
-              <p role="status" className="text-sm text-muted-foreground">
-                {amountMessage}
-              </p>
-            ) : null}
-          </form>
+            <summary className="min-h-12 cursor-pointer py-2 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-brand">
+              {englishCopy.home.monthly_investment}
+            </summary>
+            {amountMode === "monthly" ? renderAmountForm("monthly") : null}
+          </details>
+        ) : editorMode ? (
+          renderAmountForm(editorMode)
         ) : null}
         {amountMessage && !editorMode ? (
           <p role="status" className="text-sm text-muted-foreground">
@@ -1126,7 +1259,18 @@ export function HomePage() {
         </details>
       </Card>
 
-      {netWorthPrimary ? (
+      {noRecordedItems ? (
+        <Link
+          to="/money"
+          className="flex min-h-12 items-center justify-between gap-3 rounded-xl border border-line bg-surface px-4 py-3 text-sm font-medium"
+        >
+          <span>{englishCopy.home.no_holdings}</span>
+          <ChevronRight
+            aria-hidden="true"
+            className="size-4 shrink-0 text-muted-foreground"
+          />
+        </Link>
+      ) : netWorthPrimary ? (
         <Link
           to="/money"
           className="flex min-h-12 items-center justify-between gap-3 rounded-xl border border-line bg-surface px-4 py-3 text-sm font-medium"
@@ -1215,9 +1359,6 @@ export function HomePage() {
             const hasClubbingCheck =
               clubbingCheck === true ||
               (typeof clubbingCheck === "string" && clubbingCheck.length > 0);
-            const whyParams = Object.entries(params).filter(
-              ([key]) => key !== "clubbing_check",
-            );
             const sale = sellDetails(sheetAction);
             const person = memberForAction(
               sheetAction,
@@ -1269,7 +1410,7 @@ export function HomePage() {
                     </p>
                   ) : null}
                   <details>
-                    <summary className="cursor-pointer text-sm font-semibold">
+                    <summary className="min-h-12 cursor-pointer py-2 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-brand">
                       Why?
                     </summary>
                     <div className="grid gap-3 pt-2">
@@ -1287,25 +1428,6 @@ export function HomePage() {
                         action={sheetAction}
                         plan={planValue}
                       />
-                      {whyParams.length ? (
-                        <dl className="grid gap-2">
-                          {whyParams.map(([key, value]) => (
-                            <div
-                              key={key}
-                              className="flex justify-between gap-4 border-t border-line pt-2 text-sm"
-                            >
-                              <dt className="text-muted-foreground">
-                                {key.replaceAll("_", " ")}
-                              </dt>
-                              <dd className="text-right">
-                                {typeof value === "string"
-                                  ? value
-                                  : JSON.stringify(value)}
-                              </dd>
-                            </div>
-                          ))}
-                        </dl>
-                      ) : null}
                     </div>
                   </details>
                 </div>

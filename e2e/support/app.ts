@@ -141,17 +141,17 @@ export async function signIn(
 }
 
 export async function completeMinimalOnboarding(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "Set up my Money Map" }).click();
+  await page.getByRole("button", { name: "Get started" }).click();
   await expect(
     page.getByRole("heading", { name: "Who are we planning for?" }),
   ).toBeVisible();
   await page.getByRole("button", { name: /^Just me/ }).click();
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Your plan is ready" }),
+    page.getByRole("heading", { name: "You're ready to start" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "View your plan" }).click();
-  await expect(page).toHaveURL(/\/plan$/);
+  await page.getByRole("button", { name: "Explore the app" }).click();
+  await expect(page).toHaveURL(/\/$/);
 }
 
 export async function startReadyAccount(
@@ -173,7 +173,7 @@ export async function skipGuidedTour(page: Page): Promise<void> {
 
 export async function openFixedDepositForm(page: Page): Promise<void> {
   await gotoApp(page, "/money");
-  await page.getByText("What else do you have?", { exact: true }).click();
+  await page.getByText("Add manually", { exact: true }).click();
   const fixedDeposits = page.getByRole("button", {
     name: "Fixed deposits",
     exact: true,
@@ -192,13 +192,11 @@ export async function completeFixedDeposit(page: Page): Promise<number> {
   await page.getByLabel("Amount deposited").fill("5L");
   await page.getByLabel("Interest rate (%)").fill("7.1");
   await page.getByLabel("Matures (month and year)").fill("2027-03");
-  await page.getByRole("button", { name: "Save now" }).click();
+  await page.getByRole("button", { name: "Save and return" }).click();
+  await expect(page).toHaveURL(/\/money$/);
   await expect(
-    page.getByRole("status").filter({ hasText: /^Saved$/ }),
-  ).toBeVisible({
-    timeout: 30_000,
-  });
-  await expect(page.getByText(/^Value today ≈/)).toBeVisible();
+    page.getByRole("link", { name: /Fixed deposit at Synthetic Bank/ }),
+  ).toBeVisible({ timeout: 30_000 });
   return Date.now() - startedAt;
 }
 
@@ -207,9 +205,10 @@ export async function addDanishSavings(page: Page): Promise<void> {
   await page.getByLabel("Bank").fill("Synthetic Bank");
   await page.getByLabel("Currency").selectOption("DKK");
   await page.getByLabel("Current balance").fill("20,000");
-  await page.getByRole("button", { name: "Save now" }).click();
+  await page.getByRole("button", { name: "Save and return" }).click();
+  await expect(page).toHaveURL(/\/money$/);
   await expect(
-    page.getByRole("status").filter({ hasText: /^Saved$/ }),
+    page.getByRole("link", { name: /Savings account at Synthetic Bank/ }),
   ).toBeVisible();
 }
 
@@ -222,7 +221,7 @@ export async function uploadSyntheticCas(
     throw new Error("The synthetic statement is not configured.");
   await page.getByLabel("Statement file").setInputFiles(path);
   await page.getByLabel(/^Statement password/).fill(password);
-  await page.getByRole("button", { name: "Upload statement" }).click();
+  await page.getByRole("button", { name: "Upload file" }).click();
   await expect(
     page.getByRole("heading", { name: "Review your import" }),
   ).toBeVisible({

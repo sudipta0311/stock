@@ -16,7 +16,7 @@ test("short household setup reaches the first plan in five setup taps", async ({
 
   // The dev-token submit authenticates this test account. Count the setup taps after it.
   let taps = 0;
-  await page.getByRole("button", { name: "Set up my Money Map" }).click();
+  await page.getByRole("button", { name: "Get started" }).click();
   taps += 1;
   await expect(
     page.getByRole("heading", { name: "Who are we planning for?" }),
@@ -32,11 +32,11 @@ test("short household setup reaches the first plan in five setup taps", async ({
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   taps += 1;
   await expect(
-    page.getByRole("heading", { name: "Your plan is ready" }),
+    page.getByRole("heading", { name: "You're ready to start" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "View your plan" }).click();
+  await page.getByRole("button", { name: "Explore the app" }).click();
   taps += 1;
-  await expect(page).toHaveURL(/\/plan$/);
+  await expect(page).toHaveURL(/\/$/);
   expect(taps).toBeLessThanOrEqual(5);
 
   await gotoApp(page, "/");
@@ -44,15 +44,21 @@ test("short household setup reaches the first plan in five setup taps", async ({
   await page.getByText("Make it more accurate", { exact: true }).click();
   await page.getByRole("link", { name: "Add a goal" }).click();
   await expect(
-    page.getByRole("heading", { name: "What are you saving for?" }),
+    page.getByRole("heading", { name: "Add a goal" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("banner").getByText("Add a goal"),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Pick a goal, then add a rough target and year."),
   ).toBeVisible();
   await page.getByRole("button", { name: "Education abroad" }).click();
   await page.getByLabel("Currency").selectOption("USD");
   await page.getByLabel("Target amount (USD)").fill("50000");
   await page.getByLabel("Target year").fill("2034");
-  await page.getByRole("button", { name: "Add Education abroad" }).click();
-  await expect(page.getByText("Education abroad · 2034")).toBeVisible();
-  await page.getByRole("link", { name: "Home" }).click();
+  await page.getByRole("button", { name: "Save goal" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByText("Goal saved", { exact: true })).toBeVisible();
   await page.getByText("Make it more accurate", { exact: true }).click();
   await page
     .getByRole("link", { name: "Choose your comfort with ups and downs" })

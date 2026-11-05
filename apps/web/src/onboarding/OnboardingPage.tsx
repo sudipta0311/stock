@@ -237,22 +237,28 @@ function StepHeading({
   step,
   title,
   description,
+  showProgress = true,
 }: {
   step: OnboardingStep;
   title: string;
   description: string;
+  showProgress?: boolean;
 }) {
   const index = STEPS.indexOf(step);
   return (
     <div className="grid gap-3">
-      <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-        <span>Getting started</span>
-      </div>
-      <Progress
-        quiet
-        value={((index + 1) / STEPS.length) * 100}
-        label="Onboarding progress"
-      />
+      {showProgress ? (
+        <>
+          <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+            <span>Getting started</span>
+          </div>
+          <Progress
+            quiet
+            value={((index + 1) / STEPS.length) * 100}
+            label="Onboarding progress"
+          />
+        </>
+      ) : null}
       <div>
         <h1 className="text-page-title font-semibold tracking-tight">
           {title}
@@ -315,6 +321,8 @@ export function OnboardingPage() {
 
   const pathStep = stepFromPath(location.pathname);
   const step = pathStep ?? draft.step;
+  const goalSavedNotice =
+    (location.state as { goalSaved?: unknown } | null)?.goalSaved === true;
   const answersComplete =
     questions.length > 0 &&
     questions.every((question) => Boolean(draft.answers[question.id]));
@@ -600,8 +608,7 @@ export function OnboardingPage() {
     }
   }
 
-  async function addGoal(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function saveGoal(): Promise<boolean> {
     setGoalSaving(true);
     setGoalError("");
     try {
@@ -619,11 +626,32 @@ export function OnboardingPage() {
       });
       setGoals((current) => [...current, goal]);
       setGoalAmount("");
+      return true;
     } catch {
       setGoalError("Enter a target amount and year, then try again.");
+      return false;
     } finally {
       setGoalSaving(false);
     }
+  }
+
+  async function continueAfterGoal(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!goalAmount.trim()) {
+      if (returnPath) {
+        setGoalError(englishCopy.household_ui.goal_amount_required);
+        return;
+      }
+      moveTo("risk");
+      return;
+    }
+    if (!(await saveGoal())) return;
+    if (returnPath) {
+      navigate(returnPath, { state: { goalSaved: true } });
+      return;
+    }
+    updateDraft({ step: "risk" });
+    navigate("/onboarding/risk", { state: { goalSaved: true } });
   }
 
   async function saveRiskAnswers() {
@@ -650,7 +678,7 @@ export function OnboardingPage() {
     updateDraft({ consents: { ...draft.consents, [key]: checked } });
   }
 
-  function finish() {
+  function finish(destination: string) {
     try {
       localStorage.setItem(
         ONBOARDING_STORAGE_KEY,
@@ -659,7 +687,7 @@ export function OnboardingPage() {
     } catch {
       /* the account still opens */
     }
-    navigate("/plan");
+    navigate(destination);
   }
 
   if (!profileLoaded && step !== "welcome") {
@@ -684,7 +712,7 @@ export function OnboardingPage() {
             className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-muted-foreground"
           >
             <ArrowLeft aria-hidden="true" className="size-4" />
-            Home
+            {step === "goals" ? englishCopy.household_ui.back_to_home : "Home"}
           </Link>
         ) : step !== "welcome" && step !== "done" ? (
           <Link
@@ -706,7 +734,7 @@ export function OnboardingPage() {
               description="Start with what you have. Approximate amounts are welcome, and you can add or change details anytime."
             />
             <Button data-primary="true" onClick={() => moveTo("household")}>
-              Set up my Money Map{" "}
+              {englishCopy.household.onboarding.get_started}{" "}
               <ArrowRight aria-hidden="true" className="size-4" />
             </Button>
           </>
@@ -973,8 +1001,13 @@ export function OnboardingPage() {
           <>
             <StepHeading
               step="goals"
-              title="What are you saving for?"
-              description="Pick a goal, add a rough target and year, then add another or continue."
+              title={
+                returnPath
+                  ? englishCopy.household_ui.add_goal_title
+                  : "What are you saving for?"
+              }
+              description={englishCopy.household_ui.goal_intro}
+              showProgress={!returnPath}
             />
             <TileToggle
               label="Goal type"
@@ -988,15 +1021,17 @@ export function OnboardingPage() {
             />
             <form
               className="grid gap-5"
-              onSubmit={(event) => void addGoal(event)}
+              onSubmit={(event) => void continueAfterGoal(event)}
             >
               {goalCurrency === "INR" ? (
                 <AmountEntry
                   id="goal-amount"
                   label="Target amount"
                   value={goalAmount}
-                  onChange={setGoalAmount}
-                  required
+                  onChange={(value) => {
+                    setGoalAmount(value);
+                    setGoalError("");
+                  }}
                 />
               ) : (
                 <Field
@@ -1009,9 +1044,10 @@ export function OnboardingPage() {
                     id="goal-amount-usd"
                     inputMode="decimal"
                     value={goalAmount}
-                    onChange={(event) =>
-                      setGoalAmount(event.currentTarget.value)
-                    }
+                    onChange={(event) => {
+                      setGoalAmount(event.currentTarget.value);
+                      setGoalError("");
+                    }}
                     className="min-h-12 w-full rounded-xl border border-line bg-background pl-14 pr-3"
                   />
                 </Field>
@@ -1046,13 +1082,10 @@ export function OnboardingPage() {
                   {goalError}
                 </p>
               ) : null}
-              <Button
-                type="submit"
-                variant="secondary"
-                loading={goalSaving}
-                disabled={!goalAmount.trim()}
-              >
-                Add {selectedGoalLabel}
+              <Button type="submit" data-primary="true" loading={goalSaving}>
+                {returnPath
+                  ? englishCopy.household_ui.goal_save
+                  : englishCopy.household.onboarding.continue}
               </Button>
             </form>
             {goals.length ? (
@@ -1078,30 +1111,23 @@ export function OnboardingPage() {
                   </div>
                 ))}
               </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                You can skip goals and add them later.
-              </p>
-            )}
-            <Button
-              type="button"
-              data-primary="true"
-              onClick={() => moveTo("risk")}
-            >
-              Continue
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => moveTo("risk")}
-            >
-              Skip for now
-            </Button>
+            ) : null}
           </>
         ) : null}
 
         {step === "risk" ? (
           <>
+            {goalSavedNotice ? (
+              <div className="grid gap-1 rounded-xl bg-muted/60 p-3 text-sm">
+                <p>{englishCopy.household_ui.goal_saved}</p>
+                <Link
+                  to="/onboarding/goals"
+                  className="inline-flex min-h-11 items-center text-sm font-medium text-brand"
+                >
+                  {englishCopy.household_ui.add_another_goal}
+                </Link>
+              </div>
+            ) : null}
             <StepHeading
               step="risk"
               title="How do you feel about risk?"
@@ -1238,8 +1264,8 @@ export function OnboardingPage() {
             </div>
             <StepHeading
               step="done"
-              title="Your plan is ready"
-              description="Add a statement or a few items whenever you're ready."
+              title={englishCopy.household_ui.ready_title}
+              description={englishCopy.household_ui.ready_description}
             />
             {riskResult ? (
               <p className="text-sm text-muted-foreground">
@@ -1250,16 +1276,13 @@ export function OnboardingPage() {
                 .
               </p>
             ) : null}
-            <Button data-primary="true" onClick={finish}>
-              View your plan{" "}
+            <Button data-primary="true" onClick={() => finish("/money?add=1")}>
+              {englishCopy.money_ui.add_update}{" "}
               <ArrowRight aria-hidden="true" className="size-4" />
             </Button>
-            <Link
-              to="/money?checklist=open"
-              className="inline-flex min-h-12 items-center justify-center text-sm font-medium text-brand"
-            >
-              Add a statement or a few items first
-            </Link>
+            <Button variant="ghost" onClick={() => finish("/")}>
+              {englishCopy.household_ui.ready_explore}
+            </Button>
           </>
         ) : null}
       </Card>

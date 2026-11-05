@@ -44,6 +44,12 @@ export function quantityLabel(quantity: string, securityType: string): string {
       ? roundedSubUnit(quantity)
       : roundedWhole(quantity)
     : exactQuantity(quantity);
-  const unit = isUnitCount ? "units" : "shares";
+  const unit = isUnitCount
+    ? trimmed === "1"
+      ? "unit"
+      : "units"
+    : trimmed === "1"
+      ? "share"
+      : "shares";
   return `${/^\d+(?:\.\d+)?$/.test(trimmed) ? groupIndian(trimmed) : trimmed} ${unit}`;
 }

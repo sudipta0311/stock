@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useForm, useWatch } from "react-hook-form";
 import type { Path } from "react-hook-form";
-import { ArrowLeft, ArrowRight, Check, ChevronDown } from "lucide-react";
+import { ArrowLeft, ArrowRight, ChevronDown } from "lucide-react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { ApiError, type ApiFieldError } from "../api/client";
 import { formatInr } from "../lib/money";
@@ -229,6 +229,20 @@ function eligibilityNote(
   return null;
 }
 
+function readableMaturityDate(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const match = /^(\d{4})-(\d{2})(?:-\d{2})?$/.exec(value);
+  if (!match) return value;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (month < 1 || month > 12) return value;
+  return new Intl.DateTimeFormat("en-IN", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(year, month - 1, 1)));
+}
+
 export function USInvestmentStep() {
   const navigate = useNavigate();
   const { workflow } = useWorkflowState();
@@ -283,6 +297,8 @@ function AssetForm({
   initialAsset,
   selectedMemberId,
   workflow,
+  saveQueued = false,
+  onReturn,
 }: {
   assetType: AssetType;
   draft?: Record<string, unknown>;
@@ -290,6 +306,8 @@ function AssetForm({
   initialAsset?: AssetDetailResponse;
   selectedMemberId?: string | null;
   workflow?: ChecklistWorkflow;
+  saveQueued?: boolean;
+  onReturn?: (queued: boolean, saved?: AssetResponse) => void;
 }) {
   const navigate = useNavigate();
   const household = useHousehold();
@@ -325,6 +343,15 @@ function AssetForm({
           (field): field is (typeof shaped)[number] => field !== undefined,
         ),
         ...rest,
+      ];
+    }
+    if (assetType === "fd") {
+      const firstFields = ["bank", "principal", "rate_pct", "maturity"];
+      return [
+        ...firstFields.flatMap((name) =>
+          shaped.filter((field) => field.name === name),
+        ),
+        ...shaped.filter((field) => !firstFields.includes(field.name)),
       ];
     }
     if (assetType !== "loan") return shaped;
@@ -400,23 +427,26 @@ function AssetForm({
     () => applyFieldRules(assetType, baseFormFields, watched),
     [assetType, baseFormFields, watched],
   );
-  const [assetId, setAssetId] = useState(initialAsset?.id ?? null);
   const assetIdRef = useRef<string | null>(initialAsset?.id ?? null);
   const [savedAsset, setSavedAsset] = useState<AssetResponse | null>(
     initialAsset ?? null,
   );
+  const savedAssetRef = useRef<AssetResponse | null>(initialAsset ?? null);
   const members = household.members;
   const [fieldErrors, setFieldErrors] = useState<ApiFieldError[]>([]);
   const [clientErrors, setClientErrors] = useState<Record<string, string>>({});
   const [saveState, setSaveState] = useState<
     "idle" | "saving" | "saved" | "queued" | "error"
-  >(initialAsset ? "saved" : "idle");
+  >(saveQueued ? "queued" : initialAsset ? "saved" : "idle");
   const [saveError, setSaveError] = useState("");
   const [revision, setRevision] = useState(0);
-  const changed = useRef(false);
+  const [changed, setChanged] = useState(false);
   const moreDetailsRef = useRef<HTMLDetailsElement>(null);
   const saving = useRef(false);
+  const savePromise = useRef<Promise<boolean> | null>(null);
+  const activeBody = useRef("");
   const pendingBody = useRef<Record<string, unknown> | null>(null);
+  const queuedWrite = useRef(saveQueued);
   const lastSignature = useRef("");
   const localDraftKey = useRef(`${assetType}:${crypto.randomUUID()}`);
 
@@ -434,99 +464,115 @@ function AssetForm({
   }, [assetType, baseDetails, defaults, fields, form, initialAsset]);
 
   function markEdited() {
-    changed.current = true;
+    setChanged(true);
     setRevision((current) => current + 1);
     setFieldErrors([]);
     setSaveError("");
   }
 
-  async function saveBody(body: Record<string, unknown>): Promise<void> {
+  async function saveBody(body: Record<string, unknown>): Promise<boolean> {
     const signature = JSON.stringify(body);
     if (signature === lastSignature.current) {
       setSaveState("saved");
-      return;
+      return true;
     }
-    if (saving.current) {
-      pendingBody.current = body;
-      return;
+    if (savePromise.current) {
+      if (signature !== activeBody.current) pendingBody.current = body;
+      return savePromise.current;
     }
-    saving.current = true;
-    let nextBody: Record<string, unknown> | null = body;
-    while (nextBody) {
-      const bodyToSave = nextBody;
-      try {
-        if (!navigator.onLine) {
-          await queueAssetWrite(
-            localDraftKey.current,
-            assetIdRef.current,
-            bodyToSave,
-          );
-          setSaveState("queued");
-          nextBody = pendingBody.current;
-          pendingBody.current = null;
-          continue;
-        }
-        setSaveState("saving");
-        const currentAssetId = assetIdRef.current;
-        const saved = currentAssetId
-          ? await patchAsset(currentAssetId, bodyToSave)
-          : await createAsset(bodyToSave as AssetDraft);
-        assetIdRef.current = saved.id;
-        setAssetId(saved.id);
-        setSavedAsset(saved);
-        lastSignature.current = JSON.stringify(bodyToSave);
-        setSaveState("saved");
-        setSaveError("");
-        nextBody = pendingBody.current;
-        pendingBody.current = null;
-      } catch (error) {
-        if (typeof navigator !== "undefined" && !navigator.onLine) {
-          try {
+    const task = (async () => {
+      saving.current = true;
+      activeBody.current = signature;
+      let nextBody: Record<string, unknown> | null = body;
+      let latestSucceeded = true;
+      while (nextBody) {
+        const bodyToSave = nextBody;
+        activeBody.current = JSON.stringify(bodyToSave);
+        let succeeded = false;
+        try {
+          if (typeof navigator !== "undefined" && !navigator.onLine) {
             await queueAssetWrite(
               localDraftKey.current,
               assetIdRef.current,
               bodyToSave,
             );
             setSaveState("queued");
+            queuedWrite.current = true;
+            succeeded = true;
+          } else {
+            setSaveState("saving");
+            const currentAssetId = assetIdRef.current;
+            const saved = currentAssetId
+              ? await patchAsset(currentAssetId, bodyToSave)
+              : await createAsset(bodyToSave as AssetDraft);
+            assetIdRef.current = saved.id;
+            setSavedAsset(saved);
+            savedAssetRef.current = saved;
+            lastSignature.current = JSON.stringify(bodyToSave);
+            setSaveState("saved");
             setSaveError("");
-          } catch {
-            setSaveState("error");
-            setSaveError(
-              "Offline storage is unavailable. Keep this screen open and try again when connected.",
-            );
+            succeeded = true;
           }
-        } else if (error instanceof ApiError) {
-          const errors =
-            error.code === "rate_needed"
-              ? [
-                  {
-                    field: "rate_pct",
-                    message:
-                      "Enter the interest rate printed on your certificate",
-                    code: error.code,
-                  },
-                ]
-              : error.errors;
-          setFieldErrors(errors);
-          setSaveError(
-            errors.length
-              ? "Please check the highlighted details."
-              : error.title,
-          );
-          setSaveState("error");
-        } else {
-          setSaveError("We couldn't save this item. Please try again.");
-          setSaveState("error");
+        } catch (error) {
+          if (typeof navigator !== "undefined" && !navigator.onLine) {
+            try {
+              await queueAssetWrite(
+                localDraftKey.current,
+                assetIdRef.current,
+                bodyToSave,
+              );
+              setSaveState("queued");
+              queuedWrite.current = true;
+              setSaveError("");
+              succeeded = true;
+            } catch {
+              setSaveState("error");
+              setSaveError(
+                "Offline storage is unavailable. Keep this screen open and try again when connected.",
+              );
+            }
+          } else if (error instanceof ApiError) {
+            const errors =
+              error.code === "rate_needed"
+                ? [
+                    {
+                      field: "rate_pct",
+                      message:
+                        "Enter the interest rate printed on your certificate",
+                      code: error.code,
+                    },
+                  ]
+                : error.errors;
+            setFieldErrors(errors);
+            setSaveError(
+              errors.length
+                ? "Please check the highlighted details."
+                : error.title,
+            );
+            setSaveState("error");
+          } else {
+            setSaveError("We couldn't save this item. Please try again.");
+            setSaveState("error");
+          }
         }
+        latestSucceeded = succeeded;
         nextBody = pendingBody.current;
         pendingBody.current = null;
       }
+      saving.current = false;
+      activeBody.current = "";
+      return latestSucceeded;
+    })();
+    savePromise.current = task;
+    try {
+      return await task;
+    } finally {
+      if (savePromise.current === task) savePromise.current = null;
     }
-    saving.current = false;
   }
 
   useEffect(() => {
-    if (!changed.current) return;
+    if (!changed) return;
     const values = form.getValues();
     const errors = validateAssetValues(formFields, values);
     setClientErrors(errors);
@@ -544,7 +590,7 @@ function AssetForm({
     }
     const timer = window.setTimeout(() => void saveBody(body), 600);
     return () => window.clearTimeout(timer);
-  }, [assetType, baseDetails, fields, form, formFields, revision]);
+  }, [assetType, baseDetails, changed, fields, form, formFields, revision]);
 
   useEffect(() => {
     function handleReplay(event: Event) {
@@ -554,9 +600,10 @@ function AssetForm({
       }>;
       if (savedEvent.detail.draftKey !== localDraftKey.current) return;
       assetIdRef.current = savedEvent.detail.asset.id;
-      setAssetId(savedEvent.detail.asset.id);
       setSavedAsset(savedEvent.detail.asset);
+      savedAssetRef.current = savedEvent.detail.asset;
       setSaveState("saved");
+      queuedWrite.current = false;
       lastSignature.current = JSON.stringify(savedEvent.detail.asset.details);
     }
     window.addEventListener("wealth:offline-asset-saved", handleReplay);
@@ -564,7 +611,7 @@ function AssetForm({
       window.removeEventListener("wealth:offline-asset-saved", handleReplay);
   }, []);
 
-  function saveNow() {
+  async function persistCurrent(): Promise<boolean> {
     const values = form.getValues();
     const errors = validateAssetValues(formFields, values);
     setClientErrors(errors);
@@ -576,10 +623,10 @@ function AssetForm({
         moreDetailsRef.current.open = true;
       setSaveError("Please check the highlighted details.");
       setSaveState("error");
-      return;
+      return false;
     }
     try {
-      void saveBody(
+      const saved = await saveBody(
         serializeAssetValues(
           assetType,
           fields,
@@ -587,21 +634,42 @@ function AssetForm({
           baseDetails,
         ),
       );
+      return saved;
     } catch {
       setSaveError("Enter a valid amount before saving.");
       setSaveState("error");
+      return false;
     }
   }
 
-  function goNext() {
+  function goNext(queued = false) {
     const nextIndex = (workflow?.index ?? -1) + 1;
     const category = workflow?.categories[nextIndex];
     if (workflow && category) {
       navigate(addPathForCategory(category), {
-        state: { workflow: { ...workflow, index: nextIndex } },
+        state: {
+          workflow: { ...workflow, index: nextIndex },
+          saveQueued: queued,
+        },
       });
     } else {
-      navigate("/money");
+      navigate("/money", { state: { saveQueued: queued } });
+    }
+  }
+
+  async function saveAndLeave() {
+    const saved = await persistCurrent();
+    if (!saved) return;
+    const queued = queuedWrite.current;
+    if (onReturn) {
+      onReturn(
+        queued,
+        queued ? undefined : (savedAssetRef.current ?? undefined),
+      );
+    } else if (workflow) {
+      goNext(queued);
+    } else {
+      navigate("/money", { state: { saveQueued: queued } });
     }
   }
 
@@ -862,8 +930,15 @@ function AssetForm({
   const requiredFields = formFields.filter(
     (field) => field.required && field.kind !== "hidden",
   );
+  const memberField = formFields.find((field) => field.name === "member_id");
+  const multipleAdults =
+    members.filter((member) => member.relationship !== "child").length > 1;
+  const showMemberField = assetType === "fd" && multipleAdults && memberField;
   const optionalFields = formFields.filter(
-    (field) => !field.required && field.kind !== "hidden",
+    (field) =>
+      !field.required &&
+      field.kind !== "hidden" &&
+      !(showMemberField && field.name === "member_id"),
   );
   const optionalFieldHasError = optionalFields.some(
     (field) =>
@@ -890,6 +965,7 @@ function AssetForm({
       : typeof savedAsset?.details.maturity === "string"
         ? savedAsset.details.maturity
         : undefined;
+  const readableDate = readableMaturityDate(maturityDate);
   const isPriceNeeded = savedAsset?.valuation_status === "price_needed";
   const selectedMember = members.find(
     (member) => member.id === String(watched.member_id ?? activeMemberId ?? ""),
@@ -916,7 +992,7 @@ function AssetForm({
       : saveState === "saved"
         ? "Saved"
         : saveState === "queued"
-          ? "Saved on this device · waiting for connection"
+          ? englishCopy.money_ui.saved_offline
           : saveState === "error"
             ? "Couldn't save"
             : "Changes save automatically";
@@ -944,7 +1020,7 @@ function AssetForm({
               Where do I find this?
             </Link>
           </div>
-          {workflow ? (
+          {workflow && workflow.categories.length > 1 ? (
             <span className="rounded-full bg-muted px-3 py-2 text-sm tabular-nums">
               {workflow.index + 1} of {workflow.categories.length}
             </span>
@@ -956,9 +1032,27 @@ function AssetForm({
             className="grid gap-4 disabled:opacity-70"
           >
             <div className="grid gap-5">
-              {requiredFields.map((field) => renderField(field, true))}
+              {showMemberField ? renderField(memberField, false) : null}
             </div>
-            {eligibility ? (
+            {assetType === "fd" && (showMemberField || eligibility) ? (
+              <section
+                className="grid gap-1 rounded-xl border border-line bg-muted/40 p-3 text-sm"
+                aria-label={englishCopy.household_ui.adding_new_money}
+              >
+                <p className="font-medium">
+                  {englishCopy.household_ui.adding_new_money}
+                </p>
+                {planMember?.eligibility_status?.[eligibilityKey ?? ""] ===
+                "not_allowed" ? (
+                  <>
+                    <p>{englishCopy.household_ui.existing_record_note}</p>
+                    {eligibility ? <p>{eligibility}</p> : null}
+                  </>
+                ) : eligibility ? (
+                  <p>{eligibility}</p>
+                ) : null}
+              </section>
+            ) : eligibility ? (
               <section
                 className="grid gap-1 rounded-xl border border-line bg-muted/40 p-3 text-sm"
                 aria-label={eligibilityTitle}
@@ -973,6 +1067,9 @@ function AssetForm({
                 ) : null}
               </section>
             ) : null}
+            <div className="grid gap-5">
+              {requiredFields.map((field) => renderField(field, true))}
+            </div>
             {optionalFields.length ? (
               <details
                 ref={moreDetailsRef}
@@ -987,37 +1084,11 @@ function AssetForm({
                 </div>
               </details>
             ) : null}
-            <div className="grid gap-2 sm:grid-cols-2">
-              <Button type="button" onClick={saveNow}>
-                {saveState === "saved" ? (
-                  <>
-                    <Check aria-hidden="true" className="size-4" /> Save now
-                  </>
-                ) : (
-                  "Save now"
-                )}
-              </Button>
-              {workflow ? (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={!savedAsset || saveState === "saving"}
-                  onClick={goNext}
-                >
-                  {workflow.index + 1 < workflow.categories.length
-                    ? "Continue to next item"
-                    : "Finish Money Map setup"}
-                </Button>
-              ) : assetId ? (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => navigate(`/money/asset/${assetId}`)}
-                >
-                  View asset
-                </Button>
-              ) : null}
-            </div>
+            <Button type="button" onClick={() => void saveAndLeave()}>
+              {workflow && workflow.index + 1 < workflow.categories.length
+                ? englishCopy.money_ui.save_continue
+                : englishCopy.money_ui.save_return}
+            </Button>
           </fieldset>
         </div>
         {readOnly ? (
@@ -1056,7 +1127,8 @@ function AssetForm({
             ) : null}
             {maturityDate ? (
               <p className="text-muted-foreground">
-                Matures {maturityDate}. We'll remind you 30 days before.
+                {englishCopy.money_ui.asset_maturity_date}{" "}
+                <strong>{readableDate}</strong>
               </p>
             ) : null}
             {savedAsset.valuation_note ? (
@@ -1145,6 +1217,9 @@ export function AddAssetPage() {
         missingFields={state?.missing}
         selectedMemberId={memberId}
         workflow={workflow}
+        saveQueued={Boolean(
+          (location.state as { saveQueued?: boolean } | null)?.saveQueued,
+        )}
       />
     </div>
   );
@@ -1153,11 +1228,14 @@ export function AddAssetPage() {
 export function AssetDetailPage() {
   const { id = "" } = useParams();
   const navigate = useNavigate();
+  const household = useHousehold();
   const [asset, setAsset] = useState<AssetDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [confirmClose, setConfirmClose] = useState(false);
   const [closing, setClosing] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [queuedStatus, setQueuedStatus] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -1206,76 +1284,194 @@ export function AssetDetailPage() {
       </Card>
     );
 
+  const details = asset.details;
+  const valuation = asset.valuation as Record<string, unknown> | null;
+  const valueToday =
+    typeof valuation?.value_today === "string"
+      ? valuation.value_today
+      : asset.value_cached;
+  const maturityValue =
+    typeof valuation?.maturity_value === "string"
+      ? valuation.maturity_value
+      : undefined;
+  const maturityDate = readableMaturityDate(
+    typeof valuation?.maturity_date === "string"
+      ? valuation.maturity_date
+      : typeof details.maturity === "string"
+        ? details.maturity
+        : undefined,
+  );
+  const bankOrInstitution = [
+    details.bank,
+    details.institution,
+    details.insurer,
+    details.held_at,
+    details.issuer,
+  ].find(
+    (value): value is string => typeof value === "string" && value.length > 0,
+  );
+  const owner = household.members.find(
+    (member) => member.id === asset.member_id,
+  );
+  const ownerName = owner ? household.memberLabel(owner) : "";
+
   return (
     <div className="grid gap-4">
-      <AssetForm
-        key={asset.id}
-        assetType={asset.asset_type as AssetType}
-        initialAsset={asset}
-      />
-      <Card className="grid gap-3">
-        <h2 className="text-base font-semibold">Edit history</h2>
-        {asset.history.length ? (
-          asset.history.map((entry) => (
-            <div key={entry.id} className="border-t border-line pt-3 text-sm">
-              <p className="font-medium">
-                {new Intl.DateTimeFormat("en-IN", {
-                  day: "numeric",
-                  month: "short",
-                  year: "numeric",
-                }).format(new Date(entry.changed_at))}
-              </p>
-              <p className="mt-1 text-muted-foreground">
-                Changed{" "}
-                {Object.keys(entry.changed_fields)
-                  .map((field) => field.replaceAll("_", " "))
-                  .join(", ") || "details"}
-              </p>
-            </div>
-          ))
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            No edits have been recorded yet.
-          </p>
-        )}
-        {error ? (
-          <p className="text-sm text-danger-foreground" role="alert">
-            {error}
-          </p>
-        ) : null}
-        {confirmClose ? (
-          <div className="grid gap-2 rounded-xl border border-danger/40 bg-danger-soft p-3">
-            <p className="text-sm">
-              Close this asset? It will leave your active Money Map but remain
-              in its history.
+      {!editing ? (
+        <Card className="grid gap-4">
+          <h2 className="text-xl font-semibold">
+            {assetTitles[asset.asset_type as AssetType]}
+          </h2>
+          <dl className="grid grid-cols-2 gap-4 text-sm">
+            {valueToday ? (
+              <div>
+                <dt className="text-muted-foreground">
+                  {englishCopy.money_ui.asset_value_today}
+                </dt>
+                <dd className="mt-1 font-semibold">
+                  {formatInr(valueToday, "full")}
+                </dd>
+              </div>
+            ) : null}
+            {maturityValue ? (
+              <div>
+                <dt className="text-muted-foreground">
+                  {englishCopy.money_ui.asset_maturity_value}
+                </dt>
+                <dd className="mt-1 font-semibold">
+                  {formatInr(maturityValue, "full")}
+                </dd>
+              </div>
+            ) : null}
+            {maturityDate ? (
+              <div>
+                <dt className="text-muted-foreground">
+                  {englishCopy.money_ui.asset_maturity_date}
+                </dt>
+                <dd className="mt-1">{maturityDate}</dd>
+              </div>
+            ) : null}
+            {bankOrInstitution ? (
+              <div>
+                <dt className="text-muted-foreground">
+                  {englishCopy.money_ui.asset_bank}
+                </dt>
+                <dd className="mt-1">{bankOrInstitution}</dd>
+              </div>
+            ) : null}
+            {ownerName ? (
+              <div>
+                <dt className="text-muted-foreground">
+                  {englishCopy.money_ui.asset_owner}
+                </dt>
+                <dd className="mt-1">{ownerName}</dd>
+              </div>
+            ) : null}
+          </dl>
+          {queuedStatus ? (
+            <p role="status" className="text-sm text-muted-foreground">
+              {englishCopy.money_ui.saved_offline}
             </p>
-            <div className="grid grid-cols-2 gap-2">
-              <Button
-                type="button"
-                variant="danger"
-                loading={closing}
-                onClick={() => void closeCurrentAsset()}
-              >
-                Close asset
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => setConfirmClose(false)}
-              >
-                Keep it
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <Button
-            type="button"
-            variant="danger"
-            onClick={() => setConfirmClose(true)}
-          >
-            Close this asset
+          ) : null}
+          <Button type="button" onClick={() => setEditing(true)}>
+            {englishCopy.money_ui.edit_details}
           </Button>
-        )}
+        </Card>
+      ) : (
+        <AssetForm
+          key={asset.id}
+          assetType={asset.asset_type as AssetType}
+          initialAsset={asset}
+          saveQueued={queuedStatus}
+          onReturn={(queued, saved) => {
+            if (saved) {
+              setAsset((current) =>
+                current
+                  ? ({
+                      ...current,
+                      ...saved,
+                      history: current.history,
+                    } as AssetDetailResponse)
+                  : current,
+              );
+            }
+            setQueuedStatus(queued);
+            setEditing(false);
+          }}
+        />
+      )}
+      <Card className="grid gap-3">
+        <details>
+          <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-2 text-sm font-medium">
+            <span>{englishCopy.money_ui.edit_history}</span>
+            <ChevronDown aria-hidden="true" className="size-4" />
+          </summary>
+          <div className="grid gap-3 border-t border-line pt-3">
+            {asset.history.length ? (
+              asset.history.map((entry) => (
+                <div
+                  key={entry.id}
+                  className="border-t border-line pt-3 text-sm"
+                >
+                  <p className="font-medium">
+                    {new Intl.DateTimeFormat("en-IN", {
+                      day: "numeric",
+                      month: "short",
+                      year: "numeric",
+                    }).format(new Date(entry.changed_at))}
+                  </p>
+                  <p className="mt-1 text-muted-foreground">
+                    Changed{" "}
+                    {Object.keys(entry.changed_fields)
+                      .map((field) => field.replaceAll("_", " "))
+                      .join(", ") || "details"}
+                  </p>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                No edits have been recorded yet.
+              </p>
+            )}
+            {error ? (
+              <p className="text-sm text-danger-foreground" role="alert">
+                {error}
+              </p>
+            ) : null}
+            {confirmClose ? (
+              <div className="grid gap-2 rounded-xl border border-danger/40 bg-danger-soft p-3">
+                <p className="text-sm">
+                  {englishCopy.money_ui.close_item_message}
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    variant="danger"
+                    loading={closing}
+                    onClick={() => void closeCurrentAsset()}
+                  >
+                    {englishCopy.money_ui.mark_closed}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setConfirmClose(false)}
+                  >
+                    {englishCopy.money_ui.keep_item}
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setConfirmClose(true)}
+              >
+                {englishCopy.money_ui.mark_closed}
+              </Button>
+            )}
+          </div>
+        </details>
       </Card>
     </div>
   );

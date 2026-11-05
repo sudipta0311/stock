@@ -16,6 +16,13 @@ describe("quantityLabel", () => {
     expect(quantityLabel("0.999", "mf")).toBe("0.999 units");
   });
 
+  it("uses a singular unit for one holding", () => {
+    expect(quantityLabel("1.00", "mf")).toBe("1 unit");
+    expect(quantityLabel("1.000000", "equity")).toBe("1 share");
+    expect(quantityLabel("2.000000", "equity")).toBe("2 shares");
+    expect(quantityLabel("2.5", "equity")).toBe("2.5 shares");
+  });
+
   it("keeps the exact holding quantity for details", () => {
     expect(exactQuantity("0.423700")).toBe("0.4237");
     expect(exactQuantity("82.000")).toBe("82");

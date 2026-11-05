@@ -280,7 +280,7 @@ describe("family plan screens", () => {
     expect(within(freshOwnerCard).getByText(/₹10,000/)).toBeInTheDocument();
     expect(freshOwnerCard).not.toHaveTextContent("For you");
     await user.click(
-      within(freshOwnerCard).getByRole("button", { name: "How to" }),
+      within(freshOwnerCard).getByRole("button", { name: "Show steps" }),
     );
     const howTo = await screen.findByRole("dialog", {
       name: "How to take this step",

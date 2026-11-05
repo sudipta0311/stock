@@ -47,16 +47,16 @@ test("required screens have no serious or critical accessibility violations", as
   await scan("Login");
   await signIn(page, makeIdentity("axe"));
   await scan("Onboarding welcome");
-  await page.getByRole("button", { name: "Set up my Money Map" }).click();
+  await page.getByRole("button", { name: "Get started" }).click();
   await scan("Onboarding household");
   await page.getByRole("button", { name: /^Just me/ }).click();
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Your plan is ready" }),
+    page.getByRole("heading", { name: "You're ready to start" }),
   ).toBeVisible();
   await scan("Onboarding done");
-  await page.getByRole("button", { name: "View your plan" }).click();
-  await expect(page).toHaveURL(/\/plan$/);
+  await page.getByRole("button", { name: "Explore the app" }).click();
+  await expect(page).toHaveURL(/\/$/);
 
   await gotoApp(page, "/onboarding/goals");
   await expect(
@@ -76,7 +76,7 @@ test("required screens have no serious or critical accessibility violations", as
 
   await gotoApp(page, "/money");
   await scan("Money");
-  await page.getByText("What else do you have?", { exact: true }).click();
+  await page.getByText("Add manually", { exact: true }).click();
   const fixedDeposits = page.getByRole("button", {
     name: "Fixed deposits",
     exact: true,

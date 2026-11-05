@@ -338,7 +338,7 @@ describe("household screens", () => {
     expect(screen.queryByText("clubbing_check")).not.toBeInTheDocument();
 
     const howToButtons = await screen.findAllByRole("button", {
-      name: "How to",
+      name: "Show steps",
     });
     await user.click(howToButtons[0]!);
     const askDialog = screen.getByRole("dialog", {
@@ -353,7 +353,7 @@ describe("household screens", () => {
     ).toBeInTheDocument();
     await user.click(within(askDialog).getByRole("button", { name: "Close" }));
 
-    await user.click(screen.getAllByRole("button", { name: "How to" })[1]!);
+    await user.click(screen.getAllByRole("button", { name: "Show steps" })[1]!);
     const ordinaryDialog = screen.getByRole("dialog", {
       name: "How to take this step",
     });

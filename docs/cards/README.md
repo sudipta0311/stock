@@ -70,6 +70,8 @@ Status: ⬜ not started · 🟦 in progress · ✅ accepted · 🔁 rework · �
 | C48 | Broker files that just work: Indian brokers in the picker with INR defaults, UTF-16/HTML-xls/xls files, Danish and Indian column words, market from the ISIN, auto-mapping with "Fix columns" | 3.3 | ✅ |
 | C49 | Keep, add more or sell: weekly stock checks stored by the research job feed the exit engine; verdicts on Money and the Holding page, add-more candidates in the stock step, at most one sell step a week | 4.9, 4.8 | ✅ |
 | C50 | Shares from Denmark go in the share savings account when it has room after the ETFs (never split), the eligible markets are rule data, the account's cap and tax rate are per-year rules with a safe fallback and a health warning, and S&P 500 shares get their ISIN from the CUSIP (without clashing with imported shares) so Denmark US picks can appear | 4.8 | ✅ |
+| C51 | UI review (report only, gpt-6-astra): 28 phone screenshots and the PWA source checked against the five family jobs; ranked top 10, screen-by-screen notes and two implementation cards in `docs/reviews/C51-ui-review.md` | 8 | ✅ |
+| C52 | Clear weekly steps and one way to add holdings: sell steps name the share and say how to sell, one "Add holdings" sheet (upload first) from Money, Home, Plan, onboarding and Inbox, deposits save with one button and open on a summary, first use leads to adding holdings, a typed goal is saved | 8 | ✅ |
 
 ## Follow-ups and review outcomes
 

@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 import type { ImportJob } from "./api";
 import { Badge, Card } from "../ui";
+import * as englishCopy from "../copy/sections/index";
 
 function sourceName(source: string | null): string {
   if (source === "nsdl") return "NSDL fund statement";
@@ -24,7 +25,7 @@ export function ImportHistorySheet({ jobs }: { jobs: readonly ImportJob[] }) {
   return (
     <details className="rounded-xl border border-line px-3">
       <summary className="min-h-12 cursor-pointer py-3 text-sm font-semibold">
-        Imports
+        {englishCopy.household_ui.previous_uploads}
       </summary>
       {jobs.length ? (
         <ul className="grid gap-2 pb-3">

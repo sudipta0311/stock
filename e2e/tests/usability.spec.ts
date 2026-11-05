@@ -36,8 +36,10 @@ test("five narrow-screen tasks meet their timing and visibility targets", async 
 
   await signIn(page, makeIdentity("usability-cas"));
   await completeMinimalOnboarding(page);
-  await gotoApp(page, "/import");
+  await gotoApp(page, "/money");
   startedAt = Date.now();
+  await page.getByRole("button", { name: "Add holdings" }).click();
+  await page.getByRole("link", { name: "Upload a file" }).click();
   await uploadSyntheticCas(page);
   tasks.push({
     task: "Reach statement review",
@@ -77,7 +79,7 @@ test("five narrow-screen tasks meet their timing and visibility targets", async 
     page.getByRole("heading", { name: "Your money, in one clear place" }),
   ).toBeVisible();
   startedAt = Date.now();
-  await page.getByRole("button", { name: "Set up my Money Map" }).click();
+  await page.getByRole("button", { name: "Get started" }).click();
   await page.getByRole("button", { name: /^Me and my spouse/ }).click();
   const residences = page.getByLabel("Tax residence");
   await residences.nth(0).selectOption("NRI");
@@ -85,7 +87,18 @@ test("five narrow-screen tasks meet their timing and visibility targets", async 
   await expect(residences.nth(1)).toHaveValue("RI");
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Your plan is ready" }),
+    page.getByRole("heading", { name: "You're ready to start" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Add holdings" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Explore the app" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Add holdings" }).click();
+  await expect(page).toHaveURL(/\/money$/);
+  await expect(
+    page.getByRole("dialog", { name: "Add holdings" }),
   ).toBeVisible();
   tasks.push({
     task: "Add spouse and set tax residence",
