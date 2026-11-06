@@ -26,7 +26,7 @@ import type {
   LoanListResponse,
 } from "../money/api";
 import type { WeeklyPlan } from "../planning/api";
-import { Card, EmptyState, Progress, Term } from "../ui";
+import { buttonClassName, Card, EmptyState, Progress, Term } from "../ui";
 import { useHousehold } from "../household/HouseholdContext";
 import { formatHouseholdAmount } from "../household/currency";
 import {
@@ -228,7 +228,7 @@ function PlacementNotesCard({ plan }: { plan: WeeklyPlan }) {
   if (!notes.length) return null;
   return (
     <Card className="grid gap-3">
-      <h2 className="text-base font-semibold">
+      <h2 className="text-card-title font-semibold">
         {englishCopy.household_ui.placement_title}
       </h2>
       <details>
@@ -311,7 +311,7 @@ function MemberHoldingsCard({
   return (
     <Card className="grid gap-3">
       <div>
-        <h2 className="text-base font-semibold">
+        <h2 className="text-card-title font-semibold">
           {englishCopy.household_ui.holds_title}
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -391,7 +391,7 @@ function SelectedMemberCard({
   return (
     <Card className="grid gap-3">
       <div>
-        <h2 className="text-base font-semibold">{name}</h2>
+        <h2 className="text-card-title font-semibold">{name}</h2>
         <p className="mt-1 text-sm text-muted-foreground">
           {englishCopy.household_ui.selected_member_plan.replace(
             "{name}",
@@ -530,7 +530,7 @@ function AllocationCard({
           <Link
             to="/money?add=1"
             data-primary="true"
-            className="motion-safe:active:scale-[.98] inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground transition"
+            className={buttonClassName()}
           >
             {englishCopy.money_ui.add_update}
           </Link>
@@ -550,7 +550,9 @@ function AllocationCard({
   return (
     <Card className="grid gap-3">
       <div>
-        <h2 className="text-base font-semibold">Your money vs your plan</h2>
+        <h2 className="text-card-title font-semibold">
+          Your money vs your plan
+        </h2>
         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
           <Term
             explanation="Your money mix compares each kind of holding with its target."
@@ -668,7 +670,9 @@ function FoundationCard({ plan }: { plan: WeeklyPlan }) {
   const items = foundationMap(plan);
   return (
     <Card className="grid gap-3">
-      <h2 className="text-base font-semibold">Your financial foundation</h2>
+      <h2 className="text-card-title font-semibold">
+        Your financial foundation
+      </h2>
       {FOUNDATION.map(([key, label]) => {
         const item = items.get(key) ?? {};
         const status = textValue(item.status, "unknown");
@@ -720,7 +724,7 @@ function GlobalCard({ plan }: { plan: WeeklyPlan }) {
   return (
     <Card className="grid gap-3">
       <div>
-        <h2 className="text-base font-semibold">
+        <h2 className="text-card-title font-semibold">
           {englishCopy.household_ui.abroad_shares}
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -784,7 +788,7 @@ function DebtAnswerCard({
 }) {
   return (
     <Card className="grid gap-2">
-      <h2 className="text-base font-semibold">
+      <h2 className="text-card-title font-semibold">
         <Term
           explanation="Savings meant for near-term needs and steady access."
           prompt="What's this?"
@@ -835,7 +839,7 @@ function SafeMoneyDetails({ plan }: { plan: WeeklyPlan }) {
   const timePeriod = textValue(debtPick.tenure ?? debtPick.tenure_years);
   return (
     <Card className="grid gap-3">
-      <h2 className="text-base font-semibold">Safe money details</h2>
+      <h2 className="text-card-title font-semibold">Safe money details</h2>
       <dl className="grid grid-cols-2 gap-3 text-sm">
         <div>
           <dt className="text-muted-foreground">Current amount</dt>
@@ -910,7 +914,9 @@ function InsuranceCard({ assets }: { assets: AssetResponse[] }) {
   );
   return (
     <Card className="grid gap-3">
-      <h2 className="text-base font-semibold">Your LIC / insurance policies</h2>
+      <h2 className="text-card-title font-semibold">
+        Your LIC / insurance policies
+      </h2>
       {policies.length ? (
         policies.map((policy) => {
           const details = policyDetails(policy);
@@ -999,7 +1005,7 @@ function InsuranceCard({ assets }: { assets: AssetResponse[] }) {
 function GoalsCard({ goals }: { goals: GoalResponse[] }) {
   return (
     <Card className="grid gap-3">
-      <h2 className="text-base font-semibold">Your goals</h2>
+      <h2 className="text-card-title font-semibold">Your goals</h2>
       {goals.length ? (
         goals.map((goal) => {
           const extra = asRecord(goal);
@@ -1168,7 +1174,7 @@ export function PlanPage() {
                   : "/money"
             }
             data-primary="true"
-            className="motion-safe:active:scale-[.98] inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground transition"
+            className={buttonClassName()}
           >
             {gap?.row.key === "debt"
               ? englishCopy.money_ui.add_update

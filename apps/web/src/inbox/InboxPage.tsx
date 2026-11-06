@@ -11,7 +11,7 @@ import {
   ScreenError,
   ScreenLoading,
 } from "../features/api";
-import { Badge, Card, EmptyState } from "../ui";
+import { Badge, buttonClassName, Card, EmptyState } from "../ui";
 import * as englishCopy from "../copy/sections/index";
 
 interface InboxEntry {
@@ -126,7 +126,7 @@ export function InboxPage({
             <Link
               to="/settings?section=notifications"
               data-primary="true"
-              className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground"
+              className={buttonClassName()}
             >
               {englishCopy.inbox.email_settings}
             </Link>
@@ -154,7 +154,7 @@ function InboxGroup({
 }) {
   return (
     <Card className="grid gap-3">
-      <h2 className="text-base font-semibold">{title}</h2>
+      <h2 className="text-card-title font-semibold">{title}</h2>
       {items.length ? (
         items.map((entry, index) => {
           const subject = textValue(entry.subject ?? entry.title, title);

@@ -16,6 +16,20 @@ function classes(...names: Array<string | false | undefined>): string {
 
 type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 
+const buttonStyles: Record<ButtonVariant, string> = {
+  primary: "bg-brand text-brand-foreground hover:bg-brand-strong",
+  secondary: "border border-line bg-surface text-foreground hover:bg-muted",
+  ghost: "bg-transparent text-foreground hover:bg-muted",
+  danger: "bg-danger text-danger-on-fill hover:opacity-90",
+};
+
+export function buttonClassName(variant: ButtonVariant = "primary"): string {
+  return classes(
+    "motion-safe:active:scale-[.98] inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-4 py-3 text-base font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60",
+    buttonStyles[variant],
+  );
+}
+
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
   loading?: boolean;
@@ -29,19 +43,9 @@ export function Button({
   children,
   ...props
 }: ButtonProps) {
-  const styles: Record<ButtonVariant, string> = {
-    primary: "bg-brand text-brand-foreground hover:bg-brand-strong",
-    secondary: "border border-line bg-surface text-foreground hover:bg-muted",
-    ghost: "bg-transparent text-foreground hover:bg-muted",
-    danger: "bg-danger text-danger-on-fill hover:opacity-90",
-  };
   return (
     <button
-      className={classes(
-        "motion-safe:active:scale-[.98] inline-flex min-h-12 items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:cursor-not-allowed disabled:opacity-60",
-        styles[variant],
-        className,
-      )}
+      className={classes(buttonClassName(variant), className)}
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       {...props}

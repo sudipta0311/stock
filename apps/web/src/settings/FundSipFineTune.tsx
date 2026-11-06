@@ -96,7 +96,10 @@ export function FundSipFineTune() {
   return (
     <Card className="grid gap-3">
       <div>
-        <h2 id="fund-sip-settings-heading" className="text-base font-semibold">
+        <h2
+          id="fund-sip-settings-heading"
+          className="text-card-title font-semibold"
+        >
           {englishCopy.fund_check.settings_title}
         </h2>
         <p className="mt-1 text-base text-muted-foreground">
@@ -129,7 +132,7 @@ export function FundSipFineTune() {
                       ₹
                     </span>
                     <input
-                      className="min-h-12 w-40 rounded-lg border border-line bg-background pl-9 pr-3 text-sm tabular-nums"
+                      className="min-h-12 w-40 rounded-lg border border-line bg-background pl-9 pr-3 text-base tabular-nums"
                       id={`fund-sip-${row.securityId}`}
                       inputMode="decimal"
                       min="0"

@@ -1,6 +1,6 @@
 import { Link } from "react-router";
 import type { ImportJob } from "./api";
-import { Badge, Card } from "../ui";
+import { Badge, buttonClassName, Card } from "../ui";
 import * as englishCopy from "../copy/sections/index";
 
 function sourceName(source: string | null): string {
@@ -63,10 +63,7 @@ export function ImportHistorySheet({ jobs }: { jobs: readonly ImportJob[] }) {
           <p className="text-sm text-muted-foreground">
             Upload a statement to see its review here.
           </p>
-          <Link
-            to="/import"
-            className="inline-flex min-h-12 items-center justify-center rounded-xl border border-line px-4 py-3 text-sm font-semibold"
-          >
+          <Link to="/import" className={buttonClassName("secondary")}>
             Upload a statement
           </Link>
         </Card>

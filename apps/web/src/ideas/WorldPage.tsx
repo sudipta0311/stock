@@ -64,7 +64,7 @@ function StressList({ stress }: { stress: Record<string, unknown> }) {
             key={key}
             className="grid gap-1 border-t border-line pt-3 first:border-0 first:pt-0"
           >
-            <h3 className="text-sm font-semibold">
+            <h3 className="text-base font-semibold">
               {formatScenarioLabel(key)}
             </h3>
             <p className="text-sm">
@@ -98,7 +98,7 @@ function TiltNotes({ plan }: { plan: WeeklyPlan | undefined }) {
   if (!changed && !why && sources.length === 0) return null;
   return (
     <Card className="grid gap-2">
-      <h2 className="text-base font-semibold">What we changed and why</h2>
+      <h2 className="text-card-title font-semibold">What we changed and why</h2>
       {changed ? <p className="text-sm">{changed}</p> : null}
       {why ? <p className="text-sm text-muted-foreground">{why}</p> : null}
       {sources.map((source) => {
@@ -150,7 +150,7 @@ export function WorldPage() {
         </p>
       </header>
       <Card className="grid gap-3">
-        <h2 className="text-base font-semibold">If this happens…</h2>
+        <h2 className="text-card-title font-semibold">If this happens…</h2>
         <StressList stress={stressData} />
       </Card>
       <TiltNotes plan={plan.data as WeeklyPlan | undefined} />

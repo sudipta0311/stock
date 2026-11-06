@@ -4,7 +4,7 @@ import { CheckCircle2, FileUp, LoaderCircle, X } from "lucide-react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { ApiError } from "../api/client";
 import { formatInr } from "../lib/money";
-import { Badge, Button, Card, Sheet } from "../ui";
+import { Badge, Button, buttonClassName, Card, Sheet } from "../ui";
 import { useHousehold } from "../household/HouseholdContext";
 import { listAccounts } from "../money/api";
 import type { AccountResponse } from "../money/api";
@@ -351,7 +351,7 @@ export function ImportPage() {
                     setFile(null);
                     setProblem(null);
                   }}
-                  className="flex min-h-11 w-full items-center justify-between gap-3 text-left text-sm font-semibold focus-visible:outline-2 focus-visible:outline-brand disabled:cursor-not-allowed"
+                  className="flex min-h-11 w-full items-center justify-between gap-3 text-left text-base font-semibold focus-visible:outline-2 focus-visible:outline-brand disabled:cursor-not-allowed"
                 >
                   <span>{sourceCopy[option].title}</span>
                   {disabled ? <Badge>Coming soon</Badge> : null}
@@ -1054,10 +1054,7 @@ export function ImportReviewPage() {
             )}
           </p>
         ) : null}
-        <Link
-          to="/money"
-          className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 text-sm font-semibold text-brand-foreground"
-        >
+        <Link to="/money" className={buttonClassName()}>
           Go to Money
         </Link>
       </Card>
@@ -1070,10 +1067,7 @@ export function ImportReviewPage() {
       <Card className="grid gap-2" role="alert">
         <h2 className="font-semibold">{copy.message}</h2>
         <p className="text-sm text-muted-foreground">{copy.nextStep}</p>
-        <Link
-          to="/import"
-          className="mt-2 inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 text-sm font-semibold text-brand-foreground"
-        >
+        <Link to="/import" className={`${buttonClassName()} mt-2`}>
           Try another statement
         </Link>
       </Card>

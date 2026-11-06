@@ -13,6 +13,7 @@ import type { LoanEventWrite, PrepayPreviewResponse } from "./api";
 import { Button, Card, Field, Progress, Select, Sheet, Term } from "../ui";
 import { formatInr } from "../lib/money";
 import { formatDkk } from "../household/fx";
+import * as englishCopy from "../copy/sections/index";
 
 type EventKind = LoanEventWrite["kind"];
 
@@ -185,7 +186,8 @@ export function LoanDetailPage() {
           to="/money"
           className="inline-flex min-h-12 items-center gap-2 text-sm text-muted-foreground"
         >
-          <ArrowLeft aria-hidden="true" className="size-4" /> Your Money Map
+          <ArrowLeft aria-hidden="true" className="size-4" />
+          {englishCopy.holding_review.back_to_money}
         </Link>
         <header>
           <h2 className="text-xl font-semibold">{item.name}</h2>
@@ -266,7 +268,7 @@ export function LoanDetailPage() {
       </Card>
 
       <Card className="grid gap-3">
-        <h3 className="text-base font-semibold">Recorded updates</h3>
+        <h3 className="text-card-title font-semibold">Recorded updates</h3>
         {item.events.length ? (
           item.events.map((event) => (
             <div

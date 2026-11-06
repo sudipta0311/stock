@@ -183,7 +183,7 @@ export function MemberDetailsEditor({
         <Button
           type="button"
           variant="ghost"
-          className="min-h-10 px-3 py-2"
+          className="min-h-11 px-3 py-2"
           disabled={disabled}
           onClick={() => {
             setName(member.display_name);

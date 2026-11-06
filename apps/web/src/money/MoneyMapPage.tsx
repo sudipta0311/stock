@@ -313,7 +313,9 @@ function LoansGroup({
     <Card className="grid gap-1">
       <div className="mb-1 grid gap-1">
         <div className="flex items-center justify-between gap-3">
-          <h3 className="text-sm font-semibold text-muted-foreground">Loans</h3>
+          <h3 className="text-card-title font-semibold text-muted-foreground">
+            Loans
+          </h3>
           <span className="shrink-0 text-right text-sm font-semibold tabular-nums">
             {shownAmount(summary.remaining_inr)}
           </span>
@@ -444,7 +446,7 @@ function HoldingsGroup({
     <section className="grid gap-2" aria-label={title}>
       <Card className="grid gap-2">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold">{title}</h2>
+          <h2 className="text-card-title font-semibold">{title}</h2>
           <GroupAmount
             amount={sumKnownValues(holdings.map((holding) => holding.value))}
             primaryCurrency={primaryCurrency}
@@ -853,7 +855,9 @@ function HouseholdInsights({
   return (
     <div className="grid gap-4">
       <Card className="grid gap-2">
-        <h2 className="text-base font-semibold">What your Money Map says</h2>
+        <h2 className="text-card-title font-semibold">
+          What your Money Map says
+        </h2>
         <p className="text-base text-muted-foreground">
           Including EPF, PPF and fixed deposits,{" "}
           <strong className="text-foreground">
@@ -864,7 +868,7 @@ function HouseholdInsights({
       </Card>
       <Card className="grid gap-4">
         <div>
-          <h2 className="text-base font-semibold">
+          <h2 className="text-card-title font-semibold">
             {englishCopy.household_ui.accessible_money}
           </h2>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -897,7 +901,9 @@ function HouseholdInsights({
       <Card className="grid gap-3">
         <div className="flex items-center gap-2">
           <CalendarDays aria-hidden="true" className="size-5 text-brand" />
-          <h2 className="text-base font-semibold">Coming up in 12 months</h2>
+          <h2 className="text-card-title font-semibold">
+            Coming up in 12 months
+          </h2>
         </div>
         {upcoming.length ? (
           upcoming.slice(0, 8).map((event) => (
@@ -936,7 +942,9 @@ function HouseholdInsights({
         <Card className="grid gap-3 border-warning/50">
           <div className="flex items-center gap-2">
             <Building2 aria-hidden="true" className="size-5 text-warning" />
-            <h2 className="text-base font-semibold">Waiting for a value</h2>
+            <h2 className="text-card-title font-semibold">
+              Waiting for a value
+            </h2>
           </div>
           <p className="text-sm text-muted-foreground">
             These items stay visible and are not counted as ₹0.
@@ -1434,7 +1442,7 @@ export function MoneyMapPage() {
           visibleGroups.map(([sleeve, items]) => (
             <Card key={sleeve} className="grid gap-1">
               <div className="mb-1 flex items-center justify-between gap-3">
-                <h3 className="text-sm font-semibold text-muted-foreground">
+                <h3 className="text-card-title font-semibold text-muted-foreground">
                   {sleeve}
                 </h3>
                 <GroupAmount
@@ -1551,7 +1559,7 @@ export function MoneyMapPage() {
                     aria-pressed={selected}
                     disabled={isViewer}
                     onClick={() => void toggleCategory(tile.category)}
-                    className={`min-h-16 rounded-xl border px-2 py-3 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-brand ${selected ? "border-brand bg-brand/10 text-brand" : "border-line bg-background hover:bg-muted"}`}
+                    className={`min-h-16 rounded-xl border px-2 py-3 text-base font-semibold focus-visible:outline-2 focus-visible:outline-brand ${selected ? "border-brand bg-brand/10 text-brand" : "border-line bg-background hover:bg-muted"}`}
                   >
                     {selected ? <span aria-hidden="true">✓ </span> : null}
                     {tile.shortLabel}
@@ -1613,7 +1621,7 @@ export function MoneyMapPage() {
             ) : null}
             {networth?.by_sleeve.length ? (
               <Card className="grid gap-3">
-                <h2 className="text-base font-semibold">Split by type</h2>
+                <h2 className="text-card-title font-semibold">Split by type</h2>
                 {sleeveRows(networth.by_sleeve).map((row) => (
                   <div
                     key={row.label}

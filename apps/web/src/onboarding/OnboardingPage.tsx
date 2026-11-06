@@ -291,7 +291,7 @@ function QuestionCard({
             type="button"
             aria-pressed={answer === option.id}
             onClick={() => onAnswer(option.id)}
-            className={`min-h-14 rounded-xl border px-4 py-3 text-left text-small ${answer === option.id ? "border-brand bg-brand/10 font-semibold" : "border-line bg-background hover:bg-muted"}`}
+            className={`min-h-14 rounded-xl border px-4 py-3 text-left text-base ${answer === option.id ? "border-brand bg-brand/10 font-semibold" : "border-line bg-background hover:bg-muted"}`}
           >
             {option.text}
           </button>

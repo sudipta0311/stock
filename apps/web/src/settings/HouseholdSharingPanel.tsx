@@ -192,7 +192,7 @@ export function HouseholdSharingPanel() {
   return (
     <Card className="grid gap-4">
       <div>
-        <h2 className="text-base font-semibold">
+        <h2 className="text-card-title font-semibold">
           {englishCopy.household.share_with_partner}
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -270,7 +270,7 @@ export function HouseholdSharingPanel() {
               value={
                 new URL(createdInvite.share_link, window.location.origin).href
               }
-              className="min-h-12 w-full rounded-xl border border-line bg-background px-3 text-xs"
+              className="min-h-12 w-full rounded-xl border border-line bg-background px-3 text-base"
             />
           </label>
           <div className="flex flex-wrap gap-2">
@@ -302,7 +302,7 @@ export function HouseholdSharingPanel() {
               {canManage ? (
                 <Button
                   variant="ghost"
-                  className="min-h-10 px-3 py-2"
+                  className="min-h-11 px-3 py-2"
                   loading={activeChangeId === invite.id}
                   onClick={() => void revokeInvite(invite.id)}
                 >
@@ -357,7 +357,7 @@ export function HouseholdSharingPanel() {
               {canManage ? (
                 <Button
                   variant="ghost"
-                  className="min-h-10 px-3 py-2 text-danger-foreground"
+                  className="min-h-11 px-3 py-2 text-danger-foreground"
                   loading={activeChangeId === person.user_id}
                   onClick={() => void removeAccess(person.user_id)}
                 >

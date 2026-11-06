@@ -3,7 +3,16 @@ import type { FormEvent } from "react";
 import { Link, useLocation } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown } from "lucide-react";
-import { Badge, Button, Card, Checkbox, Field, Select, Sheet } from "../ui";
+import {
+  Badge,
+  Button,
+  buttonClassName,
+  Card,
+  Checkbox,
+  Field,
+  Select,
+  Sheet,
+} from "../ui";
 import * as englishCopy from "../copy/sections/index";
 import { ApiError, apiFetch } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
@@ -707,7 +716,7 @@ export function SettingsPage() {
               <div>
                 <h2
                   id="settings-family-heading"
-                  className="text-base font-semibold"
+                  className="text-card-title font-semibold"
                 >
                   {englishCopy.household.settings.household}
                 </h2>
@@ -1261,7 +1270,7 @@ export function SettingsPage() {
             <Card className="grid gap-3">
               <h2
                 id="settings-statements-heading"
-                className="text-base font-semibold"
+                className="text-card-title font-semibold"
               >
                 Statements from Gmail
               </h2>
@@ -1269,10 +1278,7 @@ export function SettingsPage() {
                 PDFs wait in Inbox. Enter each password and review changes
                 before saving.
               </p>
-              <Link
-                to="/settings/gmail"
-                className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground"
-              >
+              <Link to="/settings/gmail" className={buttonClassName()}>
                 Get statements from Gmail
               </Link>
             </Card>
@@ -1289,7 +1295,7 @@ export function SettingsPage() {
         />
         <div className="grid gap-4 pb-3">
           <Card className="grid gap-3">
-            <h3 className="text-sm font-semibold">
+            <h3 className="text-card-title font-semibold">
               {englishCopy.household.primary_currency}
             </h3>
             <Select
@@ -1312,7 +1318,7 @@ export function SettingsPage() {
                   ref={notificationHeadingRef}
                   id="settings-notifications-heading"
                   tabIndex={-1}
-                  className="text-base font-semibold focus:outline-none"
+                  className="text-card-title font-semibold focus:outline-none"
                 >
                   {englishCopy.settings.notifications.title}
                 </h2>
@@ -1388,7 +1394,7 @@ export function SettingsPage() {
               <div>
                 <h2
                   id="settings-privacy-heading"
-                  className="text-base font-semibold"
+                  className="text-card-title font-semibold"
                 >
                   {englishCopy.settings.privacy.title}
                 </h2>
@@ -1485,7 +1491,7 @@ export function SettingsPage() {
             <Card className="grid gap-3">
               <h2
                 id="settings-about-heading"
-                className="text-base font-semibold"
+                className="text-card-title font-semibold"
               >
                 {englishCopy.settings.about.title}
               </h2>

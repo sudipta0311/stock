@@ -33,7 +33,7 @@ export function ToastRenderer({
             </div>
             <ToastPrimitive.Close asChild>
               <button
-                className="grid size-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted"
+                className="grid size-11 place-items-center rounded-lg text-muted-foreground hover:bg-muted"
                 aria-label="Dismiss notification"
               >
                 <X aria-hidden="true" className="size-4" />
@@ -45,7 +45,7 @@ export function ToastRenderer({
               <button
                 type="button"
                 onClick={item.action.onClick}
-                className="mt-3 min-h-12 rounded-lg bg-brand px-4 text-sm font-semibold text-brand-foreground"
+                className="mt-3 min-h-12 rounded-lg bg-brand px-4 text-base font-semibold text-brand-foreground"
               >
                 {item.action.label}
               </button>

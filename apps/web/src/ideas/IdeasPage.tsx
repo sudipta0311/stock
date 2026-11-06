@@ -85,7 +85,7 @@ function DenmarkBuyCard({ plan }: { plan?: WeeklyPlan }) {
   return (
     <Card className="grid gap-3">
       <div>
-        <h2 className="text-base font-semibold">{copy.buy_title}</h2>
+        <h2 className="text-card-title font-semibold">{copy.buy_title}</h2>
         <p className="mt-1 text-sm text-muted-foreground">{copy.buy_intro}</p>
       </div>
       {lines.length ? (
@@ -780,7 +780,7 @@ function ResearchCard({
   const hasIdeas = ideas.length > 0;
   return (
     <Card className="grid gap-3">
-      <h2 className="text-base font-semibold">
+      <h2 className="text-card-title font-semibold">
         {englishCopy.ideas.weekly_title}
       </h2>
       <details className="border-b border-line pb-2">
@@ -925,7 +925,9 @@ function IndexFundsCard({
 
   return (
     <Card className="grid gap-3">
-      <h2 className="text-base font-semibold">{copy.index_funds_title}</h2>
+      <h2 className="text-card-title font-semibold">
+        {copy.index_funds_title}
+      </h2>
       <div className="grid gap-1 text-sm">
         <p>{marketLine}</p>
         {Number.isInteger(extraMoneyParts) && extraMoneyParts > 0 ? (

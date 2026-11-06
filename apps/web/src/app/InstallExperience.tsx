@@ -102,7 +102,7 @@ export function InstallExperience() {
             <button
               type="button"
               aria-label={englishCopy.install.dismiss}
-              className="grid size-10 place-items-center rounded-full text-muted-foreground hover:bg-muted"
+              className="grid size-11 place-items-center rounded-full text-muted-foreground hover:bg-muted"
               onClick={() => {
                 setAndroidCard(false);
                 markInstallGuideShown();

@@ -156,7 +156,9 @@ export function GmailStatementsSettingsPage() {
 
       {canManage ? (
         <Card className="grid gap-3">
-          <h2 className="text-base font-semibold">Connect one Gmail account</h2>
+          <h2 className="text-card-title font-semibold">
+            Connect one Gmail account
+          </h2>
           <label
             className="grid gap-1 text-sm font-medium"
             htmlFor="gmail-label"
@@ -186,7 +188,9 @@ export function GmailStatementsSettingsPage() {
 
       {createdKey ? (
         <Card className="grid gap-3" aria-live="polite">
-          <h2 className="text-base font-semibold">Your new key is ready</h2>
+          <h2 className="text-card-title font-semibold">
+            Your new key is ready
+          </h2>
           <p className="text-sm text-muted-foreground">
             It appears in the script below. Copy it before leaving this screen.
           </p>
@@ -209,7 +213,7 @@ export function GmailStatementsSettingsPage() {
       ) : null}
 
       <Card className="grid gap-3">
-        <h2 className="text-base font-semibold">Finish the setup</h2>
+        <h2 className="text-card-title font-semibold">Finish the setup</h2>
         <ol className="grid list-decimal gap-2 pl-5 text-sm">
           <li>
             <a
@@ -242,7 +246,7 @@ export function GmailStatementsSettingsPage() {
 
       {keysQuery.data.length ? (
         <Card className="grid gap-3">
-          <h2 className="text-base font-semibold">Gmail connections</h2>
+          <h2 className="text-card-title font-semibold">Gmail connections</h2>
           {keysQuery.data.map((key) => (
             <div
               key={key.id}
@@ -274,7 +278,9 @@ export function GmailStatementsSettingsPage() {
 
       {canManage ? (
         <Card className="grid gap-3">
-          <h2 className="text-base font-semibold">Saved statement passwords</h2>
+          <h2 className="text-card-title font-semibold">
+            Saved statement passwords
+          </h2>
           <p className="text-sm text-muted-foreground">
             Saved passwords are encrypted and used only to prepare a review.
           </p>

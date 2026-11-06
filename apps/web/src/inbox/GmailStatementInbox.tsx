@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router";
 import { ApiError, apiFetch } from "../api/client";
 import { apiPathAvailable } from "../api/feature-support";
-import { Button, Card, Checkbox } from "../ui";
+import { Button, buttonClassName, Card, Checkbox } from "../ui";
 import * as englishCopy from "../copy/sections/index";
 
 type SenderType = "cams" | "kfintech" | "mfcentral" | "nsdl" | "cdsl" | "other";
@@ -371,7 +371,7 @@ export function GmailStatementInbox() {
               : null}
             {item.status === "review" && jobId ? (
               <Link
-                className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground"
+                className={buttonClassName()}
                 to={`/import/${encodeURIComponent(jobId)}`}
               >
                 Review
@@ -382,10 +382,7 @@ export function GmailStatementInbox() {
                 <p className="text-sm text-muted-foreground">
                   We couldn’t read this file. Upload it in Money instead.
                 </p>
-                <Link
-                  className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground"
-                  to="/import"
-                >
+                <Link className={buttonClassName()} to="/import">
                   Upload in Money
                 </Link>
                 <div className="flex flex-wrap gap-2">
@@ -413,7 +410,7 @@ export function GmailStatementInbox() {
       })}
       {otherItems.length > 0 ? (
         <details className="rounded-2xl border border-line bg-surface p-4">
-          <summary className="min-h-10 cursor-pointer text-sm font-semibold">
+          <summary className="min-h-11 cursor-pointer text-sm font-semibold">
             Other emails ({otherItems.length})
           </summary>
           <p className="mt-2 text-sm text-muted-foreground">

@@ -1,5 +1,6 @@
 export {
   Button,
+  buttonClassName,
   Badge,
   Card,
   EmptyState,

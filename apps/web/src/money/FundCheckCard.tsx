@@ -4,7 +4,7 @@ import { apiFetch } from "../api/client";
 import * as englishCopy from "../copy/sections/index";
 import { useHousehold } from "../household/HouseholdContext";
 import { formatInr } from "../lib/money";
-import { Button, Card } from "../ui";
+import { Button, buttonClassName, Card } from "../ui";
 
 interface FundCheckResponse {
   status: "fine" | "attention";
@@ -98,7 +98,7 @@ export function FundCheckCard() {
   return (
     <Card className="grid gap-3" aria-labelledby="fund-check-heading">
       <div>
-        <h2 id="fund-check-heading" className="text-base font-semibold">
+        <h2 id="fund-check-heading" className="text-card-title font-semibold">
           {englishCopy.fund_check.title}
         </h2>
         <p className="mt-1 text-base" aria-live="polite">
@@ -138,10 +138,7 @@ export function FundCheckCard() {
             : englishCopy.fund_check.see_why}
         </Button>
       ) : (
-        <Link
-          className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand"
-          to="/import"
-        >
+        <Link className={buttonClassName()} to="/import">
           {englishCopy.fund_check.upload_statement}
         </Link>
       )}

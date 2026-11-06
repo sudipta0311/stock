@@ -6,7 +6,15 @@ import { ArrowLeft, ArrowRight, ChevronDown } from "lucide-react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { ApiError, type ApiFieldError } from "../api/client";
 import { formatInr } from "../lib/money";
-import { Button, Card, Field, MoneyInput, MonthYearInput, Select } from "../ui";
+import {
+  Button,
+  buttonClassName,
+  Card,
+  Field,
+  MoneyInput,
+  MonthYearInput,
+  Select,
+} from "../ui";
 import { institutionNames } from "./institutions.generated";
 import { closeAsset, createAsset, getAsset, patchAsset } from "./api";
 import type { AssetDetailResponse, AssetResponse } from "./api";
@@ -264,7 +272,7 @@ export function USInvestmentStep() {
         className="inline-flex min-h-12 items-center gap-2 text-sm text-muted-foreground"
       >
         <ArrowLeft aria-hidden="true" className="size-4" />
-        Your Money Map
+        {englishCopy.holding_review.back_to_money}
       </Link>
       <div>
         <h2 className="text-xl font-semibold">US investments</h2>
@@ -273,10 +281,7 @@ export function USInvestmentStep() {
           is the available entry point for these assets.
         </p>
       </div>
-      <Link
-        to="/import"
-        className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground"
-      >
+      <Link to="/import" className={buttonClassName()}>
         Upload a broker file{" "}
         <ArrowRight aria-hidden="true" className="size-4" />
       </Link>
@@ -1005,7 +1010,7 @@ function AssetForm({
           className="inline-flex min-h-12 items-center gap-2 text-sm text-muted-foreground"
         >
           <ArrowLeft aria-hidden="true" className="size-4" />
-          Your Money Map
+          {englishCopy.holding_review.back_to_money}
         </Link>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -1181,8 +1186,8 @@ export function AddAssetPage() {
         <p className="mt-2 text-sm text-muted-foreground">
           This item isn't available as a manual form yet.
         </p>
-        <Link to="/import" className="mt-4 block">
-          <Button className="w-full">Upload what you have</Button>
+        <Link to="/import" className={`${buttonClassName()} mt-4 w-full`}>
+          Upload what you have
         </Link>
       </Card>
     );
@@ -1278,8 +1283,8 @@ export function AssetDetailPage() {
     return (
       <Card role="alert">
         <p>{error || "This asset wasn't found."}</p>
-        <Link to="/money" className="mt-4 block">
-          <Button className="w-full">Back to Money Map</Button>
+        <Link to="/money" className={`${buttonClassName()} mt-4 w-full`}>
+          {englishCopy.holding_review.back_to_money}
         </Link>
       </Card>
     );

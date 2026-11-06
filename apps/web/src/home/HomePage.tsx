@@ -44,7 +44,7 @@ import type {
   RecordBuyRequest,
   WeeklyPlan,
 } from "../planning/api";
-import { Button, Card, Sheet } from "../ui";
+import { Button, buttonClassName, Card, Sheet } from "../ui";
 import { Highlights } from "../features/Highlights";
 import * as englishCopy from "../copy/sections/index";
 import { useHousehold } from "../household/HouseholdContext";
@@ -695,7 +695,7 @@ function ActionCard({
         </span>
         <div className="flex min-w-0 flex-1 items-start justify-between gap-3">
           <div className="min-w-0">
-            <h3 className="text-sm font-semibold">{actionTitle(action)}</h3>
+            <h3 className="text-base font-semibold">{actionTitle(action)}</h3>
             {holdingName ? (
               <p className="mt-1 break-words text-sm font-medium [overflow-wrap:anywhere]">
                 {holdingName}
@@ -1128,7 +1128,7 @@ export function HomePage() {
               <Link
                 to="/plan"
                 data-primary="true"
-                className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground"
+                className={buttonClassName()}
               >
                 View your plan
               </Link>
@@ -1138,7 +1138,7 @@ export function HomePage() {
           <Link
             to="/money?add=1"
             data-primary="true"
-            className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground"
+            className={buttonClassName()}
           >
             {englishCopy.money_ui.add_update}
           </Link>
@@ -1163,7 +1163,7 @@ export function HomePage() {
             className="grid gap-1 border-t border-line pt-3"
           >
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold">{buyStepName(action)}</h3>
+              <h3 className="text-base font-semibold">{buyStepName(action)}</h3>
               <span className="text-sm font-medium">
                 {englishCopy.home.buy_done}
               </span>
@@ -1226,7 +1226,7 @@ export function HomePage() {
           </Button>
         ) : null}
         <details className="border-t border-line pt-2">
-          <summary className="min-h-10 cursor-pointer py-2 text-sm font-medium">
+          <summary className="min-h-11 cursor-pointer py-2 text-sm font-medium">
             Make it more accurate
           </summary>
           <div className="grid gap-2 pb-2">

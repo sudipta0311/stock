@@ -112,7 +112,7 @@ export function OurView({ value }: { value: unknown }) {
 
   return (
     <Card className="grid gap-3">
-      <h2 className="text-base font-semibold">{copy.title}</h2>
+      <h2 className="text-card-title font-semibold">{copy.title}</h2>
       {verdict === "not_checked" ? (
         <p className="text-sm text-muted-foreground">{copy.not_checked}</p>
       ) : (
@@ -150,8 +150,7 @@ export function OurView({ value }: { value: unknown }) {
             ))}
           </ul>
         ) : null}
-        {/* `!`: the global `.card-surface h3` rule would otherwise make this a card title. */}
-        <h3 className="mt-2 text-sm! font-semibold">{copy.how_we_check}</h3>
+        <h3 className="mt-2 text-sm font-semibold">{copy.how_we_check}</h3>
         <ul className="grid gap-2 border-t border-line pt-2">
           {asArray(review.checks).map((raw, index) => {
             const check = asRecord(raw);
