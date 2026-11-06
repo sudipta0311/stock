@@ -3,6 +3,7 @@ import {
   completeFixedDeposit,
   completeMinimalOnboarding,
   expect,
+  expectFitsScreen,
   gotoApp,
   makeIdentity,
   openFixedDepositForm,
@@ -20,6 +21,7 @@ test("five narrow-screen tasks meet their timing and visibility targets", async 
     testInfo.project.name !== "narrow",
     "Usability timing is measured at 360 by 740.",
   );
+  await page.setViewportSize({ width: 360, height: 740 });
   const tasks: Array<{ task: string; elapsedMs: number; targetMs: number }> =
     [];
 
@@ -28,6 +30,7 @@ test("five narrow-screen tasks meet their timing and visibility targets", async 
   let startedAt = Date.now();
   await openFixedDepositForm(page);
   await completeFixedDeposit(page);
+  await expectFitsScreen(page);
   tasks.push({
     task: "Add fixed deposit",
     elapsedMs: Date.now() - startedAt,
@@ -41,6 +44,7 @@ test("five narrow-screen tasks meet their timing and visibility targets", async 
   await page.getByRole("button", { name: "Add holdings" }).click();
   await page.getByRole("link", { name: "Upload a file" }).click();
   await uploadSyntheticCas(page);
+  await expectFitsScreen(page);
   tasks.push({
     task: "Reach statement review",
     elapsedMs: Date.now() - startedAt,
@@ -55,6 +59,7 @@ test("five narrow-screen tasks meet their timing and visibility targets", async 
   await expect(
     page.getByRole("heading", { name: "This week" }),
   ).toBeInViewport();
+  await expectFitsScreen(page);
   tasks.push({
     task: "Find this week",
     elapsedMs: Date.now() - startedAt,
@@ -66,8 +71,9 @@ test("five narrow-screen tasks meet their timing and visibility targets", async 
   await addDanishSavings(page);
   startedAt = Date.now();
   await gotoApp(page, "/plan");
-  const safeMoney = page.getByText(/Your safe money target is/);
+  const safeMoney = page.getByText("Target", { exact: true });
   await expect(safeMoney).toBeInViewport();
+  await expectFitsScreen(page);
   tasks.push({
     task: "Find safe money target",
     elapsedMs: Date.now() - startedAt,
@@ -100,6 +106,7 @@ test("five narrow-screen tasks meet their timing and visibility targets", async 
   await expect(
     page.getByRole("dialog", { name: "Add holdings" }),
   ).toBeVisible();
+  await expectFitsScreen(page);
   tasks.push({
     task: "Add spouse and set tax residence",
     elapsedMs: Date.now() - startedAt,

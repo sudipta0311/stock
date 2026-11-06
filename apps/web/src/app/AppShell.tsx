@@ -79,6 +79,7 @@ function AppShellLayout() {
             {showPicker ? <HouseholdControls variant="compact" /> : null}
             <Link
               to={`/help#${helpArticleForPath(location.pathname)}`}
+              state={{ from: `${location.pathname}${location.search}` }}
               aria-label={`Help with ${title}`}
               className="motion-safe:active:scale-[.98] grid size-11 place-items-center rounded-full text-muted-foreground transition hover:bg-muted hover:text-foreground"
             >

@@ -5,6 +5,10 @@ const section = {
   "gap_sentence": "{name} is below plan. New money goes there first.",
   "gap_amount_sentence": "{name} is {amount} below plan.",
   "update_money": "Update your money",
+  "compare_amounts": "Compare amounts",
+  "safe_money_current": "You have",
+  "safe_money_target": "Target",
+  "add_existing_items": "Add items you already own.",
   "gaps": {
     "equity_india": {
       "button": "Add Indian shares",

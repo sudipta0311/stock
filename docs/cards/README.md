@@ -72,6 +72,7 @@ Status: ⬜ not started · 🟦 in progress · ✅ accepted · 🔁 rework · �
 | C50 | Shares from Denmark go in the share savings account when it has room after the ETFs (never split), the eligible markets are rule data, the account's cap and tax rate are per-year rules with a safe fallback and a health warning, and S&P 500 shares get their ISIN from the CUSIP (without clashing with imported shares) so Denmark US picks can appear | 4.8 | ✅ |
 | C51 | UI review (report only, gpt-6-astra): 28 phone screenshots and the PWA source checked against the five family jobs; ranked top 10, screen-by-screen notes and two implementation cards in `docs/reviews/C51-ui-review.md` | 8 | ✅ |
 | C52 | Clear weekly steps and one way to add holdings: sell steps name the share and say how to sell, one "Add holdings" sheet (upload first) from Money, Home, Plan, onboarding and Inbox, deposits save with one button and open on a summary, first use leads to adding holdings, a typed goal is saved | 8 | ✅ |
+| C53 | Understand a share, the plan and ideas at a glance: a share's page leads with value and our view, Plan shows "You have" next to the target, Ideas show full names, risk questions one at a time, Help opens on the asked article, plain labels, 44 px targets, weekly email uses the app's sell words | 8 | ✅ |
 
 ## Follow-ups and review outcomes
 

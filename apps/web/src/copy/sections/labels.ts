@@ -1,4 +1,13 @@
 const section = {
+  "form_fields": {
+    "bond_issuer": "Issued by",
+    "bond_interest_rate": "Interest rate (%)",
+    "bond_investment_code": "Investment code",
+    "investment_code_help": "Copy the code from your statement.",
+    "shares_pct": "Shares (%)",
+    "company_bonds_pct": "Company bonds (%)",
+    "government_bonds_pct": "Government bonds (%)"
+  },
   "instrument_categories": {
     "mutual_fund": "Indian fund",
     "abroad_etf": "European fund",
@@ -47,9 +56,9 @@ const section = {
     "BUILD_EMERGENCY_FUND": "Build your emergency fund",
     "PAY_DOWN_DEBT": "Pay off costly debt",
     "PAY_EXTRA_ON_LOAN": "Pay extra on a loan",
-    "SELL_EXIT": "Exit",
-    "SELL_TRIM": "Take some profit",
-    "REVIEW_EXIT": "Review, likely exit",
+    "SELL_EXIT": "Sell",
+    "SELL_TRIM": "Sell some",
+    "REVIEW_EXIT": "Think about selling",
     "SWAP": "Swap for better",
     "SWITCH_TO_DIRECT": "Switch to a lower-cost plan",
     "REDIRECT_SIP": "Change a monthly investment",

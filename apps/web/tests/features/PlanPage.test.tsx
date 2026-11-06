@@ -1,8 +1,12 @@
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { waitFor } from "@testing-library/react";
 import { HttpResponse, http } from "msw";
 import { MemoryRouter } from "react-router";
+import {
+  HouseholdProvider,
+  MEMBER_FILTER_STORAGE_KEY,
+} from "../../src/household/HouseholdContext";
 import { describe, expect, it } from "vitest";
 import { axe } from "vitest-axe";
 import type { WeeklyPlan } from "../../src/planning/api";
@@ -10,6 +14,7 @@ import { PlanPage } from "../../src/plan/PlanPage";
 import { loanSummary, networth, weeklyPlan } from "./fixtures";
 import { renderWithQueries } from "./render";
 import { server } from "../msw";
+import { bannedTermsIncludingDisclosuresAndFields } from "../plain-language";
 
 const PLAN_GAP_KEYS = [
   "equity_india",
@@ -141,6 +146,72 @@ describe("Plan page", () => {
     expect(addHoldingsLinks[0]).toHaveAttribute("href", "/money?add=1");
   });
 
+  it("shows the selected person's safe money values", async () => {
+    window.sessionStorage.setItem(MEMBER_FILTER_STORAGE_KEY, "member-test-1");
+    server.use(
+      ...planHandlers({
+        members: [
+          {
+            id: "member-test-1",
+            name: "Synthetic member",
+            relationship: "self",
+            net_worth: "150000.00",
+            sleeves: { debt: "85000.00", debt_target: "110000.00" },
+          },
+        ],
+      }),
+      http.get(/\/v1\/me$/, () =>
+        HttpResponse.json({
+          id: "user-test",
+          me_member_id: "member-test-1",
+          household_owner_id: "owner-test",
+          display_name: "Synthetic member",
+          role: "owner",
+        }),
+      ),
+      http.get(/\/v1\/members$/, () =>
+        HttpResponse.json([
+          {
+            id: "member-test-1",
+            display_name: "Synthetic member",
+            created_at: "2026-10-01T00:00:00Z",
+            is_self: true,
+            relationship: "self",
+            tax: {},
+            residency: {
+              country: "IN",
+              status: "RI",
+              settle_plan: "india",
+              us_person: false,
+              planned_return_year: null,
+            },
+            investing: {},
+          },
+        ]),
+      ),
+      http.get(/\/v1\/households$/, () => HttpResponse.json([])),
+    );
+    renderWithQueries(
+      <HouseholdProvider>
+        <MemoryRouter>
+          <PlanPage />
+        </MemoryRouter>
+      </HouseholdProvider>,
+    );
+
+    await screen.findByRole("heading", { name: "Your money vs your plan" });
+    expect(screen.getByText("Plan for You")).toBeVisible();
+    const safeMoney = within(
+      screen.getByText("You have", { exact: true }).closest("section")!,
+    );
+    expect(
+      safeMoney.getByText("You have", { exact: true }).parentElement,
+    ).toHaveTextContent(/3\.9 L/);
+    expect(
+      safeMoney.getByText("Target", { exact: true }).parentElement,
+    ).toHaveTextContent(/2\.3 L/);
+    window.sessionStorage.setItem(MEMBER_FILTER_STORAGE_KEY, "family");
+  });
   it("shows the loading label as visible text", async () => {
     let release!: () => void;
     server.use(...planHandlers());
@@ -195,18 +266,26 @@ describe("Plan page", () => {
         "Your money abroad is below plan. New money goes there first.",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Your safe money target is/)).toBeInTheDocument();
+    const safeMoney = within(
+      screen.getByText("You have", { exact: true }).closest("section")!,
+    );
     expect(
-      screen.getByText(/Your safe money target is/).textContent?.trim(),
-    ).toMatch(/\.$/);
+      safeMoney.getByText("You have", { exact: true }).parentElement,
+    ).toHaveTextContent(/3\.9 L/);
+    expect(
+      safeMoney.getByText("Target", { exact: true }).parentElement,
+    ).toHaveTextContent(/2\.3 L/);
+    expect(screen.getAllByText("Gold", { exact: true })[0]).toBeVisible();
+
     expect(container.querySelectorAll('[data-primary="true"]')).toHaveLength(1);
+    expect(bannedTermsIncludingDisclosuresAndFields(container)).toEqual([]);
     const details = screen.getByText("Details").closest("details");
     expect(details).not.toHaveAttribute("open");
     expect(
       screen.getByText("Shares abroad: US-listed index fund"),
     ).not.toBeVisible();
 
-    await user.click(screen.getByText("Show amounts"));
+    await user.click(screen.getByText("Compare amounts"));
     expect(
       screen.getByText(/Your money abroad is .* below plan\./),
     ).toBeInTheDocument();
@@ -250,9 +329,9 @@ describe("Plan page", () => {
           ),
         ).toBeInTheDocument();
         expect(
-          screen.getByRole("link", { name: "Add safe money" }),
-        ).toHaveAttribute("href", "/money/add/fd");
-        await user.click(screen.getByText("Show amounts"));
+          screen.getByRole("link", { name: "Add holdings" }),
+        ).toHaveAttribute("href", "/money?add=1");
+        await user.click(screen.getByText("Compare amounts"));
         expect(
           screen.getByText("Your safe money is ₹12 L below plan."),
         ).toBeInTheDocument();
@@ -270,7 +349,7 @@ describe("Plan page", () => {
   it.each([
     ["equity_india", "Add Indian shares", "/import"],
     ["equity_global", "Add money abroad", "/money/add/us_investments"],
-    ["debt", "Add safe money", "/money/add/fd"],
+    ["debt", "Add holdings", "/money?add=1"],
     ["cash", "Add cash", "/money/add/savings"],
     ["gold", "Add gold", "/money/add/gold"],
   ] as const)(

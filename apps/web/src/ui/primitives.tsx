@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from "react";
 import { useId, useState } from "react";
+import { Link, useLocation } from "react-router";
 import type { ApiFieldError } from "../api/client";
 
 function classes(...names: Array<string | false | undefined>): string {
@@ -160,17 +161,30 @@ export function Term({
         </button>
         <span id={explanationId} hidden={!open}>
           <span className="ml-2">{explanation}</span>
-          {learnMoreHref ? (
-            <a
-              className="ml-2 whitespace-nowrap text-brand underline underline-offset-2"
-              href={learnMoreHref}
-            >
-              Learn more
-            </a>
-          ) : null}
+          {learnMoreHref ? <ContextualHelpLink to={learnMoreHref} /> : null}
         </span>
       </span>
     </span>
+  );
+}
+
+function ContextualHelpLink({ to }: { to: string }) {
+  const location = useLocation();
+  const priorOrigin = (location.state as { from?: unknown } | null)?.from;
+  const from =
+    typeof priorOrigin === "string" &&
+    priorOrigin.startsWith("/") &&
+    !priorOrigin.startsWith("/help")
+      ? priorOrigin
+      : `${location.pathname}${location.search}`;
+  return (
+    <Link
+      className="ml-2 inline-flex min-h-11 items-center whitespace-nowrap text-brand underline underline-offset-2"
+      to={to}
+      state={{ from }}
+    >
+      Learn more
+    </Link>
   );
 }
 

@@ -6,9 +6,11 @@ import { formatDkk, dkkToInr } from "./fx";
 export function MoneyValue({
   amountInr,
   compact = true,
+  showSecondary = true,
 }: {
   amountInr: string;
   compact?: boolean;
+  showSecondary?: boolean;
 }) {
   const { fxRate, primaryCurrency } = useHousehold();
   const primary = formatHouseholdAmount(
@@ -17,7 +19,9 @@ export function MoneyValue({
     fxRate,
     compact,
   );
-  const secondary = formatSecondaryAmount(amountInr, primaryCurrency, fxRate);
+  const secondary = showSecondary
+    ? formatSecondaryAmount(amountInr, primaryCurrency, fxRate)
+    : null;
   return (
     <>
       <span className="tabular-nums">{primary}</span>

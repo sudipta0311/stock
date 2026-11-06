@@ -13,29 +13,68 @@ import {
 test("held shares show weekly reviews and Home has one sell step", async ({
   page,
 }, testInfo) => {
+  await page.setViewportSize({ width: 360, height: 740 });
   const identity = await startReadyAccount(page, "holding-review");
   await seedHoldingReviews(identity.email);
 
   await gotoApp(page, "/money");
-  await expect(page.getByText("Synthetic share to add", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Synthetic share to add", { exact: true }),
+  ).toBeVisible();
   await expect(page.getByText("Add more", { exact: true })).toBeVisible();
-  await expect(page.getByText("Synthetic share to sell", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("Synthetic share to sell", { exact: true }),
+  ).toBeVisible();
   await expect(page.getByText("Sell", { exact: true })).toBeVisible();
   await expectFitsScreen(page);
 
   await page.getByText("Synthetic share to add", { exact: true }).click();
   await expect(page.getByRole("heading", { name: "Our view" })).toBeVisible();
   await expect(page.getByText("Add more", { exact: true })).toBeVisible();
-  await expect(page.getByText("How we check", { exact: true })).toBeVisible();
-  await expect(page.getByText("Company results", { exact: true })).not.toBeVisible();
-  await expect(page.getByText("We don't follow this company's results yet", { exact: false }))
-    .not.toBeVisible();
+  await expect(page.getByRole("link", { name: "Back to Money" })).toBeVisible();
+  const buyingPrice = page.getByText("Buying price not recorded", {
+    exact: true,
+  });
+  await expect(buyingPrice).toBeVisible();
+  await expect(buyingPrice).toHaveClass(/text-muted-foreground/);
+  await expect(buyingPrice).not.toHaveClass(/font-semibold/);
+  await expect(
+    page
+      .getByText("Why this suggestion?", { exact: true })
+      .locator("xpath=ancestor::details"),
+  ).not.toHaveAttribute("open");
+  await expect(
+    page.getByText("How we check", { exact: true }),
+  ).not.toBeVisible();
+  await expect(
+    page.getByText("Recent checks support adding more shares.", {
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.getByText("Why this suggestion?", { exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "How we check", level: 3 }),
+  ).toBeVisible();
+  const companyResultsCheck = page
+    .getByRole("listitem")
+    .filter({ hasText: "Company results" });
+  await expect(companyResultsCheck).toHaveCount(1);
+  await expect(companyResultsCheck).toBeVisible();
+  await expect(companyResultsCheck).toContainText("Company results");
+  await expect(companyResultsCheck).toContainText("Not enough information");
   await expectFitsScreen(page);
 
-  const addViolations = (await new AxeBuilder({ page }).analyze()).violations.filter(
-    (violation) => violation.impact === "critical" || violation.impact === "serious",
+  const addViolations = (
+    await new AxeBuilder({ page }).analyze()
+  ).violations.filter(
+    (violation) =>
+      violation.impact === "critical" || violation.impact === "serious",
   );
-  await writeReport("holding-review-add-axe", testInfo.project.name, addViolations);
+  await writeReport(
+    "holding-review-add-axe",
+    testInfo.project.name,
+    addViolations,
+  );
   expect(addViolations).toEqual([]);
 
   await gotoApp(page, "/money");
@@ -43,16 +82,23 @@ test("held shares show weekly reviews and Home has one sell step", async ({
   await expect(page.getByRole("heading", { name: "Our view" })).toBeVisible();
   await expect(page.getByText("Sell", { exact: true })).toBeVisible();
   await expect(
-    page.getByText("Company revenue fell for 2 quarters in a row.", { exact: true }),
+    page.getByText("Company revenue fell for 2 quarters in a row.", {
+      exact: true,
+    }),
   ).toBeVisible();
   await expectFitsScreen(page);
 
   const sellViolations = (
     await new AxeBuilder({ page }).analyze()
   ).violations.filter(
-    (violation) => violation.impact === "critical" || violation.impact === "serious",
+    (violation) =>
+      violation.impact === "critical" || violation.impact === "serious",
   );
-  await writeReport("holding-review-sell-axe", testInfo.project.name, sellViolations);
+  await writeReport(
+    "holding-review-sell-axe",
+    testInfo.project.name,
+    sellViolations,
+  );
   expect(sellViolations).toEqual([]);
 
   await gotoApp(page, "/");

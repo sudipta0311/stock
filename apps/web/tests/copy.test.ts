@@ -4,7 +4,10 @@ import { fileURLToPath } from "node:url";
 import { load } from "js-yaml";
 import { describe, expect, it } from "vitest";
 import * as englishCopy from "../src/copy/sections/index";
-import { bannedVisibleTerms } from "./plain-language";
+import {
+  bannedTermsIncludingDisclosuresAndFields,
+  bannedVisibleTerms,
+} from "./plain-language";
 
 type HelpEntry = { term: string; meaning: string };
 type HelpArticle = {
@@ -156,6 +159,15 @@ describe("generated copy", () => {
     ideas.innerHTML =
       "<span data-security>TCS ETF UCITS</span><span data-term-copy>ISIN</span><p>Exchange traded fund</p>";
     expect(bannedVisibleTerms(ideas)).toEqual([]);
+  });
+
+  it("scans opened disclosures and optional field labels", () => {
+    const form = document.createElement("div");
+    form.innerHTML =
+      '<details><summary>More details</summary><label for="investment-code">Investment code</label><input id="investment-code" placeholder="ISIN" /></details>';
+
+    expect(bannedVisibleTerms(form)).toEqual([]);
+    expect(bannedTermsIncludingDisclosuresAndFields(form)).toEqual(["ISIN"]);
   });
 
   it("allows the statement label only on the import screen", () => {

@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { Link } from "react-router";
+import { Link, useLocation } from "react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown } from "lucide-react";
 import { Badge, Button, Card, Checkbox, Field, Select, Sheet } from "../ui";
@@ -177,6 +177,9 @@ function saveBlob(blob: Blob): void {
 }
 
 export function SettingsPage() {
+  const location = useLocation();
+  const notificationSectionRef = useRef<HTMLDetailsElement>(null);
+  const notificationHeadingRef = useRef<HTMLHeadingElement>(null);
   const queryClient = useQueryClient();
   const { logout } = useAuth();
   const { meMemberId, primaryCurrency, role, setPrimaryCurrency } =
@@ -273,6 +276,20 @@ export function SettingsPage() {
   const [deleteMessage, setDeleteMessage] = useState("");
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [consentSaving, setConsentSaving] = useState(false);
+
+  useEffect(() => {
+    if (new URLSearchParams(location.search).get("section") !== "notifications")
+      return;
+    const section = notificationSectionRef.current;
+    if (!section) return;
+    section.open = true;
+    const frame = window.requestAnimationFrame(() => {
+      const heading = notificationHeadingRef.current;
+      heading?.focus({ preventScroll: true });
+      heading?.scrollIntoView?.({ block: "center" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [location.search]);
 
   const me = meQuery.data;
   const members = membersQuery.data ?? me?.members ?? [];
@@ -723,7 +740,7 @@ export function SettingsPage() {
                       canEditHousehold ? (
                         <Button
                           variant="ghost"
-                          className="min-h-10 px-3 py-2 text-danger-foreground"
+                          className="min-h-11 px-3 py-2 text-danger-foreground"
                           onClick={() => {
                             setRemoveMemberMessage("");
                             setRemovingMember(member);
@@ -807,7 +824,7 @@ export function SettingsPage() {
                     </Select>
                     {newResidence === "NRI" ? (
                       <details>
-                        <summary className="cursor-pointer text-sm font-medium">
+                        <summary className="min-h-11 cursor-pointer py-2 text-sm font-medium">
                           {englishCopy.household.add_details}
                         </summary>
                         <label
@@ -870,7 +887,7 @@ export function SettingsPage() {
         <section className="grid gap-3 pb-3">
           <Card className="grid gap-4">
             <details className="border-t border-line pt-3">
-              <summary className="cursor-pointer text-sm font-semibold">
+              <summary className="min-h-11 cursor-pointer py-2 text-sm font-semibold">
                 {englishCopy.settings.family.fine_tune}
               </summary>
               <form
@@ -1262,7 +1279,10 @@ export function SettingsPage() {
           </section>
         </div>
       </details>
-      <details className="group rounded-xl border border-line px-3">
+      <details
+        ref={notificationSectionRef}
+        className="group rounded-xl border border-line px-3"
+      >
         <SettingsSectionSummary
           title={sectionCopy.app_title}
           summary={appSummary}
@@ -1289,8 +1309,10 @@ export function SettingsPage() {
             <Card className="grid gap-3">
               <div>
                 <h2
+                  ref={notificationHeadingRef}
                   id="settings-notifications-heading"
-                  className="text-base font-semibold"
+                  tabIndex={-1}
+                  className="text-base font-semibold focus:outline-none"
                 >
                   {englishCopy.settings.notifications.title}
                 </h2>
@@ -1475,7 +1497,7 @@ export function SettingsPage() {
               </p>
               <div className="flex flex-wrap gap-4 border-t border-line pt-3 text-sm">
                 <a
-                  className="min-h-10 text-brand underline"
+                  className="inline-flex min-h-11 items-center text-brand underline"
                   href={englishCopy.settings.about.investor_url}
                   target="_blank"
                   rel="noreferrer"
@@ -1483,7 +1505,7 @@ export function SettingsPage() {
                   {englishCopy.settings.about.investor_link}
                 </a>
                 <a
-                  className="min-h-10 text-brand underline"
+                  className="inline-flex min-h-11 items-center text-brand underline"
                   href={englishCopy.settings.about.data_url}
                   target="_blank"
                   rel="noreferrer"
@@ -1561,7 +1583,7 @@ export function SettingsPage() {
               {question.options.map((option) => (
                 <label
                   key={option.id}
-                  className="flex min-h-10 items-center gap-2 text-sm"
+                  className="flex min-h-11 items-center gap-2 text-sm"
                 >
                   <input
                     type="radio"

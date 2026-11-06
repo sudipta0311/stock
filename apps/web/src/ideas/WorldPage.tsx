@@ -1,5 +1,5 @@
 import { ExternalLink } from "lucide-react";
-import { formatInr } from "../lib/money";
+import { Link } from "react-router";
 import {
   asArray,
   asRecord,
@@ -16,14 +16,30 @@ import {
 import { getPlan, getStress } from "../planning/api";
 import type { WeeklyPlan } from "../planning/api";
 import { Card } from "../ui";
+import { MoneyValue } from "../household/currency-view";
+import * as englishCopy from "../copy/sections/index";
 
-/** "down ₹23.69 L" / "up ₹83,238": a bare "₹83,238" next to "-₹23.69 L" reads as a loss. */
+/** Returns a direction label so positive and negative scenario values stay clear. */
 function changeText(total: string): string {
   if (!total) return "—";
   const negative = total.trim().startsWith("-");
   const magnitude = total.trim().replace(/^[-+]/, "");
   if (/^0+(?:\.0+)?$/.test(magnitude)) return "no change";
-  return `${negative ? "down" : "up"} ${formatInr(magnitude, "compact")}`;
+  return negative ? "down" : "up";
+}
+
+function ChangeValue({ total }: { total: string }) {
+  const direction = changeText(total);
+  if (direction === "no change" || !total) return direction || "—";
+  return (
+    <>
+      {direction}{" "}
+      <MoneyValue
+        amountInr={total.trim().replace(/^[-+]/, "")}
+        showSecondary={false}
+      />
+    </>
+  );
 }
 
 function StressList({ stress }: { stress: Record<string, unknown> }) {
@@ -54,11 +70,11 @@ function StressList({ stress }: { stress: Record<string, unknown> }) {
             <p className="text-sm">
               Your money:{" "}
               <strong className="tabular-nums">
-                {changeText(currentTotal)}
+                <ChangeValue total={currentTotal} />
               </strong>
             </p>
             <p className="text-sm text-muted-foreground">
-              With your target plan: {changeText(targetTotal)}
+              With your target plan: <ChangeValue total={targetTotal} />
             </p>
           </article>
         );
@@ -121,11 +137,16 @@ export function WorldPage() {
   const stressData = asRecord(stress.data?.stress);
   return (
     <div className="grid gap-4">
+      <Link
+        to="/ideas"
+        className="inline-flex min-h-11 w-fit items-center text-sm font-medium text-brand underline underline-offset-2"
+      >
+        {englishCopy.ideas.world_back}
+      </Link>
       <header>
         <h2 className="text-xl font-semibold">World & your money</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Illustrations of what selected market events could mean for your
-          holdings.
+          {englishCopy.ideas.world_intro}
         </p>
       </header>
       <Card className="grid gap-3">

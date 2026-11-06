@@ -10,11 +10,16 @@ const section = {
   "not_checked": "We don't follow this company's results yet, so we only check its price and size.",
   "checked_on": "Checked on {date}",
   "how_we_check": "How we check",
+  "back_to_money": "Back to Money",
+  "buying_price_not_recorded": "Buying price not recorded",
+  "buying_price_help": "Profit or loss needs your buying price.",
+  "holding_details": "Holding details",
+  "why_suggestion": "Why this suggestion?",
   "checks": {
     "company_results": "Company results",
     "company_events": "Company events",
     "price_history": "Price history",
-    "position_size": "Position size",
+    "position_size": "Share of your investments",
     "price_and_cost": "Price and cost",
     "goal_timing": "Goal timing",
     "company_strength": "Company strength"

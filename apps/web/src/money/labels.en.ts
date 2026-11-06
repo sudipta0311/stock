@@ -1,4 +1,7 @@
-﻿import type { AssetType } from "./forms.generated";
+import type { AssetType } from "./forms.generated";
+import * as englishCopy from "../copy/sections/index";
+
+const formCopy = englishCopy.labels.form_fields;
 
 export interface FieldCopy {
   label: string;
@@ -25,10 +28,13 @@ export const assetFieldCopy: Partial<
   bond: {
     kind: { label: "Bond type" },
     face_value: { label: "Amount invested", help: "A rough amount is fine." },
-    issuer: { label: "Issuer" },
-    coupon_pct: { label: "Coupon rate (%)" },
+    issuer: { label: formCopy.bond_issuer },
+    coupon_pct: { label: formCopy.bond_interest_rate },
     coupon_frequency: { label: "Payments per year" },
-    isin: { label: "ISIN" },
+    isin: {
+      label: formCopy.bond_investment_code,
+      help: formCopy.investment_code_help,
+    },
     maturity: { label: "Matures (month and year)" },
     label: commonFieldCopy.label,
     member_id: commonFieldCopy.member_id,
@@ -107,9 +113,9 @@ export const assetFieldCopy: Partial<
   nps: {
     tier1_balance: { label: "NPS Tier I balance" },
     tier2_balance: { label: "NPS Tier II balance" },
-    equity_pct: { label: "Equity allocation (%)" },
-    corporate_debt_pct: { label: "Corporate debt allocation (%)" },
-    govt_debt_pct: { label: "Government debt allocation (%)" },
+    equity_pct: { label: formCopy.shares_pct },
+    corporate_debt_pct: { label: formCopy.company_bonds_pct },
+    govt_debt_pct: { label: formCopy.government_bonds_pct },
     label: commonFieldCopy.label,
     member_id: commonFieldCopy.member_id,
     notes: commonFieldCopy.notes,
@@ -191,7 +197,7 @@ export const assetFieldCopy: Partial<
     insurer: { label: "Insurer" },
     fund_value: { label: "Current fund value" },
     annual_premium: { label: "Annual premium" },
-    equity_pct: { label: "Equity allocation (%)" },
+    equity_pct: { label: formCopy.shares_pct },
     start_year: { label: "Started in year" },
     label: commonFieldCopy.label,
     member_id: commonFieldCopy.member_id,

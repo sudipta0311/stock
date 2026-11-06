@@ -18,6 +18,7 @@ test("required screens have no serious or critical accessibility violations", as
     testInfo.project.name !== "narrow",
     "Axe runs once at the narrow phone viewport.",
   );
+  await page.setViewportSize({ width: 360, height: 740 });
   const reports: Array<{ screen: string; result: unknown }> = [];
   const failures: Array<{
     screen: string;
@@ -67,6 +68,9 @@ test("required screens have no serious or critical accessibility violations", as
   await expect(
     page.getByRole("heading", { name: "How do you feel about risk?" }),
   ).toBeVisible();
+  await expect(page.getByText("Question 1 of 6")).toBeVisible();
+  await expect(page.getByRole("group")).toHaveCount(1);
+  await expectFitsScreen(page);
   await scan("Onboarding risk");
   await gotoApp(page, "/onboarding/consent");
   await expect(
@@ -75,6 +79,7 @@ test("required screens have no serious or critical accessibility violations", as
   await scan("Onboarding updates");
 
   await gotoApp(page, "/money");
+  await expectFitsScreen(page);
   await scan("Money");
   await page.getByText("Add manually", { exact: true }).click();
   const fixedDeposits = page.getByRole("button", {
@@ -92,14 +97,17 @@ test("required screens have no serious or critical accessibility violations", as
   await scan("Statement review");
 
   await gotoApp(page, "/plan");
+  await expectFitsScreen(page);
   await scan("Plan");
   await gotoApp(page, "/");
   const tourSkip = page
     .getByRole("dialog", { name: "Home" })
     .getByRole("button", { name: "Skip" });
   if (await tourSkip.isVisible().catch(() => false)) await tourSkip.click();
+  await expectFitsScreen(page);
   await scan("Home");
   await gotoApp(page, "/ideas");
+  await expectFitsScreen(page);
   await scan("Ideas");
   await gotoApp(page, "/inbox");
   await expectFitsScreen(page);

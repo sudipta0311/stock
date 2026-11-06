@@ -1,4 +1,4 @@
-import { useParams } from "react-router";
+import { Link, useParams } from "react-router";
 import { formatInr } from "../lib/money";
 import { asArray, asRecord, textValue } from "../features/data";
 import * as englishCopy from "../copy/sections/index";
@@ -14,6 +14,7 @@ import type { NetworthResponse } from "./api";
 import { getPlan } from "../planning/api";
 import type { WeeklyPlan } from "../planning/api";
 import { Card } from "../ui";
+import { MoneyValue } from "../household/currency-view";
 import { exactQuantity, quantityLabel } from "./quantity";
 
 function reviewFor(plan: WeeklyPlan, securityId: string): unknown {
@@ -121,7 +122,7 @@ export function OurView({ value }: { value: unknown }) {
           </p>
           {reasons.length ? (
             <ul className="grid gap-2 text-sm text-muted-foreground">
-              {reasons.map((reason, index) => (
+              {reasons.slice(0, 1).map((reason, index) => (
                 <li key={`${textValue(asRecord(reason).code)}-${index}`}>
                   {reasonText(reason)}
                 </li>
@@ -137,9 +138,20 @@ export function OurView({ value }: { value: unknown }) {
         </p>
       ) : null}
       <details className="border-t border-line pt-2">
-        <summary className="min-h-12 cursor-pointer py-2 text-sm font-medium">
-          {copy.how_we_check}
+        <summary className="min-h-12 cursor-pointer py-2 text-sm font-semibold">
+          {copy.why_suggestion}
         </summary>
+        {reasons.length > 1 ? (
+          <ul className="grid gap-2 border-t border-line py-2 text-sm text-muted-foreground">
+            {reasons.slice(1).map((reason, index) => (
+              <li key={`${textValue(asRecord(reason).code)}-${index + 1}`}>
+                {reasonText(reason)}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {/* `!`: the global `.card-surface h3` rule would otherwise make this a card title. */}
+        <h3 className="mt-2 text-sm! font-semibold">{copy.how_we_check}</h3>
         <ul className="grid gap-2 border-t border-line pt-2">
           {asArray(review.checks).map((raw, index) => {
             const check = asRecord(raw);
@@ -160,7 +172,7 @@ export function OurView({ value }: { value: unknown }) {
                   {symbol}
                 </span>
                 <span className="flex-1">
-                  {checkLabels[key] ?? key}
+                  {checkLabels[key] ?? key}{" "}
                   <span className="ml-2 text-muted-foreground">
                     {statuses[status] ?? statuses.unknown}
                   </span>
@@ -214,8 +226,15 @@ export function HoldingPage() {
   const costKnown = textValue(extra.cost_basis ?? extra.cost_value);
   const pnl = textValue(extra.profit_loss ?? extra.pnl);
   const review = reviewFor(planData, holding.security_id);
+  const copy = englishCopy.holding_review;
   return (
     <div className="grid gap-4">
+      <Link
+        to="/money"
+        className="inline-flex min-h-11 w-fit items-center text-sm font-medium text-brand underline underline-offset-2"
+      >
+        {copy.back_to_money}
+      </Link>
       <header>
         <h2 className="text-xl font-semibold">{holding.name || "Holding"}</h2>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -226,17 +245,23 @@ export function HoldingPage() {
         <div>
           <p className="text-sm text-muted-foreground">Value</p>
           <p className="mt-1 font-semibold tabular-nums">
-            {holding.value
-              ? formatInr(holding.value, "compact")
-              : "Not available"}
+            {holding.value ? (
+              <MoneyValue amountInr={holding.value} />
+            ) : (
+              "Not available"
+            )}
           </p>
         </div>
         <div>
           <p className="text-sm text-muted-foreground">Profit or loss</p>
-          <p className="mt-1 font-semibold tabular-nums">
-            {pnl && costKnown
-              ? formatInr(pnl, "compact")
-              : "Cost not available"}
+          <p
+            className={`mt-1 ${pnl && costKnown ? "font-semibold tabular-nums" : "text-sm font-normal text-muted-foreground"}`}
+          >
+            {pnl && costKnown ? (
+              <MoneyValue amountInr={pnl} />
+            ) : (
+              copy.buying_price_not_recorded
+            )}
           </p>
         </div>
         <div>
@@ -248,10 +273,16 @@ export function HoldingPage() {
           </p>
         </div>
       </Card>
+      {review ? <OurView value={review} /> : null}
       <details className="rounded-xl border border-line px-3">
         <summary className="min-h-12 cursor-pointer py-3 text-sm font-semibold">
-          Details
+          {copy.holding_details}
         </summary>
+        {!costKnown ? (
+          <p className="border-t border-line py-3 text-sm text-muted-foreground">
+            {copy.buying_price_help}
+          </p>
+        ) : null}
         <dl className="grid gap-2 border-t border-line py-3 text-sm">
           <div className="flex justify-between gap-3">
             <dt className="text-muted-foreground">Code</dt>
@@ -269,7 +300,6 @@ export function HoldingPage() {
           ) : null}
         </dl>
       </details>
-      {review ? <OurView value={review} /> : null}
     </div>
   );
 }

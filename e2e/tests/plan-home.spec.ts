@@ -12,6 +12,7 @@ import {
 test("Plan and Home show household values, closed details, and action status", async ({
   page,
 }) => {
+  await page.setViewportSize({ width: 360, height: 740 });
   const identity = await startReadyAccount(page, "plan-home");
   await addDanishSavings(page);
 
@@ -19,10 +20,9 @@ test("Plan and Home show household values, closed details, and action status", a
   await expect(
     page.getByRole("heading", { name: "Your money vs your plan" }),
   ).toBeVisible();
-  await expect(page.getByText(/Your safe money target is/)).toBeVisible();
-  await expect(
-    page.getByText("Current amount", { exact: true }),
-  ).not.toBeVisible();
+  await expect(page.getByText("You have", { exact: true })).toBeVisible();
+  await expect(page.getByText("Target", { exact: true })).toBeVisible();
+  await expect(page.getByText("Current amount", { exact: true })).not.toBeVisible();
   await expectFitsScreen(page);
 
   await seedHomeAction(identity.email);

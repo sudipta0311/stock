@@ -28,10 +28,7 @@ import type {
 import type { WeeklyPlan } from "../planning/api";
 import { Card, EmptyState, Progress, Term } from "../ui";
 import { useHousehold } from "../household/HouseholdContext";
-import {
-  formatHouseholdAmount,
-  formatSecondaryAmount,
-} from "../household/currency";
+import { formatHouseholdAmount } from "../household/currency";
 import {
   DkkMoneyValue,
   ExchangeRateNote,
@@ -112,7 +109,7 @@ function LoansPlanDetails({
   if (!summary?.loans.length) return null;
   return (
     <details className="rounded-xl border border-line p-3">
-      <summary className="min-h-10 cursor-pointer py-2 text-sm font-semibold">
+      <summary className="min-h-11 cursor-pointer py-2 text-sm font-semibold">
         Loans
       </summary>
       <div className="grid gap-2 border-t border-line pt-3 text-sm">
@@ -145,7 +142,7 @@ const DISPLAY_SLEEVES: Record<string, string> = {
   debt: englishCopy.household_ui.safe_money,
   cash: englishCopy.household_ui.cash,
   equity_global: englishCopy.household_ui.abroad,
-  gold: englishCopy.household_ui.other_holdings,
+  gold: englishCopy.labels.sleeves.gold,
   property: englishCopy.household_ui.other_holdings,
   protection: englishCopy.household_ui.other_holdings,
   liabilities: englishCopy.household_ui.other_holdings,
@@ -235,7 +232,7 @@ function PlacementNotesCard({ plan }: { plan: WeeklyPlan }) {
         {englishCopy.household_ui.placement_title}
       </h2>
       <details>
-        <summary className="cursor-pointer text-sm font-semibold">
+        <summary className="min-h-11 cursor-pointer py-2 text-sm font-semibold">
           {englishCopy.household_ui.placement_details}
         </summary>
         <ul className="mt-2 grid gap-2 text-base">
@@ -342,7 +339,7 @@ function MemberHoldingsCard({
                 </span>
               </div>
               <details>
-                <summary className="cursor-pointer text-sm text-muted-foreground">
+                <summary className="min-h-11 cursor-pointer py-2 text-sm text-muted-foreground">
                   {englishCopy.household_ui.details}
                 </summary>
                 <div className="mt-3 grid gap-3">
@@ -617,8 +614,8 @@ function AllocationCard({
         ))}
       </div>
       <details>
-        <summary className="cursor-pointer text-sm font-medium text-brand">
-          Show amounts
+        <summary className="min-h-11 cursor-pointer py-2 text-sm font-medium text-brand">
+          {englishCopy.plan_ui.compare_amounts}
         </summary>
         {gap ? (
           <p className="mt-3 text-sm">
@@ -749,7 +746,7 @@ function GlobalCard({ plan }: { plan: WeeklyPlan }) {
       )}
       {reasons.length ? (
         <details>
-          <summary className="cursor-pointer text-sm font-semibold">
+          <summary className="min-h-11 cursor-pointer py-2 text-sm font-semibold">
             {englishCopy.household_ui.why_global_choice}
           </summary>
           <ul
@@ -778,20 +775,15 @@ function GlobalCard({ plan }: { plan: WeeklyPlan }) {
   );
 }
 
-function DebtAnswerCard({ plan }: { plan: WeeklyPlan }) {
-  const debt = asRecord(plan.debt_answer);
-  const target = textValue(debt.target_debt);
-  const { fxRate, primaryCurrency } = useHousehold();
-  const primary =
-    target && isPositiveAmount(target)
-      ? formatHouseholdAmount(target, primaryCurrency, fxRate)
-      : null;
-  const secondary =
-    target && isPositiveAmount(target)
-      ? formatSecondaryAmount(target, primaryCurrency, fxRate)
-      : null;
+function DebtAnswerCard({
+  current,
+  target,
+}: {
+  current: string;
+  target: string;
+}) {
   return (
-    <Card>
+    <Card className="grid gap-2">
       <h2 className="text-base font-semibold">
         <Term
           explanation="Savings meant for near-term needs and steady access."
@@ -801,23 +793,24 @@ function DebtAnswerCard({ plan }: { plan: WeeklyPlan }) {
           Safe money
         </Term>
       </h2>
-      {primary ? (
-        <>
-          <p className="mt-2 text-base">
-            Your safe money target is{" "}
-            <span className="tabular-nums">{primary}.</span>
-          </p>
-          {secondary ? (
-            <p className="mt-1 text-xs tabular-nums text-muted-foreground">
-              {secondary}
-            </p>
-          ) : null}
-        </>
-      ) : (
-        <p className="mt-2 text-base">
-          Add your savings and loans to see a safe money target.
-        </p>
-      )}
+      <dl className="grid gap-2 text-sm">
+        <div className="flex items-center justify-between gap-3">
+          <dt className="text-muted-foreground">
+            {englishCopy.plan_ui.safe_money_current}
+          </dt>
+          <dd className="text-right font-semibold tabular-nums">
+            {current ? <MoneyValue amountInr={current} /> : "—"}
+          </dd>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <dt className="text-muted-foreground">
+            {englishCopy.plan_ui.safe_money_target}
+          </dt>
+          <dd className="text-right font-semibold tabular-nums">
+            {target ? <MoneyValue amountInr={target} /> : "—"}
+          </dd>
+        </div>
+      </dl>
     </Card>
   );
 }
@@ -1090,6 +1083,7 @@ export function PlanPage() {
   const selectedPlanMember = planValue?.members?.find(
     (member) => member.id === activeMemberId,
   );
+  const debtAnswer = asRecord(planValue?.debt_answer);
   const selectedName = selectedPlanMember
     ? memberDisplayName(
         selectedPlanMember.id,
@@ -1156,18 +1150,38 @@ export function PlanPage() {
           Plan for {selectedName || englishCopy.household.family}
         </h2>
       ) : null}
-      <AllocationCard rows={rows} empty={noAssets} />
-      {!noAssets ? <DebtAnswerCard plan={planValue} /> : null}
       {!noAssets ? (
-        <Link
-          to={gap ? addPathForPlanGap(gap.row.key) : "/money"}
-          data-primary="true"
-          className="motion-safe:active:scale-[.98] inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground transition"
-        >
-          {gap
-            ? PLAN_GAP_COPY[gap.row.key as PlanGapKey].button
-            : englishCopy.plan_ui.update_money}
-        </Link>
+        <DebtAnswerCard
+          current={textValue(debtAnswer.current_debt)}
+          target={textValue(debtAnswer.target_debt)}
+        />
+      ) : null}
+      <AllocationCard rows={rows} empty={noAssets} />
+      {!noAssets ? (
+        <div className="grid gap-2">
+          <Link
+            to={
+              gap?.row.key === "debt"
+                ? "/money?add=1"
+                : gap
+                  ? addPathForPlanGap(gap.row.key)
+                  : "/money"
+            }
+            data-primary="true"
+            className="motion-safe:active:scale-[.98] inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground transition"
+          >
+            {gap?.row.key === "debt"
+              ? englishCopy.money_ui.add_update
+              : gap
+                ? PLAN_GAP_COPY[gap.row.key as PlanGapKey].button
+                : englishCopy.plan_ui.update_money}
+          </Link>
+          {gap?.row.key === "debt" ? (
+            <p className="text-sm text-muted-foreground">
+              {englishCopy.plan_ui.add_existing_items}
+            </p>
+          ) : null}
+        </div>
       ) : null}
       <details>
         <summary className="min-h-12 cursor-pointer py-3 text-sm font-semibold">

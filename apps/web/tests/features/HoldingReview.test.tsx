@@ -17,7 +17,7 @@ describe("holding review", () => {
     expect(screen.getByText(label, { exact: true })).toBeVisible();
   });
 
-  it("explains unchecked shares without exposing codes", () => {
+  it("explains unchecked shares without changing the unchecked state", () => {
     render(
       <OurView
         value={{
@@ -37,7 +37,7 @@ describe("holding review", () => {
     expect(screen.queryByText("not_checked")).not.toBeInTheDocument();
   });
 
-  it("keeps the check details closed until asked", async () => {
+  it("shows one reason and keeps remaining reasons and checks closed", async () => {
     const user = userEvent.setup();
     render(
       <OurView
@@ -45,11 +45,10 @@ describe("holding review", () => {
           verdict: "review",
           checked_on: "2026-11-07",
           reasons: [
-            {
-              code: "revenue_down_quarters",
-              params: { count: 1 },
-            },
+            { code: "revenue_down_quarters", params: { count: 1 } },
+            { code: "valuation_stretch", params: {} },
           ],
+          tax: { note_code: "ask_same_tax" },
           checks: [
             { key: "company_results", status: "watch" },
             { key: "price_history", status: "ok" },
@@ -59,16 +58,36 @@ describe("holding review", () => {
     );
 
     expect(
-      screen.getByText("Company results", { exact: true }),
-    ).not.toBeVisible();
-    expect(screen.getByText("Checked on 7 Nov 2026")).toBeVisible();
-    await user.click(screen.getByText("How we check", { exact: true }));
-    expect(screen.getByText("Company results", { exact: true })).toBeVisible();
-    expect(
       screen.getByText(
         "Company revenue fell last quarter compared with a year earlier.",
       ),
     ).toBeVisible();
+    expect(
+      screen.getByText("The price looks high against its own history."),
+    ).not.toBeVisible();
+    expect(screen.getByText("Checked on 7 Nov 2026")).toBeVisible();
+    expect(
+      screen.getByText(
+        "In your share savings account, tax is the same whether you sell or keep.",
+      ),
+    ).toBeVisible();
+    const companyResultsCheck = screen
+      .getAllByRole("listitem", { hidden: true })
+      .find((row) => row.textContent?.includes("Company results"));
+    expect(companyResultsCheck).toBeDefined();
+    expect(companyResultsCheck?.textContent).toContain(
+      "Company results Worth a look",
+    );
+    expect(companyResultsCheck).not.toBeVisible();
+
+    await user.click(screen.getByText("Why this suggestion?"));
+    expect(
+      screen.getByText("The price looks high against its own history."),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "How we check", level: 3 }),
+    ).toBeVisible();
+    expect(companyResultsCheck).toBeVisible();
   });
 
   it("does not show a waiting date for a share savings account", () => {

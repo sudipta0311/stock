@@ -308,6 +308,26 @@ describe("statement upload screen", () => {
 });
 
 describe("statement import review", () => {
+  it("calls broker equity rows Shares", async () => {
+    server.use(
+      http.get(`/v1/imports/${jobId}`, () =>
+        HttpResponse.json(
+          reviewDetail({
+            source: "broker",
+            items: [item({ id: "broker-equity", action: "new" })],
+            counts: { new: 1, changed: 0, duplicate: 0, unknown: 0 },
+          }),
+        ),
+      ),
+    );
+    renderReview();
+
+    expect(await screen.findByText("Shares", { exact: true })).toBeVisible();
+    expect(
+      screen.queryByText("Equity", { exact: true }),
+    ).not.toBeInTheDocument();
+  });
+
   it("groups counts, patches an unknown override, confirms, and shows success", async () => {
     const user = userEvent.setup();
     let overrideBody: Record<string, unknown> | null = null;

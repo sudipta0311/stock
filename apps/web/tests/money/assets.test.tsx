@@ -9,6 +9,8 @@ import type { AssetDetailResponse, AssetResponse } from "../../src/money/api";
 import { HouseholdProvider } from "../../src/household/HouseholdContext";
 import { server } from "../msw";
 import { renderWithQueries } from "../features/render";
+import { weeklyPlan } from "../features/fixtures";
+import { bannedTermsIncludingDisclosuresAndFields } from "../plain-language";
 
 function assetResponse(details: Record<string, unknown>): AssetResponse {
   return {
@@ -76,6 +78,29 @@ function renderAssetDetail() {
 }
 
 describe("asset forms and autosave", () => {
+  it.each([
+    ["bond", "Bond"],
+    ["nps", "NPS"],
+    ["traditional_policy", "LIC / Insurance policy"],
+  ])("keeps the %s form copy plain", async (assetType, title) => {
+    server.use(
+      http.get(/\/v1\/plan$/, () => HttpResponse.json(weeklyPlan())),
+      memberList(),
+    );
+    const { container } = renderWithQueries(
+      <MemoryRouter initialEntries={[`/money/add/${assetType}`]}>
+        <main>
+          <Routes>
+            <Route path="/money/add/:type" element={<AddAssetPage />} />
+          </Routes>
+        </main>
+      </MemoryRouter>,
+    );
+
+    await screen.findByRole("heading", { name: title });
+    expect(bannedTermsIncludingDisclosuresAndFields(container)).toEqual([]);
+  });
+
   it("posts a valid fixed deposit after the debounce and shows valuation", async () => {
     const user = userEvent.setup();
     let postBody: Record<string, unknown> | null = null;

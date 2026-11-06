@@ -143,7 +143,7 @@ function DenmarkBuyCard({ plan }: { plan?: WeeklyPlan }) {
                 ) : null}
                 {listedName || searchCode ? (
                   <details>
-                    <summary className="cursor-pointer text-sm font-semibold text-brand">
+                    <summary className="min-h-11 cursor-pointer py-2 text-sm font-semibold text-brand">
                       {copy.find_it_at_broker}
                     </summary>
                     <div className="mt-2 grid gap-1 text-sm text-muted-foreground">
@@ -174,7 +174,7 @@ function DenmarkBuyCard({ plan }: { plan?: WeeklyPlan }) {
                   <span>{textValue(instrument.currency)}</span>
                 </div>
                 <details>
-                  <summary className="cursor-pointer text-sm font-semibold text-brand">
+                  <summary className="min-h-11 cursor-pointer py-2 text-sm font-semibold text-brand">
                     {copy.how}
                   </summary>
                   <ol className="mt-2 grid gap-1 pl-5 text-base list-decimal">
@@ -184,7 +184,7 @@ function DenmarkBuyCard({ plan }: { plan?: WeeklyPlan }) {
                   </ol>
                 </details>
                 <details>
-                  <summary className="cursor-pointer text-sm text-muted-foreground">
+                  <summary className="min-h-11 cursor-pointer py-2 text-sm text-muted-foreground">
                     {copy.why}
                   </summary>
                   <div className="mt-2 grid gap-2 text-base">
@@ -552,6 +552,7 @@ function ResearchIdea({
   const displayName = name || symbol;
   const confidence = confidenceWords(textValue(idea.confidence));
   const valuation = valuationWords(textValue(idea.valuation_label));
+  const sector = textValue(idea.sector);
   const tranche = referencedTranche(idea, actions);
   const why = asRecord(idea.why);
   const whyReasons = asArray(why.reasons)
@@ -615,130 +616,125 @@ function ResearchIdea({
   return (
     <article
       key={`${symbol}-${index}`}
-      className="flex gap-3 border-t border-line pt-3 first:border-0 first:pt-0"
+      className="grid gap-2 border-t border-line pt-3 first:border-0 first:pt-0"
     >
-      <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-muted text-muted-foreground">
-        <Lightbulb aria-hidden="true" className="size-4" />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="flex min-w-0 items-center justify-between gap-3">
-          <h3
-            // A one-line clamp, not `truncate`: nowrap text sets the whole list's minimum
-            // width, so a long company name pushed the page past a phone screen.
-            className="line-clamp-1 min-w-0 flex-1 font-semibold [overflow-wrap:anywhere]"
-            data-security
-            title={displayName}
-          >
-            {displayName}
-          </h3>
-          <div className="flex shrink-0 items-center gap-2">
-            {name ? (
-              <span className="text-xs text-muted-foreground" data-security>
-                {symbol}
-              </span>
+      <header className="min-w-0">
+        <h3
+          className="break-words font-semibold [overflow-wrap:anywhere]"
+          data-security
+        >
+          {displayName}
+        </h3>
+        {name ? (
+          <p className="mt-1 text-xs text-muted-foreground" data-security>
+            {symbol}
+          </p>
+        ) : null}
+      </header>
+      {ownershipLine ? (
+        <p className="min-w-0 break-words text-sm text-muted-foreground [overflow-wrap:anywhere]">
+          {ownershipLine}
+        </p>
+      ) : null}
+      {hintLine ? <p className="text-sm font-medium">{hintLine}</p> : null}
+      {idea.price ? (
+        <p className="text-xs text-muted-foreground tabular-nums">
+          Reference price{" "}
+          {textValue(idea.market) === "US"
+            ? formatUsd(textValue(idea.price), 0)
+            : formatInr(textValue(idea.price), "compact")}
+        </p>
+      ) : null}
+      {whyReasons.length ||
+      whyRisk ||
+      hintReasons.length ||
+      ownedFunds.length ||
+      confidence ||
+      sector ||
+      valuation ? (
+        <details>
+          <summary className="min-h-11 cursor-pointer py-2 text-sm text-muted-foreground">
+            {englishCopy.ideas.why_this_idea}
+          </summary>
+          <div className="grid gap-2 pb-2 text-sm text-muted-foreground">
+            {confidence || sector || valuation ? (
+              <div className="flex flex-wrap gap-2">
+                {confidence ? (
+                  <span className="rounded-full bg-muted px-2 py-1 text-xs">
+                    {confidence}
+                  </span>
+                ) : null}
+                {sector ? (
+                  <span className="rounded-full bg-muted px-2 py-1 text-xs">
+                    {sector}
+                  </span>
+                ) : null}
+                {valuation ? (
+                  <span className="rounded-full bg-muted px-2 py-1 text-xs">
+                    {valuation}
+                  </span>
+                ) : null}
+              </div>
             ) : null}
-            {confidence ? (
-              <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
-                {confidence}
-              </span>
+            {whyReasons.length ? (
+              <ul className="grid gap-1">
+                {whyReasons.map((reason, reasonIndex) => (
+                  <li key={`${symbol}-reason-${reasonIndex}`}>{reason}</li>
+                ))}
+              </ul>
+            ) : null}
+            {whyRisk ? (
+              <p>
+                <strong className="font-medium text-foreground">
+                  {englishCopy.ideas.main_risk}:{" "}
+                </strong>
+                {whyRisk}
+              </p>
+            ) : null}
+            {hintReasons.length ? (
+              <p>
+                <strong className="font-medium text-foreground">
+                  {englishCopy.ideas.about_timing}:{" "}
+                </strong>
+                {hintReasons.join(" ")}
+              </p>
+            ) : null}
+            {ownedFunds.length ? (
+              <div>
+                <p className="font-medium text-foreground">
+                  {englishCopy.ideas.owned_details_title}
+                </p>
+                <ul className="grid gap-1">
+                  {ownedFunds.map((rawFund, fundIndex) => {
+                    const fund = asRecord(rawFund);
+                    const estimate =
+                      fund.estimated === true
+                        ? englishCopy.ideas.owned_estimate
+                        : "";
+                    return (
+                      <li
+                        className="break-words [overflow-wrap:anywhere]"
+                        key={`${symbol}-fund-${fundIndex}`}
+                      >
+                        {englishCopy.ideas.owned_fund_detail
+                          .replace("{name}", textValue(fund.name))
+                          .replace(
+                            "{amount}",
+                            formatOwnedAmount(
+                              textValue(fund.amount ?? fund.amount_inr, "0"),
+                            ),
+                          )
+                          .replace("{estimate}", estimate)}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
             ) : null}
           </div>
-        </div>
-        {hintLine ? (
-          <p className="mt-1 text-sm font-medium">{hintLine}</p>
-        ) : null}
-        {ownershipLine ? (
-          <p className="mt-1 min-w-0 break-words text-sm text-muted-foreground [overflow-wrap:anywhere]">
-            {ownershipLine}
-          </p>
-        ) : null}
-        <div className="mt-1 flex items-baseline justify-between gap-3">
-          <p className="min-w-0 truncate text-sm text-muted-foreground">
-            {textValue(idea.sector, "Sector unavailable")}
-          </p>
-          {valuation ? (
-            <p className="shrink-0 text-right text-sm text-muted-foreground">
-              {valuation}
-            </p>
-          ) : null}
-        </div>
-        {whyReasons.length ||
-        whyRisk ||
-        hintReasons.length ||
-        ownedFunds.length ? (
-          <details className="mt-1">
-            <summary className="min-h-9 cursor-pointer py-1 text-sm text-muted-foreground">
-              {englishCopy.ideas.why_this_idea}
-            </summary>
-            <div className="grid gap-2 pb-2 text-sm text-muted-foreground">
-              {whyReasons.length ? (
-                <ul className="grid gap-1">
-                  {whyReasons.map((reason, reasonIndex) => (
-                    <li key={`${symbol}-reason-${reasonIndex}`}>{reason}</li>
-                  ))}
-                </ul>
-              ) : null}
-              {whyRisk ? (
-                <p>
-                  <strong className="font-medium text-foreground">
-                    {englishCopy.ideas.main_risk}:{" "}
-                  </strong>
-                  {whyRisk}
-                </p>
-              ) : null}
-              {hintReasons.length ? (
-                <p>
-                  <strong className="font-medium text-foreground">
-                    {englishCopy.ideas.about_timing}:{" "}
-                  </strong>
-                  {hintReasons.join(" ")}
-                </p>
-              ) : null}
-              {ownedFunds.length ? (
-                <div>
-                  <p className="font-medium text-foreground">
-                    {englishCopy.ideas.owned_details_title}
-                  </p>
-                  <ul className="grid gap-1">
-                    {ownedFunds.map((rawFund, fundIndex) => {
-                      const fund = asRecord(rawFund);
-                      const estimate =
-                        fund.estimated === true
-                          ? englishCopy.ideas.owned_estimate
-                          : "";
-                      return (
-                        <li
-                          className="break-words [overflow-wrap:anywhere]"
-                          key={`${symbol}-fund-${fundIndex}`}
-                        >
-                          {englishCopy.ideas.owned_fund_detail
-                            .replace("{name}", textValue(fund.name))
-                            .replace(
-                              "{amount}",
-                              formatOwnedAmount(
-                                textValue(fund.amount ?? fund.amount_inr, "0"),
-                              ),
-                            )
-                            .replace("{estimate}", estimate)}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                </div>
-              ) : null}
-            </div>
-          </details>
-        ) : null}
-        {tranche ? <p className="mt-1 text-sm font-medium">{tranche}</p> : null}
-        {idea.price ? (
-          <p className="mt-1 text-xs text-muted-foreground tabular-nums">
-            Reference price{" "}
-            {textValue(idea.market) === "US"
-              ? formatUsd(textValue(idea.price), 0)
-              : formatInr(textValue(idea.price), "compact")}
-          </p>
-        ) : null}
-      </div>
+        </details>
+      ) : null}
+      {tranche ? <p className="text-sm font-medium">{tranche}</p> : null}
     </article>
   );
 }
@@ -754,7 +750,9 @@ function IdeaGroups({
     <div className="grid gap-3">
       {[...groups].map(([market, ideas]) => (
         <div key={market}>
-          <h3 className="text-sm font-semibold">{ideaMarketLabel(market)}</h3>
+          <h3 className="mb-2 text-xs font-semibold text-muted-foreground">
+            {ideaMarketLabel(market)}
+          </h3>
           <div className="grid gap-3">
             {ideas.map((raw, index) => (
               <ResearchIdea
@@ -786,7 +784,7 @@ function ResearchCard({
         {englishCopy.ideas.weekly_title}
       </h2>
       <details className="border-b border-line pb-2">
-        <summary className="min-h-9 cursor-pointer py-1 text-sm font-medium text-muted-foreground">
+        <summary className="min-h-11 cursor-pointer py-1 text-sm font-medium text-muted-foreground">
           {englishCopy.ideas.term_prompt}
         </summary>
         <p className="pb-1 text-sm text-muted-foreground">
@@ -840,9 +838,11 @@ function ResearchCard({
 function IndexFundsCard({
   research,
   showSetMonthlyAmount,
+  showMonthlyBuying,
 }: {
   research?: ResearchIdeasResponse;
   showSetMonthlyAmount: boolean;
+  showMonthlyBuying: boolean;
 }) {
   const funds = asArray(research?.index_funds).map(asRecord);
   if (!funds.length) return null;
@@ -865,6 +865,63 @@ function IndexFundsCard({
     global_sp500: copy.index_sp500_fund,
     global_nasdaq100: copy.index_nasdaq100_fund,
   };
+  const mainFund =
+    funds.find((fund) => textValue(fund.role) === "plan_main") ?? funds[0];
+  const otherFunds = funds.filter((fund) => fund !== mainFund);
+  const renderFund = (fund: Record<string, unknown>, index: number) => {
+    const exposure = textValue(fund.exposure);
+    const instrument = asRecord(fund.instrument);
+    const listedName = textValue(instrument.listed_name);
+    const searchCode = textValue(instrument.isin);
+    const brokers = asArray(instrument.brokers)
+      .map((broker) => textValue(broker))
+      .map((broker) => textValue(brokerNames[broker], broker));
+    const secondLine = [
+      instrument.ask_eligible ? englishCopy.denmark.account_ask : null,
+      brokers.length ? brokers.join(", ") : null,
+    ]
+      .filter(Boolean)
+      .join(", ");
+    return (
+      <li
+        key={`${exposure}-${index}`}
+        className="border-t border-line pt-3 first:border-0 first:pt-0"
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <h3 className="text-sm font-semibold">
+            {textValue(rowLabels[exposure], copy.index_world_fund)}
+          </h3>
+          {textValue(fund.role) === "plan_main" ? (
+            <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
+              {copy.index_plan_main}
+            </span>
+          ) : null}
+        </div>
+        <p className="mt-1 text-sm">{textValue(instrument.name)}</p>
+        {secondLine ? (
+          <p className="mt-1 text-xs text-muted-foreground">{secondLine}</p>
+        ) : null}
+        {listedName || searchCode ? (
+          <details>
+            <summary className="min-h-11 cursor-pointer py-2 text-sm text-muted-foreground">
+              {copy.index_find_it_at_broker}
+            </summary>
+            <div className="grid gap-1 pb-1 text-sm text-muted-foreground">
+              {listedName ? <p>{listedName}</p> : null}
+              {searchCode ? (
+                <p>
+                  {copy.index_search_code_label}: {searchCode}
+                </p>
+              ) : null}
+              {instrument.accumulating ? (
+                <p>{copy.index_reinvests_dividends}</p>
+              ) : null}
+            </div>
+          </details>
+        ) : null}
+      </li>
+    );
+  };
 
   return (
     <Card className="grid gap-3">
@@ -876,68 +933,23 @@ function IndexFundsCard({
             {copy.index_extra_parts.replace("{parts}", String(extraMoneyParts))}
           </p>
         ) : null}
-        <p>{copy.index_monthly_buying}</p>
+        {showMonthlyBuying ? <p>{copy.index_monthly_buying}</p> : null}
       </div>
       <ul className="grid gap-3">
-        {funds.map((fund) => {
-          const exposure = textValue(fund.exposure);
-          const instrument = asRecord(fund.instrument);
-          const listedName = textValue(instrument.listed_name);
-          const searchCode = textValue(instrument.isin);
-          const brokers = asArray(instrument.brokers)
-            .map((broker) => textValue(broker))
-            .map((broker) => textValue(brokerNames[broker], broker));
-          const secondLine = [
-            instrument.ask_eligible ? englishCopy.denmark.account_ask : null,
-            brokers.length ? brokers.join(", ") : null,
-          ]
-            .filter(Boolean)
-            .join(", ");
-          return (
-            <li
-              key={exposure}
-              className="border-t border-line pt-3 first:border-0 first:pt-0"
-            >
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="text-sm font-semibold">
-                  {textValue(rowLabels[exposure], copy.index_world_fund)}
-                </h3>
-                {textValue(fund.role) === "plan_main" ? (
-                  <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
-                    {copy.index_plan_main}
-                  </span>
-                ) : null}
-              </div>
-              <p className="mt-1 text-sm">{textValue(instrument.name)}</p>
-              {secondLine ? (
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {secondLine}
-                </p>
-              ) : null}
-              {listedName || searchCode ? (
-                <details>
-                  <summary className="min-h-9 cursor-pointer py-1 text-sm text-muted-foreground">
-                    {copy.index_find_it_at_broker}
-                  </summary>
-                  <div className="grid gap-1 pb-1 text-sm text-muted-foreground">
-                    {listedName ? <p>{listedName}</p> : null}
-                    {searchCode ? (
-                      <p>
-                        {copy.index_search_code_label}: {searchCode}
-                      </p>
-                    ) : null}
-                    {instrument.accumulating ? (
-                      <p>{copy.index_reinvests_dividends}</p>
-                    ) : null}
-                  </div>
-                </details>
-              ) : null}
-            </li>
-          );
-        })}
+        {mainFund ? renderFund(mainFund, 0) : null}
       </ul>
+      {otherFunds.length ? (
+        <details>
+          <summary className="min-h-11 cursor-pointer py-2 text-sm text-muted-foreground">
+            {copy.index_other_funds}
+          </summary>
+          <ul className="grid gap-3 pb-1">
+            {otherFunds.map((fund, index) => renderFund(fund, index + 1))}
+          </ul>
+        </details>
+      ) : null}
       <details>
-        <summary className="min-h-9 cursor-pointer py-1 text-sm text-muted-foreground">
+        <summary className="min-h-11 cursor-pointer py-2 text-sm text-muted-foreground">
           {copy.index_why}
         </summary>
         <div className="grid gap-2 pb-1 text-sm text-muted-foreground">
@@ -950,7 +962,7 @@ function IndexFundsCard({
       {showSetMonthlyAmount ? (
         <Link
           to="/"
-          className="min-h-9 w-fit py-1 text-sm font-medium text-muted-foreground"
+          className="inline-flex min-h-11 w-fit items-center text-sm font-medium text-muted-foreground"
         >
           {englishCopy.denmark.set_monthly_amount}
         </Link>
@@ -987,11 +999,14 @@ export function IdeasPage() {
     asRecord(planValue?.residency).country === "DK" ||
     planMembers.some((member) => asRecord(member.residency).country === "DK");
   const denmarkBuyCount = asArray(planValue?.abroad_buy_list).length;
+  const monthlyAmountSet = isPositiveAmount(
+    investing.data?.monthly_sip_capacity,
+  );
   const showSetMonthlyAmount =
     denmarkResident &&
     !investing.isPending &&
     Boolean(investing.data) &&
-    !isPositiveAmount(investing.data?.monthly_sip_capacity);
+    !monthlyAmountSet;
   return (
     <div data-copy-screen="ideas" className="grid gap-4">
       <header>
@@ -1009,6 +1024,7 @@ export function IdeasPage() {
       <IndexFundsCard
         research={research.data}
         showSetMonthlyAmount={showSetMonthlyAmount}
+        showMonthlyBuying={monthlyAmountSet}
       />
       {denmarkResident && !denmarkBuyCount ? (
         <div className="grid gap-1 text-sm text-muted-foreground">

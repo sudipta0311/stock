@@ -1231,8 +1231,7 @@ export function HomePage() {
           </summary>
           <div className="grid gap-2 pb-2">
             <p className="text-sm text-muted-foreground">
-              Your plan starts balanced. Goals and email updates stay off until
-              you choose them.
+              {englishCopy.home.more_accurate_description}
             </p>
             <Link
               className="min-h-10 text-sm font-medium text-brand"

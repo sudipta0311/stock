@@ -4,6 +4,7 @@ const section = {
   "upload_description": "Broker files and investment statements.",
   "gmail_statements": "Get statements from Gmail",
   "add_by_hand": "Add manually",
+  "check_investment": "Check an investment",
   "quick_add_summary": "Quick add",
   "save_continue": "Save and continue",
   "save_return": "Save and return",

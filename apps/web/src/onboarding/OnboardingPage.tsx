@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import type { FormEvent } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { FormEvent, RefObject } from "react";
 import { useForm } from "react-hook-form";
 import { ArrowLeft, ArrowRight, Check, HeartHandshake } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router";
@@ -248,16 +248,11 @@ function StepHeading({
   return (
     <div className="grid gap-3">
       {showProgress ? (
-        <>
-          <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
-            <span>Getting started</span>
-          </div>
-          <Progress
-            quiet
-            value={((index + 1) / STEPS.length) * 100}
-            label="Onboarding progress"
-          />
-        </>
+        <Progress
+          quiet
+          value={((index + 1) / STEPS.length) * 100}
+          label="Onboarding progress"
+        />
       ) : null}
       <div>
         <h1 className="text-page-title font-semibold tracking-tight">
@@ -273,14 +268,22 @@ function QuestionCard({
   question,
   answer,
   onAnswer,
+  headingRef,
 }: {
   question: RiskQuestion;
   answer?: string;
   onAnswer(value: string): void;
+  headingRef: RefObject<HTMLLegendElement | null>;
 }) {
   return (
     <fieldset className="grid gap-3">
-      <legend className="text-base font-semibold">{question.text}</legend>
+      <legend
+        ref={headingRef}
+        tabIndex={-1}
+        className="text-base font-semibold focus:outline-none"
+      >
+        {question.text}
+      </legend>
       <div className="grid gap-2">
         {question.options.map((option) => (
           <button
@@ -305,6 +308,9 @@ export function OnboardingPage() {
   const [draft, setDraft] = useState<OnboardingDraft>(readDraft);
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [questions, setQuestions] = useState<RiskQuestion[]>([]);
+  const [questionIndex, setQuestionIndex] = useState(0);
+  const riskQuestionHeadingRef = useRef<HTMLLegendElement>(null);
+  const shouldFocusRiskQuestion = useRef(false);
   const [goals, setGoals] = useState<GoalResponse[]>([]);
   const [riskResult, setRiskResult] = useState<RiskResult | null>(null);
   const [riskSaved, setRiskSaved] = useState(false);
@@ -455,6 +461,17 @@ export function OnboardingPage() {
       active = false;
     };
   }, [step]);
+
+  useEffect(() => {
+    if (step !== "risk") {
+      setQuestionIndex(0);
+      return;
+    }
+    if (shouldFocusRiskQuestion.current && questions[questionIndex]) {
+      riskQuestionHeadingRef.current?.focus();
+      shouldFocusRiskQuestion.current = false;
+    }
+  }, [questionIndex, questions, step]);
 
   function updateDraft(patch: Partial<OnboardingDraft>) {
     setDraft((current) => ({ ...current, ...patch }));
@@ -671,6 +688,21 @@ export function OnboardingPage() {
     }
   }
 
+  function moveRiskQuestion(index: number) {
+    if (index < 0 || index >= questions.length) return;
+    shouldFocusRiskQuestion.current = true;
+    setQuestionIndex(index);
+  }
+
+  function skipRisk() {
+    setPageError("");
+    if (returnPath) {
+      navigate(returnPath);
+      return;
+    }
+    moveTo("consent");
+  }
+
   function updateConsent(
     key: keyof OnboardingDraft["consents"],
     checked: boolean,
@@ -712,7 +744,7 @@ export function OnboardingPage() {
             className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-muted-foreground"
           >
             <ArrowLeft aria-hidden="true" className="size-4" />
-            {step === "goals" ? englishCopy.household_ui.back_to_home : "Home"}
+            {englishCopy.household_ui.back_to_home}
           </Link>
         ) : step !== "welcome" && step !== "done" ? (
           <Link
@@ -779,10 +811,12 @@ export function OnboardingPage() {
                 <legend className="px-1 text-sm font-semibold">
                   {index === 0
                     ? englishCopy.household.onboarding.you
-                    : englishCopy.household.onboarding.adult_number.replace(
-                        "{number}",
-                        String(index + 1),
-                      )}
+                    : draft.householdMode === "spouse"
+                      ? englishCopy.household.onboarding.your_spouse
+                      : englishCopy.household.onboarding.adult_number.replace(
+                          "{number}",
+                          String(index + 1),
+                        )}
                 </legend>
                 <Field
                   id={`adult-${index}-name`}
@@ -801,7 +835,7 @@ export function OnboardingPage() {
                     className="min-h-12 w-full rounded-xl border border-line bg-background px-3"
                   />
                 </Field>
-                {index === 0 ? null : (
+                {index === 0 || draft.householdMode === "spouse" ? null : (
                   <Select
                     id={`adult-${index}-relationship`}
                     label={englishCopy.household.onboarding.relationship}
@@ -842,8 +876,13 @@ export function OnboardingPage() {
                     {englishCopy.household.residency_rnor}
                   </option>
                 </Select>
+                {index === 0 ? (
+                  <p className="-mt-4 text-sm text-muted-foreground">
+                    {englishCopy.household.onboarding.tax_residence_help}
+                  </p>
+                ) : null}
                 <details className="border-t border-line pt-2">
-                  <summary className="cursor-pointer text-sm font-medium">
+                  <summary className="min-h-11 cursor-pointer py-2 text-sm font-medium">
                     {englishCopy.household.add_details}
                   </summary>
                   <div className="mt-3 grid gap-5">
@@ -1130,23 +1169,37 @@ export function OnboardingPage() {
             ) : null}
             <StepHeading
               step="risk"
-              title="How do you feel about risk?"
-              description="Choose the answer that feels closest. There are six short questions."
+              title={
+                returnPath
+                  ? englishCopy.household_ui.risk_home_title
+                  : englishCopy.household_ui.risk_title
+              }
+              description={englishCopy.household_ui.risk_description}
+              showProgress={!returnPath}
             />
-            <div className="grid gap-5">
-              {questions.map((question) => (
+            {questions[questionIndex] ? (
+              <div className="grid gap-3">
+                <p className="text-sm text-muted-foreground">
+                  {englishCopy.household_ui.risk_question_count
+                    .replace("{number}", String(questionIndex + 1))
+                    .replace("{count}", String(questions.length))}
+                </p>
                 <QuestionCard
-                  key={question.id}
-                  question={question}
-                  answer={draft.answers[question.id]}
+                  key={questions[questionIndex]!.id}
+                  question={questions[questionIndex]!}
+                  answer={draft.answers[questions[questionIndex]!.id]}
+                  headingRef={riskQuestionHeadingRef}
                   onAnswer={(answer) =>
                     updateDraft({
-                      answers: { ...draft.answers, [question.id]: answer },
+                      answers: {
+                        ...draft.answers,
+                        [questions[questionIndex]!.id]: answer,
+                      },
                     })
                   }
                 />
-              ))}
-            </div>
+              </div>
+            ) : null}
             {riskResult ? (
               <Card className="border-brand/40 bg-brand/5">
                 <p className="text-sm font-semibold">
@@ -1166,21 +1219,48 @@ export function OnboardingPage() {
             ) : null}
             {riskSaved ? (
               <Button data-primary="true" onClick={() => moveTo("consent")}>
-                Continue
+                {englishCopy.household.onboarding.continue}
               </Button>
-            ) : (
-              <Button
-                data-primary="true"
-                onClick={() => void saveRiskAnswers()}
-                loading={saving}
-                disabled={!answersComplete}
-              >
-                Save answers
-              </Button>
-            )}
-            <Button variant="ghost" onClick={() => moveTo("consent")}>
-              Skip for now
-            </Button>
+            ) : questions.length ? (
+              <div className="grid gap-2">
+                <div className="flex items-center gap-2">
+                  {questionIndex > 0 ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => moveRiskQuestion(questionIndex - 1)}
+                    >
+                      {englishCopy.household_ui.risk_back}
+                    </Button>
+                  ) : null}
+                  {questionIndex < questions.length - 1 ? (
+                    <Button
+                      type="button"
+                      data-primary="true"
+                      className="ml-auto"
+                      disabled={!draft.answers[questions[questionIndex]!.id]}
+                      onClick={() => moveRiskQuestion(questionIndex + 1)}
+                    >
+                      {englishCopy.household_ui.risk_next}
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      data-primary="true"
+                      className="ml-auto"
+                      onClick={() => void saveRiskAnswers()}
+                      loading={saving}
+                      disabled={!answersComplete}
+                    >
+                      {englishCopy.household_ui.risk_save}
+                    </Button>
+                  )}
+                </div>
+                <Button variant="ghost" onClick={skipRisk}>
+                  {englishCopy.household_ui.risk_skip}
+                </Button>
+              </div>
+            ) : null}
           </>
         ) : null}
 

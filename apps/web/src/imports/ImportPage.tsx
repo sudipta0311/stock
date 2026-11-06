@@ -590,7 +590,7 @@ export function ImportPage() {
 }
 
 const kindOptions = [
-  ["equity", "Equity"],
+  ["equity", englishCopy.imports.broker_security_label],
   ["etf", "Exchange traded fund"],
   ["mf", "Mutual fund"],
   ["bond", "Bond"],
@@ -691,7 +691,7 @@ function TradebookMismatchChoice({
       <legend className="font-medium">
         {englishCopy.imports.quantity_choice_label}
       </legend>
-      <label className="flex min-h-10 items-center gap-2">
+      <label className="flex min-h-11 items-center gap-2">
         <input
           type="radio"
           name={`quantity-choice-${item.id}`}
@@ -703,7 +703,7 @@ function TradebookMismatchChoice({
         />
         {englishCopy.imports.keep_statement}
       </label>
-      <label className="flex min-h-10 items-center gap-2">
+      <label className="flex min-h-11 items-center gap-2">
         <input
           type="radio"
           name={`quantity-choice-${item.id}`}
@@ -1120,7 +1120,7 @@ export function ImportReviewPage() {
             <Button
               type="button"
               variant="ghost"
-              className="min-h-10 px-2"
+              className="min-h-11 px-2"
               onClick={() => setFixingMapping(true)}
             >
               {englishCopy.imports.fix_columns}
@@ -1148,7 +1148,7 @@ export function ImportReviewPage() {
             <legend className="font-medium">
               {englishCopy.imports.tax_wrapper_question}
             </legend>
-            <label className="flex min-h-10 items-center gap-2">
+            <label className="flex min-h-11 items-center gap-2">
               <input
                 type="radio"
                 name="tax-wrapper"
@@ -1160,7 +1160,7 @@ export function ImportReviewPage() {
               />
               {englishCopy.imports.tax_wrapper_yes}
             </label>
-            <label className="flex min-h-10 items-center gap-2">
+            <label className="flex min-h-11 items-center gap-2">
               <input
                 type="radio"
                 name="tax-wrapper"
@@ -1197,7 +1197,7 @@ export function ImportReviewPage() {
               <Button
                 type="button"
                 variant="ghost"
-                className="min-h-10 px-2"
+                className="min-h-11 px-2"
                 disabled={saving}
                 onClick={() => void selectAllNew()}
               >
@@ -1653,7 +1653,7 @@ function BrokerMappingPanel({
         </select>
       </label>
       <details className="rounded-xl border border-line p-3 text-sm">
-        <summary className="min-h-10 cursor-pointer font-medium">
+        <summary className="min-h-11 cursor-pointer font-medium">
           {englishCopy.imports.mapping_preview_rows}
         </summary>
         <div className="overflow-x-auto pt-2">
@@ -1723,7 +1723,7 @@ function BrokerMappingPanel({
           ))}
         </div>
         <details className="rounded-xl border border-line p-3 text-sm">
-          <summary className="min-h-10 cursor-pointer font-medium">
+          <summary className="min-h-11 cursor-pointer font-medium">
             {englishCopy.imports.mapping_more_columns}
           </summary>
           <div className="grid gap-3 pt-3 sm:grid-cols-2">

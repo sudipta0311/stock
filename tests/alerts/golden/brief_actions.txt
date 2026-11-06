@@ -19,7 +19,7 @@ Open: https://app.example/plan
 You: Change your monthly investments · Monthly investment · ₹20,000 — This points your monthly SIPs toward areas below target.
 Open: https://app.example/plan
 
-You: Take some profit · SYNTH · 15 shares · ₹6,750 — The holding is above its planned share of your equity.
+You: Sell some · SYNTH · 15 shares · ₹6,750 — The holding is above its planned share of your equity.
 Open: https://app.example/plan
 
 

@@ -31,6 +31,7 @@ const section = {
   "money_summary": "Money: {amount}",
   "money_summary_empty": "Money: Add items to see your total",
   "plan_empty": "Add what you have to see your plan",
+  "more_accurate_description": "You can add goals and change these choices anytime.",
   "add_money": "Add your money",
   "buy_sheet_title": "What did you buy?",
   "buy_sheet_description": "Enter the amount you spent.",

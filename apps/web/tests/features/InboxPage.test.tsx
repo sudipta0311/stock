@@ -42,7 +42,9 @@ describe("Inbox and brief", () => {
     expect(
       await screen.findByRole("link", { name: "Upload a file" }),
     ).toHaveAttribute("href", "/import");
-    expect(screen.getByRole("link", { name: "Email settings" })).toBeVisible();
+    expect(
+      screen.getByRole("link", { name: "Email settings" }),
+    ).toHaveAttribute("href", "/settings?section=notifications");
   });
 
   it("keeps the upload link visible when emails are present", async () => {

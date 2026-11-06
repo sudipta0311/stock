@@ -14,6 +14,10 @@ export function OnboardingFrame() {
     location.pathname === "/onboarding/goals" &&
     typeof returnTo === "string" &&
     returnTo.startsWith("/");
+  const addingRisk =
+    location.pathname === "/onboarding/risk" &&
+    typeof returnTo === "string" &&
+    returnTo.startsWith("/");
   return (
     <HouseholdProvider>
       <header className="sticky top-0 z-20 h-14 border-b border-line bg-surface/95 backdrop-blur">
@@ -28,7 +32,9 @@ export function OnboardingFrame() {
             <span className="truncate text-sm font-semibold">
               {addingGoal
                 ? englishCopy.household_ui.add_goal_title
-                : "Getting started"}
+                : addingRisk
+                  ? englishCopy.household_ui.risk_home_title
+                  : "Getting started"}
             </span>
           </div>
           <AccountMenu />

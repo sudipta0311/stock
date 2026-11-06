@@ -1,7 +1,11 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { MemoryRouter } from "react-router";
+import {
+  HouseholdProvider,
+  PRIMARY_CURRENCY_STORAGE_KEY,
+} from "../../src/household/HouseholdContext";
 import { describe, expect, it } from "vitest";
 import { axe } from "vitest-axe";
 import * as englishCopy from "../../src/copy/sections/index";
@@ -10,6 +14,7 @@ import { WorldPage } from "../../src/ideas/WorldPage";
 import { action, networth, weeklyPlan } from "./fixtures";
 import { renderWithQueries } from "./render";
 import { server } from "../msw";
+import { bannedTermsIncludingDisclosuresAndFields } from "../plain-language";
 
 function ideaHandlers(
   plan = weeklyPlan(),
@@ -163,6 +168,9 @@ describe("Ideas page", () => {
       await screen.findByText(englishCopy.denmark.no_buy_short),
     ).toBeInTheDocument();
     expect(
+      screen.queryByText("Monthly buying: keep going."),
+    ).not.toBeInTheDocument();
+    expect(
       screen.getByRole("link", {
         name: englishCopy.denmark.set_monthly_amount,
       }),
@@ -174,7 +182,8 @@ describe("Ideas page", () => {
     ).toHaveLength(1);
   });
 
-  it("shows ideas and confidence details in plain words", async () => {
+  it("shows ideas and keeps confidence details closed", async () => {
+    const user = userEvent.setup();
     server.use(...ideaHandlers());
     const { container } = renderWithQueries(
       <MemoryRouter>
@@ -186,10 +195,13 @@ describe("Ideas page", () => {
       name: "Example Company",
     });
     expect(ideaHeading.parentElement).toHaveTextContent("DEMO");
-    expect(screen.getByText("Energy")).toBeInTheDocument();
-    expect(screen.getByText("Fairly priced")).toBeInTheDocument();
-    expect(screen.getByText("Higher confidence")).toBeInTheDocument();
-    expect(screen.getByText("Part 1 of 3")).toBeInTheDocument();
+    const marketHeading = screen.getByText("India", { exact: true });
+    expect(marketHeading).toHaveClass("text-xs", "text-muted-foreground");
+    expect(marketHeading).not.toHaveClass("text-sm", "text-base");
+    expect(screen.getByText("Energy")).not.toBeVisible();
+    expect(screen.getByText("Fairly priced")).not.toBeVisible();
+    expect(screen.getByText("Higher confidence")).not.toBeVisible();
+    expect(screen.getByText("Part 1 of 3")).toBeVisible();
     const ideaArticle = ideaHeading.closest("article");
     if (!(ideaArticle instanceof HTMLElement))
       throw new Error("Expected the research idea row");
@@ -211,7 +223,18 @@ describe("Ideas page", () => {
       ),
     ).not.toBeVisible();
     expect(within(ideaArticle).queryByText("Why?")).not.toBeInTheDocument();
+    await user.click(within(ideaArticle).getByText("Why this idea?"));
+    expect(screen.getByText("Energy")).toBeVisible();
+    expect(screen.getByText("Fairly priced")).toBeVisible();
+    expect(screen.getByText("Higher confidence")).toBeVisible();
+    expect(
+      screen.getByText("A durable business has steady demand."),
+    ).toBeVisible();
     expect(screen.getByText("Buy in 3 parts over 3 months")).toBeVisible();
+    const articleText = ideaArticle.textContent ?? "";
+    expect(articleText.indexOf("Buy in 3 parts over 3 months")).toBeLessThan(
+      articleText.indexOf("Reference price"),
+    );
     expect(
       screen.getByText("Ideas are research to review, not a reason to rush."),
     ).toBeInTheDocument();
@@ -219,8 +242,44 @@ describe("Ideas page", () => {
       screen.queryByRole("heading", { name: "Ideas" }),
     ).not.toBeInTheDocument();
     expect((await axe(container)).violations).toEqual([]);
+    expect(bannedTermsIncludingDisclosuresAndFields(container)).toEqual([]);
+  });
+  it("shows a long company name in full without a clamp", async () => {
+    const longName =
+      "Synthetic Agricultural Equipment Company With A Long Name";
+    server.use(...ideaHandlers(weeklyPlan(), longName));
+    renderWithQueries(
+      <MemoryRouter>
+        <IdeasPage />
+      </MemoryRouter>,
+    );
+
+    const heading = await screen.findByRole("heading", { name: longName });
+    expect(heading).toBeVisible();
+    expect(heading).not.toHaveClass(/line-clamp/);
+    expect(heading).not.toHaveAttribute("title");
   });
 
+  it("shows monthly buying only when a monthly amount is set", async () => {
+    server.use(...ideaHandlers(denmarkPlan()));
+    server.use(
+      http.get(/\/v1\/research\/ideas$/, () =>
+        HttpResponse.json(indexFundResearch()),
+      ),
+      http.get(/\/v1\/me\/investing$/, () =>
+        HttpResponse.json({ monthly_sip_capacity: "2500.00" }),
+      ),
+    );
+    renderWithQueries(
+      <MemoryRouter>
+        <IdeasPage />
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByText("Monthly buying: keep going."),
+    ).toBeVisible();
+  });
   it("uses the ticker as the title when the company name is missing", async () => {
     server.use(...ideaHandlers(weeklyPlan(), null));
     renderWithQueries(
@@ -233,7 +292,8 @@ describe("Ideas page", () => {
     expect(screen.queryByText("Example Company")).not.toBeInTheDocument();
   });
 
-  it("shows the Denmark index funds in three visible rows", async () => {
+  it("keeps the plan fund visible and groups other funds closed", async () => {
+    const user = userEvent.setup();
     server.use(...ideaHandlers(denmarkPlan()));
     server.use(
       http.get(/\/v1\/research\/ideas$/, () =>
@@ -252,18 +312,28 @@ describe("Ideas page", () => {
     const card = title.closest("div.grid");
     if (!(card instanceof HTMLElement))
       throw new Error("Expected the index fund card");
-    expect(within(card).getAllByRole("listitem")).toHaveLength(3);
     expect(screen.getByRole("heading", { name: "World fund" })).toBeVisible();
+    expect(screen.getByText(englishCopy.ideas.index_plan_main)).toBeVisible();
+    const otherFunds = screen.getByText(englishCopy.ideas.index_other_funds);
+    expect(otherFunds.closest("details")).not.toHaveAttribute("open");
+    expect(
+      screen.getByRole("heading", { name: "S&P 500 fund" }),
+    ).not.toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "Nasdaq 100 fund" }),
+    ).not.toBeVisible();
+    await user.click(otherFunds);
+    expect(within(card).getAllByRole("listitem")).toHaveLength(3);
     expect(screen.getByRole("heading", { name: "S&P 500 fund" })).toBeVisible();
     expect(
       screen.getByRole("heading", { name: "Nasdaq 100 fund" }),
     ).toBeVisible();
-    expect(screen.getByText(englishCopy.ideas.index_plan_main)).toBeVisible();
     expect(screen.getByText("iShares Core S&P 500 fund")).toBeVisible();
     expect(
       screen.getByText("Share savings account, Nordnet, Saxo"),
     ).toBeVisible();
     expect(screen.getByText("Share savings account, Nordnet")).toBeVisible();
+
     const why = screen.getByText(englishCopy.ideas.index_why);
     expect(why.closest("details")).not.toHaveAttribute("open");
     const sp500Row = screen
@@ -285,7 +355,6 @@ describe("Ideas page", () => {
       within(sp500Row).getByText("It reinvests dividends for you."),
     ).not.toBeVisible();
   });
-
   it.each([
     [
       "cheap",
@@ -331,7 +400,9 @@ describe("Ideas page", () => {
       expect(
         screen.getByText(`Extra money: buy in ${parts} parts.`),
       ).toBeVisible();
-      expect(screen.getByText("Monthly buying: keep going.")).toBeVisible();
+      expect(
+        screen.queryByText("Monthly buying: keep going."),
+      ).not.toBeInTheDocument();
     },
   );
 
@@ -538,6 +609,7 @@ describe("Ideas page", () => {
               valuation_percentile: "35",
               valuation_label: "fair",
               confidence: "HIGH",
+              entry_hint: { code: "buy_in_parts", parts: 3, reasons: [] },
               owned: {
                 direct_inr: "0.00",
                 through_funds_inr: "270000.00",
@@ -676,6 +748,14 @@ describe("Ideas page", () => {
         "You already own about ₹3.21 L of this, ₹2.71 L through your funds.",
       ),
     ).toBeVisible();
+    const ownedIdea = screen.getByText("FUNDSONLY").closest("article")!;
+    const ownedLine = within(ownedIdea).getByText(/You already own about/);
+    const entryLine = within(ownedIdea).getByText(
+      "Buy in 3 parts over 3 months",
+    );
+    expect(ownedLine.compareDocumentPosition(entryLine)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
     const noneIdea = screen.getByText("NONE").closest("article");
     expect(noneIdea).not.toHaveTextContent("You already own about");
     expect(
@@ -1028,7 +1108,34 @@ describe("Ideas page", () => {
   });
 
   it("formats stress impacts for current holdings and the target plan", async () => {
+    let fxRequests = 0;
+    localStorage.setItem(PRIMARY_CURRENCY_STORAGE_KEY, "INR");
     server.use(
+      http.get(/\/v1\/me$/, () =>
+        HttpResponse.json({
+          id: "user-test",
+          display_name: "Synthetic user",
+          me_member_id: "member-dk-test",
+          household_owner_id: "household-test",
+          role: "owner",
+        }),
+      ),
+      http.get(/\/v1\/members$/, () =>
+        HttpResponse.json([
+          {
+            id: "member-dk-test",
+            display_name: "Synthetic member",
+            is_self: true,
+            relationship: "self",
+            residency: { country: "DK", status: "NRI" },
+          },
+        ]),
+      ),
+      http.get(/\/v1\/households$/, () => HttpResponse.json([])),
+      http.get(/\/v1\/fx\/dkk-inr$/, () => {
+        fxRequests += 1;
+        return HttpResponse.json({ date: "2026-10-28", rate: "12.35" });
+      }),
       http.get(/\/v1\/stress$/, () =>
         HttpResponse.json({
           week: "2026-W44",
@@ -1048,13 +1155,21 @@ describe("Ideas page", () => {
       ),
     );
     renderWithQueries(
-      <MemoryRouter>
-        <WorldPage />
-      </MemoryRouter>,
+      <HouseholdProvider>
+        <MemoryRouter>
+          <WorldPage />
+        </MemoryRouter>
+      </HouseholdProvider>,
+    );
+    await screen.findByText("If Indian shares fall 25%");
+    await waitFor(() => expect(fxRequests).toBeGreaterThan(0));
+    expect(screen.getByRole("link", { name: "Back to Ideas" })).toHaveAttribute(
+      "href",
+      "/ideas",
     );
     expect(
-      await screen.findByText("If Indian shares fall 25%"),
-    ).toBeInTheDocument();
+      screen.getByText("These examples show how your holdings might move."),
+    ).toBeVisible();
     const indiaScenario = screen
       .getByRole("heading", { name: "If Indian shares fall 25%" })
       .closest("article");
@@ -1062,6 +1177,7 @@ describe("Ideas page", () => {
     expect(indiaScenario).toHaveTextContent(
       "With your target plan: down ₹21,000",
     );
+    expect(indiaScenario).not.toHaveTextContent("DKK");
     expect(screen.getByText("What we changed and why")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Source" })).toHaveAttribute(
       "href",

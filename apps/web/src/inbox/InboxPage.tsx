@@ -124,7 +124,7 @@ export function InboxPage({
           icon={<Inbox aria-hidden="true" className="size-5" />}
           action={
             <Link
-              to="/settings"
+              to="/settings?section=notifications"
               data-primary="true"
               className="inline-flex min-h-12 items-center justify-center rounded-xl bg-brand px-4 py-3 text-sm font-semibold text-brand-foreground"
             >

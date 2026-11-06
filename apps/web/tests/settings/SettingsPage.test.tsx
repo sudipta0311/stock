@@ -12,6 +12,7 @@ import { downloadSettingsExport } from "../../src/settings/api";
 import { ThemeProvider } from "../../src/ui/theme";
 import type { SettingsMe } from "../../src/settings/api";
 import { HouseholdProvider } from "../../src/household/HouseholdContext";
+import { bannedTermsIncludingDisclosuresAndFields } from "../plain-language";
 
 const { logoutMock, enablePushMock } = vi.hoisted(() => ({
   logoutMock: vi.fn(),
@@ -231,12 +232,12 @@ function settingsHandlers() {
   ];
 }
 
-function renderSettings() {
+function renderSettings(initialEntries: string[] = ["/settings"]) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0, staleTime: 0 } },
   });
   const view = render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={initialEntries}>
       <QueryClientProvider client={queryClient}>
         <ThemeProvider>
           <HouseholdProvider>
@@ -297,7 +298,7 @@ describe("Settings", () => {
 
   it("shows four simple groups, keeps plan details closed, and passes the accessibility scan", async () => {
     const user = userEvent.setup();
-    renderSettings();
+    const { container } = renderSettings();
     const sectionTitles = [
       englishCopy.settings.sections.family_title,
       englishCopy.settings.sections.plan_title,
@@ -315,7 +316,7 @@ describe("Settings", () => {
       );
     }
     expect(
-      await screen.findByText("2 people, shared with your partner"),
+      await screen.findByText(/2 people.*Access: shared with your partner/),
     ).toBeVisible();
     expect(screen.getByText("Currency: INR, alerts off")).toBeVisible();
     await openSection(user, englishCopy.settings.sections.family_title);
@@ -353,6 +354,20 @@ describe("Settings", () => {
     expect(await axe(document.querySelector("main")!)).toEqual(
       expect.objectContaining({ violations: [] }),
     );
+    expect(bannedTermsIncludingDisclosuresAndFields(container)).toEqual([]);
+  });
+
+  it("opens and focuses notifications from the email settings link", async () => {
+    renderSettings(["/settings?section=notifications"]);
+
+    const heading = await screen.findByRole("heading", {
+      name: englishCopy.settings.notifications.title,
+    });
+    const weeklyEmail = screen.getByLabelText(
+      englishCopy.settings.notifications.weekly_email,
+    );
+    expect(weeklyEmail.closest("details")).toHaveAttribute("open");
+    await waitFor(() => expect(heading).toHaveFocus());
   });
 
   it.each([

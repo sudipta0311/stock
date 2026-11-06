@@ -12,6 +12,7 @@ import { describe, expect, it, vi } from "vitest";
 import { OnboardingPage } from "../../src/onboarding/OnboardingPage";
 import { server } from "../msw";
 import { axe } from "vitest-axe";
+import { bannedTermsIncludingDisclosuresAndFields } from "../plain-language";
 
 function CurrentPath() {
   const location = useLocation();
@@ -107,6 +108,11 @@ describe("Money Map onboarding", () => {
     ).toBeInTheDocument();
     expect(screen.getByLabelText("Name")).toHaveValue("You");
     expect(screen.getByLabelText("Tax residence")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Another adult/ })).toBeVisible();
+    expect(
+      screen.getByText("Your tax residence helps tailor the plan."),
+    ).toBeVisible();
+    expect(screen.queryByText("Getting started", { exact: true })).toBeNull();
     expect(document.querySelectorAll('[data-primary="true"]')).toHaveLength(1);
     expect(
       screen.getByText("Add more details (optional)").closest("details"),
@@ -114,6 +120,219 @@ describe("Money Map onboarding", () => {
     expect(await axe(document.body)).toEqual(
       expect.objectContaining({ violations: [] }),
     );
+  });
+
+  it("moves through risk questions, keeps answers, focuses each question, and saves exact ids", async () => {
+    const user = userEvent.setup();
+    localStorage.clear();
+    let savedAnswers: Record<string, string> | null = null;
+    const questions = [
+      {
+        id: "risk-q-one",
+        text: "Synthetic question one?",
+        options: [
+          { id: "choice-one-a", text: "Choice one A" },
+          { id: "choice-one-b", text: "Choice one B" },
+        ],
+      },
+      {
+        id: "risk-q-two",
+        text: "Synthetic question two?",
+        options: [
+          { id: "choice-two-a", text: "Choice two A" },
+          { id: "choice-two-b", text: "Choice two B" },
+        ],
+      },
+      {
+        id: "risk-q-three",
+        text: "Synthetic question three?",
+        options: [
+          { id: "choice-three-a", text: "Choice three A" },
+          { id: "choice-three-b", text: "Choice three B" },
+        ],
+      },
+    ];
+    server.use(
+      http.get(/\/v1\/me$/, () =>
+        HttpResponse.json({
+          id: "user-test",
+          email: "user@example.test",
+          display_name: "Synthetic user",
+          created_at: "2026-10-28T00:00:00Z",
+          profile: null,
+          members: [],
+          me_member_id: null,
+        }),
+      ),
+      http.get(/\/v1\/members$/, () => HttpResponse.json([])),
+      http.get(/\/v1\/goals$/, () => HttpResponse.json([])),
+      http.get(/\/v1\/meta\/risk-questions$/, () =>
+        HttpResponse.json(questions),
+      ),
+      http.put(/\/v1\/me\/risk-answers$/, async ({ request }) => {
+        savedAnswers = (await request.json()) as Record<string, string>;
+        return HttpResponse.json({ final: "Balanced" });
+      }),
+    );
+    const { container } = render(
+      <MemoryRouter initialEntries={["/onboarding/risk"]}>
+        <Routes>
+          <Route path="/onboarding/*" element={<OnboardingPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await screen.findByText("Synthetic question one?", {
+      selector: "legend",
+    });
+    expect(
+      screen.getByText("Choose the answer that feels closest."),
+    ).toBeVisible();
+    expect(bannedTermsIncludingDisclosuresAndFields(container)).toEqual([]);
+    expect(screen.getByText("Question 1 of 3")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Next" })).toBeDisabled();
+    expect(
+      screen.queryByText("Synthetic question two?"),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Choice one B" }));
+    await user.click(screen.getByRole("button", { name: "Next" }));
+
+    const second = await screen.findByText("Synthetic question two?", {
+      selector: "legend",
+    });
+    await waitFor(() => expect(second).toHaveFocus());
+    expect(screen.getByText("Question 2 of 3")).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    const returnedFirst = await screen.findByText("Synthetic question one?", {
+      selector: "legend",
+    });
+    await waitFor(() => expect(returnedFirst).toHaveFocus());
+    expect(
+      screen.getByRole("button", { name: "Choice one B" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(screen.getByRole("button", { name: "Choice two A" }));
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(screen.getByRole("button", { name: "Choice three B" }));
+    expect(screen.getByRole("button", { name: "Save answers" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Save answers" }));
+    await waitFor(() =>
+      expect(savedAnswers).toEqual({
+        answers: {
+          "risk-q-one": "choice-one-b",
+          "risk-q-two": "choice-two-a",
+          "risk-q-three": "choice-three-b",
+        },
+      }),
+    );
+  });
+
+  it("skips Home risk questions without saving or showing setup progress", async () => {
+    const user = userEvent.setup();
+    let saveCalls = 0;
+    localStorage.clear();
+    server.use(
+      http.get(/\/v1\/me$/, () =>
+        HttpResponse.json({
+          id: "user-test",
+          email: "user@example.test",
+          display_name: "Synthetic user",
+          created_at: "2026-10-28T00:00:00Z",
+          profile: null,
+          members: [],
+          me_member_id: null,
+        }),
+      ),
+      http.get(/\/v1\/members$/, () => HttpResponse.json([])),
+      http.get(/\/v1\/goals$/, () => HttpResponse.json([])),
+      http.get(/\/v1\/meta\/risk-questions$/, () =>
+        HttpResponse.json([
+          {
+            id: "risk-q-one",
+            text: "Synthetic question?",
+            options: [{ id: "choice-a", text: "Choice A" }],
+          },
+        ]),
+      ),
+      http.put(/\/v1\/me\/risk-answers$/, () => {
+        saveCalls += 1;
+        return HttpResponse.json({ final: "Balanced" });
+      }),
+    );
+    render(
+      <MemoryRouter
+        initialEntries={[
+          { pathname: "/onboarding/risk", state: { returnTo: "/" } },
+        ]}
+      >
+        <Routes>
+          <Route path="/onboarding/*" element={<OnboardingPage />} />
+          <Route path="/" element={<CurrentPath />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Your comfort with risk",
+      }),
+    ).toBeVisible();
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    await user.click(
+      await screen.findByRole("button", { name: "Skip for now" }),
+    );
+    expect(await screen.findByText("/")).toBeVisible();
+    expect(saveCalls).toBe(0);
+  });
+
+  it("skips setup risk questions forward to consent without saving", async () => {
+    const user = userEvent.setup();
+    let saveCalls = 0;
+    localStorage.clear();
+    server.use(
+      http.get(/\/v1\/me$/, () =>
+        HttpResponse.json({
+          id: "user-test",
+          email: "user@example.test",
+          display_name: "Synthetic user",
+          created_at: "2026-10-28T00:00:00Z",
+          profile: null,
+          members: [],
+          me_member_id: null,
+        }),
+      ),
+      http.get(/\/v1\/members$/, () => HttpResponse.json([])),
+      http.get(/\/v1\/goals$/, () => HttpResponse.json([])),
+      http.get(/\/v1\/meta\/risk-questions$/, () =>
+        HttpResponse.json([
+          {
+            id: "risk-q-one",
+            text: "Synthetic setup question?",
+            options: [{ id: "choice-a", text: "Choice A" }],
+          },
+        ]),
+      ),
+      http.put(/\/v1\/me\/risk-answers$/, () => {
+        saveCalls += 1;
+        return HttpResponse.json({ final: "Balanced" });
+      }),
+    );
+    render(
+      <MemoryRouter initialEntries={["/onboarding/risk"]}>
+        <Routes>
+          <Route path="/onboarding/consent" element={<p>Consent step</p>} />
+          <Route path="/onboarding/*" element={<OnboardingPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await screen.findByText("Synthetic setup question?", {
+      selector: "legend",
+    });
+    await user.click(screen.getByRole("button", { name: "Skip for now" }));
+
+    expect(await screen.findByText("Consent step")).toBeVisible();
+    expect(saveCalls).toBe(0);
   });
 
   it("reaches the ready screen in five taps when adding a spouse", async () => {
@@ -185,6 +404,13 @@ describe("Money Map onboarding", () => {
     const names = screen.getAllByLabelText("Name");
     expect(names[0]).toHaveValue("You");
     expect(names[1]).toHaveValue("Spouse");
+    expect(
+      screen.getByText("Your spouse", { selector: "legend" }),
+    ).toBeVisible();
+    expect(screen.queryByLabelText("Relationship")).not.toBeInTheDocument();
+    expect(
+      screen.getAllByText("Your tax residence helps tailor the plan."),
+    ).toHaveLength(1);
     const residences = screen.getAllByLabelText("Tax residence");
     await user.selectOptions(residences[1]!, "NRI");
     taps += 1;

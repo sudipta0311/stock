@@ -1514,22 +1514,15 @@ export function MoneyMapPage() {
         ) : null}
         <LoansGroup summary={loanSummary} shownAmount={shownAmount} />
       </section>
-      <ImportHistorySheet jobs={importJobs} />
-      <details onToggle={(event) => setShowFundCheck(event.currentTarget.open)}>
-        <summary className="min-h-12 cursor-pointer py-3 text-sm font-semibold">
-          Check an investment
-        </summary>
-        {showFundCheck ? (
-          <Suspense fallback={<p className="py-3 text-sm">Loading…</p>}>
-            <FundCheckCard />
-          </Suspense>
-        ) : null}
-      </details>
-      <details id="money-checklist" ref={chooserRef}>
+      <details
+        id="money-checklist"
+        ref={chooserRef}
+        className="rounded-xl border border-line px-3"
+      >
         <summary
           ref={chooserSummaryRef}
           tabIndex={-1}
-          className="min-h-12 cursor-pointer py-3 text-base font-semibold focus-visible:outline-2 focus-visible:outline-brand"
+          className="min-h-12 cursor-pointer py-3 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-brand"
         >
           {englishCopy.money_ui.add_by_hand}
         </summary>
@@ -1590,8 +1583,22 @@ export function MoneyMapPage() {
           ) : null}
         </div>
       </details>
+      <ImportHistorySheet jobs={importJobs} />
+      <details
+        className="rounded-xl border border-line px-3"
+        onToggle={(event) => setShowFundCheck(event.currentTarget.open)}
+      >
+        <summary className="min-h-12 cursor-pointer py-3 text-sm font-semibold">
+          {englishCopy.money_ui.check_investment}
+        </summary>
+        {showFundCheck ? (
+          <Suspense fallback={<p className="py-3 text-sm">Loading…</p>}>
+            <FundCheckCard />
+          </Suspense>
+        ) : null}
+      </details>
       {networth ? (
-        <details>
+        <details className="rounded-xl border border-line px-3">
           <summary className="min-h-12 cursor-pointer py-3 text-sm font-semibold">
             {englishCopy.money_ui.more_details}
           </summary>

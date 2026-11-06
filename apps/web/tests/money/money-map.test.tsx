@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { axe } from "vitest-axe";
 import englishCopy from "../../src/copy/en.json";
 import { AddAssetPage } from "../../src/money/AssetFormPage";
+import { assetFieldCopy } from "../../src/money/labels.en";
 import { MoneyMapPage } from "../../src/money/MoneyMapPage";
 import {
   clearOfflineAssetWrites,
@@ -26,6 +27,7 @@ import {
   PRIMARY_CURRENCY_STORAGE_KEY,
 } from "../../src/household/HouseholdContext";
 import { HouseholdControls } from "../../src/household/HouseholdControls";
+import { bannedTermsIncludingDisclosuresAndFields } from "../plain-language";
 
 const memberId = "member-test-1";
 
@@ -172,6 +174,21 @@ async function openQuickAdd(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("Money Map", () => {
+  it("uses plain labels in manual bond and NPS forms", () => {
+    expect(assetFieldCopy.bond?.isin).toEqual({
+      label: "Investment code",
+      help: "Copy the code from your statement.",
+    });
+    expect(assetFieldCopy.bond?.issuer?.label).toBe("Issued by");
+    expect(assetFieldCopy.bond?.coupon_pct?.label).toBe("Interest rate (%)");
+    expect(assetFieldCopy.nps?.equity_pct?.label).toBe("Shares (%)");
+    expect(assetFieldCopy.nps?.corporate_debt_pct?.label).toBe(
+      "Company bonds (%)",
+    );
+    expect(assetFieldCopy.nps?.govt_debt_pct?.label).toBe(
+      "Government bonds (%)",
+    );
+  });
   it("shows loan balances and links each row to loan details", async () => {
     server.use(...baseHandlers(networth(), loanSummary()));
     renderMap();
@@ -543,17 +560,41 @@ describe("Money Map", () => {
         screen.queryByRole("heading", { name: group }),
       ).not.toBeInTheDocument();
     }
-    for (const section of [
+    const disclosureTitles = [
+      "Add manually",
       "Previous uploads",
       "Check an investment",
-      "Add manually",
-    ]) {
-      const details = Array.from(root?.querySelectorAll("details") ?? []).find(
-        (item) => item.querySelector("summary")?.textContent === section,
-      );
+      "More details",
+    ];
+    const disclosures = Array.from(
+      root?.querySelectorAll("details") ?? [],
+    ).filter((item) =>
+      disclosureTitles.includes(
+        item.querySelector("summary")?.textContent?.trim() ?? "",
+      ),
+    );
+    expect(
+      disclosures.map((item) =>
+        item.querySelector("summary")?.textContent?.trim(),
+      ),
+    ).toEqual(disclosureTitles);
+    for (const details of disclosures) {
       expect(details).not.toHaveAttribute("open");
+      expect(details.className).toBe("rounded-xl border border-line px-3");
+      const summary = details.querySelector("summary");
+      expect(summary).toHaveClass(
+        "min-h-12",
+        "py-3",
+        "text-sm",
+        "font-semibold",
+      );
+      if (summary?.textContent?.trim() === "Add manually") {
+        expect(summary).toHaveClass("focus-visible:outline-2");
+      }
     }
     expect(screen.queryByText("Monthly amounts")).toBeNull();
+    await user.click(screen.getByText("Add manually", { selector: "summary" }));
+    expect(bannedTermsIncludingDisclosuresAndFields(container)).toEqual([]);
     await user.click(screen.getByRole("button", { name: "Add holdings" }));
     const sheet = screen.getByRole("dialog", { name: "Add holdings" });
     expect(
