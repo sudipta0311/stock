@@ -77,6 +77,7 @@ function reviewDetail(overrides: Partial<ImportDetail> = {}): ImportDetail {
     source: "nsdl",
     statement_date: "2026-10-01",
     counts: { new: 1, changed: 1, duplicate: 1, unknown: 1 },
+    currency_mismatch_values: 0,
     auto_mapped: false,
     cash_flow_count: 0,
     columns_used: {},
@@ -328,6 +329,207 @@ describe("statement import review", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("explains when a row from several accounts is left unchanged", async () => {
+    server.use(
+      http.get(`/v1/imports/${jobId}`, () =>
+        HttpResponse.json(
+          reviewDetail({
+            source: "broker",
+            items: [
+              item({ id: "ordinary-row", action: "new" }),
+              item({
+                id: "several-account-row",
+                status: "unknown",
+                kind: "unknown",
+                reason: "several_accounts",
+                name: "Synthetic multi-account holding",
+                sleeve: null,
+              }),
+            ],
+            counts: { new: 1, changed: 0, duplicate: 0, unknown: 1 },
+          }),
+        ),
+      ),
+    );
+    renderReview();
+
+    expect(
+      await screen.findByText(
+        "You hold this in more than one account. We left it as it is.",
+      ),
+    ).toBeVisible();
+  });
+
+  it("shows only useful counts, plain quantities, values, and accounts", async () => {
+    server.use(
+      http.get(`/v1/imports/${jobId}`, () =>
+        HttpResponse.json(
+          reviewDetail({
+            source: "broker",
+            items: [
+              item({
+                id: "broker-share",
+                name: "Synthetic share",
+                action: "new",
+                quantity: "10.00",
+                statement_value: "1200.00",
+                account_ref: null,
+              }),
+              item({
+                id: "broker-fund",
+                name: "Synthetic fund",
+                action: "new",
+                kind: "etf",
+                quantity: "50.00",
+                statement_value: "1234.50",
+                account_ref: "account-1234",
+                market: "US",
+                currency: "USD",
+              }),
+            ],
+            counts: { new: 2, changed: 0, duplicate: 0, unknown: 0 },
+          }),
+        ),
+      ),
+    );
+    renderReview();
+
+    expect(
+      await screen.findByLabelText("Import item counts"),
+    ).toHaveTextContent("2 new holdings");
+    expect(screen.getByText(/10 shares/)).toBeVisible();
+    expect(screen.getByText(/10 shares · /)).toBeVisible();
+    expect(screen.getByText(/50 units/)).toBeVisible();
+    expect(screen.getByText("Shares", { exact: true })).toBeVisible();
+    expect(screen.getByText("Fund", { exact: true })).toBeVisible();
+    expect(screen.getByText(/₹1,200.00/)).toBeVisible();
+    expect(screen.getByText(/1,234.50 USD/)).toBeVisible();
+    expect(screen.getByText("•••• 1234")).toBeVisible();
+    expect(screen.queryByText("Account hidden")).not.toBeInTheDocument();
+    expect(screen.queryByText("Changed holdings")).not.toBeInTheDocument();
+    expect(screen.queryByText("Already saved")).not.toBeInTheDocument();
+    expect(screen.queryByText("Need review")).not.toBeInTheDocument();
+  });
+
+  it("keeps fractional share and fund quantities exact in review", async () => {
+    server.use(
+      http.get(`/v1/imports/${jobId}`, () =>
+        HttpResponse.json(
+          reviewDetail({
+            source: "broker",
+            items: [
+              item({
+                id: "fractional-fund",
+                name: "Synthetic fractional fund",
+                kind: "mf",
+                quantity: "12.500",
+              }),
+              item({
+                id: "fractional-share",
+                name: "Synthetic fractional share",
+                quantity: "1.2500",
+              }),
+            ],
+            counts: { new: 2, changed: 0, duplicate: 0, unknown: 0 },
+          }),
+        ),
+      ),
+    );
+    renderReview();
+
+    expect(await screen.findByText(/12\.5 units/)).toBeVisible();
+    expect(screen.getByText(/1\.25 shares/)).toBeVisible();
+  });
+
+  it("offers another file when no row can be added", async () => {
+    server.use(
+      http.get(`/v1/imports/${jobId}`, () =>
+        HttpResponse.json(
+          reviewDetail({
+            source: "broker",
+            items: [
+              item({ id: "duplicate-row", status: "duplicate" }),
+              item({
+                id: "unknown-row",
+                status: "unknown",
+                kind: "unknown",
+                name: "Unclassified holding",
+                sleeve: null,
+              }),
+            ],
+            counts: { new: 0, changed: 0, duplicate: 1, unknown: 1 },
+          }),
+        ),
+      ),
+    );
+    renderReview();
+
+    expect(
+      await screen.findByText("We couldn't recognise the shares in this file."),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "Review your import" }),
+    ).toBeVisible();
+    expect(screen.getByText(/Broker file/)).toBeVisible();
+    const rows = screen.getByText("Which rows?").closest("details");
+    expect(rows).not.toHaveAttribute("open");
+    expect(within(rows!).getByText("Example Equity Fund")).toBeInTheDocument();
+    expect(within(rows!).getByText("Unclassified holding")).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Try another file" }),
+    ).toHaveAttribute("data-primary", "true");
+    expect(screen.getByRole("button", { name: "Discard" })).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: /Confirm import/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows a saved outcome when every broker row is already saved", async () => {
+    server.use(
+      http.get(`/v1/imports/${jobId}`, () =>
+        HttpResponse.json(
+          reviewDetail({
+            source: "broker",
+            items: [item({ id: "duplicate-row", status: "duplicate" })],
+            counts: { new: 0, changed: 0, duplicate: 1, unknown: 0 },
+          }),
+        ),
+      ),
+    );
+    renderReview();
+
+    expect(
+      await screen.findByText("Everything in this file is already saved ✓"),
+    ).toBeVisible();
+    expect(screen.getByText("Example Equity Fund")).toBeInTheDocument();
+  });
+
+  it("keeps statement decisions available when only unknown rows remain", async () => {
+    server.use(
+      http.get(`/v1/imports/${jobId}`, () =>
+        HttpResponse.json(
+          reviewDetail({
+            source: "nsdl",
+            items: [
+              item({
+                id: "unknown-row",
+                status: "unknown",
+                kind: "unknown",
+                sleeve: null,
+              }),
+            ],
+            counts: { new: 0, changed: 0, duplicate: 0, unknown: 1 },
+          }),
+        ),
+      ),
+    );
+    renderReview();
+
+    expect(
+      await screen.findByRole("button", { name: "Save decision" }),
+    ).toBeVisible();
+  });
+
   it("groups counts, patches an unknown override, confirms, and shows success", async () => {
     const user = userEvent.setup();
     let overrideBody: Record<string, unknown> | null = null;
@@ -362,11 +564,14 @@ describe("statement import review", () => {
     );
     renderReview();
 
-    expect(await screen.findByText("New · 1")).toBeInTheDocument();
-    expect(screen.getByText("Changed · 1")).toBeInTheDocument();
-    expect(screen.getByText("Duplicate · 1")).toBeInTheDocument();
-    expect(screen.getByText("Unknown · 1")).toBeInTheDocument();
-    expect(screen.getByText("Already up to date")).toBeInTheDocument();
+    expect(
+      await screen.findByLabelText("Import item counts"),
+    ).toHaveTextContent(
+      "1 new holding · 1 changed holding · 1 already saved · 1 row to review",
+    );
+    const savedSummary = screen.getByText("Already saved").parentElement;
+    expect(savedSummary).toHaveTextContent("1");
+    expect(savedSummary).not.toHaveTextContent("Already up to date");
     expect(importFeatureSupport.mapping).toBe(true);
     expect(
       screen.queryByText("Column mapping is available for this API."),
@@ -382,7 +587,9 @@ describe("statement import review", () => {
         override: { kind: "mf", sleeve: "gold" },
       }),
     );
-    expect(await screen.findByText("Unknown · 0")).toBeInTheDocument();
+    expect(screen.getByLabelText("Import item counts")).not.toHaveTextContent(
+      "row to review",
+    );
     await user.click(
       screen.getByRole("button", { name: "Confirm import (3 items)" }),
     );

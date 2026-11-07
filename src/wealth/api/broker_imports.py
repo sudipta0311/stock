@@ -7,6 +7,7 @@ import threading
 import time
 from collections import Counter, OrderedDict, defaultdict
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from typing import Any
@@ -42,6 +43,7 @@ from wealth.importer.brokers import (
     load_broker_config,
     load_layouts,
     normalize_header,
+    normalize_template_header,
     parse_cash_flows,
     parse_holdings,
     parse_tradebook,
@@ -85,8 +87,21 @@ def available_templates(session: Session, user_id: UUID) -> list[dict[str, Any]]
     ]
 
 
-def find_layout(headers: list[str], templates: list[dict[str, Any]]) -> Layout | None:
-    return detect_layout(headers, load_layouts(), templates)
+def find_layout(
+    headers: list[str], templates: list[dict[str, Any]], broker: str | None = None
+) -> Layout | None:
+    layout = detect_layout(headers, load_layouts(), templates)
+    if layout is None or broker is None:
+        return layout
+    if layout.header_fingerprint is None:
+        return layout if layout.broker.casefold() == broker.casefold() else None
+    market_default, currency_default = broker_defaults(broker)
+    return replace(
+        layout,
+        broker=broker,
+        market_default=market_default,
+        currency_default=currency_default,
+    )
 
 
 def masked_samples(headers: list[str], rows: list[dict[str, Any]]) -> list[list[str]]:
@@ -153,7 +168,7 @@ def persist_template(
     currency_default: str = "INR",
 ) -> None:
     fingerprint = header_fingerprint(headers)
-    header_names = sorted({normalize_header(header) for header in headers})
+    header_names = sorted({normalize_template_header(header) for header in headers})
     statement = pg_insert(ImportTemplate).values(
         user_id=user_id,
         name=name[:80],
@@ -191,7 +206,10 @@ def _security_match(
     market: str = "IN",
 ) -> Security | None:
     if isin:
-        found = session.scalar(select(Security).where(Security.isin == isin.upper()))
+        normalized_isin = isin.upper()
+        if normalized_isin.startswith("IN") and market != "IN":
+            return None
+        found = session.scalar(select(Security).where(Security.isin == normalized_isin))
         if found is not None:
             return found
     if not symbol or market not in _MARKETS:
@@ -282,6 +300,37 @@ def _cash_flow_payload(flow: BrokerCashFlow) -> dict[str, str | None]:
     }
 
 
+def _broker_lots_at_place(
+    session: Session,
+    user_id: UUID,
+    job: ImportJob,
+    security_id: UUID,
+    broker: str,
+) -> list[HoldingLot]:
+    query = (
+        select(HoldingLot, ImportJob.parse_report)
+        .join(
+            ImportJob,
+            (ImportJob.id == HoldingLot.import_job_id) & (ImportJob.user_id == HoldingLot.user_id),
+        )
+        .where(
+            HoldingLot.user_id == user_id,
+            HoldingLot.member_id == job.member_id,
+            HoldingLot.security_id == security_id,
+            HoldingLot.source == "broker",
+        )
+    )
+    if job.account_id is not None:
+        query = query.where(HoldingLot.account_id == job.account_id)
+    else:
+        query = query.where(HoldingLot.account_id.is_(None))
+    return [
+        lot
+        for lot, parse_report in session.execute(query.order_by(HoldingLot.id))
+        if job.account_id is not None or (parse_report or {}).get("broker") == broker
+    ]
+
+
 def stage_broker_items(
     session: Session,
     user_id: UUID,
@@ -296,22 +345,30 @@ def stage_broker_items(
     job.doc_type = f"broker_{layout.kind}"
     job.status = "ready"
     report = dict(job.parse_report or {})
+    source_broker = str(report.get("broker") or layout.broker)
     report.update({"kind": layout.kind, "broker": layout.broker})
 
     if layout.kind == "holdings":
-        holdings = parse_holdings(rows, layout)
+        currency_mismatches: dict[str, int] = {}
+        holdings = parse_holdings(rows, layout, currency_mismatches=currency_mismatches)
+        report["currency_mismatch_values"] = sum(currency_mismatches.values())
         report["has_missing_cost"] = any(holding.avg_price is None for holding in holdings)
         for holding in holdings:
-            security = _security_match(
-                session,
-                isin=holding.isin,
-                symbol=holding.symbol,
-                exchange=holding.exchange,
-                market=holding.market,
+            security = (
+                _security_match(
+                    session,
+                    isin=holding.isin,
+                    symbol=holding.symbol,
+                    exchange=holding.exchange,
+                    market=holding.market,
+                )
+                if holding.currency in _CURRENCIES
+                else None
             )
             status = "new"
             diff = None
             match_lot_id = None
+            reason = "symbol_not_found"
             if security is None and not can_create_security(
                 {
                     "isin": holding.isin,
@@ -322,36 +379,78 @@ def stage_broker_items(
             ):
                 status = "unknown"
             elif security is not None:
-                lots = list(
-                    session.scalars(
-                        select(HoldingLot)
-                        .where(
-                            HoldingLot.user_id == user_id,
-                            HoldingLot.member_id == job.member_id,
-                            HoldingLot.security_id == security.id,
-                            HoldingLot.source == "cas",
-                        )
-                        .order_by(HoldingLot.id)
-                    )
+                broker_lots = _broker_lots_at_place(
+                    session, user_id, job, security.id, source_broker
                 )
-                quantity = sum((lot.quantity for lot in lots), Decimal(0))
-                if lots and quantity == holding.quantity:
-                    status = "enrich"
-                    match_lot_id = lots[0].id
-                elif lots:
-                    status = "changed"
-                    match_lot_id = lots[0].id
-                    diff = {
-                        "quantity": {
-                            "old": format(quantity, "f"),
-                            "new": format(holding.quantity, "f"),
+                if broker_lots:
+                    quantity = sum((lot.quantity for lot in broker_lots), Decimal(0))
+                    match_lot_id = broker_lots[0].id
+                    if quantity == holding.quantity:
+                        status = (
+                            "enrich"
+                            if holding.avg_price is not None
+                            and any(lot.cost_per_unit is None for lot in broker_lots)
+                            else "duplicate"
+                        )
+                    else:
+                        status = "changed"
+                        diff = {
+                            "quantity": {
+                                "old": format(quantity, "f"),
+                                "new": format(holding.quantity, "f"),
+                            }
                         }
-                    }
+                else:
+                    cas_lots = list(
+                        session.scalars(
+                            select(HoldingLot)
+                            .where(
+                                HoldingLot.user_id == user_id,
+                                HoldingLot.member_id == job.member_id,
+                                HoldingLot.security_id == security.id,
+                                HoldingLot.source == "cas",
+                            )
+                            .order_by(HoldingLot.id)
+                        )
+                    )
+                    if cas_lots:
+                        lots_by_account: dict[str | None, list[HoldingLot]] = defaultdict(list)
+                        for lot in cas_lots:
+                            lots_by_account[lot.account_ref].append(lot)
+                        account_lots = list(lots_by_account.values())
+                        if len(account_lots) > 1:
+                            matching_accounts = [
+                                lots
+                                for lots in account_lots
+                                if sum((lot.quantity for lot in lots), Decimal(0))
+                                == holding.quantity
+                            ]
+                            if len(matching_accounts) == 1:
+                                lots = matching_accounts[0]
+                                status = "enrich"
+                                match_lot_id = lots[0].id
+                            else:
+                                status = "unknown"
+                                reason = "several_accounts"
+                        else:
+                            lots = account_lots[0]
+                            quantity = sum((lot.quantity for lot in lots), Decimal(0))
+                            match_lot_id = lots[0].id
+                            if quantity == holding.quantity:
+                                status = "enrich"
+                            else:
+                                status = "changed"
+                                diff = {
+                                    "quantity": {
+                                        "old": format(quantity, "f"),
+                                        "new": format(holding.quantity, "f"),
+                                    }
+                                }
             payload = _holding_payload(holding)
             payload["merge_status"] = status
             payload["broker_kind"] = "holdings"
             if status == "unknown":
-                payload["reason"] = "symbol_not_found"
+                payload["reason"] = reason
             counts[status] += 1
             items.append(
                 ImportItem(
@@ -396,12 +495,17 @@ def stage_broker_items(
                             HoldingLot.user_id == user_id,
                             HoldingLot.member_id == job.member_id,
                             HoldingLot.security_id == security.id,
+                            HoldingLot.source != "broker",
                         )
                     )
                 )
                 if security is not None
                 else []
             )
+            if security is not None:
+                old_lots.extend(
+                    _broker_lots_at_place(session, user_id, job, security.id, layout.broker)
+                )
             old_quantity = sum((lot.quantity for lot in old_lots), Decimal(0))
             status = "replace_with_lots" if old_quantity == open_quantity else "quantity_mismatch"
             if security is None and not can_create_security(
@@ -663,9 +767,14 @@ def _security_for_confirmation(
     market = str(payload.get("market") or ("IN" if isin.startswith("IN") else "US")).upper()
     currency = str(payload.get("currency") or ("INR" if market == "IN" else "USD")).upper()
     symbol = str(payload.get("symbol") or isin).upper()
+    valid_isin = _ISIN.fullmatch(isin) is not None and isin_check_digit_ok(isin)
+    if valid_isin and re.fullmatch(r"[A-Z0-9.\-]{1,15}", symbol) is None:
+        symbol = isin
     name = str(payload.get("name") or symbol or "Imported security")[:160]
     override = item.user_override or {}
-    security_type = str(override.get("kind") or payload.get("security_type") or "equity")
+    security_type = str(
+        override.get("kind") or payload.get("security_type") or payload.get("kind") or "equity"
+    )
     sleeve = str(
         override.get("sleeve")
         or payload.get("sleeve")
@@ -682,7 +791,7 @@ def _security_for_confirmation(
             ),
             {
                 "isin": isin,
-                "symbol": symbol[:32],
+                "symbol": symbol,
                 "name": name,
                 "kind": security_type,
                 "currency": currency,
@@ -698,7 +807,7 @@ def _security_for_confirmation(
             ),
             {
                 "market": market,
-                "symbol": symbol[:15],
+                "symbol": symbol,
                 "exchange": str(payload.get("exchange") or "")[:32] or None,
                 "name": name,
                 "kind": security_type,
@@ -741,15 +850,35 @@ def confirm_broker_items(
             if security is None:
                 continue
             if merge_status == "enrich":
-                query = select(HoldingLot).where(
-                    HoldingLot.user_id == user_id,
-                    HoldingLot.member_id == job.member_id,
-                    HoldingLot.security_id == security.id,
-                    HoldingLot.source == "cas",
+                matched_lot = (
+                    session.get(HoldingLot, item.match_lot_id)
+                    if item.match_lot_id is not None
+                    else None
                 )
-                lots = list(session.scalars(query))
+                if matched_lot is None:
+                    continue
+                if matched_lot.source == "cas":
+                    lots = list(
+                        session.scalars(
+                            select(HoldingLot).where(
+                                HoldingLot.user_id == user_id,
+                                HoldingLot.member_id == job.member_id,
+                                HoldingLot.security_id == security.id,
+                                HoldingLot.source == "cas",
+                                HoldingLot.account_ref.is_not_distinct_from(
+                                    matched_lot.account_ref
+                                ),
+                            )
+                        )
+                    )
+                elif matched_lot.source == "broker":
+                    lots = _broker_lots_at_place(session, user_id, job, security.id, source_broker)
+                else:
+                    lots = [matched_lot]
                 for lot in lots:
-                    if payload.get("avg_price") is not None:
+                    if payload.get("avg_price") is not None and (
+                        lot.source == "cas" or lot.cost_per_unit is None
+                    ):
                         lot.cost_per_unit = Decimal(str(payload["avg_price"]))
                     lot.currency = str(payload.get("currency") or security.currency)
                     if job.account_id is not None and lot.account_id is None:
@@ -757,7 +886,18 @@ def confirm_broker_items(
                 counts["enrich"] += 1
                 continue
 
-            sources = ("broker", "cas") if merge_status == "changed" else ("broker",)
+            matched_lot = (
+                session.get(HoldingLot, item.match_lot_id)
+                if item.match_lot_id is not None
+                else None
+            )
+            sources = (
+                ("broker", "cas")
+                if merge_status == "changed"
+                and matched_lot is not None
+                and matched_lot.source == "cas"
+                else ("broker",)
+            )
             _delete_replaceable_lots(session, user_id, job, security.id, sources)
             session.add(
                 HoldingLot(
@@ -935,16 +1075,24 @@ def _delete_replaceable_lots(
     security_id: UUID,
     sources: tuple[str, ...],
 ) -> None:
-    lots = list(
-        session.scalars(
-            select(HoldingLot.id).where(
-                HoldingLot.user_id == user_id,
-                HoldingLot.member_id == job.member_id,
-                HoldingLot.security_id == security_id,
-                HoldingLot.source.in_(sources),
+    lots: list[UUID] = []
+    if "cas" in sources:
+        lots.extend(
+            session.scalars(
+                select(HoldingLot.id).where(
+                    HoldingLot.user_id == user_id,
+                    HoldingLot.member_id == job.member_id,
+                    HoldingLot.security_id == security_id,
+                    HoldingLot.source == "cas",
+                )
             )
         )
-    )
+    if "broker" in sources:
+        broker = str((job.parse_report or {}).get("broker", "mapped"))
+        lots.extend(
+            lot.id for lot in _broker_lots_at_place(session, user_id, job, security_id, broker)
+        )
+    lots = list(dict.fromkeys(lots))
     if lots:
         session.execute(
             update(ImportItem)
@@ -1009,17 +1157,20 @@ def mapping_suggestions(
 
 
 def header_names(headers: list[str]) -> list[str]:
-    return [normalize_header(header) for header in headers]
+    return [normalize_template_header(header) for header in headers]
 
 
 def can_create_security(payload: Mapping[str, Any]) -> bool:
     isin = payload.get("isin")
+    valid_isin = False
     if isinstance(isin, str) and isin:
         normalized_isin = isin.upper()
         if _ISIN.fullmatch(normalized_isin) is None or not isin_check_digit_ok(normalized_isin):
             return False
+        valid_isin = True
         if normalized_isin.startswith("IN"):
-            return str(payload.get("market") or "IN").upper() == "IN"
+            currency = str(payload.get("currency") or "INR").upper()
+            return str(payload.get("market") or "IN").upper() == "IN" and currency in _CURRENCIES
     market = str(payload.get("market") or "").upper()
     currency = str(payload.get("currency") or "").upper()
     symbol = str(payload.get("symbol") or "").upper()
@@ -1028,7 +1179,7 @@ def can_create_security(payload: Mapping[str, Any]) -> bool:
     return (
         market in {"US", "DK", "EU", "GB"}
         and currency in {"USD", "EUR", "DKK", "GBP", "SEK"}
-        and re.fullmatch(r"[A-Z0-9.\-]{1,15}", symbol) is not None
+        and (valid_isin or re.fullmatch(r"[A-Z0-9.\-]{1,15}", symbol) is not None)
     )
 
 

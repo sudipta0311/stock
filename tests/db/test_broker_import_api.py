@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 from uuid import UUID, uuid4
 
 import jwt
@@ -16,6 +19,7 @@ from sqlalchemy import func, select, text
 
 from conftest import MigratedDatabase
 from wealth.api.fund_check import _member_rows
+from wealth.api.imports import _get_item_response
 from wealth.api.main import create_app
 from wealth.api.money_map import get_today
 from wealth.api.settings import Settings
@@ -111,6 +115,16 @@ def _valid_synthetic_isin(seed: str) -> str:
     raise AssertionError("A synthetic ISIN check digit could not be generated.")
 
 
+def _valid_market_isin(prefix: str) -> str:
+    body_length = 11 - len(prefix)
+    body = f"{uuid4().int % (10**body_length):0{body_length}d}"
+    for check_digit in range(10):
+        candidate = f"{prefix}{body}{check_digit}"
+        if isin_check_digit_ok(candidate):
+            return candidate
+    raise AssertionError("A synthetic ISIN check digit could not be generated.")
+
+
 def test_0013_broker_migration_downgrades_and_upgrades(
     migrated_database: MigratedDatabase,
 ) -> None:
@@ -147,6 +161,580 @@ def test_0014_international_assets_migration_downgrades_and_upgrades(
             "WHERE table_schema = current_schema() AND table_name = 'securities'"
         ).scalars()
         assert {"domicile", "exchange"} <= set(columns)
+
+
+def test_saxo_upload_cleans_symbols_and_reuses_valid_isins(
+    broker_api_client: tuple[TestClient, str], migrated_database: MigratedDatabase
+) -> None:
+    client, secret = broker_api_client
+    headers, _claims = _identity(secret, "saxo-full")
+    danish_isin = _valid_market_isin("DK")
+    european_isin = _valid_market_isin("IE")
+    statement = (
+        "Symbol,ISIN,Name,Quantity,Open Price,Last Price,Currency\n"
+        f"SYNTH B:xcse,{danish_isin},Synthetic Danish share,2,20.00,25.00,DKK\n"
+        f"SYNTHF:xams,{european_isin},Synthetic European fund,3,30.00,35.00,EUR\n"
+    ).encode()
+
+    uploaded = _upload(client, headers, "synthetic-saxo.csv", statement, broker="saxo")
+    assert uploaded.status_code == 201, uploaded.text
+    first_job_id = uploaded.json()["job_id"]
+    first = client.get(f"/v1/imports/{first_job_id}", headers=headers).json()
+    assert first["auto_mapped"] is True
+    assert first["has_missing_cost"] is False
+    assert [item["status"] for item in first["items"]] == ["new", "new"]
+    first_by_symbol = {item["symbol"]: item for item in first["items"]}
+    assert {symbol: item["exchange"] for symbol, item in first_by_symbol.items()} == {
+        "SYNTHB": "XCSE",
+        "SYNTHF": "XAMS",
+    }
+    assert {symbol: item["statement_value"] for symbol, item in first_by_symbol.items()} == {
+        "SYNTHB": "50.00",
+        "SYNTHF": "105.00",
+    }
+    confirmed = client.post(f"/v1/imports/{first_job_id}/confirm", headers=headers)
+    assert confirmed.status_code == 200, confirmed.text
+    first_confirmed_detail = client.get(f"/v1/imports/{first_job_id}", headers=headers).json()
+    first_security_ids = {
+        item["isin"]: item["match"]["security_id"] for item in first_confirmed_detail["items"]
+    }
+
+    repeated_upload = _upload(client, headers, "synthetic-saxo-again.csv", statement, broker="saxo")
+    assert repeated_upload.status_code == 201, repeated_upload.text
+    second_job_id = repeated_upload.json()["job_id"]
+    second = client.get(f"/v1/imports/{second_job_id}", headers=headers).json()
+    assert {
+        item["isin"]: item["match"]["security_id"] for item in second["items"]
+    } == first_security_ids
+    assert [item["status"] for item in second["items"]] == ["duplicate", "duplicate"]
+    assert second["counts"]["duplicate"] == 2
+
+    second_confirmed = client.post(f"/v1/imports/{second_job_id}/confirm", headers=headers)
+    assert second_confirmed.status_code == 200, second_confirmed.text
+
+    changed_statement = (
+        "Symbol,ISIN,Name,Quantity,Open Price,Last Price,Currency\n"
+        f"SYNTH B:xcse,{danish_isin},Synthetic Danish share,3,20.00,25.00,DKK\n"
+        f"SYNTHF:xams,{european_isin},Synthetic European fund,3,30.00,35.00,EUR\n"
+    ).encode()
+    changed_upload = _upload(
+        client, headers, "synthetic-saxo-changed.csv", changed_statement, broker="saxo"
+    )
+    assert changed_upload.status_code == 201, changed_upload.text
+    changed_job_id = changed_upload.json()["job_id"]
+    changed = client.get(f"/v1/imports/{changed_job_id}", headers=headers).json()
+    changed_by_isin = {item["isin"]: item for item in changed["items"]}
+    assert changed["counts"]["changed"] == 1
+    assert changed["counts"]["duplicate"] == 1
+    assert changed_by_isin[danish_isin]["status"] == "changed"
+    assert changed_by_isin[danish_isin]["diff"] == {"quantity": {"old": "2.000000", "new": "3"}}
+    assert changed_by_isin[european_isin]["status"] == "duplicate"
+
+    changed_confirmed = client.post(f"/v1/imports/{changed_job_id}/confirm", headers=headers)
+    assert changed_confirmed.status_code == 200, changed_confirmed.text
+    with system_session(migrated_database.owner_engine) as session:
+        saved = list(
+            session.scalars(select(Security).where(Security.isin.in_([danish_isin, european_isin])))
+        )
+        assert len(saved) == 2
+        assert {security.isin for security in saved} == {danish_isin, european_isin}
+        saved_lots = list(
+            session.scalars(
+                select(HoldingLot).where(
+                    HoldingLot.user_id == _user_id(migrated_database, _claims),
+                    HoldingLot.security_id.in_([security.id for security in saved]),
+                    HoldingLot.source == "broker",
+                )
+            )
+        )
+        assert len(saved_lots) == 2
+        assert {lot.quantity for lot in saved_lots} == {Decimal("3")}
+
+
+@pytest.mark.parametrize("with_accounts", [False, True], ids=["no-accounts", "two-accounts"])
+def test_broker_holdings_replace_only_lots_from_the_same_place(
+    broker_api_client: tuple[TestClient, str],
+    migrated_database: MigratedDatabase,
+    with_accounts: bool,
+) -> None:
+    client, secret = broker_api_client
+    headers, claims = _identity(secret, f"broker-place-{with_accounts}")
+    user_id = _user_id(migrated_database, claims)
+    isin = _valid_synthetic_isin("SYNTHPLACE")
+    account_ids: dict[str, UUID] = {}
+    if with_accounts:
+        with system_session(migrated_database.owner_engine) as session:
+            member = ensure_self_household_member(session, user_id)
+            zerodha_account = Account(
+                user_id=user_id,
+                member_id=member.id,
+                institution="Synthetic Zerodha Custody",
+                account_type="broker",
+                masked_number="X1101",
+            )
+            hdfc_account = Account(
+                user_id=user_id,
+                member_id=member.id,
+                institution="Synthetic HDFC Custody",
+                account_type="broker",
+                masked_number="X2202",
+            )
+            session.add_all([zerodha_account, hdfc_account])
+            session.flush()
+            account_ids = {"zerodha": zerodha_account.id, "hdfc_securities": hdfc_account.id}
+
+    def upload_holding(broker: str, quantity: str) -> dict[str, Any]:
+        statement = (
+            "Symbol,ISIN,Name,Quantity,Average Price,Last Price,Currency\n"
+            f"SYNTH,{isin},Synthetic shared holding,{quantity},10.00,12.00,INR\n"
+        )
+        fields = {"broker": broker}
+        if broker in account_ids:
+            fields["account_id"] = str(account_ids[broker])
+        response = _upload(
+            client,
+            headers,
+            f"synthetic-{broker}-{quantity}.csv",
+            statement.encode("ascii"),
+            **fields,
+        )
+        assert response.status_code == 201, response.text
+        return response.json()
+
+    zerodha = upload_holding("zerodha", "2")
+    zerodha_job_id = zerodha["job_id"]
+    zerodha_detail = client.get(f"/v1/imports/{zerodha_job_id}", headers=headers).json()
+    assert zerodha_detail["items"][0]["status"] == "new"
+    assert client.post(f"/v1/imports/{zerodha_job_id}/confirm", headers=headers).status_code == 200
+
+    hdfc = upload_holding("hdfc_securities", "5")
+    hdfc_job_id = hdfc["job_id"]
+    hdfc_detail = client.get(f"/v1/imports/{hdfc_job_id}", headers=headers).json()
+    assert hdfc_detail["items"][0]["status"] == "new"
+    assert hdfc_detail["broker"] == "hdfc_securities"
+    expected_hdfc_account = account_ids.get("hdfc_securities")
+    assert hdfc_detail["account_id"] == (
+        str(expected_hdfc_account) if expected_hdfc_account is not None else None
+    )
+    assert client.post(f"/v1/imports/{hdfc_job_id}/confirm", headers=headers).status_code == 200
+
+    money = client.get("/v1/networth", headers=headers)
+    assert money.status_code == 200, money.text
+    shared_rows = [row for row in money.json()["holdings"] if row["symbol"] == "SYNTH"]
+    assert sum(Decimal(row["quantity"]) for row in shared_rows) == Decimal("7")
+
+    changed = upload_holding("zerodha", "3")
+    changed_job_id = changed["job_id"]
+    changed_detail = client.get(f"/v1/imports/{changed_job_id}", headers=headers).json()
+    assert changed_detail["items"][0]["status"] == "changed"
+    assert changed_detail["items"][0]["diff"] == {"quantity": {"old": "2.000000", "new": "3.00"}}
+    assert client.post(f"/v1/imports/{changed_job_id}/confirm", headers=headers).status_code == 200
+
+    with system_session(migrated_database.owner_engine) as session:
+        security = session.scalar(select(Security).where(Security.isin == isin))
+        assert security is not None
+        security_id = security.id
+        lots = list(
+            session.execute(
+                select(HoldingLot, ImportJob.parse_report)
+                .join(
+                    ImportJob,
+                    (ImportJob.id == HoldingLot.import_job_id)
+                    & (ImportJob.user_id == HoldingLot.user_id),
+                )
+                .where(
+                    HoldingLot.user_id == user_id,
+                    HoldingLot.security_id == security_id,
+                    HoldingLot.source == "broker",
+                )
+            )
+        )
+        actual = {(report["broker"], lot.account_id, lot.quantity) for lot, report in lots}
+        expected = {
+            ("zerodha", account_ids.get("zerodha"), Decimal("3")),
+            ("hdfc_securities", account_ids.get("hdfc_securities"), Decimal("5")),
+        }
+        assert actual == expected
+
+    tradebook = _fixture("zerodha_tradebook.csv").replace(b"IN00000000A3", isin.encode("ascii"))
+    tradebook_fields = {"broker": "zerodha"}
+    if with_accounts:
+        tradebook_fields["account_id"] = str(account_ids["zerodha"])
+    tradebook_upload = _upload(
+        client,
+        headers,
+        "synthetic-zerodha-tradebook.csv",
+        tradebook,
+        **tradebook_fields,
+    )
+    assert tradebook_upload.status_code == 201, tradebook_upload.text
+    tradebook_job_id = tradebook_upload.json()["job_id"]
+    tradebook_detail = client.get(f"/v1/imports/{tradebook_job_id}", headers=headers).json()
+    assert tradebook_detail["items"][0]["status"] == "replace_with_lots"
+    assert (
+        client.post(f"/v1/imports/{tradebook_job_id}/confirm", headers=headers).status_code == 200
+    )
+
+    with system_session(migrated_database.owner_engine) as session:
+        lots = list(
+            session.execute(
+                select(HoldingLot, ImportJob.parse_report)
+                .join(
+                    ImportJob,
+                    (ImportJob.id == HoldingLot.import_job_id)
+                    & (ImportJob.user_id == HoldingLot.user_id),
+                )
+                .where(
+                    HoldingLot.user_id == user_id,
+                    HoldingLot.security_id == security_id,
+                    HoldingLot.source == "broker",
+                )
+            )
+        )
+        by_broker = defaultdict(Decimal)
+        for lot, report in lots:
+            by_broker[report["broker"]] += lot.quantity
+        assert by_broker == {"zerodha": Decimal("3"), "hdfc_securities": Decimal("5")}
+
+
+def test_broker_rows_enrich_only_one_matching_cas_account(
+    broker_api_client: tuple[TestClient, str], migrated_database: MigratedDatabase
+) -> None:
+    client, secret = broker_api_client
+    headers, claims = _identity(secret, "cas-account-safety")
+    user_id = _user_id(migrated_database, claims)
+    first_isin = _valid_synthetic_isin("SYNTHCASA")
+    second_isin = _valid_synthetic_isin("SYNTHCASB")
+    with system_session(migrated_database.owner_engine) as session:
+        member = ensure_self_household_member(session, user_id)
+        securities = [
+            Security(
+                market="IN",
+                symbol=f"SYNTH-{uuid4().hex[:6].upper()}",
+                isin=isin,
+                name=f"Synthetic CAS security {index}",
+                security_type="equity",
+                currency="INR",
+                sleeve="equity_india",
+            )
+            for index, isin in enumerate((first_isin, second_isin), start=1)
+        ]
+        session.add_all(securities)
+        session.flush()
+        lots = [
+            HoldingLot(
+                user_id=user_id,
+                member_id=member.id,
+                security_id=securities[0].id,
+                quantity=Decimal("6"),
+                cost_per_unit=None,
+                source="cas",
+                account_ref="XXXX1101",
+            ),
+            HoldingLot(
+                user_id=user_id,
+                member_id=member.id,
+                security_id=securities[0].id,
+                quantity=Decimal("4"),
+                cost_per_unit=None,
+                source="cas",
+                account_ref="XXXX1101",
+            ),
+            HoldingLot(
+                user_id=user_id,
+                member_id=member.id,
+                security_id=securities[0].id,
+                quantity=Decimal("5"),
+                cost_per_unit=Decimal("50"),
+                source="cas",
+                account_ref="XXXX2202",
+            ),
+            HoldingLot(
+                user_id=user_id,
+                member_id=member.id,
+                security_id=securities[1].id,
+                quantity=Decimal("10"),
+                cost_per_unit=Decimal("60"),
+                source="cas",
+                account_ref="XXXX1101",
+            ),
+            HoldingLot(
+                user_id=user_id,
+                member_id=member.id,
+                security_id=securities[1].id,
+                quantity=Decimal("5"),
+                cost_per_unit=Decimal("70"),
+                source="cas",
+                account_ref="XXXX2202",
+            ),
+        ]
+        session.add_all(lots)
+        session.flush()
+        security_ids = [security.id for security in securities]
+
+    statement = (
+        "Symbol,ISIN,Name,Quantity,Average Price,Currency\n"
+        f"SYNTHA,{first_isin},Synthetic CAS account A,10,12.50,INR\n"
+        f"SYNTHB,{second_isin},Synthetic CAS account B,12,15.00,INR\n"
+    ).encode("ascii")
+    uploaded = _upload(client, headers, "synthetic-cas-accounts.csv", statement, broker="zerodha")
+    assert uploaded.status_code == 201, uploaded.text
+    job_id = uploaded.json()["job_id"]
+    detail = client.get(f"/v1/imports/{job_id}", headers=headers).json()
+    items_by_isin = {item["isin"]: item for item in detail["items"]}
+    assert items_by_isin[first_isin]["status"] == "enrich"
+    assert items_by_isin[second_isin]["status"] == "unknown"
+    assert items_by_isin[second_isin]["reason"] == "several_accounts"
+
+    confirmed = client.post(f"/v1/imports/{job_id}/confirm", headers=headers)
+    assert confirmed.status_code == 200, confirmed.text
+    with system_session(migrated_database.owner_engine) as session:
+        stored = list(
+            session.scalars(
+                select(HoldingLot).where(
+                    HoldingLot.user_id == user_id,
+                    HoldingLot.security_id.in_(security_ids),
+                    HoldingLot.source == "cas",
+                )
+            )
+        )
+        first_account = [lot for lot in stored if lot.security_id == security_ids[0]]
+        second_account = [lot for lot in stored if lot.security_id == security_ids[1]]
+        assert len(first_account) == 3
+        assert [lot.cost_per_unit for lot in first_account if lot.account_ref == "XXXX1101"] == [
+            Decimal("12.5000"),
+            Decimal("12.5000"),
+        ]
+        assert [lot.cost_per_unit for lot in first_account if lot.account_ref == "XXXX2202"] == [
+            Decimal("50.0000")
+        ]
+        assert {(lot.account_ref, lot.quantity, lot.cost_per_unit) for lot in second_account} == {
+            ("XXXX1101", Decimal("10"), Decimal("60.0000")),
+            ("XXXX2202", Decimal("5"), Decimal("70.0000")),
+        }
+        assert (
+            session.scalar(
+                select(func.count())
+                .select_from(HoldingLot)
+                .where(
+                    HoldingLot.user_id == user_id,
+                    HoldingLot.security_id == security_ids[1],
+                    HoldingLot.source == "broker",
+                )
+            )
+            == 0
+        )
+
+
+def test_same_place_broker_reimport_enriches_missing_purchase_price(
+    broker_api_client: tuple[TestClient, str], migrated_database: MigratedDatabase
+) -> None:
+    client, secret = broker_api_client
+    headers, claims = _identity(secret, "broker-cost-enrich")
+    user_id = _user_id(migrated_database, claims)
+    isin = _valid_market_isin("US")
+    without_cost = (
+        "Symbol,ISIN,Name,Quantity,Current Price,Currency\n"
+        f"SYNTHCOST,{isin},Synthetic missing cost,4,15.00,USD\n"
+    ).encode("ascii")
+    uploaded = _upload(client, headers, "synthetic-no-cost.csv", without_cost, broker="indmoney")
+    assert uploaded.status_code == 201, uploaded.text
+    first_job_id = uploaded.json()["job_id"]
+    assert client.post(f"/v1/imports/{first_job_id}/confirm", headers=headers).status_code == 200
+
+    with_cost = (
+        "Symbol,ISIN,Name,Quantity,Average Price,Current Price,Currency\n"
+        f"SYNTHCOST,{isin},Synthetic missing cost,4,10.00,15.00,USD\n"
+    ).encode("ascii")
+    repeated = _upload(client, headers, "synthetic-with-cost.csv", with_cost, broker="indmoney")
+    assert repeated.status_code == 201, repeated.text
+    job_id = repeated.json()["job_id"]
+    detail = client.get(f"/v1/imports/{job_id}", headers=headers).json()
+    assert detail["items"][0]["status"] == "enrich"
+    assert detail["items"][0]["action"] == "enrich"
+    assert client.post(f"/v1/imports/{job_id}/confirm", headers=headers).status_code == 200
+    with system_session(migrated_database.owner_engine) as session:
+        lot = session.scalar(
+            select(HoldingLot).where(
+                HoldingLot.user_id == user_id,
+                HoldingLot.source == "broker",
+                HoldingLot.security_id
+                == session.scalar(select(Security.id).where(Security.isin == isin)),
+            )
+        )
+        assert lot is not None
+        assert lot.quantity == Decimal("4")
+        assert lot.cost_per_unit == Decimal("10.0000")
+
+
+def test_zerodha_prices_and_indian_etf_types_are_staged(
+    broker_api_client: tuple[TestClient, str], migrated_database: MigratedDatabase
+) -> None:
+    client, secret = broker_api_client
+    headers, _claims = _identity(secret, "zerodha-prices")
+    stock_isin = _valid_synthetic_isin("SYNTHSTK")
+    etf_isin = _valid_market_isin("INF")
+    statement = (
+        "Synthetic Zerodha export\nReport for a test household\n"
+        "Symbol,ISIN,Sector,Quantity Available,Quantity Discrepant,Quantity Long Term,"
+        "Quantity Pledged (Margin),Quantity Pledged (Loan),Average Price,"
+        "Previous Closing Price,Unrealized P&L,Unrealized P&L Pct.\n"
+        f"SYNTHSTK,{stock_isin},Equity,10,0,10,0,0,10.00,12.50,25.00,2.50\n"
+        f"SYNTHETF,{etf_isin},ETF,50,0,50,0,0,100.00,105.00,250.00,5.00\n"
+    ).encode()
+    uploaded = _upload(client, headers, "synthetic-zerodha.csv", statement, broker="zerodha")
+    assert uploaded.status_code == 201, uploaded.text
+    job_id = uploaded.json()["job_id"]
+    detail = client.get(f"/v1/imports/{job_id}", headers=headers).json()
+    assert [item["status"] for item in detail["items"]] == ["new", "new"]
+    items_by_symbol = {item["symbol"]: item for item in detail["items"]}
+    assert {symbol: item["statement_value"] for symbol, item in items_by_symbol.items()} == {
+        "SYNTHSTK": "125.00",
+        "SYNTHETF": "5250.00",
+    }
+    assert {symbol: item["security_type"] for symbol, item in items_by_symbol.items()} == {
+        "SYNTHSTK": "equity",
+        "SYNTHETF": "etf",
+    }
+    confirmed = client.post(f"/v1/imports/{job_id}/confirm", headers=headers)
+    assert confirmed.status_code == 200, confirmed.text
+
+    with system_session(migrated_database.owner_engine) as session:
+        fund_security = session.scalar(select(Security).where(Security.isin == etf_isin))
+        assert fund_security is not None and fund_security.security_type == "etf"
+
+
+def test_currency_mismatch_is_reported_and_bad_symbol_stays_unknown(
+    broker_api_client: tuple[TestClient, str], migrated_database: MigratedDatabase
+) -> None:
+    client, secret = broker_api_client
+    headers, _claims = _identity(secret, "currency-headers")
+    foreign_isin = _valid_market_isin("IE")
+    statement = (
+        "Symbol,ISIN,Name,Quantity,Currency,Market Value (DKK)\n"
+        f"SYNTHF,{foreign_isin},Synthetic European holding,2,EUR,100.00\n"
+        "Bad symbol!,,Synthetic unknown holding,1,DKK,50.00\n"
+    ).encode()
+    uploaded = _upload(client, headers, "synthetic-currency.csv", statement, broker="saxo")
+    assert uploaded.status_code == 201, uploaded.text
+    detail = client.get(f"/v1/imports/{uploaded.json()['job_id']}", headers=headers).json()
+    with system_session(migrated_database.owner_engine) as session:
+        parsed_job = session.get(ImportJob, UUID(uploaded.json()["job_id"]))
+        assert parsed_job is not None
+        assert parsed_job.parse_report["currency_mismatch_values"] == 1
+    assert detail["auto_mapped"] is True
+    assert detail["columns_used"]["market_value"] == "Market Value (DKK)"
+    assert detail["currency_mismatch_values"] == 1
+    items_by_name = {item["name"]: item for item in detail["items"]}
+    assert items_by_name["Synthetic European holding"]["statement_value"] is None
+    assert items_by_name["Synthetic European holding"]["status"] == "new"
+    assert items_by_name["Synthetic unknown holding"]["status"] == "unknown"
+
+
+def test_nok_row_is_unknown_and_dkk_row_can_be_confirmed(
+    broker_api_client: tuple[TestClient, str], migrated_database: MigratedDatabase
+) -> None:
+    client, secret = broker_api_client
+    headers, _claims = _identity(secret, "unsupported-currency")
+    nok_isin = _valid_market_isin("DK")
+    dkk_isin = _valid_market_isin("DK")
+    statement = (
+        "Symbol,ISIN,Name,Quantity,Open Price,Currency\n"
+        f"NOKROW,{nok_isin},Synthetic NOK row,2,20.00,NOK\n"
+        f"DKROW,{dkk_isin},Synthetic DKK row,3,30.00,DKK\n"
+    ).encode()
+    uploaded = _upload(client, headers, "synthetic-currencies.csv", statement, broker="saxo")
+    assert uploaded.status_code == 201, uploaded.text
+    job_id = uploaded.json()["job_id"]
+    detail = client.get(f"/v1/imports/{job_id}", headers=headers).json()
+    items_by_symbol = {item["symbol"]: item for item in detail["items"]}
+    assert items_by_symbol["NOKROW"]["status"] == "unknown"
+    assert items_by_symbol["NOKROW"]["currency"] == "NOK"
+    assert items_by_symbol["DKROW"]["status"] == "new"
+    assert items_by_symbol["DKROW"]["currency"] == "DKK"
+
+    confirmed = client.post(f"/v1/imports/{job_id}/confirm", headers=headers)
+    assert confirmed.status_code == 200, confirmed.text
+    with system_session(migrated_database.owner_engine) as session:
+        assert session.scalar(select(Security).where(Security.isin == dkk_isin)) is not None
+        assert session.scalar(select(Security).where(Security.isin == nok_isin)) is None
+
+
+def test_valid_isins_use_safe_symbols_on_confirm_and_reimport(
+    broker_api_client: tuple[TestClient, str], migrated_database: MigratedDatabase
+) -> None:
+    client, secret = broker_api_client
+    headers, _claims = _identity(secret, "safe-symbols")
+    first_isin = _valid_market_isin("DK")
+    second_isin = _valid_market_isin("IE")
+    statement = (
+        "Symbol,ISIN,Name,Quantity,Open Price,Currency\n"
+        f"SYNTH&B/X,{first_isin},Synthetic unusual symbol,2,20.00,DKK\n"
+        f"SYNTHETICLONGSYMBOL12345,{second_isin},Synthetic long symbol,3,30.00,EUR\n"
+    ).encode()
+    uploaded = _upload(client, headers, "synthetic-safe-symbols.csv", statement, broker="saxo")
+    assert uploaded.status_code == 201, uploaded.text
+    first_job = uploaded.json()["job_id"]
+    detail = client.get(f"/v1/imports/{first_job}", headers=headers).json()
+    assert [item["status"] for item in detail["items"]] == ["new", "new"]
+    confirmed = client.post(f"/v1/imports/{first_job}/confirm", headers=headers)
+    assert confirmed.status_code == 200, confirmed.text
+
+    with system_session(migrated_database.owner_engine) as session:
+        securities = {
+            security.isin: security
+            for security in session.scalars(
+                select(Security).where(Security.isin.in_([first_isin, second_isin]))
+            )
+        }
+        assert set(securities) == {first_isin, second_isin}
+        assert {isin: security.symbol for isin, security in securities.items()} == {
+            first_isin: first_isin,
+            second_isin: second_isin,
+        }
+        security_ids = {isin: str(security.id) for isin, security in securities.items()}
+
+    reuploaded = _upload(client, headers, "synthetic-safe-symbols.csv", statement, broker="saxo")
+    assert reuploaded.status_code == 201, reuploaded.text
+    reimport = client.get(f"/v1/imports/{reuploaded.json()['job_id']}", headers=headers).json()
+    assert {
+        item["isin"]: item["match"]["security_id"] for item in reimport["items"]
+    } == security_ids
+
+
+def test_ibkr_generic_headers_use_the_selected_us_defaults(
+    broker_api_client: tuple[TestClient, str],
+) -> None:
+    client, secret = broker_api_client
+    headers, _claims = _identity(secret, "ibkr-generic-layout")
+    statement = b"Symbol,Quantity,Average Price,Exchange\nSYNTH,2,20.00,XNAS\n"
+    uploaded = _upload(client, headers, "synthetic-ibkr.csv", statement, broker="ibkr")
+    assert uploaded.status_code == 201, uploaded.text
+    detail = client.get(f"/v1/imports/{uploaded.json()['job_id']}", headers=headers).json()
+    assert detail["auto_mapped"] is True
+    assert detail["items"][0]["status"] == "new"
+    assert (detail["items"][0]["market"], detail["items"][0]["currency"]) == (
+        "US",
+        "USD",
+    )
+
+
+def test_item_response_uses_a_user_selected_kind_for_security_type() -> None:
+    item = SimpleNamespace(
+        id=uuid4(),
+        payload={"quantity": "12.500", "security_type": "equity", "kind": "bond"},
+        user_override={"kind": "mf"},
+        item_kind="unknown",
+        match_lot_id=None,
+        match_security_id=None,
+        status="accepted",
+        diff=None,
+    )
+
+    response = _get_item_response(item)
+
+    assert response["kind"] == "mf"
+    assert response["security_type"] == "mf"
 
 
 def test_unknown_file_auto_maps_once_and_reuses_household_template(

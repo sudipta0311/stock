@@ -29,7 +29,7 @@ test("CAS password feedback, review, and confirmation update Money", async ({
     .setInputFiles(process.env.E2E_CAS_PATH ?? "");
   const startedAt = Date.now();
   await uploadSyntheticCas(page);
-  await expect(page.getByText(/^New \d+$/)).toBeVisible();
+  await expect(page.getByLabel("Import item counts")).toContainText(/\d+ new holdings?/);
   await expectFitsScreen(page);
   await page.getByRole("button", { name: /Confirm import \(/ }).click();
   await expect(

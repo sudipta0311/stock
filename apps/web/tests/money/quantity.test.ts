@@ -28,4 +28,13 @@ describe("quantityLabel", () => {
     expect(exactQuantity("82.000")).toBe("82");
     expect(exactQuantity("1200")).toBe("1200");
   });
+
+  it("can show exact quantities for statement review", () => {
+    expect(quantityLabel("12.500", "mf", { exact: true })).toBe("12.5 units");
+    expect(quantityLabel("1.2500", "equity", { exact: true })).toBe(
+      "1.25 shares",
+    );
+    expect(quantityLabel("10.00", "equity", { exact: true })).toBe("10 shares");
+    expect(quantityLabel("12.500", "mf")).toBe("13 units");
+  });
 });

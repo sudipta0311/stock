@@ -10,6 +10,8 @@ const section = {
   "privacy_upload": "Your file and password are used for this upload only. They are not stored.",
   "broker_source_label": "Broker file",
   "broker_security_label": "Shares",
+  "broker_fund_label": "Fund",
+  "broker_several_accounts": "You hold this in more than one account. We left it as it is.",
   "broker_account_label": "Account (optional)",
   "broker_no_account": "No account yet",
   "broker_member_label": "Whose account is this?",

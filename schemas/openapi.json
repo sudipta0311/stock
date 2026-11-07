@@ -2724,6 +2724,11 @@
             "title": "Currency Default",
             "type": "string"
           },
+          "currency_mismatch_values": {
+            "default": 0,
+            "title": "Currency Mismatch Values",
+            "type": "integer"
+          },
           "doc_type": {
             "title": "Doc Type",
             "type": "string"
@@ -3054,6 +3059,17 @@
               }
             ],
             "title": "Reason"
+          },
+          "security_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Security Type"
           },
           "sleeve": {
             "anyOf": [

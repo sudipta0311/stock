@@ -113,7 +113,7 @@ describe("import review data", () => {
 
   it("masks account references before they are displayed", () => {
     expect(maskAccountReference("account-0123")).toBe("•••• 0123");
-    expect(maskAccountReference(null)).toBe("Account hidden");
+    expect(maskAccountReference(null)).toBeNull();
   });
 });
 

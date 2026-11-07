@@ -4,6 +4,7 @@ import { CheckCircle2, FileUp, LoaderCircle, X } from "lucide-react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { ApiError } from "../api/client";
 import { formatInr } from "../lib/money";
+import { quantityLabel } from "../money/quantity";
 import { Badge, Button, buttonClassName, Card, Sheet } from "../ui";
 import { useHousehold } from "../household/HouseholdContext";
 import { listAccounts } from "../money/api";
@@ -609,6 +610,13 @@ const sleeveOptions = [
 
 const categories: ImportCategory[] = ["new", "changed", "duplicate", "unknown"];
 
+function brokerSecurityLabel(item: ImportItem): string {
+  const kind = item.security_type ?? item.kind;
+  return kind === "etf" || kind === "mf"
+    ? englishCopy.imports.broker_fund_label
+    : englishCopy.imports.broker_security_label;
+}
+
 function ItemToggle({
   item,
   checked,
@@ -651,10 +659,16 @@ function ItemToggle({
           {item.name}
         </strong>
         <span className="block text-xs text-muted-foreground">
-          {item.quantity} units ·{" "}
-          {item.statement_value
-            ? formatValue(item.statement_value, item.currency)
-            : "Value not provided"}
+          {[
+            quantityLabel(item.quantity, item.security_type ?? item.kind, {
+              exact: true,
+            }),
+            item.statement_value
+              ? formatValue(item.statement_value, item.currency)
+              : "Value not provided",
+          ]
+            .filter(Boolean)
+            .join(" \u00b7 ")}
         </span>
         {actionNote ? (
           <span className="block text-xs text-muted-foreground">
@@ -663,9 +677,7 @@ function ItemToggle({
         ) : null}
       </span>
       <Badge>
-        {item.action
-          ? englishCopy.imports.broker_security_label
-          : readableSleeve(item.sleeve)}
+        {item.action ? brokerSecurityLabel(item) : readableSleeve(item.sleeve)}
       </Badge>
     </label>
   );
@@ -734,6 +746,58 @@ function formatValue(value: string, currency: string | null = "INR"): string {
   } catch {
     return value;
   }
+}
+
+function quantityChangeLabel(item: ImportItem): string {
+  const arrow = String.fromCharCode(0x2192);
+  return quantityChange(item)
+    .split(arrow)
+    .map((part) => {
+      const value = part.trim();
+      return /^\d+(?:\.\d+)?$/.test(value)
+        ? quantityLabel(value, item.security_type ?? item.kind, { exact: true })
+        : value;
+    })
+    .join(` ${arrow} `);
+}
+
+function DiscardImportSheet({
+  open,
+  onOpenChange,
+  saving,
+  onDiscard,
+}: {
+  open: boolean;
+  onOpenChange(open: boolean): void;
+  saving: boolean;
+  onDiscard(): void;
+}) {
+  return (
+    <Sheet
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Discard this import?"
+      description="This removes the review job. None of its holdings will be added."
+    >
+      <div className="grid grid-cols-2 gap-2">
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => onOpenChange(false)}
+        >
+          Keep reviewing
+        </Button>
+        <Button
+          type="button"
+          variant="danger"
+          loading={saving}
+          onClick={onDiscard}
+        >
+          Discard import
+        </Button>
+      </div>
+    </Sheet>
+  );
 }
 
 export function ImportReviewPage() {
@@ -1074,12 +1138,83 @@ export function ImportReviewPage() {
     );
   }
 
-  const countsList: Array<[ImportCategory, string]> = [
-    ["new", "New"],
-    ["changed", "Changed"],
-    ["duplicate", "Duplicate"],
-    ["unknown", "Unknown"],
-  ];
+  const countSummary = [
+    counts.new
+      ? `${counts.new} new ${counts.new === 1 ? "holding" : "holdings"}`
+      : null,
+    counts.changed
+      ? `${counts.changed} changed ${counts.changed === 1 ? "holding" : "holdings"}`
+      : null,
+    counts.duplicate ? `${counts.duplicate} already saved` : null,
+    counts.unknown
+      ? `${counts.unknown} ${counts.unknown === 1 ? "row" : "rows"} to review`
+      : null,
+  ]
+    .filter((count): count is string => count !== null)
+    .join(" · ");
+  const nothingToAdd =
+    detail.source === "broker" &&
+    grouped.new.length === 0 &&
+    grouped.changed.length === 0 &&
+    detail.cash_flow_count === 0;
+  const allAlreadySaved =
+    grouped.duplicate.length > 0 && grouped.unknown.length === 0;
+
+  if (nothingToAdd) {
+    return (
+      <div data-copy-screen="import" className="grid gap-4">
+        <Card className="grid gap-3">
+          <div>
+            <h2 className="text-xl font-semibold">Review your import</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {sourceLabel(detail.source)} ·{" "}
+              {displayDate(detail.statement_date)}
+            </p>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            {allAlreadySaved
+              ? "Everything in this file is already saved ✓"
+              : "We couldn't recognise the shares in this file."}
+          </p>
+          <details>
+            <summary className="min-h-11 cursor-pointer font-medium">
+              Which rows?
+            </summary>
+            <ul className="grid gap-2 border-t border-line pt-3 text-sm">
+              {detail.items.map((item) => (
+                <li key={item.id} data-security>
+                  {item.name}
+                </li>
+              ))}
+            </ul>
+          </details>
+          <div className="flex gap-2">
+            <Link
+              to="/import"
+              data-primary="true"
+              className={buttonClassName()}
+            >
+              Try another file
+            </Link>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={saving}
+              onClick={() => setDiscardOpen(true)}
+            >
+              Discard
+            </Button>
+          </div>
+        </Card>
+        <DiscardImportSheet
+          open={discardOpen}
+          onOpenChange={setDiscardOpen}
+          saving={saving}
+          onDiscard={() => void discard()}
+        />
+      </div>
+    );
+  }
 
   return (
     <div data-copy-screen="import" className="grid gap-4 pb-36">
@@ -1090,20 +1225,11 @@ export function ImportReviewPage() {
             {sourceLabel(detail.source)} · {displayDate(detail.statement_date)}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2" aria-label="Import item counts">
-          {countsList.map(([category, label]) => (
-            <Badge
-              key={category}
-              tone={
-                category === "unknown" && counts[category]
-                  ? "warning"
-                  : "neutral"
-              }
-            >
-              {label} {counts[category]}
-            </Badge>
-          ))}
-        </div>
+        {countSummary ? (
+          <p className="text-sm font-medium" aria-label="Import item counts">
+            {countSummary}
+          </p>
+        ) : null}
         <p className="text-sm text-muted-foreground">
           Your file isn’t kept. A password is kept only if you chose to remember
           it.
@@ -1181,13 +1307,13 @@ export function ImportReviewPage() {
         </Card>
       ) : null}
 
-      <section aria-labelledby="new-heading" className="grid gap-3">
-        <Card className="grid gap-2">
-          <div className="flex items-center justify-between gap-3">
-            <h3 id="new-heading" className="font-semibold">
-              New · {counts.new}
-            </h3>
-            {grouped.new.length ? (
+      {grouped.new.length ? (
+        <section aria-labelledby="new-heading" className="grid gap-3">
+          <Card className="grid gap-2">
+            <div className="flex items-center justify-between gap-3">
+              <h3 id="new-heading" className="font-semibold">
+                New holdings
+              </h3>
               <Button
                 type="button"
                 variant="ghost"
@@ -1197,10 +1323,8 @@ export function ImportReviewPage() {
               >
                 Select all new
               </Button>
-            ) : null}
-          </div>
-          {grouped.new.length ? (
-            grouped.new.map((item) => (
+            </div>
+            {grouped.new.map((item) => (
               <div key={item.id} className="grid gap-1">
                 <ItemToggle
                   item={item}
@@ -1208,24 +1332,24 @@ export function ImportReviewPage() {
                   disabled={saving}
                   onChange={(checked) => void updateStatus(item, checked)}
                 />
-                <p className="pl-8 text-xs text-muted-foreground">
-                  {maskAccountReference(item.account_ref)}
-                </p>
+                {maskAccountReference(item.account_ref) ? (
+                  <p className="pl-8 text-xs text-muted-foreground">
+                    {maskAccountReference(item.account_ref)}
+                  </p>
+                ) : null}
               </div>
-            ))
-          ) : (
-            <p className="text-sm text-muted-foreground">No new holdings.</p>
-          )}
-        </Card>
-      </section>
+            ))}
+          </Card>
+        </section>
+      ) : null}
 
-      <section aria-labelledby="changed-heading" className="grid gap-3">
-        <Card className="grid gap-2">
-          <h3 id="changed-heading" className="font-semibold">
-            Changed · {counts.changed}
-          </h3>
-          {grouped.changed.length ? (
-            grouped.changed.map((item) => (
+      {grouped.changed.length ? (
+        <section aria-labelledby="changed-heading" className="grid gap-3">
+          <Card className="grid gap-2">
+            <h3 id="changed-heading" className="font-semibold">
+              Changed holdings
+            </h3>
+            {grouped.changed.map((item) => (
               <div key={item.id} className="grid gap-1">
                 {item.action === "quantity_mismatch" ? (
                   <>
@@ -1235,10 +1359,14 @@ export function ImportReviewPage() {
                           {item.name}
                         </strong>
                         <span className="block text-xs text-muted-foreground">
-                          {item.quantity} units
+                          {quantityLabel(
+                            item.quantity,
+                            item.security_type ?? item.kind,
+                            { exact: true },
+                          )}
                         </span>
                       </span>
-                      <Badge>{englishCopy.imports.broker_security_label}</Badge>
+                      <Badge>{brokerSecurityLabel(item)}</Badge>
                     </div>
                     <TradebookMismatchChoice
                       item={item}
@@ -1257,66 +1385,73 @@ export function ImportReviewPage() {
                   />
                 )}
                 <p className="pl-8 text-xs text-muted-foreground">
-                  Quantity: {quantityChange(item)} ·{" "}
-                  {maskAccountReference(item.account_ref)}
+                  {[
+                    `Quantity: ${quantityChangeLabel(item)}`,
+                    maskAccountReference(item.account_ref),
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
                 </p>
               </div>
-            ))
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              No changed holdings.
-            </p>
-          )}
-        </Card>
-      </section>
+            ))}
+          </Card>
+        </section>
+      ) : null}
 
-      <section aria-labelledby="duplicate-heading">
-        <Card>
-          <details>
-            <summary
-              className="flex min-h-12 cursor-pointer items-center justify-between gap-3 font-semibold"
-              id="duplicate-heading"
-            >
-              <span>Duplicate · {counts.duplicate}</span>
-              <span className="text-sm font-normal text-muted-foreground">
-                Already up to date
-              </span>
-            </summary>
-            {grouped.duplicate.length ? (
+      {grouped.duplicate.length ? (
+        <section aria-labelledby="duplicate-heading">
+          <Card>
+            <details>
+              <summary
+                className="flex min-h-12 cursor-pointer items-center justify-between gap-3 font-semibold"
+                id="duplicate-heading"
+              >
+                <span>Already saved</span>
+                <span className="text-sm font-normal text-muted-foreground">
+                  {grouped.duplicate.length}
+                </span>
+              </summary>
               <ul className="grid gap-2 border-t border-line pt-3">
                 {grouped.duplicate.map((item) => (
                   <li key={item.id} className="text-sm">
                     <strong data-security>{item.name}</strong>
                     <span className="block text-xs text-muted-foreground">
-                      {item.quantity} units ·{" "}
-                      {maskAccountReference(item.account_ref)}
+                      {[
+                        quantityLabel(
+                          item.quantity,
+                          item.security_type ?? item.kind,
+                          { exact: true },
+                        ),
+                        item.statement_value
+                          ? formatValue(item.statement_value, item.currency)
+                          : null,
+                        maskAccountReference(item.account_ref),
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
                     </span>
                   </li>
                 ))}
               </ul>
-            ) : (
-              <p className="pt-2 text-sm text-muted-foreground">
-                No duplicate holdings.
-              </p>
-            )}
-          </details>
-        </Card>
-      </section>
+            </details>
+          </Card>
+        </section>
+      ) : null}
 
-      <section aria-labelledby="unknown-heading" className="grid gap-3">
-        <Card className="grid gap-3">
-          <div>
-            <h3 id="unknown-heading" className="font-semibold">
-              Unknown · {counts.unknown}
-            </h3>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {detail.source === "broker"
-                ? englishCopy.imports.mapping_unknown_help
-                : "Choose the holding type, or leave it out of this import."}
-            </p>
-          </div>
-          {grouped.unknown.length ? (
-            grouped.unknown.map((item) => (
+      {grouped.unknown.length ? (
+        <section aria-labelledby="unknown-heading" className="grid gap-3">
+          <Card className="grid gap-3">
+            <div>
+              <h3 id="unknown-heading" className="font-semibold">
+                Need review
+              </h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {detail.source === "broker"
+                  ? englishCopy.imports.mapping_unknown_help
+                  : "Choose the holding type, or leave it out of this import."}
+              </p>
+            </div>
+            {grouped.unknown.map((item) => (
               <div
                 key={item.id}
                 className="grid gap-3 border-t border-line pt-3"
@@ -1325,12 +1460,25 @@ export function ImportReviewPage() {
                   <strong className="text-sm" data-security>
                     {item.name}
                   </strong>
+                  {item.reason === "several_accounts" ? (
+                    <p className="text-xs text-muted-foreground">
+                      {englishCopy.imports.broker_several_accounts}
+                    </p>
+                  ) : null}
                   <p className="text-xs text-muted-foreground">
-                    {item.quantity} units ·{" "}
-                    {item.statement_value
-                      ? formatValue(item.statement_value, item.currency)
-                      : "Value not provided"}{" "}
-                    · {maskAccountReference(item.account_ref)}
+                    {[
+                      quantityLabel(
+                        item.quantity,
+                        kindById[item.id] ?? item.security_type ?? item.kind,
+                        { exact: true },
+                      ),
+                      item.statement_value
+                        ? formatValue(item.statement_value, item.currency)
+                        : "Value not provided",
+                      maskAccountReference(item.account_ref),
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
                   </p>
                 </div>
                 {detail.source === "broker" ? (
@@ -1418,14 +1566,10 @@ export function ImportReviewPage() {
                   </div>
                 )}
               </div>
-            ))
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              No items need a decision.
-            </p>
-          )}
-        </Card>
-      </section>
+            ))}
+          </Card>
+        </section>
+      ) : null}
 
       <div className="fixed inset-x-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-20 mx-auto max-w-3xl border-t border-line bg-surface/95 p-3 shadow-lg backdrop-blur">
         <div className="flex gap-2">
@@ -1458,30 +1602,12 @@ export function ImportReviewPage() {
         </div>
       </div>
 
-      <Sheet
+      <DiscardImportSheet
         open={discardOpen}
         onOpenChange={setDiscardOpen}
-        title="Discard this import?"
-        description="This removes the review job. None of its holdings will be added."
-      >
-        <div className="grid grid-cols-2 gap-2">
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => setDiscardOpen(false)}
-          >
-            Keep reviewing
-          </Button>
-          <Button
-            type="button"
-            variant="danger"
-            loading={saving}
-            onClick={() => void discard()}
-          >
-            Discard import
-          </Button>
-        </div>
-      </Sheet>
+        saving={saving}
+        onDiscard={() => void discard()}
+      />
     </div>
   );
 }

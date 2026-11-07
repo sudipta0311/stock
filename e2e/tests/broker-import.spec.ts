@@ -12,11 +12,18 @@ import {
 type BrokerImportDetail = {
   account_id: string | null;
   auto_mapped: boolean;
+  counts: Record<string, number>;
+  currency_mismatch_values: number;
+  has_missing_cost: boolean;
   items: Array<{
     name: string;
+    isin: string;
     symbol: string | null;
+    status: string;
     market: string | null;
     currency: string | null;
+    statement_value: string | null;
+    exchange: string | null;
   }>;
 };
 
@@ -192,4 +199,60 @@ test("three broker files auto-map, confirm, and appear in Money", async ({
   await expect(
     page.getByText("Synthetic UCITS ETF", { exact: true }),
   ).toBeVisible();
+});
+
+test("Saxo suffix symbols confirm and keep their value in Money", async ({
+  page,
+}) => {
+  await startReadyAccount(page, "saxo-import");
+  const danishIsin = syntheticIsin("DK");
+  const europeanIsin = syntheticIsin("IE");
+  const csv = Buffer.from(
+    `Symbol,ISIN,Name,Quantity,Open Price,Current Price,Market Value (DKK),Currency\nSYNTH B:xcse,${danishIsin},Synthetic Danish share,2,20.00,25.00,60.00,DKK\nSYNTHF:xams,${europeanIsin},Synthetic European fund,3,30.00,40.00,300.00,EUR\n`,
+    "utf8",
+  );
+  const detail = await uploadBrokerFile(page, {
+    broker: "saxo",
+    filename: "synthetic-saxo.csv",
+    mimeType: "text/csv",
+    buffer: csv,
+  });
+
+  expect(detail.counts.new).toBe(2);
+  expect(detail.has_missing_cost).toBe(false);
+  expect(detail.currency_mismatch_values).toBe(1);
+  const itemsByIsin = new Map(detail.items.map((item) => [item.isin, item]));
+  expect(itemsByIsin.get(danishIsin)).toMatchObject({
+    name: "Synthetic Danish share",
+    status: "new",
+    symbol: "SYNTHB",
+    exchange: "XCSE",
+    statement_value: "60.00",
+    market: "DK",
+    currency: "DKK",
+  });
+  expect(itemsByIsin.get(europeanIsin)).toMatchObject({
+    name: "Synthetic European fund",
+    status: "new",
+    symbol: "SYNTHF",
+    exchange: "XAMS",
+    statement_value: "120.00",
+    market: "EU",
+    currency: "EUR",
+  });
+  await expect(
+    page.locator("label").filter({ hasText: "Synthetic Danish share" }),
+  ).toContainText("60.00");
+  await expect(
+    page.locator("label").filter({ hasText: "Synthetic Danish share" }),
+  ).toContainText(/DKK|kr/);
+  await expect(
+    page.locator("label").filter({ hasText: "Synthetic European fund" }),
+  ).toContainText("120.00");
+  await expect(
+    page.locator("label").filter({ hasText: "Synthetic European fund" }),
+  ).toContainText(/EUR|€/);
+  await confirmAndFindInMoney(page, "Synthetic Danish share");
+  await expect(page.getByText("Synthetic European fund", { exact: true })).toBeVisible();
+  await expectFitsScreen(page);
 });

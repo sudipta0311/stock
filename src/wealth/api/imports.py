@@ -78,6 +78,7 @@ class ImportItemResponse(ImportApiModel):
     currency: str | None = None
     exchange: str | None = None
     amount: str | None = None
+    security_type: str | None = None
     sleeve: str | None
     status: str
     diff: dict[str, Any] | None
@@ -118,6 +119,7 @@ class ImportDetailResponse(ImportJobResponse):
     tax_wrapper: Literal["ask", "ordinary", "pension"] | None = None
     tax_wrapper_question: bool = False
     cash_flow_count: int = 0
+    currency_mismatch_values: int = 0
 
 
 class ImportMappingRequest(ImportApiModel):
@@ -287,7 +289,12 @@ def _get_item_response(item: Any) -> dict[str, Any]:
             statement_value = None
     return {
         "id": item.id,
-        "kind": override.get("kind", item.item_kind),
+        "kind": (
+            override.get("kind")
+            or payload.get("security_type")
+            or payload.get("kind")
+            or item.item_kind
+        ),
         "isin": payload.get("isin") or "",
         "symbol": payload.get("symbol"),
         "name": payload.get("name") or payload.get("symbol") or "Unknown security",
@@ -298,6 +305,9 @@ def _get_item_response(item: Any) -> dict[str, Any]:
         "currency": payload.get("currency"),
         "exchange": payload.get("exchange"),
         "amount": payload.get("amount"),
+        "security_type": (
+            override.get("kind") or payload.get("security_type") or payload.get("kind")
+        ),
         "sleeve": override.get("sleeve", payload.get("sleeve")),
         "status": item.status,
         "diff": item.diff,
@@ -629,7 +639,7 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             broker_name = broker_for_account(broker_name, account)
             market_default, currency_default = broker_defaults(broker_name)
             templates = available_templates(user.session, user.household_owner_id)
-            layout = find_layout(headers, templates) if activity is None else None
+            layout = find_layout(headers, templates, broker_name) if activity is None else None
             auto_mapped = False
             mapping_kind: str | None = None
             mapping: dict[str, str | None] = {}
@@ -843,6 +853,7 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             "tax_wrapper": report.get("tax_wrapper"),
             "tax_wrapper_question": report.get("tax_wrapper_question", False),
             "cash_flow_count": report.get("cash_flow_count", 0),
+            "currency_mismatch_values": report.get("currency_mismatch_values", 0),
         }
 
     @router.post("/v1/imports/{job_id}/mapping", response_model=ImportDetailResponse)
@@ -1035,6 +1046,7 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             "tax_wrapper": (job.parse_report or {}).get("tax_wrapper"),
             "tax_wrapper_question": (job.parse_report or {}).get("tax_wrapper_question", False),
             "cash_flow_count": (job.parse_report or {}).get("cash_flow_count", 0),
+            "currency_mismatch_values": (job.parse_report or {}).get("currency_mismatch_values", 0),
         }
 
     @router.patch("/v1/imports/{job_id}/items/{item_id}", response_model=ImportItemResponse)

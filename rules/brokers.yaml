@@ -32,7 +32,7 @@ aliases:
       "no": [antall, beholdning]
       sv: [antal, innehav]
     avg_price:
-      en: [avg price, average price, average cost value, buy price, cost price, avg cost, purchase price, acquisition price, avg buy price, avg cost price, average cost price, average buy price, cost basis per share]
+      en: [avg price, average price, average cost value, buy price, cost price, avg cost, purchase price, acquisition price, avg buy price, avg cost price, average cost price, average buy price, cost basis per share, open price, avg open price, average open price]
       da: [gak, gns. købskurs, gns kurs, anskaffelseskurs, købskurs]
       "no": [snittkurs, gjennomsnittskurs, kjøpskurs]
       sv: [snittkurs, genomsnittskurs, inköpskurs]
@@ -42,7 +42,7 @@ aliases:
       "no": [investert verdi, kostpris]
       sv: [investerat värde, anskaffningsvärde]
     last_price:
-      en: [ltp, cmp, last price, current price, market price, close price, current market price, closing price]
+      en: [ltp, cmp, last price, current price, market price, close price, current market price, closing price, previous closing price, previous close, prev close]
       da: [seneste kurs, senest, kurs]
       "no": [siste kurs, sist]
       sv: [senaste kurs, senast, kurs]
@@ -52,7 +52,7 @@ aliases:
       "no": [markedsverdi, verdi]
       sv: [marknadsvärde, värde]
     security_type:
-      en: [security type, asset category]
+      en: [security type, asset category, sector, type]
     exchange:
       en: [exchange, venue, market center]
     market:
@@ -162,7 +162,8 @@ layouts:
       name: [instrument, company name]
       quantity: [qty, quantity]
       avg_price: [average price, avg price, avg cost]
-      last_price: [last price, ltp]
+      last_price: [last price, ltp, previous closing price, previous close, prev close]
+      security_type: [security type, asset category, sector, type]
       exchange: [exchange]
     verified: true
     source_note: "Legacy broker parser aliases for symbol, quantity, and average cost; exchange identifies this layout."

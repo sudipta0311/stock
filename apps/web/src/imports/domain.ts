@@ -140,10 +140,10 @@ export function countImportItems(items: readonly ImportItem[]): ImportCounts {
   };
 }
 
-export function maskAccountReference(value: string | null): string {
-  if (!value?.trim()) return "Account hidden";
+export function maskAccountReference(value: string | null): string | null {
+  if (!value?.trim()) return null;
   const suffix = value.replace(/[^a-z\d]/gi, "").slice(-4);
-  return suffix ? `•••• ${suffix}` : "Account hidden";
+  return suffix ? `•••• ${suffix}` : null;
 }
 
 export function quantityChange(item: ImportItem): string {

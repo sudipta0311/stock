@@ -36,14 +36,20 @@ export function exactQuantity(quantity: string): string {
 }
 
 /** "82 units" for funds, "1,200 shares" for stocks, without trailing zeros. */
-export function quantityLabel(quantity: string, securityType: string): string {
+export function quantityLabel(
+  quantity: string,
+  securityType: string,
+  options: { exact?: boolean } = {},
+): string {
   const isUnitCount = ["mf", "etf", "bond", "sgb"].includes(securityType);
   const isSubUnit = /^(?:0\.\d*[1-9]\d*|0\.0*[1-9]\d*)$/.test(quantity);
-  const trimmed = isUnitCount
-    ? isSubUnit
-      ? roundedSubUnit(quantity)
-      : roundedWhole(quantity)
-    : exactQuantity(quantity);
+  const trimmed = options.exact
+    ? exactQuantity(quantity)
+    : isUnitCount
+      ? isSubUnit
+        ? roundedSubUnit(quantity)
+        : roundedWhole(quantity)
+      : exactQuantity(quantity);
   const unit = isUnitCount
     ? trimmed === "1"
       ? "unit"

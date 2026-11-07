@@ -49,7 +49,7 @@ _MARKETS = {"IN", "US", "DK", "EU", "GB"}
 # Indian grouping with more than 2 decimals, which prices and fund units often have.
 _INR_LONG_FRACTION = re.compile(r"(?:\d+|\d{1,3}(?:,\d{3})+|\d{1,2}(?:,\d{2})+,\d{3})\.\d{3,}")
 _ETF_WORD = re.compile(r"\betfs?\b", re.IGNORECASE)
-_CURRENCY_MARKERS = re.compile(r"(?:INR|USD|EUR|DKK|GBP|SEK|RS\.?|KR\.?)", re.IGNORECASE)
+_CURRENCY_MARKERS = re.compile(r"(?:INR|USD|EUR|DKK|GBP|SEK|NOK|RS\.?|KR\.?)", re.IGNORECASE)
 _MARKET_NAMES = {
     "india": "IN",
     "indian": "IN",
@@ -73,12 +73,38 @@ _CURRENCY_NAMES = {
     "kr": "DKK",
     "kr.": "DKK",
 }
+_CURRENCY_HEADER_CODES = {
+    **{currency.casefold(): currency for currency in _CURRENCY_CODES},
+    "nok": "NOK",
+}
+
+
+def _header_currency_code(value: str) -> str | None:
+    normalized = unicodedata.normalize("NFKC", value).strip().casefold()
+    symbols = {"\u20b9": "INR", "$": "USD", "\u20ac": "EUR", "\u00a3": "GBP"}
+    if normalized in symbols:
+        return symbols[normalized]
+    for symbol, currency in symbols.items():
+        if normalized.startswith(f"{symbol} per "):
+            return currency
+    for code, currency in _CURRENCY_HEADER_CODES.items():
+        if normalized == code or normalized.startswith(f"{code} per "):
+            return currency
+    if normalized in {"rs", "rs."}:
+        return "INR"
+    return None
 
 
 def normalize_header(value: object) -> str:
-    """Normalize a vendor header and discard bracketed units such as currency labels."""
+    """Normalize a vendor header while retaining recognized currency units."""
     text = unicodedata.normalize("NFKC", str(value or "")).casefold().strip()
-    text = re.sub(r"\([^)]*\)|\[[^]]*\]", " ", text)
+
+    def replace_unit(match: re.Match[str]) -> str:
+        unit = match.group(1) if match.group(1) is not None else match.group(2)
+        currency = _header_currency_code(unit or "")
+        return f" {currency.casefold()} " if currency else " "
+
+    text = re.sub(r"\(([^)]*)\)|\[([^]]*)\]", replace_unit, text)
     text = text.replace("₨", " ").replace("₹", " ")
     text = re.sub(r"[._]+", " ", text)
     text = re.sub(r"[^\w\s-]", " ", text)
@@ -86,9 +112,37 @@ def normalize_header(value: object) -> str:
     return text.strip()
 
 
+def normalize_template_header(value: object) -> str:
+    """Keep the pre-currency-unit header form used by saved templates."""
+    text = unicodedata.normalize("NFKC", str(value or "")).casefold().strip()
+    text = re.sub(r"\([^)]*\)|\[[^]]*\]", " ", text)
+    return normalize_header(text)
+
+
+def _header_alias_base(value: object) -> str:
+    normalized = normalize_header(value)
+    currency_suffix = "|".join(sorted(_CURRENCY_HEADER_CODES, key=len, reverse=True))
+    normalized = re.sub(rf"^(?:{currency_suffix})\s+", "", normalized)
+    return re.sub(rf"\s+(?:{currency_suffix})$", "", normalized)
+
+
+def _header_currency_unit(value: str | None) -> str | None:
+    if value is None:
+        return None
+    match = re.search(r"\(([^)]*)\)|\[([^]]*)\]", value)
+    if match is None:
+        return None
+    unit = match.group(1) if match.group(1) is not None else match.group(2)
+    return _header_currency_code(unit or "")
+
+
 def header_fingerprint(headers: list[str] | tuple[str, ...]) -> str:
     normalized = sorted(
-        {normalize_header(header) for header in headers if normalize_header(header)}
+        {
+            normalize_template_header(header)
+            for header in headers
+            if normalize_template_header(header)
+        }
     )
     return hashlib.sha256("\n".join(normalized).encode("utf-8")).hexdigest()
 
@@ -210,7 +264,7 @@ def detect_layout(
     layouts: tuple[Layout, ...] | list[Layout] | None = None,
     templates: tuple[Mapping[str, Any], ...] | list[Mapping[str, Any]] = (),
 ) -> Layout | None:
-    normalized = {normalize_header(header) for header in headers}
+    normalized = {_header_alias_base(header) for header in headers}
     fingerprint = header_fingerprint(headers)
     for template in templates:
         if template.get("header_fingerprint") == fingerprint:
@@ -227,10 +281,10 @@ def _mapping_for_kind(
     result: dict[str, str | None] = {}
     ambiguous: set[str] = set()
     matched: set[str] = set()
-    normalized_headers = [(normalize_header(header), header) for header in headers]
+    normalized_headers = [(_header_alias_base(header), header) for header in headers]
     for canonical in load_aliases(kind):
         alias_scores = {
-            normalize_header(alias): (0 if fallback else 1, len(normalize_header(alias)))
+            _header_alias_base(alias): (0 if fallback else 1, len(_header_alias_base(alias)))
             for alias, fallback in _alias_entries(kind, canonical)
         }
         hits: list[tuple[tuple[int, int], str]] = []
@@ -353,16 +407,16 @@ def auto_map(
 
 def _known_headers() -> frozenset[str]:
     known = {
-        normalize_header(alias)
+        _header_alias_base(alias)
         for kind in ("holdings", "tradebook")
         for aliases in load_aliases(kind).values()
         for alias in aliases
     }
     for layout in load_layouts():
-        known.update(layout.fingerprint)
+        known.update(_header_alias_base(value) for value in layout.fingerprint)
         for aliases in layout.columns.values():
             values = (aliases,) if isinstance(aliases, str) else aliases
-            known.update(normalize_header(alias) for alias in values)
+            known.update(_header_alias_base(alias) for alias in values)
     return frozenset(known)
 
 
@@ -371,7 +425,7 @@ def _header_row(rows: list[tuple[Any, ...]]) -> int | None:
     for index, row in enumerate(rows):
         non_empty = [value for value in row if value is not None and str(value).strip()]
         if len(non_empty) >= 3 and any(
-            normalize_header(value) in known_headers for value in non_empty
+            _header_alias_base(value) in known_headers for value in non_empty
         ):
             return index
     return None
@@ -610,17 +664,28 @@ def _rows_from_values(
     return headers, rows
 
 
-def _column_value(row: Mapping[str, Any], layout: Layout, canonical: str) -> Any:
+def _column_header(row: Mapping[str, Any], layout: Layout, canonical: str) -> str | None:
     configured = layout.columns.get(canonical)
     if configured is None:
         return None
     aliases = (configured,) if isinstance(configured, str) else configured
-    normalized = {normalize_header(header): value for header, value in row.items()}
+    row_headers = [(normalize_header(header), _header_alias_base(header), header) for header in row]
     for alias in aliases:
         key = normalize_header(alias)
-        if key in normalized:
-            return normalized[key]
+        for normalized, _base, header in row_headers:
+            if normalized == key:
+                return header
+    for alias in aliases:
+        base = _header_alias_base(alias)
+        for _normalized, row_base, header in row_headers:
+            if row_base == base:
+                return header
     return None
+
+
+def _column_value(row: Mapping[str, Any], layout: Layout, canonical: str) -> Any:
+    header = _column_header(row, layout, canonical)
+    return row.get(header) if header is not None else None
 
 
 def _decimal_value(value: Any, *, field: str) -> Decimal:
@@ -802,6 +867,8 @@ def _row_market_currency(
     if explicit_currency:
         normalized_currency = explicit_currency.strip().casefold()
         currency = _CURRENCY_NAMES.get(normalized_currency, explicit_currency.upper())
+        if currency not in _CURRENCY_CODES:
+            return market, currency
     else:
         currency = ""
     if currency not in _CURRENCY_CODES:
@@ -820,6 +887,8 @@ def _security_type(
     isin: str | None,
 ) -> str:
     """File a row as an ETF from its type column, its name, or the look-through fund lists."""
+    if isin and isin.upper().startswith("INF"):
+        return "etf"
     raw_type = (_text(_column_value(row, layout, "security_type")) or "").casefold()
     if raw_type in {"etf", "etfs"}:
         return "etf"
@@ -835,6 +904,31 @@ def _security_type(
     return "equity"
 
 
+def _clean_broker_symbol(value: str | None) -> tuple[str | None, str | None]:
+    if value is None:
+        return None, None
+    symbol_text = value.strip()
+    exchange_hint: str | None = None
+    if ":" in symbol_text:
+        symbol_text, raw_exchange = symbol_text.split(":", 1)
+        exchange_hint = re.sub(r"\s+", "", raw_exchange).upper() or None
+    symbol = re.sub(r"\s+", "", symbol_text).upper()
+    return symbol or None, exchange_hint
+
+
+def _currency_mismatch(
+    row: Mapping[str, Any], layout: Layout, canonical: str, currency: str
+) -> bool:
+    header = _column_header(row, layout, canonical)
+    unit = _header_currency_unit(header)
+    return unit is not None and unit != currency
+
+
+def _record_currency_mismatch(mismatches: dict[str, int] | None, canonical: str) -> None:
+    if mismatches is not None:
+        mismatches[canonical] = mismatches.get(canonical, 0) + 1
+
+
 def _is_summary(row: Mapping[str, Any], layout: Layout) -> bool:
     values = [str(value).strip().casefold() for value in row.values() if value is not None]
     return not any(values) or any(
@@ -842,7 +936,12 @@ def _is_summary(row: Mapping[str, Any], layout: Layout) -> bool:
     )
 
 
-def parse_holdings(rows: list[dict[str, Any]], layout: Layout) -> list[BrokerHolding]:
+def parse_holdings(
+    rows: list[dict[str, Any]],
+    layout: Layout,
+    *,
+    currency_mismatches: dict[str, int] | None = None,
+) -> list[BrokerHolding]:
     if layout.kind != "holdings":
         raise ValueError("A holdings layout is required.")
     result: list[BrokerHolding] = []
@@ -865,17 +964,24 @@ def parse_holdings(rows: list[dict[str, Any]], layout: Layout) -> list[BrokerHol
         raw_avg_price = _column_value(row, layout, "avg_price")
         raw_cost_value = _column_value(row, layout, "cost_value")
         avg_price: Decimal | None = None
-        if raw_avg_price not in (None, ""):
+        if raw_avg_price not in (None, "") and _currency_mismatch(
+            row, layout, "avg_price", currency
+        ):
+            _record_currency_mismatch(currency_mismatches, "avg_price")
+        elif raw_avg_price not in (None, ""):
             with suppress(ValueError):
                 avg_price = _currency_decimal(
                     raw_avg_price, field="average price", currency=currency
                 )
         elif raw_cost_value not in (None, ""):
-            with suppress(ValueError):
-                cost_value = _currency_decimal(
-                    raw_cost_value, field="cost value", currency=currency
-                )
-                avg_price = cost_value / quantity
+            if _currency_mismatch(row, layout, "cost_value", currency):
+                _record_currency_mismatch(currency_mismatches, "cost_value")
+            else:
+                with suppress(ValueError):
+                    cost_value = _currency_decimal(
+                        raw_cost_value, field="cost value", currency=currency
+                    )
+                    avg_price = cost_value / quantity
         if avg_price is not None and avg_price < 0:
             continue
         symbol = _text(_column_value(row, layout, "symbol"))
@@ -885,25 +991,33 @@ def parse_holdings(rows: list[dict[str, Any]], layout: Layout) -> list[BrokerHol
         last_price = None
         raw_last = _column_value(row, layout, "last_price")
         if raw_last not in (None, ""):
-            with suppress(ValueError):
-                last_price = _currency_decimal(raw_last, field="last price", currency=currency)
+            if _currency_mismatch(row, layout, "last_price", currency):
+                _record_currency_mismatch(currency_mismatches, "last_price")
+            else:
+                with suppress(ValueError):
+                    last_price = _currency_decimal(raw_last, field="last price", currency=currency)
         parsed_market_value = None
         raw_market_value = _column_value(row, layout, "market_value")
         if raw_market_value not in (None, ""):
-            with suppress(ValueError):
-                parsed_market_value = _currency_decimal(
-                    raw_market_value, field="market value", currency=currency
-                )
+            if _currency_mismatch(row, layout, "market_value", currency):
+                _record_currency_mismatch(currency_mismatches, "market_value")
+            else:
+                with suppress(ValueError):
+                    parsed_market_value = _currency_decimal(
+                        raw_market_value, field="market value", currency=currency
+                    )
         isin = _text(_column_value(row, layout, "isin"))
+        symbol, exchange_hint = _clean_broker_symbol(_text(_column_value(row, layout, "symbol")))
+        exchange = _text(_column_value(row, layout, "exchange")) or exchange_hint
         result.append(
             BrokerHolding(
                 isin=isin.upper() if isin else None,
-                symbol=symbol.upper() if symbol else None,
+                symbol=symbol,
                 name=name,
                 quantity=quantity,
                 avg_price=avg_price,
                 last_price=last_price,
-                exchange=_text(_column_value(row, layout, "exchange")),
+                exchange=exchange,
                 market=market,
                 currency=currency,
                 market_value=parsed_market_value,
@@ -966,18 +1080,19 @@ def parse_tradebook(
         if quantity <= 0 or price < 0:
             continue
         isin = _text(_column_value(row, layout, "isin"))
-        symbol = _text(_column_value(row, layout, "symbol"))
+        symbol, exchange_hint = _clean_broker_symbol(_text(_column_value(row, layout, "symbol")))
         if isin is None and symbol is None:
             continue
+        exchange = _text(_column_value(row, layout, "exchange")) or exchange_hint
         result.append(
             Trade(
                 isin=isin.upper() if isin else None,
-                symbol=symbol.upper() if symbol else None,
+                symbol=symbol,
                 trade_date=trade_date,
                 trade_type=trade_type,
                 quantity=quantity,
                 price=price,
-                exchange=_text(_column_value(row, layout, "exchange")),
+                exchange=exchange,
                 order_id=_text(_column_value(row, layout, "order_id")),
                 trade_id=_text(_column_value(row, layout, "trade_id")),
                 market=market,

@@ -1,4 +1,4 @@
-// OpenAPI SHA256: 61d1330e2f858627a0477cc9cfd25901ce3893d179caa8c87dadba34ff93d0cc
+// OpenAPI SHA256: d0c7a8fe1569df9c12973d7b54c45926c32caf6ec0bc75f9a663041284453afb
 export interface paths {
     "/healthz": {
         parameters: {
@@ -2124,6 +2124,11 @@ export interface components {
              * @enum {string}
              */
             currency_default: "INR" | "USD" | "EUR" | "DKK" | "GBP" | "SEK";
+            /**
+             * Currency Mismatch Values
+             * @default 0
+             */
+            currency_mismatch_values: number;
             /** Doc Type */
             doc_type: string;
             /** Error Code */
@@ -2226,6 +2231,8 @@ export interface components {
             quantity: string;
             /** Reason */
             reason?: string | null;
+            /** Security Type */
+            security_type?: string | null;
             /** Sleeve */
             sleeve: string | null;
             /** Statement Value */

@@ -14,7 +14,12 @@ from openpyxl import Workbook
 from openpyxl.utils.datetime import WINDOWS_EPOCH, to_excel
 from xlwt import Workbook as XlsWorkbook
 
-from wealth.api.broker_imports import mapping_suggestions, masked_samples
+from wealth.api.broker_imports import (
+    can_create_security,
+    header_names,
+    mapping_suggestions,
+    masked_samples,
+)
 from wealth.api.imports import _looks_like_text_csv
 from wealth.core.ids import isin_check_digit_ok
 from wealth.importer.brokers import (
@@ -76,19 +81,22 @@ def _xls(headers: list[str], rows: list[list[object]]) -> bytes:
 
 def test_header_normalization_handles_vendor_units_and_punctuation() -> None:
     cases = {
-        "Avg. cost (₹)": "avg cost",
+        "Avg. cost (₹)": "avg cost inr",
         "Qty.": "qty",
         "ISIN Code": "isin code",
         " Average__Price ": "average price",
         "Last.Price": "last price",
         "Trade_Date": "trade date",
-        "Current price (INR)": "current price",
+        "Current price (INR)": "current price inr",
+        "Market Value (DKK)": "market value dkk",
+        "Market Value (NOK)": "market value nok",
+        "Market Value (€)": "market value eur",
         "Scrip.Name": "scrip name",
         "Order ID [ref]": "order id",
         "Trade No.": "trade no",
         "Exchange (NSE/BSE)": "exchange",
         "Stock   Name": "stock name",
-        "Buy price (₹ per share)": "buy price",
+        "Buy price (₹ per share)": "buy price inr",
     }
     assert len(cases) >= 12
     assert {value: normalize_header(value) for value in cases} == cases
@@ -232,6 +240,15 @@ def test_saved_template_is_selected_for_the_same_normalized_headers() -> None:
     assert layout.columns == template["columns"]
 
 
+def test_saved_template_headers_keep_the_pre_currency_unit_fingerprint() -> None:
+    headers = ["Avg. cost (₹)", "Current price (INR)"]
+
+    assert header_fingerprint(headers) == (
+        "2eb3ab040869e7a969236a85cc3146c7dd7dde6e148f1d57087d42f7aed9f09d"
+    )
+    assert header_names(headers) == ["avg cost", "current price"]
+
+
 def test_csv_reader_handles_bom_and_cp1252_without_writing_files() -> None:
     utf8_bom = (
         "Symbol,Quantity,Average price,Company name\nSYNTH,2,125.50,Synthetic share\n"
@@ -362,10 +379,248 @@ def test_broker_dates_accept_excel_serial_values() -> None:
 
 def _synthetic_isin(prefix: str) -> str:
     for check_digit in range(10):
-        candidate = f"{prefix}00000000A{check_digit}"
+        candidate = f"{prefix}{'0' * (11 - len(prefix))}{check_digit}"
         if isin_check_digit_ok(candidate):
             return candidate
     raise AssertionError("Could not make a check-digit-valid synthetic ISIN.")
+
+
+def test_saxo_holdings_clean_symbols_and_read_open_price() -> None:
+    headers = ["Symbol", "ISIN", "Name", "Quantity", "Open Price", "Currency"]
+    rows = [
+        {
+            "Symbol": "SYNTH B:xcse",
+            "ISIN": _synthetic_isin("DK"),
+            "Name": "Synthetic Danish share",
+            "Quantity": "2",
+            "Open Price": "20.50",
+            "Currency": "DKK",
+        },
+        {
+            "Symbol": "SYNTHF:xams",
+            "ISIN": _synthetic_isin("IE"),
+            "Name": "Synthetic European fund",
+            "Quantity": "3",
+            "Open Price": "30.25",
+            "Currency": "EUR",
+        },
+    ]
+    layout, kind, _mapping = auto_map(
+        headers,
+        rows,
+        broker="saxo",
+        market_default="DK",
+        currency_default="DKK",
+    )
+    assert kind == "holdings"
+    assert layout is not None
+    holdings = parse_holdings(rows, layout)
+    assert [(holding.symbol, holding.exchange, holding.avg_price) for holding in holdings] == [
+        ("SYNTHB", "XCSE", Decimal("20.50")),
+        ("SYNTHF", "XAMS", Decimal("30.25")),
+    ]
+
+
+def test_valid_isin_allows_unusual_symbols_but_missing_isin_keeps_symbol_rule() -> None:
+    assert can_create_security(
+        {
+            "isin": _synthetic_isin("DK"),
+            "symbol": "SYNTH B?",
+            "market": "DK",
+            "currency": "DKK",
+        }
+    )
+    assert not can_create_security(
+        {"isin": None, "symbol": "SYNTH B?", "market": "DK", "currency": "DKK"}
+    )
+
+
+def test_zerodha_previous_closing_price_and_indian_fund_units() -> None:
+    holdings_headers = [
+        "Symbol",
+        "ISIN",
+        "Sector",
+        "Quantity Available",
+        "Quantity Discrepant",
+        "Quantity Long Term",
+        "Quantity Pledged (Margin)",
+        "Quantity Pledged (Loan)",
+        "Average Price",
+        "Previous Closing Price",
+        "Unrealized P&L",
+        "Unrealized P&L Pct.",
+    ]
+    holdings_data = io.StringIO(newline="")
+    writer = csv.writer(holdings_data)
+    writer.writerow(["Synthetic holdings report"])
+    writer.writerow(["Generated for testing"])
+    writer.writerow(holdings_headers)
+    writer.writerow(
+        [
+            "SYNTH",
+            _synthetic_isin("IN"),
+            "Equity",
+            "10",
+            "0",
+            "10",
+            "0",
+            "0",
+            "10.00",
+            "12.50",
+            "25.00",
+            "2.50",
+        ]
+    )
+    writer.writerow(
+        [
+            "SYNTHE",
+            _synthetic_isin("INF"),
+            "ETF",
+            "25",
+            "0",
+            "25",
+            "0",
+            "0",
+            "20.00",
+            "26.00",
+            "150.00",
+            "7.50",
+        ]
+    )
+    holdings_headers, holdings_rows = read_table(
+        holdings_data.getvalue().encode("utf-8"), "synthetic_zerodha.csv"
+    )
+    holdings_layout, kind, _mapping = auto_map(
+        holdings_headers,
+        holdings_rows,
+        broker="zerodha",
+        market_default="IN",
+        currency_default="INR",
+    )
+    assert kind == "holdings"
+    assert holdings_layout is not None
+    holdings = parse_holdings(holdings_rows, holdings_layout)
+    assert [holding.last_price for holding in holdings] == [
+        Decimal("12.50"),
+        Decimal("26.00"),
+    ]
+    assert [holding.security_type for holding in holdings] == ["equity", "etf"]
+
+
+def test_generic_ibkr_holdings_use_the_selected_us_defaults() -> None:
+    headers = ["Symbol", "Quantity", "Average Price", "Exchange"]
+    rows = [
+        {
+            "Symbol": "SYNTH",
+            "Quantity": "2",
+            "Average Price": "20.00",
+            "Exchange": "XNAS",
+        }
+    ]
+
+    assert detect_layout(headers, load_layouts()) is None
+    layout, kind, _mapping = auto_map(
+        headers,
+        rows,
+        broker="ibkr",
+        market_default="US",
+        currency_default="USD",
+    )
+    assert kind == "holdings"
+    assert layout is not None
+    holding = parse_holdings(rows, layout)[0]
+    assert (holding.market, holding.currency) == ("US", "USD")
+
+
+def test_currency_unit_mismatch_leaves_market_value_out() -> None:
+    headers = ["Symbol", "ISIN", "Quantity", "Currency", "Market Value (DKK)"]
+    rows = [
+        {
+            "Symbol": "SYNTHF",
+            "ISIN": _synthetic_isin("IE"),
+            "Quantity": "2",
+            "Currency": "EUR",
+            "Market Value (DKK)": "100.00",
+        }
+    ]
+    layout, _kind, _mapping = auto_map(
+        headers,
+        rows,
+        broker="saxo",
+        market_default="DK",
+        currency_default="DKK",
+    )
+    assert layout is not None
+    mismatches: dict[str, int] = {}
+    holding = parse_holdings(rows, layout, currency_mismatches=mismatches)[0]
+    assert holding.currency == "EUR"
+    assert holding.market_value is None
+    assert mismatches == {"market_value": 1}
+
+
+def test_nok_header_unit_is_still_checked_against_a_dkk_row() -> None:
+    headers = ["Symbol", "Quantity", "Currency", "Market Value (NOK)"]
+    rows = [
+        {
+            "Symbol": "SYNTH",
+            "Quantity": "2",
+            "Currency": "DKK",
+            "Market Value (NOK)": "100.00",
+        }
+    ]
+    layout, _kind, _mapping = auto_map(
+        headers,
+        rows,
+        broker="saxo",
+        market_default="DK",
+        currency_default="DKK",
+    )
+    assert layout is not None
+    mismatches: dict[str, int] = {}
+    holding = parse_holdings(rows, layout, currency_mismatches=mismatches)[0]
+    assert holding.market_value is None
+    assert mismatches == {"market_value": 1}
+
+
+def test_kr_header_unit_does_not_override_a_swedish_row_currency() -> None:
+    headers = ["Symbol", "Quantity", "Currency", "Marknadsvärde (kr)"]
+    rows = [
+        {
+            "Symbol": "SYNTH",
+            "Quantity": "2",
+            "Currency": "SEK",
+            "Marknadsvärde (kr)": "100.00",
+        }
+    ]
+    layout, kind, _mapping = auto_map(
+        headers,
+        rows,
+        broker="nordnet",
+        market_default="DK",
+        currency_default="DKK",
+    )
+    assert kind == "holdings"
+    assert layout is not None
+    holding = parse_holdings(rows, layout)[0]
+    assert holding.currency == "SEK"
+    assert holding.market_value == Decimal("100.00")
+    assert normalize_header("Marknadsvärde (kr)") == "marknadsvärde"
+
+
+def test_kr_in_a_currency_cell_still_means_danish_kroner() -> None:
+    headers = ["Symbol", "Quantity", "Currency", "Market Value"]
+    rows = [{"Symbol": "SYNTH", "Quantity": "2", "Currency": "kr.", "Market Value": "100.00"}]
+    layout, _kind, _mapping = auto_map(
+        headers,
+        rows,
+        broker="nordnet",
+        market_default="DK",
+        currency_default="DKK",
+    )
+    assert layout is not None
+    holding = parse_holdings(rows, layout)[0]
+    assert holding.currency == "DKK"
+    assert holding.market_value == Decimal("100.00")
 
 
 def test_danish_headers_auto_map_and_market_follows_each_isin() -> None:
@@ -821,7 +1076,7 @@ def test_fifo_warns_for_sells_without_buys_and_nets_intraday_trades() -> None:
 
 
 def _synthetic_isin(prefix: str) -> str:
-    base = f"{prefix}{'0' * 9}"
+    base = f"{prefix}{'0' * (11 - len(prefix))}"
     for digit in range(10):
         candidate = f"{base}{digit}"
         if isin_check_digit_ok(candidate):
