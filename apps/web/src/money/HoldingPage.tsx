@@ -104,6 +104,29 @@ export function OurView({ value }: { value: unknown }) {
   const verdicts = copy.verdicts as Record<string, string>;
   const checkLabels = copy.checks as Record<string, string>;
   const statuses = copy.statuses as Record<string, string>;
+  const reviewChecks = asArray(review.checks);
+  const knownChecks = reviewChecks.filter((raw) =>
+    ["ok", "watch", "triggered"].includes(
+      textValue(asRecord(raw).status, "unknown"),
+    ),
+  );
+  const waitingLabels = reviewChecks
+    .filter(
+      (raw) =>
+        !["ok", "watch", "triggered"].includes(
+          textValue(asRecord(raw).status, "unknown"),
+        ),
+    )
+    .map((raw) => {
+      const key = textValue(asRecord(raw).key);
+      return checkLabels[key] ?? key;
+    });
+  const ranChecks = knownChecks.length;
+  const allKnownChecksAreOk =
+    knownChecks.length > 0 &&
+    knownChecks.every(
+      (raw) => textValue(asRecord(raw).status, "unknown") === "ok",
+    );
   const reasons = asArray(review.reasons)
     .filter((reason) => textValue(asRecord(reason).code) !== "tax_wait")
     .slice(0, 3);
@@ -129,6 +152,16 @@ export function OurView({ value }: { value: unknown }) {
               ))}
             </ul>
           ) : null}
+          {!reasons.length && reviewChecks.length && allKnownChecksAreOk ? (
+            <p className="text-sm text-muted-foreground">
+              {(ranChecks === reviewChecks.length
+                ? copy.summary_all
+                : copy.summary_partial
+              )
+                .replace("{ran}", String(ranChecks))
+                .replace("{total}", String(reviewChecks.length))}
+            </p>
+          ) : null}
         </>
       )}
       {taxLine ? <p className="text-sm">{taxLine}</p> : null}
@@ -152,7 +185,7 @@ export function OurView({ value }: { value: unknown }) {
         ) : null}
         <h3 className="mt-2 text-sm font-semibold">{copy.how_we_check}</h3>
         <ul className="grid gap-2 border-t border-line pt-2">
-          {asArray(review.checks).map((raw, index) => {
+          {knownChecks.map((raw, index) => {
             const check = asRecord(raw);
             const key = textValue(check.key);
             const status = textValue(check.status, "unknown");
@@ -180,6 +213,14 @@ export function OurView({ value }: { value: unknown }) {
             );
           })}
         </ul>
+        {waitingLabels.length ? (
+          <p className="text-sm text-muted-foreground">
+            {copy.waiting_for_data.replace(
+              "{checks}",
+              waitingLabels.join(", "),
+            )}
+          </p>
+        ) : null}
       </details>
     </Card>
   );

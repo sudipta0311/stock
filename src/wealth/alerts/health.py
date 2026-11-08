@@ -73,6 +73,7 @@ _ALL_MARKETDATA_SOURCES = frozenset(
         "index_pe",
         "ust",
         "feeds",
+        "sentinel",
     }
 )
 _SOURCE_WORKFLOWS = {
@@ -93,6 +94,7 @@ _SOURCE_WORKFLOWS = {
     "edgar": "Weekly company data",
     "us_index_pe": "Weekly company data",
     "nse_fundamentals": "Weekly company data",
+    "sentinel": "Daily safety checks and reminders",
 }
 
 

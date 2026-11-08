@@ -323,7 +323,7 @@
         },
         "risk_stop": {
           "key": "risk_stop",
-          "status": "unknown",
+          "status": "ok",
           "threshold": "drawdown <=-25% and below 200-DMA and thesis watch",
           "value": "28.57142857142857142857142857% from cost; below 200-DMA=None; thesis=unknown"
         },
@@ -402,15 +402,11 @@
         },
         {
           "key": "price_and_cost",
-          "status": "unknown"
-        },
-        {
-          "key": "goal_timing",
-          "status": "unknown"
+          "status": "ok"
         },
         {
           "key": "company_strength",
-          "status": "watch"
+          "status": "ok"
         }
       ],
       "member_id": "self",
@@ -429,7 +425,7 @@
       "verdict": "sell_some"
     }
   ],
-  "inputs_digest": "9facd49c2402915f302d40b881c9c2fcbb3fa38d49d61f5d60ef293cafdf5b78",
+  "inputs_digest": "455cef8ab4e25d5481c38612726fbc83e2555555342ff5d21190e36803215b73",
   "insurance_reviews": [],
   "members": [
     {

@@ -10,7 +10,7 @@ from uuid import UUID
 
 from langgraph.graph import END, StateGraph
 
-from wealth.policy.actions import SatelliteIdea
+from wealth.policy.actions import NEUTRAL_VALUATION_PERCENTILE, SatelliteIdea
 from wealth.research.agenda import build_cio_agenda
 from wealth.research.agents import (
     ResearchTeam,
@@ -220,7 +220,12 @@ def build_week_pack_content(
             ),
             "quant_decile": int(candidate["quant_decile"]),
             "dossier_status": "APPROVED",
-            "valuation_percentile": format(dossier.valuation_percentile or Decimal("50"), "f"),
+            "valuation_percentile": format(
+                dossier.valuation_percentile
+                if dossier.valuation_percentile is not None
+                else NEUTRAL_VALUATION_PERCENTILE,
+                "f",
+            ),
             "confidence": (
                 "HIGH"
                 if dossier.confidence >= Decimal("0.8")

@@ -85,6 +85,58 @@ def test_fresh_strong_share_with_room_is_add_more() -> None:
     assert card.action == "KEEP"
     assert result.verdict == "add_more"
     assert result.reasons[0]["code"] == "add_more"
+    assert "goal_timing" not in {row["key"] for row in result.checks}
+
+
+def test_sector_multiple_can_support_add_more_without_own_history() -> None:
+    _card, result = _decision(
+        _facts(weight_pct_of_equity=Decimal("2"), target_weight_pct=Decimal("4")),
+        _check(pe_percentile=None, pe_vs_sector=Decimal("1.1")),
+    )
+
+    assert result.verdict == "add_more"
+
+
+def test_high_sector_multiple_keeps_share_without_own_history() -> None:
+    _card, result = _decision(
+        _facts(weight_pct_of_equity=Decimal("2"), target_weight_pct=Decimal("4")),
+        _check(pe_percentile=None, pe_vs_sector=Decimal("1.3")),
+    )
+
+    assert result.verdict == "keep"
+
+
+def test_sector_only_valuation_watch_uses_its_own_reason() -> None:
+    _card, result = _decision(
+        _facts(
+            weight_pct_of_equity=Decimal("2"),
+            target_weight_pct=Decimal("4"),
+            pe_vs_sector_multiple=Decimal("1.6"),
+        ),
+        _check(pe_percentile=None, pe_vs_sector=Decimal("1.6")),
+    )
+
+    assert result.reasons[0]["code"] == "valuation_vs_sector"
+
+
+def test_company_strength_uses_the_research_decile_alone() -> None:
+    expected = ((9, "ok"), (5, "ok"), (2, "watch"), (None, "unknown"))
+
+    for decile, status in expected:
+        _card, result = _decision(_facts(), _check(quant_decile=decile))
+        company_strength = next(
+            row["status"] for row in result.checks if row["key"] == "company_strength"
+        )
+        assert company_strength == status
+
+
+def test_weak_company_strength_adds_a_reason() -> None:
+    _card, result = _decision(
+        _facts(weight_pct_of_equity=Decimal("2"), target_weight_pct=Decimal("4")),
+        _check(quant_decile=2),
+    )
+
+    assert result.reasons == ({"code": "company_strength_weak", "params": {}},)
 
 
 def test_two_recent_revenue_drops_are_a_sell_verdict() -> None:
@@ -167,7 +219,7 @@ def test_stale_or_european_holding_is_not_checked_and_cannot_sell() -> None:
     assert stale.verdict == "not_checked"
     assert european.verdict == "not_checked"
     assert stale.checks == (
-        {"key": "price_history", "status": "ok"},
+        {"key": "latest_price", "status": "ok"},
         {"key": "position_size", "status": "ok"},
     )
     assert european.checks == stale.checks

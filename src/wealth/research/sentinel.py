@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import Engine, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from wealth.db.models import Security, SentinelEvent
+from wealth.db.models import MarketdataRun, Security, SentinelEvent
 from wealth.db.session import make_engine, system_session
 from wealth.marketdata.sources.edgar import (
     EdgarCompany,
@@ -287,6 +287,7 @@ def _process_edgar(
 
     event_count = filing_count = 0
     nano_errors = 0
+    nano_budget_exhausted = False
     for security in targets:
         if security.market != "US" or not security.symbol:
             continue
@@ -338,7 +339,13 @@ def _process_edgar(
                     governance_events=governance_events,
                 )
                 event_count += 1
-            if form == "8-K" and not known_events and router is not None:
+            if (
+                form == "8-K"
+                and not known_events
+                and router is not None
+                and not nano_budget_exhausted
+            ):
+                event_code: str | None = None
                 try:
                     event_code = _nano_event(
                         router,
@@ -348,13 +355,7 @@ def _process_edgar(
                         run_ctx,
                     )
                 except BudgetExceeded:
-                    return {
-                        "status": "complete",
-                        "filings": filing_count,
-                        "events": event_count,
-                        "nano_calls": run_ctx.budget.calls,
-                        "nano_budget_exhausted": 1,
-                    }
+                    nano_budget_exhausted = True
                 except Exception as error:
                     _LOGGER.info("Nano classification skipped (%s).", type(error).__name__)
                     nano_errors += 1
@@ -371,13 +372,16 @@ def _process_edgar(
                         governance_events=governance_events,
                     )
                     event_count += 1
-    return {
+    result: dict[str, int | str] = {
         "status": "available",
         "filings": filing_count,
         "events": event_count,
         "nano_calls": run_ctx.budget.calls,
         "nano_errors": nano_errors,
     }
+    if nano_budget_exhausted:
+        result["nano_budget_exhausted"] = 1
+    return result
 
 
 def _process_india(
@@ -399,6 +403,7 @@ def _process_india(
     if not indian_targets:
         return {"status": "no_targets", "announcements": 0, "events": 0, "nano_calls": 0}
     announcement_count = event_count = nano_errors = 0
+    nano_budget_exhausted = False
     for security in indian_targets:
         try:
             result = registry.call(
@@ -431,7 +436,7 @@ def _process_india(
             event_code = _india_rule_event(category, text_content, category_rules)
             method = "rule"
             evidence_id = result.tool_call_id
-            if event_code is None and router is not None:
+            if event_code is None and router is not None and not nano_budget_exhausted:
                 try:
                     event_code = _nano_event(
                         router,
@@ -441,13 +446,7 @@ def _process_india(
                         run_ctx,
                     )
                 except BudgetExceeded:
-                    return {
-                        "status": "available",
-                        "announcements": announcement_count,
-                        "events": event_count,
-                        "nano_calls": run_ctx.budget.calls,
-                        "nano_budget_exhausted": 1,
-                    }
+                    nano_budget_exhausted = True
                 except Exception as error:
                     _LOGGER.info("Nano classification skipped (%s).", type(error).__name__)
                     nano_errors += 1
@@ -469,13 +468,44 @@ def _process_india(
                 governance_events=governance_events,
             )
             event_count += 1
-    return {
+    result: dict[str, int | str] = {
         "status": "available",
         "announcements": announcement_count,
         "events": event_count,
         "nano_calls": run_ctx.budget.calls,
         "nano_errors": nano_errors,
     }
+    if nano_budget_exhausted:
+        result["nano_budget_exhausted"] = 1
+    return result
+
+
+def _store_sentinel_run(
+    engine: Engine,
+    *,
+    started_at: datetime,
+    target_count: int,
+    india_status: str,
+    us_status: str,
+) -> None:
+    unavailable = sum(status == "unavailable" for status in (india_status, us_status))
+    status = "failed" if unavailable == 2 else "partial" if unavailable == 1 else "succeeded"
+    with system_session(engine) as session:
+        session.add(
+            MarketdataRun(
+                started_at=started_at,
+                finished_at=started_at,
+                status=status,
+                counts={
+                    "sentinel": {
+                        "IN": india_status,
+                        "US": us_status,
+                        "targets": target_count,
+                    }
+                },
+                errors={},
+            )
+        )
 
 
 def run_sentinel(
@@ -506,6 +536,13 @@ def run_sentinel(
             }
         else:
             edgar_status = {"status": "not_needed"}
+        _store_sentinel_run(
+            engine,
+            started_at=current,
+            target_count=0,
+            india_status="not_needed",
+            us_status=str(edgar_status["status"]),
+        )
         return {
             "status": "no_targets",
             "edgar": edgar_status,
@@ -534,6 +571,9 @@ def run_sentinel(
         dossier_budget=DossierBudget(max_calls=10000, max_usd=Decimal("5")),
     )
     selected_registry = registry or ToolRegistry(engine)
+    india_status = "unavailable"
+    us_status = "unavailable"
+    run_stored = False
     try:
         categories, governance_events = _rules()
         as_of = current_day
@@ -562,6 +602,7 @@ def run_sentinel(
             )
         else:
             edgar_result = {"status": "not_needed", "filings": 0, "events": 0}
+        us_status = str(edgar_result.get("status", "unavailable"))
 
         in_targets = [item for item in targets if item.market == "IN"]
         nse_result = _process_india(
@@ -576,6 +617,15 @@ def run_sentinel(
             category_rules=categories,
             governance_events=governance_events,
         )
+        india_status = str(nse_result.get("status", "unavailable"))
+        _store_sentinel_run(
+            engine,
+            started_at=current,
+            target_count=len(targets),
+            india_status=india_status,
+            us_status=us_status,
+        )
+        run_stored = True
         return {
             "status": "complete",
             "week": week,
@@ -585,6 +635,16 @@ def run_sentinel(
             "nse": nse_result,
             **counts,
         }
+    except Exception:
+        if not run_stored:
+            _store_sentinel_run(
+                engine,
+                started_at=current,
+                target_count=len(targets),
+                india_status=india_status,
+                us_status=us_status,
+            )
+        raise
     finally:
         if registry is None:
             selected_registry.close()

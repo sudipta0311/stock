@@ -9,7 +9,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 from tests.db.conftest import MigratedDatabase
 
-from wealth.db.models import HoldingLot, Security, SentinelEvent, User
+from wealth.db.models import HoldingLot, MarketdataRun, Security, SentinelEvent, User
 from wealth.research.sentinel import run_sentinel
 from wealth.research.tools import ToolResult
 
@@ -128,6 +128,11 @@ def test_rule_events_are_idempotent_and_skip_nano(
         registry=registry,
     )
     with Session(migrated_database.owner_engine) as session:
+        sentinel_run = session.scalar(
+            select(MarketdataRun)
+            .where(MarketdataRun.status == "succeeded")
+            .order_by(MarketdataRun.started_at.desc())
+        )
         first_events = list(
             session.scalars(
                 select(SentinelEvent)
@@ -156,6 +161,11 @@ def test_rule_events_are_idempotent_and_skip_nano(
         )
 
     assert first["edgar"]["events"] == second["edgar"]["events"] == 3
+    assert sentinel_run is not None
+    assert sentinel_run.counts == {
+        "sentinel": {"IN": "no_targets", "US": "available", "targets": 1}
+    }
+    assert sentinel_run.status == "succeeded"
     assert first["models"]["nano"] == "unavailable"
     assert event_count == 3
     assert [event.id for event in first_events] == second_ids

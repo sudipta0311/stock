@@ -205,7 +205,7 @@ def test_refresh_sliding_expiry_is_capped_at_absolute_expiry(
         record = session.get(AuthSession, session_id)
         assert record is not None
         assert record.expires_at == record.absolute_expires_at
-        assert record.absolute_expires_at.date() == capped_expiry.date()
+        assert record.absolute_expires_at.astimezone(UTC) == capped_expiry
 
 
 def test_expired_session_and_removed_email_are_rejected_on_refresh(

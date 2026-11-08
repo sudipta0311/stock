@@ -101,6 +101,22 @@ def _healthy_facts() -> HealthFacts:
     )
 
 
+def test_sentinel_run_is_grouped_as_safety_work_and_skips_weekly_checks() -> None:
+    run = health._run_fact(
+        _NOW,
+        "partial",
+        {"sentinel": {"IN": "unavailable", "US": "available", "targets": 5}},
+        {},
+    )
+
+    assert run.sources == ("sentinel",)
+    assert run.source_counts == {"sentinel": {"targets": 5}}
+    assert health._group_sources(set(run.sources)) == {
+        "Daily safety checks and reminders": ["sentinel"]
+    }
+    assert health._check_weekly_data(_NOW, (run,)) == health._check_weekly_data(_NOW, ())
+
+
 def _checks(result: dict[str, Any], key: str) -> list[dict[str, Any]]:
     return [item for item in result["checks"] if item["key"] == key]
 

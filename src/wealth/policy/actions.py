@@ -121,6 +121,9 @@ class SatelliteIdea(BaseModel):
     direct_value: Rupees = Decimal(0)
 
 
+NEUTRAL_VALUATION_PERCENTILE = Decimal("50")
+
+
 # Packs also carry display-only fields (`why`, `entry_hint`, ...); the policy reads only these.
 _PACK_IDEA_FIELDS = frozenset(SatelliteIdea.model_fields) - {
     "name",

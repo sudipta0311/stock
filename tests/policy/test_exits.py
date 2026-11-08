@@ -163,6 +163,36 @@ def test_risk_stop_requires_drawdown_dma_and_watch_thesis() -> None:
     assert risk_card.triggers["risk_stop"].status == "triggered"
     assert risk_card.action == "REVIEW_THEN_EXIT"
     assert on_track_card.action == "KEEP"
+    assert on_track_card.triggers["risk_stop"].status == "ok"
+
+
+def test_known_risk_inputs_that_rule_out_a_watch_are_ok() -> None:
+    cases = (
+        _facts(price=Decimal("950")),
+        _facts(price=Decimal("700"), below_200dma=False),
+        _facts(price=Decimal("700"), below_200dma=True, thesis_status="on_track"),
+    )
+
+    assert [
+        build_exit_card(facts, TODAY, TaxContext()).triggers["risk_stop"].status for facts in cases
+    ] == ["ok", "ok", "ok"]
+
+
+@pytest.mark.parametrize(("multiple", "expected"), [("1.6", "watch"), ("1.1", "ok")])
+def test_sector_only_valuation_can_watch_but_never_triggers(multiple: str, expected: str) -> None:
+    card = build_exit_card(_facts(pe_vs_sector_multiple=Decimal(multiple)), TODAY, TaxContext())
+
+    assert card.triggers["valuation_stretch"].status == expected
+    assert card.triggers["valuation_stretch"].status != "triggered"
+    assert card.action == "KEEP"
+
+
+def test_governance_is_ok_after_a_recent_quiet_watch() -> None:
+    watched = build_exit_card(_facts(events_watched=True), TODAY, TaxContext())
+    not_watched = build_exit_card(_facts(), TODAY, TaxContext())
+
+    assert watched.triggers["governance_break"].status == "ok"
+    assert not_watched.triggers["governance_break"].status == "unknown"
 
 
 def test_missing_satellite_facts_leave_every_trigger_unknown() -> None:

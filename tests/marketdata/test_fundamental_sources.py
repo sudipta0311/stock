@@ -65,6 +65,7 @@ def _fetch_nse_batch(
     client: nse_fundamentals.NseIntegratedClient,
 ) -> refresh_module.FundamentalsBatch:
     monkeypatch.setattr(refresh_module, "_universe_symbols", lambda *_args: ["SAMPLE"])
+    monkeypatch.setattr(refresh_module, "_held_equity_symbols", lambda *_args: [])
     monkeypatch.setattr(
         refresh_module,
         "_securities_for_symbols",

@@ -36,6 +36,7 @@ class StockCheckFacts:
     price: Decimal | None = None
     dma200: Decimal | None = None
     below_dma200: bool | None = None
+    events_watched: bool = False
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,18 @@ def thesis_status_from_revenue(values: tuple[Decimal, ...] | list[Decimal]) -> s
     if negative_quarters:
         return "watch"
     return "on_track"
+
+
+def price_is_reasonable(check: StockCheckFacts) -> bool:
+    """Use own-history valuation when present, otherwise the sector comparison."""
+    accumulation = load_exit_rules()["accumulate"]
+    maximum_pe = Decimal(str(accumulation["max_pe_percentile"]))
+    maximum_sector_multiple = Decimal(str(accumulation["max_pe_vs_sector"]))
+    if check.pe_percentile is not None:
+        return check.pe_percentile < maximum_pe
+    if check.pe_vs_sector is not None:
+        return check.pe_vs_sector <= maximum_sector_multiple
+    return False
 
 
 def holding_review_decision(
@@ -92,7 +105,7 @@ def holding_review_decision(
     )
     accumulation = load_exit_rules()["accumulate"]
     minimum_decile = int(accumulation["min_quant_decile"])
-    maximum_pe = Decimal(str(accumulation["max_pe_percentile"]))
+    weak_decile_max = int(accumulation["weak_quant_decile_max"])
     fresh = age <= maximum_age
     enough_room = add_more_room is not None and add_more_room >= minimum_buy
     can_add_more = (
@@ -100,8 +113,7 @@ def holding_review_decision(
         and not watching
         and check.quant_decile is not None
         and check.quant_decile >= minimum_decile
-        and check.pe_percentile is not None
-        and check.pe_percentile < maximum_pe
+        and price_is_reasonable(check)
         and fresh
         and enough_room
     )
@@ -131,14 +143,13 @@ def holding_review_decision(
             ("price_history", "valuation_stretch"),
             ("position_size", "drift"),
             ("price_and_cost", "risk_stop"),
-            ("goal_timing", "goal_approach"),
         )
     )
     research_status = (
         "unknown"
-        if check.quant_decile is None or check.pe_percentile is None
+        if check.quant_decile is None
         else "ok"
-        if check.quant_decile >= minimum_decile and check.pe_percentile < maximum_pe
+        if check.quant_decile >= minimum_decile or check.quant_decile > weak_decile_max
         else "watch"
     )
     checks += ({"key": "company_strength", "status": research_status},)
@@ -150,7 +161,7 @@ def _price_only_checks(
 ) -> tuple[dict[str, str], ...]:
     return (
         {
-            "key": "price_history",
+            "key": "latest_price",
             "status": "ok" if check is not None and check.price is not None else "unknown",
         },
         {"key": "position_size", "status": "ok" if position_size_known else "unknown"},
@@ -165,9 +176,11 @@ def _reason_rows(
 ) -> tuple[dict[str, Any], ...]:
     if verdict == "add_more":
         return ({"code": "add_more", "params": {}},)
+    weak_decile_max = int(load_exit_rules()["accumulate"]["weak_quant_decile_max"])
     statuses = {key: card.triggers[key].status for key in _REASON_ORDER}
     selected = [key for key in _REASON_ORDER if statuses[key] in {"triggered", "watch"}]
-    if not selected and verdict == "keep":
+    weak_company = check.quant_decile is not None and check.quant_decile <= weak_decile_max
+    if not selected and verdict == "keep" and not weak_company:
         return ()
     rows: list[dict[str, Any]] = []
     for trigger in selected:
@@ -181,6 +194,12 @@ def _reason_rows(
             code = "revenue_down_quarters" if negative else trigger
             if negative:
                 params["count"] = negative
+        elif (
+            trigger == "valuation_stretch"
+            and check.pe_percentile is None
+            and check.pe_vs_sector is not None
+        ):
+            code = "valuation_vs_sector"
         else:
             code = trigger
         if trigger == "drift" and facts.weight_pct_of_equity is not None:
@@ -199,6 +218,9 @@ def _reason_rows(
         rows.append({"code": code, "params": params})
         if len(rows) == 3:
             break
+
+    if weak_company and len(rows) < 3:
+        rows.append({"code": "company_strength_weak", "params": {}})
 
     if card.params.get("wait_until") is not None and len(rows) < 3:
         rows.append(

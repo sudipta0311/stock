@@ -35,8 +35,8 @@ class NoSeriesResponse(ValueError):
     """Alpha Vantage returned no usable daily series."""
 
 
-def parse_daily_series(payload: object, symbol: str) -> DailyClose:
-    """Parse the newest valid close from a recorded daily-series response."""
+def parse_daily_series_points(payload: object, symbol: str) -> tuple[DailyClose, ...]:
+    """Parse every valid positive close from a recorded daily-series response."""
     if not isinstance(payload, dict):
         raise NoSeriesResponse("Alpha Vantage returned an invalid response")
     series = payload.get("Time Series (Daily)")
@@ -55,17 +55,21 @@ def parse_daily_series(payload: object, symbol: str) -> DailyClose:
             valid.append(DailyClose(symbol=symbol, as_of=as_of, close=close))
     if not valid:
         raise NoSeriesResponse("Alpha Vantage returned no valid daily close")
-    return max(valid, key=lambda item: item.as_of)
+    return tuple(sorted(valid, key=lambda item: item.as_of))
 
 
-def fetch_daily(
+def parse_daily_series(payload: object, symbol: str) -> DailyClose:
+    """Parse the newest valid close from a recorded daily-series response."""
+    return parse_daily_series_points(payload, symbol)[-1]
+
+
+def _fetch_daily_payload(
     symbol: str,
     api_key: str,
     *,
-    timeout: float = 30.0,
-    retries: int = 3,
-) -> DailyClose:
-    """Fetch one compact global daily series without exposing the key in errors."""
+    timeout: float,
+    retries: int,
+) -> object:
     if not api_key.strip():
         raise ValueError("Alpha Vantage API key is not configured")
     url = (
@@ -82,4 +86,28 @@ def fetch_daily(
             raise RateLimitResponse("Alpha Vantage request was rate limited")
         if "Error Message" in payload:
             raise UnknownSymbolResponse("Alpha Vantage did not recognize the symbol")
+    return payload
+
+
+def fetch_daily_series(
+    symbol: str,
+    api_key: str,
+    *,
+    timeout: float = 30.0,
+    retries: int = 3,
+) -> tuple[DailyClose, ...]:
+    """Fetch the compact global daily series without exposing the key in errors."""
+    payload = _fetch_daily_payload(symbol, api_key, timeout=timeout, retries=retries)
+    return parse_daily_series_points(payload, symbol)
+
+
+def fetch_daily(
+    symbol: str,
+    api_key: str,
+    *,
+    timeout: float = 30.0,
+    retries: int = 3,
+) -> DailyClose:
+    """Fetch one compact global daily series without exposing the key in errors."""
+    payload = _fetch_daily_payload(symbol, api_key, timeout=timeout, retries=retries)
     return parse_daily_series(payload, symbol)

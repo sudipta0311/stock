@@ -24,6 +24,24 @@ def test_parse_daily_series_picks_newest_valid_decimal_close() -> None:
     assert close.close == Decimal("102.50")
 
 
+def test_parse_daily_series_points_keeps_every_valid_close_in_order() -> None:
+    closes = alpha_vantage.parse_daily_series_points(
+        {
+            "Time Series (Daily)": {
+                "2026-10-28": {"4. close": "12.50"},
+                "2026-10-26": {"4. close": "11.75"},
+                "2026-10-27": {"4. close": "invalid"},
+            }
+        },
+        "SYNTH",
+    )
+
+    assert [(item.as_of, item.close) for item in closes] == [
+        (date(2026, 10, 26), Decimal("11.75")),
+        (date(2026, 10, 28), Decimal("12.50")),
+    ]
+
+
 def test_fetch_daily_uses_fixture_and_source_url_has_no_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

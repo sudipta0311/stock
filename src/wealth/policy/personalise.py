@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from wealth.core.money import round_paise
 from wealth.policy.actions import (
+    NEUTRAL_VALUATION_PERCENTILE,
     Action,
     ActionKind,
     ActionList,
@@ -58,6 +59,7 @@ from wealth.policy.global_split import GeoTilts, load_global_rules, split_equity
 from wealth.policy.holding_review import (
     StockCheckFacts,
     holding_review_decision,
+    price_is_reasonable,
     thesis_status_from_revenue,
 )
 from wealth.policy.household import (
@@ -799,7 +801,7 @@ def _abroad_action_rows(
                     holding is None
                     or check is None
                     or check.quant_decile is None
-                    or check.pe_percentile is None
+                    or not price_is_reasonable(check)
                     or (check.price or holding.price) is None
                 ):
                     continue
@@ -815,7 +817,11 @@ def _abroad_action_rows(
                         price=share_price,
                         quant_decile=check.quant_decile,
                         dossier_status="APPROVED",
-                        valuation_percentile=check.pe_percentile,
+                        valuation_percentile=(
+                            check.pe_percentile
+                            if check.pe_percentile is not None
+                            else NEUTRAL_VALUATION_PERCENTILE
+                        ),
                         confidence="HIGH",
                         name=holding.name or None,
                         exchange=holding.exchange,
@@ -1315,6 +1321,7 @@ def _exit_cards(
                 target_weight_pct=target_weight,
                 revenue_yoy_pct_last_quarters=list(check.revenue_yoy_pct),
                 governance_events=list(market.governance_events.get(security_id, ())),
+                events_watched=check.events_watched,
                 pe_own_band_percentile=check.pe_percentile,
                 pe_vs_sector_multiple=check.pe_vs_sector,
                 below_200dma=check.below_dma200,
@@ -1951,7 +1958,7 @@ def personalise(
             or holding.market != "IN"
             or holding.security_type != "equity"
             or check.quant_decile is None
-            or check.pe_percentile is None
+            or not price_is_reasonable(check)
         ):
             continue
         share_price = check.price or holding.price
@@ -1967,7 +1974,11 @@ def personalise(
                 price=share_price,
                 quant_decile=check.quant_decile,
                 dossier_status="APPROVED",
-                valuation_percentile=check.pe_percentile,
+                valuation_percentile=(
+                    check.pe_percentile
+                    if check.pe_percentile is not None
+                    else NEUTRAL_VALUATION_PERCENTILE
+                ),
                 confidence="HIGH",
                 name=holding.name or None,
                 isin=holding.isin,

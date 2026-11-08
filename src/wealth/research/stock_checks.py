@@ -209,7 +209,7 @@ def _stock_check_payloads(
             )
         }
         prices_by_security = _price_sessions(session, set(securities), as_of)
-        revenue_by_security = _revenue_rows(session, screened_ids, as_of)
+        revenue_by_security = _revenue_rows(session, set(securities), as_of)
         research_rules = ResearchRules.load()
         rows: list[dict[str, Any]] = []
         valuation_checked = 0
@@ -234,8 +234,8 @@ def _stock_check_payloads(
             pe_vs_sector: Decimal | None = None
             valuation_source: str | None = None
             revenue_source_dates: list[str] = []
-            if rank is not None:
-                revenue_rows = revenue_by_security.get(security_id, [])
+            revenue_rows = revenue_by_security.get(security_id, [])
+            if rank is not None or security_id in held_ids:
                 revenue = revenue_yoy_percentages(revenue_rows, as_of)
                 revenue_source_dates = sorted(
                     {row.period_end.isoformat() for row in revenue_rows}, reverse=True
@@ -284,7 +284,7 @@ def _stock_check_payloads(
                         else None,
                         "revenue_period_ends": revenue_source_dates,
                     }
-                    if rank is not None
+                    if rank is not None or security_id in held_ids
                     else None,
                     "valuation": {
                         "as_of": as_of.isoformat(),
@@ -351,6 +351,19 @@ def run_stock_checks(
         )
     }
     coverage["revenue_yoy_pct"] = sum(bool(row["revenue_yoy_pct"]) for row in rows)
+    held_rows = [row for row in rows if row["security_id"] in held_ids]
+    held_coverage = {
+        name: sum(row[name] is not None for row in held_rows)
+        for name in (
+            "price",
+            "dma200",
+            "revenue_yoy_pct",
+            "pe_vs_sector",
+            "pe_percentile",
+            "quant_decile",
+        )
+    }
+    held_coverage["revenue_yoy_pct"] = sum(bool(row["revenue_yoy_pct"]) for row in held_rows)
     return {
         "week": week,
         "as_of": as_of.isoformat(),
@@ -359,6 +372,7 @@ def run_stock_checks(
         "held_not_covered": len(held_ids - screened_ids),
         "valuation_checked": valuation_checked,
         "coverage": coverage,
+        "held_coverage": held_coverage,
     }
 
 

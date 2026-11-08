@@ -295,7 +295,7 @@ def _fetch_alpha_vantage_daily(
     *,
     sleeper: Callable[[float], None] = sleep_for,
     request_budget: AbroadRequestBudget | None = None,
-) -> DailyClose:
+) -> tuple[DailyClose, ...]:
     for attempt in range(2):
         if request_budget is not None:
             if request_budget.remaining == 0:
@@ -303,7 +303,7 @@ def _fetch_alpha_vantage_daily(
             request_budget.used += 1
         sleeper(_ALPHA_VANTAGE_REQUEST_SPACING_SECONDS)
         try:
-            return alpha_vantage.fetch_daily(
+            return alpha_vantage.fetch_daily_series(
                 symbol,
                 api_key,
                 timeout=_ALPHA_VANTAGE_REQUEST_TIMEOUT_SECONDS,
@@ -350,12 +350,13 @@ def _fetch_abroad_etfs(
             skipped["no_supported_listing"] += 1
             continue
         try:
-            close = _fetch_alpha_vantage_daily(
+            closes = _fetch_alpha_vantage_daily(
                 listing.provider_symbol,
                 api_key,
                 sleeper=sleeper,
                 request_budget=budget,
             )
+            close = closes[-1]
             if close.as_of <= on:
                 records.append(CuratedAbroadPrice(instrument, listing, close))
         except Exception as error:
@@ -383,14 +384,13 @@ def _fetch_abroad_us_stocks(
     selected = securities[: budget.remaining]
     for security_id, symbol in selected:
         try:
-            close = _fetch_alpha_vantage_daily(
+            closes = _fetch_alpha_vantage_daily(
                 symbol,
                 selected_api_key,
                 sleeper=sleeper,
                 request_budget=budget,
             )
-            if close.as_of <= on:
-                records.append(AbroadPrice(security_id, close))
+            records.extend(AbroadPrice(security_id, close) for close in closes if close.as_of <= on)
         except Exception as error:
             skipped[_abroad_skip_reason(error)] += 1
     return AbroadBatch(records, len(selected), skipped)
@@ -412,6 +412,7 @@ def _held_us_stock_keys(session: Session) -> list[tuple[Any, str]]:
                 Security.market == "US",
                 Security.security_type == "equity",
                 Security.symbol.is_not(None),
+                HoldingLot.quantity > 0,
             )
             .distinct()
             .order_by(Security.symbol, Security.id)
@@ -443,12 +444,45 @@ def _universe_symbols(
     )
 
 
+def _held_equity_symbols(session: Session, market: str) -> list[str]:
+    return list(
+        session.scalars(
+            select(Security.symbol)
+            .join(HoldingLot, HoldingLot.security_id == Security.id)
+            .where(
+                Security.market == market,
+                Security.security_type == "equity",
+                Security.symbol.is_not(None),
+                HoldingLot.quantity > 0,
+            )
+            .distinct()
+            .order_by(Security.symbol)
+        )
+    )
+
+
+def _universe_and_held_symbols(
+    session: Session,
+    market: str,
+    universe: str,
+    symbols: tuple[str, ...] | None,
+) -> list[str]:
+    selected = [
+        *_universe_symbols(session, market, universe, symbols),
+        *_held_equity_symbols(session, market),
+    ]
+    unique: dict[str, str] = {}
+    for symbol in selected:
+        unique.setdefault(symbol.upper(), symbol)
+    return list(unique.values())
+
+
 def _fetch_edgar(
     session: Session | None, on: date, symbols: tuple[str, ...] | None
 ) -> FundamentalsBatch:
     if session is None:
         raise ValueError("EDGAR refresh requires a database session")
-    return _fetch_edgar_for_symbols(on, _universe_symbols(session, "US", "sp500", symbols))
+    return _fetch_edgar_for_symbols(on, _universe_and_held_symbols(session, "US", "sp500", symbols))
 
 
 def _fetch_edgar_for_symbols(on: date, target_symbols: list[str]) -> FundamentalsBatch:
@@ -497,7 +531,7 @@ def _fetch_nse_fundamentals(
 ) -> FundamentalsBatch:
     if session is None:
         raise ValueError("NSE fundamentals refresh requires a database session")
-    target_symbols = _universe_symbols(session, "IN", "nifty500", symbols)
+    target_symbols = _universe_and_held_symbols(session, "IN", "nifty500", symbols)
     if not target_symbols:
         return FundamentalsBatch({}, {"universe": "NoSymbols"})
     securities = _securities_for_symbols(session, "IN", target_symbols)
@@ -726,6 +760,48 @@ def _default_fetchers(
         "ust": lambda: macro_geo.fetch_treasury_yields(on),
         "feeds": lambda: macro_geo.fetch_official_feeds(on),
     }
+
+
+def _upsert_us_stock_prices(
+    session: Session,
+    records: list[AbroadPrice],
+    *,
+    fetched_at: datetime,
+) -> int:
+    if not records:
+        return 0
+    security_ids = {item.security_id for item in records}
+    dates = {item.close.as_of for item in records}
+    existing = {
+        (row.security_id, row.as_of)
+        for row in session.execute(
+            select(PriceEod.security_id, PriceEod.as_of).where(
+                PriceEod.security_id.in_(security_ids),
+                PriceEod.as_of.in_(dates),
+            )
+        )
+    }
+    latest_date_by_security: dict[Any, date] = {}
+    for item in records:
+        previous = latest_date_by_security.get(item.security_id)
+        if previous is None or item.close.as_of > previous:
+            latest_date_by_security[item.security_id] = item.close.as_of
+    rows = [
+        {
+            "security_id": item.security_id,
+            "as_of": item.close.as_of,
+            "close": item.close.close,
+            "volume": None,
+            "traded_value": None,
+            "source": "AlphaVantage",
+            "source_url": alpha_vantage.SOURCE_URL,
+            "fetched_at": fetched_at,
+        }
+        for item in records
+        if (item.security_id, item.close.as_of) not in existing
+        or item.close.as_of == latest_date_by_security[item.security_id]
+    ]
+    return store.upsert_eod_prices(session, rows)
 
 
 def _store_source(
@@ -1066,6 +1142,26 @@ def _store_source(
         return {"gold_prices": 1, "gold_source": selected_source}
     if source in {"eu_etfs", "us_stocks"}:
         if isinstance(records, AbroadBatch):
+            if source == "us_stocks":
+                stock_records = [item for item in records.records if isinstance(item, AbroadPrice)]
+                if len(stock_records) != len(records.records):
+                    raise TypeError("U.S. stock adapter returned invalid rows")
+                inserted = _upsert_us_stock_prices(
+                    session,
+                    stock_records,
+                    fetched_at=fetched_at,
+                )
+                counts: dict[str, Any] = {
+                    "prices_eod": inserted,
+                    "requested": records.requested,
+                    "skipped": records.skipped,
+                }
+                errors = {
+                    reason: f"{amount} skipped"
+                    for reason, amount in records.skipped.items()
+                    if amount
+                }
+                return SourceBatchResult(counts, errors)
             inserted = 0
             for item in records.records:
                 if isinstance(item, CuratedAbroadPrice):
@@ -1101,6 +1197,14 @@ def _store_source(
             not isinstance(item, AbroadPrice) for item in records
         ):
             raise TypeError("Alpha Vantage adapter returned invalid rows")
+        if source == "us_stocks":
+            return {
+                "prices_eod": _upsert_us_stock_prices(
+                    session,
+                    records,
+                    fetched_at=fetched_at,
+                )
+            }
         for item in records:
             store.upsert_eod_price(
                 session,
@@ -1158,9 +1262,9 @@ def _prepare_engine_fetchers(
             if "us_stocks" in needs_preparation:
                 prepared_us_stocks = _held_us_stock_keys(session)
             if "edgar" in needs_preparation:
-                edgar_symbols = _universe_symbols(session, "US", "sp500", symbols)
+                edgar_symbols = _universe_and_held_symbols(session, "US", "sp500", symbols)
             if "nse_fundamentals" in needs_preparation:
-                target_symbols = _universe_symbols(session, "IN", "nifty500", symbols)
+                target_symbols = _universe_and_held_symbols(session, "IN", "nifty500", symbols)
                 if target_symbols:
                     securities = _securities_for_symbols(session, "IN", target_symbols)
                     nse_targets = [

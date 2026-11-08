@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 import wealth.policy.personalise as personalise_module
+from wealth.policy import NEUTRAL_VALUATION_PERCENTILE
 from wealth.policy.actions import Action, ActionList, SatelliteIdea
 from wealth.policy.denmark import ask_rule_for_year
 from wealth.policy.exits import HoldingFacts, build_exit_card
@@ -375,7 +376,9 @@ def test_no_research_pack_cannot_create_satellite_stock_buy_actions() -> None:
     assert all(action["kind"] != "BUY_STOCK_TRANCHE" for action in plan["actions"])
 
 
-def test_india_add_more_plan_accepts_a_six_decimal_check_price() -> None:
+def test_india_add_more_plan_uses_neutral_percentile_without_own_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     user_data = synthetic_user_data()
     original_holding = user_data.holdings[0]
     smaller_holding = replace(
@@ -390,10 +393,18 @@ def test_india_add_more_plan_accepts_a_six_decimal_check_price() -> None:
         as_of=_AS_OF,
         market="IN",
         quant_decile=9,
-        pe_percentile=Decimal("50"),
+        pe_vs_sector=Decimal("1.1"),
         price=Decimal("1543.256789"),
     )
     market = replace(synthetic_market(), stock_checks={"synthetic-india-equity": check})
+    captured_ideas: list[SatelliteIdea] = []
+    build_action_list = personalise_module.build_action_list
+
+    def capture_ideas(week_input, **kwargs):
+        captured_ideas.extend(week_input.ideas)
+        return build_action_list(week_input, **kwargs)
+
+    monkeypatch.setattr(personalise_module, "build_action_list", capture_ideas)
 
     plan = personalise(user_data, market, None, _WEEK, _AS_OF)
 
@@ -405,9 +416,19 @@ def test_india_add_more_plan_accepts_a_six_decimal_check_price() -> None:
         )["verdict"]
         == "add_more"
     )
+    assert (
+        next(
+            idea.valuation_percentile
+            for idea in captured_ideas
+            if idea.security_id == "synthetic-india-equity"
+        )
+        == NEUTRAL_VALUATION_PERCENTILE
+    )
 
 
-def test_denmark_add_more_rounds_held_us_share_before_new_idea() -> None:
+def test_denmark_add_more_rounds_held_us_share_before_new_idea(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     base = synthetic_user_data()
     investing = base.investing.model_copy(
         update={
@@ -470,7 +491,7 @@ def test_denmark_add_more_rounds_held_us_share_before_new_idea() -> None:
         as_of=_AS_OF,
         market="US",
         quant_decile=9,
-        pe_percentile=Decimal("50"),
+        pe_vs_sector=Decimal("1.1"),
         price=Decimal("123.456789"),
     )
     market = replace(
@@ -496,6 +517,14 @@ def test_denmark_add_more_rounds_held_us_share_before_new_idea() -> None:
         exchange="NASDAQ",
         currency="USD",
     )
+    captured_ideas: list[SatelliteIdea] = []
+    approved_us_stock_buys = personalise_module.approved_us_stock_buys
+
+    def capture_ideas(ideas, **kwargs):
+        captured_ideas.extend(ideas)
+        return approved_us_stock_buys(ideas, **kwargs)
+
+    monkeypatch.setattr(personalise_module, "approved_us_stock_buys", capture_ideas)
 
     plan = personalise(
         user_data,
@@ -515,6 +544,14 @@ def test_denmark_add_more_rounds_held_us_share_before_new_idea() -> None:
     assert held.symbol in tickers
     assert new_idea.symbol in tickers
     assert tickers.index(held.symbol) < tickers.index(new_idea.symbol)
+    assert (
+        next(
+            idea.valuation_percentile
+            for idea in captured_ideas
+            if idea.security_id == held.security_id
+        )
+        == NEUTRAL_VALUATION_PERCENTILE
+    )
 
 
 def test_personaliser_merges_triggered_exit_cards_with_buys() -> None:

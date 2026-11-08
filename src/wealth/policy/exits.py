@@ -74,6 +74,7 @@ class HoldingFacts:
     geo_evidence_ids: list[str] = field(default_factory=list)
     better_candidate: BetterCandidate | None = None
     goal_within_years: int | None = None
+    events_watched: bool = False
 
     def __post_init__(self) -> None:
         for name in ("security_id", "symbol", "sector"):
@@ -81,6 +82,8 @@ class HoldingFacts:
                 raise ValueError(f"{name} must be non-empty text")
         if not isinstance(self.is_core, bool):
             raise ValueError("is_core must be a bool")
+        if not isinstance(self.events_watched, bool):
+            raise ValueError("events_watched must be a bool")
         if not isinstance(self.lots, list) or any(not isinstance(lot, Lot) for lot in self.lots):
             raise ValueError("lots must be a list of Lot values")
         _decimal(self.price, "price", minimum=_ZERO)
@@ -297,7 +300,7 @@ def _governance_trigger(facts: HoldingFacts, rules: dict[str, object]) -> Trigge
         if facts.pledge_pct is not None and facts.pledge_pct_prev_quarter is not None
         else None
     )
-    known = bool(facts.governance_events) or facts.pledge_pct is not None
+    known = bool(facts.governance_events) or facts.pledge_pct is not None or facts.events_watched
     triggered = (
         bool(events)
         or (jump is not None and jump >= jump_limit)
@@ -354,27 +357,35 @@ def _valuation_trigger(facts: HoldingFacts, rules: dict[str, object]) -> Trigger
     percentile_limit = _decimal_rule(rules, (*base, "own_band_percentile"))
     multiple_limit = _decimal_rule(rules, (*base, "sector_multiple"))
     watch = _decimal_rule(rules, ("watch_fraction",))
-    known = facts.pe_own_band_percentile is not None and facts.pe_vs_sector_multiple is not None
+    own_percentile = facts.pe_own_band_percentile
+    sector_multiple = facts.pe_vs_sector_multiple
+    known = own_percentile is not None and sector_multiple is not None
     value = (
-        f"{facts.pe_own_band_percentile} percentile; {facts.pe_vs_sector_multiple}x sector"
+        f"{own_percentile} percentile; {sector_multiple}x sector"
         if known
+        else f"{sector_multiple}x sector"
+        if own_percentile is None and sector_multiple is not None
+        else f"{own_percentile} percentile"
+        if own_percentile is not None and sector_multiple is None
         else None
     )
     threshold = f"own PE percentile >{percentile_limit} and sector multiple >{multiple_limit}x"
-    if not known:
-        state: TriggerState = "unknown"
-    elif (
-        facts.pe_own_band_percentile > percentile_limit
-        and facts.pe_vs_sector_multiple > multiple_limit
-    ):
-        state = "triggered"
-    elif (
-        facts.pe_own_band_percentile >= percentile_limit * watch
-        and facts.pe_vs_sector_multiple >= multiple_limit * watch
-    ):
-        state = "watch"
+    state: TriggerState
+    if known:
+        if own_percentile > percentile_limit and sector_multiple > multiple_limit:
+            state = "triggered"
+        elif (
+            own_percentile >= percentile_limit * watch and sector_multiple >= multiple_limit * watch
+        ):
+            state = "watch"
+        else:
+            state = "ok"
+    elif own_percentile is None and sector_multiple is not None:
+        state = "watch" if sector_multiple > multiple_limit else "ok"
+    elif own_percentile is not None and sector_multiple is None:
+        state = "ok" if own_percentile < percentile_limit * watch else "unknown"
     else:
-        state = "ok"
+        state = "unknown"
     return _trigger("valuation_stretch", state, value, threshold)
 
 
@@ -423,6 +434,12 @@ def _risk_trigger(facts: HoldingFacts, rules: dict[str, object]) -> TriggerStatu
     dma_period = _integer_rule(rules, (*base, "below_dma"))
     required_thesis = str(rules["satellite"]["risk_stop"]["requires_thesis"]).lower()  # type: ignore[index]
     drawdown = _position_drawdown(facts)
+    watch_fraction = _decimal_rule(rules, ("watch_fraction",))
+    rules_out = (
+        (drawdown is not None and drawdown > -(drawdown_limit * watch_fraction))
+        or facts.below_200dma is False
+        or (facts.thesis_status != "unknown" and facts.thesis_status != required_thesis)
+    )
     known = (
         drawdown is not None and facts.below_200dma is not None and facts.thesis_status != "unknown"
     )
@@ -435,7 +452,10 @@ def _risk_trigger(facts: HoldingFacts, rules: dict[str, object]) -> TriggerStatu
     threshold = (
         f"drawdown <=-{drawdown_limit}% and below {dma_period}-DMA and thesis {required_thesis}"
     )
-    if not known:
+    state: TriggerState
+    if rules_out:
+        state = "ok"
+    elif not known:
         state: TriggerState = "unknown"
     elif (
         drawdown <= -drawdown_limit
@@ -444,7 +464,7 @@ def _risk_trigger(facts: HoldingFacts, rules: dict[str, object]) -> TriggerStatu
     ):
         state = "triggered"
     elif (
-        drawdown <= -(drawdown_limit * _decimal_rule(rules, ("watch_fraction",)))
+        drawdown <= -(drawdown_limit * watch_fraction)
         and facts.below_200dma
         and facts.thesis_status == required_thesis
     ):

@@ -17,14 +17,18 @@ describe("holding review", () => {
     expect(screen.getByText(label, { exact: true })).toBeVisible();
   });
 
-  it("explains unchecked shares without changing the unchecked state", () => {
+  it("explains unchecked shares and labels the latest price separately", async () => {
+    const user = userEvent.setup();
     render(
       <OurView
         value={{
           verdict: "not_checked",
           checked_on: null,
           reasons: [],
-          checks: [],
+          checks: [
+            { key: "latest_price", status: "ok" },
+            { key: "position_size", status: "ok" },
+          ],
         }}
       />,
     );
@@ -35,6 +39,11 @@ describe("holding review", () => {
       ),
     ).toBeVisible();
     expect(screen.queryByText("not_checked")).not.toBeInTheDocument();
+    await user.click(screen.getByText("Why this suggestion?"));
+    expect(screen.getByText("Latest price", { exact: true })).toBeVisible();
+    expect(
+      screen.queryByText("Price level", { exact: true }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows one reason and keeps remaining reasons and checks closed", async () => {
@@ -88,6 +97,78 @@ describe("holding review", () => {
       screen.getByRole("heading", { name: "How we check", level: 3 }),
     ).toBeVisible();
     expect(companyResultsCheck).toBeVisible();
+  });
+
+  it("summarizes known checks and waits for the missing data", async () => {
+    const user = userEvent.setup();
+    render(
+      <OurView
+        value={{
+          verdict: "keep",
+          reasons: [],
+          checks: [
+            { key: "company_results", status: "unknown" },
+            { key: "company_events", status: "ok" },
+            { key: "price_history", status: "unknown" },
+            { key: "position_size", status: "ok" },
+          ],
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByText("No warning signs in 2 of 4 checks."),
+    ).toBeVisible();
+    await user.click(screen.getByText("Why this suggestion?"));
+
+    expect(
+      screen.getByText("Waiting for data: Company results, Price level."),
+    ).toBeVisible();
+    const listItems = screen.getAllByRole("listitem");
+    expect(listItems).toHaveLength(2);
+    expect(listItems[0]).toHaveTextContent("Company events Looks okay");
+    expect(listItems[1]).toHaveTextContent(
+      "Share of your investments Looks okay",
+    );
+  });
+
+  it("does not summarize when a known check is a watch without a reason", () => {
+    render(
+      <OurView
+        value={{
+          verdict: "keep",
+          reasons: [],
+          checks: [{ key: "company_strength", status: "watch" }],
+        }}
+      />,
+    );
+
+    expect(screen.queryByText(/^No warning signs/)).not.toBeInTheDocument();
+  });
+
+  it("uses the all checked summary and omits the waiting line", async () => {
+    const user = userEvent.setup();
+    render(
+      <OurView
+        value={{
+          verdict: "keep",
+          reasons: [],
+          checks: [
+            { key: "price_history", status: "ok" },
+            { key: "company_strength", status: "ok" },
+          ],
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByText("No warning signs in any of the 2 checks."),
+    ).toBeVisible();
+    await user.click(screen.getByText("Why this suggestion?"));
+
+    expect(screen.queryByText(/^Waiting for data:/)).not.toBeInTheDocument();
+    expect(screen.getByText("Price level", { exact: true })).toBeVisible();
+    expect(screen.getByText("Company strength", { exact: true })).toBeVisible();
   });
 
   it("does not show a waiting date for a share savings account", () => {

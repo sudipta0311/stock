@@ -25,6 +25,7 @@ from wealth.db.models import (
     HouseholdMember,
     LoanEventRecord,
     ManualAsset,
+    MarketdataRun,
     Profile,
     RealisedTrade,
     RecordedBuy,
@@ -1168,6 +1169,24 @@ def _stock_check_inputs(
         .where(StockCheck.security_id.in_(security_ids), StockCheck.as_of <= as_of)
         .order_by(StockCheck.security_id, StockCheck.as_of.desc(), StockCheck.week.desc())
     ).all()
+    events_watch_max_age = int(load_exit_rules()["events_watch_max_age_days"])
+    latest_sentinel_run = session.scalar(
+        select(MarketdataRun)
+        .where(
+            MarketdataRun.started_at <= datetime.combine(as_of, time.max, tzinfo=UTC),
+            MarketdataRun.counts["sentinel"].is_not(None),
+        )
+        .order_by(MarketdataRun.started_at.desc())
+        .limit(1)
+    )
+    market_event_watch: dict[str, bool] = {"IN": False, "US": False}
+    if latest_sentinel_run is not None:
+        run_age = as_of - latest_sentinel_run.started_at.astimezone(UTC).date()
+        sentinel_counts = latest_sentinel_run.counts.get("sentinel")
+        if 0 <= run_age.days <= events_watch_max_age and isinstance(sentinel_counts, dict):
+            market_event_watch = {
+                market: sentinel_counts.get(market) == "available" for market in ("IN", "US")
+            }
     stock_checks: dict[str, StockCheckFacts] = {}
     for row, market in check_rows:
         key = str(row.security_id)
@@ -1186,6 +1205,7 @@ def _stock_check_inputs(
             price=row.price,
             dma200=row.dma200,
             below_dma200=row.below_dma200,
+            events_watched=market_event_watch.get(market, False),
         )
 
     governance_codes = load_exit_rules()["satellite"]["governance_break"]["events"]

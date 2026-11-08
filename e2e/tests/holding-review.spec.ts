@@ -58,10 +58,10 @@ test("held shares show weekly reviews and Home has one sell step", async ({
   const companyResultsCheck = page
     .getByRole("listitem")
     .filter({ hasText: "Company results" });
-  await expect(companyResultsCheck).toHaveCount(1);
-  await expect(companyResultsCheck).toBeVisible();
-  await expect(companyResultsCheck).toContainText("Company results");
-  await expect(companyResultsCheck).toContainText("Not enough information");
+  await expect(companyResultsCheck).toHaveCount(0);
+  await expect(
+    page.getByText(/^Waiting for data: .*Company results/),
+  ).toBeVisible();
   await expectFitsScreen(page);
 
   const addViolations = (
