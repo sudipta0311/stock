@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "playwright test"
+    "test": "playwright test",
+    "live:login": "node live/login.mjs",
+    "live": "playwright test --config playwright.live.config.ts"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",
