@@ -186,6 +186,13 @@ class SourceBatchResult:
     errors: dict[str, str]
 
 
+def _error_summary(error: BaseException) -> str:
+    """Name a failure without exposing driver messages or connection details."""
+    constraint = store.database_constraint_name(error)
+    name = type(error).__name__
+    return f"{name} ({constraint})" if constraint else name
+
+
 def _fetch_fx(on: date) -> FxFetchResult:
     observations: list[FxObservation] = []
     errors: dict[str, str] = {}
@@ -194,13 +201,13 @@ def _fetch_fx(on: date) -> FxFetchResult:
         observations.extend(ecb_result.observations)
         errors.update(ecb_result.errors)
     except Exception as error:
-        errors.update({currency: type(error).__name__ for currency in ecb.ECB_CROSS_CURRENCIES})
+        errors.update({currency: _error_summary(error) for currency in ecb.ECB_CROSS_CURRENCIES})
 
     if not any(item.pair == "USD/INR" for item in observations):
         try:
             fallback = fred.fetch_dexinus(fetched_on=on)
         except Exception as error:
-            errors.setdefault("USD", type(error).__name__)
+            errors.setdefault("USD", _error_summary(error))
         else:
             observations.extend(fallback)
             if any(item.pair == "USD/INR" for item in fallback):
@@ -216,7 +223,7 @@ def _fetch_nse_master() -> NseMasterBatch:
     try:
         etfs = nse.fetch_etf_list()
     except Exception as error:
-        return NseMasterBatch(equities, 0, type(error).__name__)
+        return NseMasterBatch(equities, 0, _error_summary(error))
     if not etfs:
         return NseMasterBatch(equities, 0, "EmptyETFList")
     return NseMasterBatch(equities + etfs, len(etfs))
@@ -503,7 +510,7 @@ def _fetch_edgar_for_symbols(on: date, target_symbols: list[str]) -> Fundamental
             payload = edgar.fetch_companyfacts(company.cik, client)
             observations[ticker] = edgar.parse_company_facts(payload, as_of=on)
         except Exception as error:
-            errors[ticker] = type(error).__name__
+            errors[ticker] = _error_summary(error)
     return FundamentalsBatch(observations, errors, selected_companies)
 
 
@@ -573,7 +580,7 @@ def _fetch_nse_fundamental_targets(
                     continue
                 observations[symbol] = result.observations
             except Exception as error:
-                errors[symbol] = type(error).__name__
+                errors[symbol] = _error_summary(error)
     return FundamentalsBatch(observations, errors, xbrl_missing=xbrl_missing)
 
 
@@ -675,20 +682,20 @@ def _fetch_universes(
     try:
         sp500 = (fetch_sp500 or universes.fetch_sp500)()
     except Exception as error:
-        errors["sp500"] = type(error).__name__
+        errors["sp500"] = _error_summary(error)
     if sp500 is not None:
         try:
             sp500_closes = universes.fetch_sp500_closes(sp500)
         except Exception as error:
-            errors["sp500_prices"] = type(error).__name__
+            errors["sp500_prices"] = _error_summary(error)
         try:
             sp500_sectors = universes.fetch_sp500_sectors()
         except Exception as error:
-            errors["sp500_sectors"] = type(error).__name__
+            errors["sp500_sectors"] = _error_summary(error)
     try:
         nifty500 = (fetch_nifty500 or universes.fetch_nifty500)()
     except Exception as error:
-        errors["nifty500"] = type(error).__name__
+        errors["nifty500"] = _error_summary(error)
     return UniverseBatch(sp500, nifty500, errors, sp500_closes, sp500_sectors)
 
 
@@ -811,7 +818,7 @@ def _store_source(
     *,
     on: date,
     fetched_at: datetime,
-) -> int | dict[str, int] | str | SourceBatchResult:
+) -> int | dict[str, int] | str | SourceBatchResult | store.NseMasterUpsertResult:
     if source in {"edgar", "nse_fundamentals"}:
         if not isinstance(records, FundamentalsBatch):
             raise TypeError(f"{source} adapter returned invalid rows")
@@ -854,7 +861,7 @@ def _store_source(
                     )
                 stored_symbols += 1
             except Exception as error:
-                errors[ticker] = type(error).__name__
+                errors[ticker] = _error_summary(error)
         counts = {"fundamentals_pit": inserted, "symbols": stored_symbols}
         if source == "nse_fundamentals":
             counts["xbrl_missing"] = records.xbrl_missing
@@ -937,7 +944,7 @@ def _store_source(
                 }
                 counts["universes_loaded"] += 1
             except Exception as error:
-                errors["sp500_store"] = type(error).__name__
+                errors["sp500_store"] = _error_summary(error)
         if records.nifty500 is not None:
             try:
                 with session.begin_nested():
@@ -966,7 +973,7 @@ def _store_source(
                 counts["nifty500"] = membership
                 counts["universes_loaded"] += 1
             except Exception as error:
-                errors["nifty500_store"] = type(error).__name__
+                errors["nifty500_store"] = _error_summary(error)
         return SourceBatchResult(counts, errors)
     if source == "fund_baskets":
         if not isinstance(records, fund_baskets.FundBasketBatch):
@@ -1029,7 +1036,7 @@ def _store_source(
                 }
                 counts["baskets_stored"] += 1
             except Exception as error:
-                errors[basket_id] = type(error).__name__
+                errors[basket_id] = _error_summary(error)
         return SourceBatchResult(counts, errors)
     if source == "master":
         securities = records.securities if isinstance(records, NseMasterBatch) else records
@@ -1337,6 +1344,11 @@ def _refresh_sources_succeeded(
                 and source_counts.get("fx_rates", 0) > 0
             )
             or (
+                source == "master"
+                and isinstance(source_counts, int)
+                and (source_counts > 0 or source in errors)
+            )
+            or (
                 source in {"edgar", "nse_fundamentals"}
                 and isinstance(source_counts, dict)
                 and source_counts.get("symbols", 0) > 0
@@ -1430,7 +1442,7 @@ def _run_refresh_on_engine(
             if deleted:
                 counts[f"{retention_name.removesuffix('_retention')}_pruned"] = deleted
         except Exception as error:
-            errors[retention_name] = type(error).__name__
+            errors[retention_name] = _error_summary(error)
 
     for source in selected_sources:
         fetcher = effective_fetchers.get(source)
@@ -1448,7 +1460,7 @@ def _run_refresh_on_engine(
                     errors[f"fx:{currency}"] = error_code
                 records = list(records.observations)
         except Exception as error:
-            errors[source] = type(error).__name__
+            errors[source] = _error_summary(error)
             continue
 
         try:
@@ -1460,7 +1472,11 @@ def _run_refresh_on_engine(
                     on=on,
                     fetched_at=started_at,
                 )
-            if isinstance(result, SourceBatchResult):
+            if isinstance(result, store.NseMasterUpsertResult):
+                counts[source] = result.stored
+                if result.error is not None:
+                    errors[source] = result.error
+            elif isinstance(result, SourceBatchResult):
                 counts[source] = result.counts
                 errors.update({f"{source}:{key}": value for key, value in result.errors.items()})
             else:
@@ -1472,14 +1488,14 @@ def _run_refresh_on_engine(
                 if records.etf_error is not None:
                     errors["etf_master"] = records.etf_error
         except Exception as error:
-            errors[source] = type(error).__name__
+            errors[source] = _error_summary(error)
 
     if prune_old:
         try:
             with system_session(engine) as session:
                 counts["pruned"] = store.prune(session, on, retention_days=_RETENTION_DAYS)
         except Exception as error:
-            errors["prune"] = type(error).__name__
+            errors["prune"] = _error_summary(error)
 
     successful_sources = _refresh_sources_succeeded(selected_sources, errors, counts)
     status = "succeeded" if not errors else "partial" if successful_sources else "failed"
@@ -1565,7 +1581,7 @@ def run_refresh(
         if fundamentals_pruned:
             counts["fundamentals_pit_pruned"] = fundamentals_pruned
     except Exception as error:
-        errors["fundamentals_pit_retention"] = type(error).__name__
+        errors["fundamentals_pit_retention"] = _error_summary(error)
 
     try:
         with session.begin_nested():
@@ -1577,7 +1593,7 @@ def run_refresh(
         if feed_items_pruned:
             counts["feed_items_pruned"] = feed_items_pruned
     except Exception as error:
-        errors["feed_items_retention"] = type(error).__name__
+        errors["feed_items_retention"] = _error_summary(error)
 
     for retention_name, prune in (
         ("index_valuations_retention", store.prune_index_valuations),
@@ -1589,7 +1605,7 @@ def run_refresh(
             if deleted:
                 counts[f"{retention_name.removesuffix('_retention')}_pruned"] = deleted
         except Exception as error:
-            errors[retention_name] = type(error).__name__
+            errors[retention_name] = _error_summary(error)
 
     for source in selected_sources:
         fetcher = effective_fetchers.get(source)
@@ -1624,7 +1640,11 @@ def run_refresh(
                         on=on,
                         fetched_at=started_at,
                     )
-                if isinstance(result, SourceBatchResult):
+                if isinstance(result, store.NseMasterUpsertResult):
+                    counts[source] = result.stored
+                    if result.error is not None:
+                        errors[source] = result.error
+                elif isinstance(result, SourceBatchResult):
                     counts[source] = result.counts
                     errors.update(
                         {f"{source}:{key}": value for key, value in result.errors.items()}
@@ -1636,14 +1656,14 @@ def run_refresh(
                     if records.etf_error is not None:
                         errors["etf_master"] = records.etf_error
         except Exception as error:
-            errors[source] = type(error).__name__
+            errors[source] = _error_summary(error)
 
     if prune_old:
         try:
             with session.begin_nested():
                 counts["pruned"] = store.prune(session, on, retention_days=_RETENTION_DAYS)
         except Exception as error:
-            errors["prune"] = type(error).__name__
+            errors["prune"] = _error_summary(error)
 
     successful_sources = _refresh_sources_succeeded(selected_sources, errors, counts)
     run.status = "succeeded" if not errors else "partial" if successful_sources else "failed"
@@ -1699,7 +1719,7 @@ def run_nse_history(
                     stored += store.upsert_nse_closes(session, rows, fetched_at=started_at)
         except Exception as error:
             failed += 1
-            last_error = type(error).__name__
+            last_error = _error_summary(error)
     counts: dict[str, Any] = {
         "nse_history": {"prices_eod": stored, "sessions_requested": len(wanted)}
     }

@@ -9,12 +9,13 @@ from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import jwt
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, event, func, select
 from sqlalchemy.orm import Session
 from tests.db.conftest import MigratedDatabase
 
@@ -37,7 +38,7 @@ from wealth.marketdata.sources import ecb, nse
 from wealth.marketdata.sources.amfi import AmfiNav
 from wealth.marketdata.sources.fred import ECB_SOURCE, FxObservation
 from wealth.marketdata.sources.ibja import GoldObservation
-from wealth.marketdata.sources.nse import NseClose
+from wealth.marketdata.sources.nse import NseClose, NseSecurity
 from wealth.valuation.prices import PriceUnavailable
 
 pytestmark = pytest.mark.db
@@ -46,6 +47,10 @@ FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "marketdata"
 
 def _fixture(name: str) -> str:
     return (FIXTURES / name).read_text(encoding="utf-8")
+
+
+def _synthetic_isin() -> str:
+    return f"ZZC59{uuid4().int % 10_000_000:07d}"
 
 
 def _security(
@@ -186,6 +191,202 @@ def test_master_refresh_reports_etf_endpoint_failure_and_keeps_equities(
     assert result["counts"]["master"] == len(equities)
     assert result["counts"]["master_etf"] == 0
     assert equities[0].symbol in stored_symbols
+
+
+def test_nse_master_changes_isin_in_place_and_keeps_price_history(
+    migrated_database: MigratedDatabase,
+) -> None:
+    on = date(2026, 11, 3)
+    old_isin = _synthetic_isin()
+    new_isin = _synthetic_isin()
+    initial = NseSecurity(
+        "SYN-C59-CHANGE",
+        "Synthetic C59 share before change",
+        old_isin,
+        "EQ",
+        "equity",
+    )
+    refreshed = NseSecurity(
+        "SYN-C59-CHANGE",
+        "Synthetic C59 share after change",
+        new_isin,
+        "EQ",
+        "equity",
+    )
+
+    with Session(migrated_database.owner_engine) as session, session.begin():
+        store.upsert_nse_master(session, [initial])
+        security = session.scalar(select(Security).where(Security.symbol == "SYN-C59-CHANGE"))
+        assert security is not None
+        security_id = security.id
+        session.add(
+            PriceEod(
+                security_id=security_id,
+                as_of=on,
+                close=Decimal("12.34"),
+                source="NSE_SYNTHETIC",
+                source_url="https://example.test/synthetic-close",
+            )
+        )
+        result = store.upsert_nse_master(session, [refreshed])
+        current = session.get(Security, security_id)
+        price = session.get(PriceEod, (security_id, on))
+        current_values = (current.id, current.isin, current.name) if current is not None else None
+        price_security_id = price.security_id if price is not None else None
+
+    assert result.stored == 1
+    assert result.error is None
+    assert current_values == (
+        security_id,
+        new_isin,
+        "Synthetic C59 share after change",
+    )
+    assert price_security_id == security_id
+
+
+def test_nse_master_stages_two_symbol_swaps_before_upserting(
+    migrated_database: MigratedDatabase,
+) -> None:
+    first = NseSecurity("SYN-C59-LEFT", "Synthetic left share", _synthetic_isin(), "EQ", "equity")
+    second = NseSecurity(
+        "SYN-C59-RIGHT", "Synthetic right share", _synthetic_isin(), "EQ", "equity"
+    )
+    swapped = [
+        NseSecurity("SYN-C59-LEFT", "Synthetic right share", second.isin, "EQ", "equity"),
+        NseSecurity("SYN-C59-RIGHT", "Synthetic left share", first.isin, "EQ", "equity"),
+    ]
+
+    with Session(migrated_database.owner_engine) as session, session.begin():
+        store.upsert_nse_master(session, [first, second])
+        original_ids = {
+            row.isin: row.id
+            for row in session.scalars(
+                select(Security).where(Security.symbol.in_((first.symbol, second.symbol)))
+            )
+        }
+        result = store.upsert_nse_master(session, swapped)
+        current = {
+            row.symbol: (row.isin, row.id)
+            for row in session.scalars(
+                select(Security).where(Security.symbol.in_((first.symbol, second.symbol)))
+            )
+        }
+
+    assert result.stored == 2
+    assert result.error is None
+    assert current == {
+        first.symbol: (second.isin, original_ids[second.isin]),
+        second.symbol: (first.isin, original_ids[first.isin]),
+    }
+
+
+def test_nse_master_keeps_the_last_row_when_an_isin_repeats_in_one_batch(
+    migrated_database: MigratedDatabase,
+) -> None:
+    isin = _synthetic_isin()
+    repeated = [
+        NseSecurity("SYN-C59-DUPE", "Synthetic first listing", isin, "EQ", "equity"),
+        NseSecurity("SYN-C59-DUPE", "Synthetic second listing", isin, "EQ", "equity"),
+    ]
+
+    with Session(migrated_database.owner_engine) as session, session.begin():
+        result = store.upsert_nse_master(session, repeated)
+        names = list(session.scalars(select(Security.name).where(Security.isin == isin)))
+
+    assert result.error is None
+    assert names == ["Synthetic second listing"]
+
+
+def test_nse_master_uses_a_bounded_number_of_statements_for_a_large_batch(
+    migrated_database: MigratedDatabase,
+) -> None:
+    batch_tag = uuid4().hex[:8].upper()
+    records = [
+        NseSecurity(
+            f"SYN-C59-{batch_tag}-{index:03d}",
+            f"Synthetic C59 batch share {index}",
+            _synthetic_isin(),
+            "EQ",
+            "equity",
+        )
+        for index in range(200)
+    ]
+    statement_count = 0
+
+    def count_statement(
+        _connection: Any,
+        _cursor: Any,
+        _statement: str,
+        _parameters: Any,
+        _context: Any,
+        _executemany: bool,
+    ) -> None:
+        nonlocal statement_count
+        statement_count += 1
+
+    engine = migrated_database.owner_engine
+    event.listen(engine, "before_cursor_execute", count_statement)
+    try:
+        with Session(engine) as session, session.begin():
+            result = store.upsert_nse_master(session, records)
+    finally:
+        event.remove(engine, "before_cursor_execute", count_statement)
+
+    assert result.stored == 200
+    assert result.error is None
+    assert statement_count <= 10
+
+
+def test_nse_master_skips_a_constraint_conflict_and_saves_other_rows(
+    migrated_database: MigratedDatabase,
+) -> None:
+    occupied_isin = _synthetic_isin()
+    owner_isin = _synthetic_isin()
+    good_target_isin = _synthetic_isin()
+    occupied_symbol = Security(
+        market="IN",
+        symbol="SYN-C59-BAD",
+        isin=occupied_isin,
+        name="Synthetic old listing",
+        security_type="equity",
+        currency="INR",
+        sleeve="equity_india",
+        category="equity:india",
+    )
+    isin_owner = Security(
+        market="IN",
+        symbol="SYN-C59-ISIN-HOLDER",
+        isin=owner_isin,
+        name="Synthetic ISIN owner",
+        security_type="equity",
+        currency="INR",
+        sleeve="equity_india",
+        category="equity:india",
+    )
+    records = [
+        NseSecurity("SYN-C59-BAD", "Synthetic conflicting update", owner_isin, "EQ", "equity"),
+        NseSecurity("SYN-C59-GOOD", "Synthetic good update", good_target_isin, "EQ", "equity"),
+    ]
+
+    with Session(migrated_database.owner_engine) as session, session.begin():
+        session.add_all((occupied_symbol, isin_owner))
+        session.flush()
+        result = run_refresh(
+            session,
+            date(2026, 11, 4),
+            ("master",),
+            fetchers={"master": lambda: records},
+        )
+        bad_row = session.scalar(select(Security).where(Security.symbol == "SYN-C59-BAD"))
+        good_row = session.scalar(select(Security).where(Security.symbol == "SYN-C59-GOOD"))
+        bad_isin = bad_row.isin if bad_row is not None else None
+        stored_good_isin = good_row.isin if good_row is not None else None
+
+    assert result["status"] == "partial"
+    assert result["counts"]["master"] == 1
+    assert result["errors"] == {"master": "1 of 2 rows skipped: SYN-C59-BAD (uq_securities_isin)"}
+    assert bad_isin == occupied_isin
+    assert stored_good_isin == good_target_isin
 
 
 def test_amfi_schemes_without_isin_upsert_by_market_symbol_repeatedly(

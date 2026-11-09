@@ -102,7 +102,7 @@ def test_basket_writes_replace_atomically_and_report_partial_sources(
         )
         assert isinstance(second, SourceBatchResult)
         assert second.counts["baskets_stored"] == 0
-        assert second.errors == {"sp500": "IntegrityError"}
+        assert second.errors == {"sp500": "IntegrityError (uq_fund_basket_weights_basket_symbol)"}
 
     with Session(migrated_database.owner_engine) as session:
         from wealth.db.models import FundBasket, FundBasketWeight

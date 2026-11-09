@@ -11,8 +11,9 @@ from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 import yaml
-from sqlalchemy import case, delete, func, or_, select
+from sqlalchemy import and_, case, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from wealth.db.models import (
@@ -48,6 +49,22 @@ if TYPE_CHECKING:
 _INDEX_PROXIES = ("NIFTYBEES", "JUNIORBEES", "GOLDBEES")
 _ETF_CATEGORIES_PATH = Path(__file__).resolve().parents[3] / "rules" / "etf_categories.yaml"
 _EU_ETFS_RULES_PATH = Path(__file__).resolve().parents[3] / "rules" / "eu_etfs.yaml"
+
+
+@dataclass(frozen=True)
+class NseMasterUpsertResult:
+    stored: int
+    error: str | None = None
+
+
+def database_constraint_name(error: BaseException) -> str | None:
+    """Read only the public constraint identifier from a driver's diagnostics."""
+    original = getattr(error, "orig", error)
+    diagnostics = getattr(original, "diag", None)
+    constraint = getattr(diagnostics, "constraint_name", None)
+    if constraint is None:
+        constraint = getattr(original, "constraint_name", None)
+    return constraint if isinstance(constraint, str) and constraint else None
 
 
 def _normalised(value: str) -> str:
@@ -149,7 +166,7 @@ def _upsert_securities_batch(
     by_isin: bool,
     preserve_nse_security: bool = False,
     batch_size: int = 1000,
-) -> None:
+) -> list[UUID]:
     """Upsert many securities with one round trip per batch instead of one per row.
 
     The daily AMFI file has ~18,000 share classes; per-row upserts from a GitHub runner
@@ -158,10 +175,16 @@ def _upsert_securities_batch(
     statement = _with_security_conflict(
         pg_insert(Security), by_isin=by_isin, preserve_nse_security=preserve_nse_security
     )
+    identifiers: list[UUID] = []
     for start in range(0, len(rows), batch_size):
+        batch = rows[start : start + batch_size]
+        batch_ids = [uuid4() for _ in batch]
         session.execute(
-            statement, [{"id": uuid4(), **row} for row in rows[start : start + batch_size]]
+            statement,
+            [{"id": identifier, **row} for identifier, row in zip(batch_ids, batch, strict=True)],
         )
+        identifiers.extend(batch_ids)
+    return identifiers
 
 
 def _with_security_conflict(statement: Any, *, by_isin: bool, preserve_nse_security: bool) -> Any:
@@ -244,38 +267,269 @@ def _with_security_conflict(statement: Any, *, by_isin: bool, preserve_nse_secur
     return statement
 
 
-def upsert_nse_master(session: Session, records: list[NseSecurity]) -> int:
-    """Insert or refresh NSE securities by ISIN or exchange symbol."""
-    count = 0
-    for record in records:
-        if record.security_type == "etf":
-            sleeve = record.sleeve or (
-                "gold" if "gold" in record.name.casefold() else "equity_india"
-            )
-            category = record.category or f"etf:{sleeve}"
-        else:
-            sleeve = "equity_india"
-            category = "equity:india"
-        _upsert_security(
-            session,
-            {
-                "market": "IN",
-                "symbol": record.symbol,
-                "isin": record.isin,
-                "name": record.name[:160],
-                "security_type": record.security_type,
-                "currency": "INR",
-                "sleeve": sleeve,
-                "category": category,
-                "nse_symbol": record.symbol,
-                "series": record.series,
-                **({"sector": record.sector} if record.sector != "Unclassified" else {}),
-                **({"industry": record.industry} if record.industry != "Unclassified" else {}),
-            },
-            by_isin=record.isin is not None,
+def _nse_master_values(record: NseSecurity) -> dict[str, Any]:
+    if record.security_type == "etf":
+        sleeve = record.sleeve or ("gold" if "gold" in record.name.casefold() else "equity_india")
+        category = record.category or f"etf:{sleeve}"
+    else:
+        sleeve = "equity_india"
+        category = "equity:india"
+    return {
+        "market": "IN",
+        "symbol": record.symbol,
+        "isin": record.isin,
+        "name": record.name[:160],
+        "security_type": record.security_type,
+        "currency": "INR",
+        "sleeve": sleeve,
+        "category": category,
+        "nse_symbol": record.symbol,
+        "series": record.series,
+        "sector": record.sector,
+        "industry": record.industry,
+    }
+
+
+def _remember_nse_security(
+    row: Security,
+    values: dict[str, Any],
+    by_symbol: dict[str, Security],
+    by_isin: dict[str, Security],
+    *,
+    inserted: bool = False,
+) -> None:
+    old_symbol, old_isin, old_market = row.symbol, row.isin, row.market
+    if old_market == "IN" and old_symbol is not None and by_symbol.get(old_symbol) is row:
+        del by_symbol[old_symbol]
+    if old_isin is not None and by_isin.get(old_isin) is row:
+        del by_isin[old_isin]
+    for field, value in values.items():
+        if not inserted and field in {"sector", "industry"} and value == "Unclassified":
+            continue
+        setattr(row, field, value)
+    if row.market == "IN" and row.symbol is not None:
+        by_symbol[row.symbol] = row
+    if row.isin is not None:
+        by_isin[row.isin] = row
+
+
+def _update_nse_master_rows(session: Session, rows: list[tuple[Security, dict[str, Any]]]) -> None:
+    """Apply same-symbol ISIN changes in one UPDATE statement."""
+    ids = [row.id for row, _values in rows]
+    fields = (
+        "isin",
+        "name",
+        "security_type",
+        "currency",
+        "sleeve",
+        "category",
+        "nse_symbol",
+        "series",
+    )
+    values: dict[str, Any] = {
+        field: case(
+            {row.id: update_values[field] for row, update_values in rows},
+            value=Security.id,
+            else_=getattr(Security, field),
         )
-        count += 1
-    return count
+        for field in fields
+    }
+    for field in ("sector", "industry"):
+        selected = {
+            row.id: update_values[field]
+            for row, update_values in rows
+            if update_values[field] != "Unclassified"
+        }
+        if selected:
+            values[field] = case(
+                selected,
+                value=Security.id,
+                else_=getattr(Security, field),
+            )
+    session.execute(update(Security).where(Security.id.in_(ids)).values(**values))
+
+
+def upsert_nse_master(session: Session, records: list[NseSecurity]) -> NseMasterUpsertResult:
+    """Insert or refresh NSE securities while retaining listing identity across ISIN changes."""
+    if not records:
+        return NseMasterUpsertResult(0)
+    # One INSERT ... ON CONFLICT cannot touch the same key twice (a cardinality error, not
+    # an IntegrityError), so keep the last row per ISIN, or per symbol when there is none.
+    unique_records: dict[tuple[str, str], NseSecurity] = {}
+    for record in records:
+        key = ("isin", record.isin) if record.isin is not None else ("symbol", record.symbol)
+        unique_records[key] = record
+    records = list(unique_records.values())
+    incoming_isins = {record.isin for record in records if record.isin is not None}
+    incoming_symbols = {record.symbol for record in records}
+    incoming_symbol_by_isin = {
+        record.isin: record.symbol for record in records if record.isin is not None
+    }
+    existing_rows = list(
+        session.scalars(
+            select(Security).where(
+                or_(
+                    and_(
+                        Security.market == "IN",
+                        Security.symbol.in_(incoming_symbols),
+                    ),
+                    Security.isin.in_(incoming_isins),
+                )
+            )
+        )
+    )
+    by_symbol = {
+        row.symbol: row for row in existing_rows if row.market == "IN" and row.symbol is not None
+    }
+    by_isin = {row.isin: row for row in existing_rows if row.isin is not None}
+    rows_by_id = {row.id: row for row in existing_rows}
+    prepared = [(record, _nse_master_values(record)) for record in records]
+
+    # A symbol with an expired ISIN remains the same security and keeps its history.
+    in_place: list[tuple[NseSecurity, Security, dict[str, Any]]] = []
+    bulk_by_isin: list[tuple[NseSecurity, dict[str, Any]]] = []
+    bulk_by_symbol: list[tuple[NseSecurity, dict[str, Any]]] = []
+    in_place_record_ids: set[int] = set()
+    for record, values in prepared:
+        symbol_row = by_symbol.get(record.symbol)
+        if (
+            record.isin is not None
+            and symbol_row is not None
+            and (symbol_row.isin is None or symbol_row.isin not in incoming_isins)
+        ):
+            in_place.append((record, symbol_row, values))
+            in_place_record_ids.add(id(record))
+        elif record.isin is not None:
+            bulk_by_isin.append((record, values))
+        else:
+            bulk_by_symbol.append((record, values))
+
+    # Clear moving symbols as a set so swaps cannot hit the market/symbol index mid-batch.
+    symbols_to_clear: set[UUID] = set()
+    for record, _values in prepared:
+        if id(record) in in_place_record_ids or record.isin is None:
+            continue
+        isin_row = by_isin.get(record.isin)
+        symbol_row = by_symbol.get(record.symbol)
+        if isin_row is not None and (symbol_row is None or isin_row.id != symbol_row.id):
+            if symbol_row is None or symbol_row.isin in incoming_isins:
+                if isin_row.symbol != record.symbol:
+                    symbols_to_clear.add(isin_row.id)
+                if symbol_row is not None:
+                    symbols_to_clear.add(symbol_row.id)
+        elif (
+            isin_row is None
+            and symbol_row is not None
+            and symbol_row.isin in incoming_isins
+            and symbol_row.isin is not None
+            and incoming_symbol_by_isin[symbol_row.isin] != record.symbol
+        ):
+            symbols_to_clear.add(symbol_row.id)
+    if symbols_to_clear:
+        session.execute(
+            update(Security).where(Security.id.in_(symbols_to_clear)).values(symbol=None),
+            execution_options={"synchronize_session": False},
+        )
+        for row_id in symbols_to_clear:
+            row = rows_by_id[row_id]
+            if row.symbol is not None and by_symbol.get(row.symbol) is row:
+                del by_symbol[row.symbol]
+            row.symbol = None
+
+    stored = 0
+    skipped = 0
+    first_skipped: tuple[str, str] | None = None
+
+    def record_skip(record: NseSecurity, error: IntegrityError) -> None:
+        nonlocal skipped, first_skipped
+        skipped += 1
+        if first_skipped is None:
+            first_skipped = (
+                record.symbol,
+                database_constraint_name(error) or "unknown constraint",
+            )
+
+    if in_place:
+        try:
+            with session.begin_nested():
+                _update_nse_master_rows(
+                    session, [(row, values) for _record, row, values in in_place]
+                )
+        except IntegrityError:
+            for record, row, values in in_place:
+                one_update = {
+                    field: value
+                    for field, value in values.items()
+                    if field not in {"sector", "industry"} or value != "Unclassified"
+                }
+                try:
+                    with session.begin_nested():
+                        session.execute(
+                            update(Security).where(Security.id == row.id).values(**one_update)
+                        )
+                except IntegrityError as error:
+                    record_skip(record, error)
+                else:
+                    _remember_nse_security(row, values, by_symbol, by_isin)
+                    stored += 1
+        else:
+            for _record, row, values in in_place:
+                _remember_nse_security(row, values, by_symbol, by_isin)
+            stored += len(in_place)
+
+    for by_isin_target, grouped in ((True, bulk_by_isin), (False, bulk_by_symbol)):
+        for start in range(0, len(grouped), 500):
+            batch = grouped[start : start + 500]
+            try:
+                with session.begin_nested():
+                    identifiers = _upsert_securities_batch(
+                        session,
+                        [values for _record, values in batch],
+                        by_isin=by_isin_target,
+                        batch_size=500,
+                    )
+            except IntegrityError:
+                for record, values in batch:
+                    try:
+                        with session.begin_nested():
+                            security_id = _upsert_security(
+                                session,
+                                values,
+                                by_isin=by_isin_target,
+                            )
+                    except IntegrityError as error:
+                        record_skip(record, error)
+                    else:
+                        row = (
+                            by_isin.get(record.isin)
+                            if by_isin_target and record.isin is not None
+                            else by_symbol.get(record.symbol)
+                        )
+                        if row is None:
+                            row = Security(id=security_id, **values)
+                            _remember_nse_security(row, values, by_symbol, by_isin, inserted=True)
+                        else:
+                            _remember_nse_security(row, values, by_symbol, by_isin)
+                        stored += 1
+            else:
+                for (record, values), security_id in zip(batch, identifiers, strict=True):
+                    row = (
+                        by_isin.get(record.isin)
+                        if by_isin_target and record.isin is not None
+                        else by_symbol.get(record.symbol)
+                    )
+                    if row is None:
+                        row = Security(id=security_id, **values)
+                        _remember_nse_security(row, values, by_symbol, by_isin, inserted=True)
+                    else:
+                        _remember_nse_security(row, values, by_symbol, by_isin)
+                stored += len(batch)
+
+    summary = None
+    if first_skipped is not None:
+        symbol, constraint = first_skipped
+        summary = f"{skipped:,} of {len(records):,} rows skipped: {symbol} ({constraint})"
+    return NseMasterUpsertResult(stored, summary)
 
 
 def us_equity_isin_conflicts(session: Session, symbol: str, isin: str) -> bool:
