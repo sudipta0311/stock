@@ -193,6 +193,20 @@ def _error_summary(error: BaseException) -> str:
     return f"{name} ({constraint})" if constraint else name
 
 
+def _classify_feed_errors(errors: Mapping[str, str]) -> tuple[dict[str, str], dict[str, str]]:
+    """Keep isolated feed failures as warnings, but retain an all-feed failure as an error."""
+    feed_failures = {key.split(":", maxsplit=1)[0] for key in errors}
+    federal_register_failed = "federal_register" in errors or all(
+        f"federal_register:{term}" in errors for term in ("tariffs", "sanctions")
+    )
+    every_feed_failed = federal_register_failed and all(
+        feed in feed_failures for feed in macro_geo.FEED_URLS
+    )
+    if not errors or every_feed_failed:
+        return dict(errors), {}
+    return {}, {f"feeds:{key}": value for key, value in errors.items()}
+
+
 def _fetch_fx(on: date) -> FxFetchResult:
     observations: list[FxObservation] = []
     errors: dict[str, str] = {}
@@ -1420,6 +1434,7 @@ def _run_refresh_on_engine(
     started_at = fetched_at or datetime.now(UTC)
     counts: dict[str, Any] = {}
     errors: dict[str, str] = {}
+    warnings: dict[str, str] = {}
 
     for retention_name, operation in (
         ("fundamentals_pit_retention", store.prune_fundamentals),
@@ -1478,7 +1493,14 @@ def _run_refresh_on_engine(
                     errors[source] = result.error
             elif isinstance(result, SourceBatchResult):
                 counts[source] = result.counts
-                errors.update({f"{source}:{key}": value for key, value in result.errors.items()})
+                if source == "feeds":
+                    feed_errors, feed_warnings = _classify_feed_errors(result.errors)
+                    errors.update({f"{source}:{key}": value for key, value in feed_errors.items()})
+                    warnings.update(feed_warnings)
+                else:
+                    errors.update(
+                        {f"{source}:{key}": value for key, value in result.errors.items()}
+                    )
             else:
                 counts[source] = result
             if source_name == "manual":
@@ -1497,7 +1519,13 @@ def _run_refresh_on_engine(
         except Exception as error:
             errors["prune"] = _error_summary(error)
 
-    successful_sources = _refresh_sources_succeeded(selected_sources, errors, counts)
+    if warnings:
+        counts["warnings"] = warnings
+    successful_sources = _refresh_sources_succeeded(
+        selected_sources,
+        {**errors, **warnings},
+        counts,
+    )
     status = "succeeded" if not errors else "partial" if successful_sources else "failed"
     finished_at = datetime.now(UTC)
     with system_session(engine) as session:
@@ -1511,7 +1539,13 @@ def _run_refresh_on_engine(
         session.add(run)
         session.flush()
         run_id = str(run.id)
-    return {"run_id": run_id, "status": status, "counts": counts, "errors": errors}
+    return {
+        "run_id": run_id,
+        "status": status,
+        "counts": counts,
+        "errors": errors,
+        "warnings": warnings,
+    }
 
 
 def run_refresh(
@@ -1575,6 +1609,7 @@ def run_refresh(
     session.flush()
     counts: dict[str, Any] = {}
     errors: dict[str, str] = {}
+    warnings: dict[str, str] = {}
     try:
         with session.begin_nested():
             fundamentals_pruned = store.prune_fundamentals(session, on)
@@ -1646,9 +1681,16 @@ def run_refresh(
                         errors[source] = result.error
                 elif isinstance(result, SourceBatchResult):
                     counts[source] = result.counts
-                    errors.update(
-                        {f"{source}:{key}": value for key, value in result.errors.items()}
-                    )
+                    if source == "feeds":
+                        feed_errors, feed_warnings = _classify_feed_errors(result.errors)
+                        errors.update(
+                            {f"{source}:{key}": value for key, value in feed_errors.items()}
+                        )
+                        warnings.update(feed_warnings)
+                    else:
+                        errors.update(
+                            {f"{source}:{key}": value for key, value in result.errors.items()}
+                        )
                 else:
                     counts[source] = result
                 if source == "master" and isinstance(records, NseMasterBatch):
@@ -1665,7 +1707,13 @@ def run_refresh(
         except Exception as error:
             errors["prune"] = _error_summary(error)
 
-    successful_sources = _refresh_sources_succeeded(selected_sources, errors, counts)
+    if warnings:
+        counts["warnings"] = warnings
+    successful_sources = _refresh_sources_succeeded(
+        selected_sources,
+        {**errors, **warnings},
+        counts,
+    )
     run.status = "succeeded" if not errors else "partial" if successful_sources else "failed"
     run.finished_at = datetime.now(UTC)
     run.counts = counts
@@ -1676,6 +1724,7 @@ def run_refresh(
         "status": run.status,
         "counts": counts,
         "errors": errors,
+        "warnings": warnings,
     }
 
 
@@ -1799,6 +1848,10 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         engine.dispose()
     statuses = {item["status"] for item in results}
+    warnings = {key: value for item in results for key, value in item.get("warnings", {}).items()}
+    counts = {key: value for item in results for key, value in item["counts"].items()}
+    if warnings:
+        counts["warnings"] = warnings
     result = {
         "run_id": ",".join(item["run_id"] for item in results),
         "status": "failed"
@@ -1806,8 +1859,9 @@ def main(argv: list[str] | None = None) -> int:
         else "partial"
         if "partial" in statuses
         else "succeeded",
-        "counts": {key: value for item in results for key, value in item["counts"].items()},
+        "counts": counts,
         "errors": {key: value for item in results for key, value in item["errors"].items()},
+        "warnings": warnings,
     }
     print(json.dumps({"date": on.isoformat(), **result}, sort_keys=True))
     return 2 if result["errors"] else 0

@@ -117,6 +117,23 @@ def test_sentinel_run_is_grouped_as_safety_work_and_skips_weekly_checks() -> Non
     assert health._check_weekly_data(_NOW, (run,)) == health._check_weekly_data(_NOW, ())
 
 
+def test_run_fact_reads_feed_warning_names_from_run_counts() -> None:
+    run = health._run_fact(
+        _NOW,
+        "succeeded",
+        {
+            "feeds": {"feed_items": 1},
+            "warnings": {
+                "feeds:federal_register:tariffs": "HTTPStatusError",
+                "feeds:pib": "NotAFeed",
+            },
+        },
+        {},
+    )
+
+    assert run.warning_sources == ("federal_register", "pib")
+
+
 def _checks(result: dict[str, Any], key: str) -> list[dict[str, Any]]:
     return [item for item in result["checks"] if item["key"] == key]
 
@@ -358,6 +375,52 @@ def test_recent_failed_runs_are_problems_and_partial_runs_are_warnings() -> None
     assert "edgar" in partial_check["facts"]["partial_sources"]
     assert failed_check["level"] == "problem"
     assert "us_index_pe" in failed_check["facts"]["failed_sources"]
+
+
+def test_feed_warning_is_reported_after_three_consecutive_daily_runs() -> None:
+    feed_runs = tuple(
+        MarketdataRunFact(
+            started_at=datetime(2026, 10, 30, 8, tzinfo=UTC) + timedelta(days=offset),
+            status="succeeded",
+            sources=("feeds",),
+            source_counts={"feeds": {"feed_items": 1}},
+            warning_sources=("pib",),
+        )
+        for offset in range(3)
+    )
+
+    result = evaluate_health(
+        replace(_healthy_facts(), marketdata_runs=(*_healthy_facts().marketdata_runs, *feed_runs)),
+        _NOW,
+    )
+    feed_checks = [item for item in _checks(result, "failed_runs") if "pib" in item["message"]]
+
+    assert len(feed_checks) == 1
+    assert feed_checks[0]["level"] == "problem"
+    assert feed_checks[0]["facts"]["consecutive_runs"] == 3
+    assert result["ok"] is False
+
+
+def test_feed_warning_is_not_reported_after_only_two_daily_runs() -> None:
+    feed_runs = tuple(
+        MarketdataRunFact(
+            started_at=datetime(2026, 10, 31, 8, tzinfo=UTC) + timedelta(days=offset),
+            status="succeeded",
+            sources=("feeds",),
+            source_counts={"feeds": {"feed_items": 1}},
+            warning_sources=("pib",),
+        )
+        for offset in range(2)
+    )
+
+    result = evaluate_health(
+        replace(_healthy_facts(), marketdata_runs=(*_healthy_facts().marketdata_runs, *feed_runs)),
+        _NOW,
+    )
+    failed_runs = _checks(result, "failed_runs")
+
+    assert all("pib" not in item["message"] for item in failed_runs)
+    assert all("pib" not in item["facts"]["persistently_failing_feeds"] for item in failed_runs)
 
 
 def test_research_pack_without_one_market_is_a_warning_naming_that_market() -> None:

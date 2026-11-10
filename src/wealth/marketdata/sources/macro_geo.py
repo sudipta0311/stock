@@ -96,6 +96,10 @@ class FeedBatch:
     errors: dict[str, str]
 
 
+class NotAFeed(ValueError):
+    """The response body is not an RSS or Atom document."""
+
+
 class _PlainText(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -389,7 +393,14 @@ def parse_rss_atom_feed(
 ) -> list[FeedItemObservation]:
     """Parse RSS 0.91/2.0 or Atom entries without following linked pages."""
     payload = content.encode("utf-8") if isinstance(content, str) else content
+    prefix = payload.lstrip(b"\xef\xbb\xbf \t\r\n")
+    if not prefix.startswith(b"<") or re.match(
+        rb"(?:<!doctype\s+html|<html\b|<head\b|<body\b)", prefix[:64], re.IGNORECASE
+    ):
+        raise NotAFeed("feed response is not XML")
     root = ElementTree.fromstring(payload)
+    if _local_name(root.tag).casefold() not in {"rss", "feed", "rdf"}:
+        raise NotAFeed("XML root is not RSS or Atom")
     elements = [
         node for node in root.iter() if _local_name(node.tag).casefold() in {"item", "entry"}
     ]
@@ -502,7 +513,7 @@ def fetch_official_feeds(
             for item in selected:
                 items[(item.source, item.guid)] = item
         except Exception as error:
-            errors[source] = type(error).__name__
+            errors[source] = "NotAFeed" if isinstance(error, NotAFeed) else type(error).__name__
 
     for term in ("tariffs", "sanctions"):
         try:

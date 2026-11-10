@@ -157,3 +157,30 @@ def test_feed_refresh_continues_after_a_source_failure_and_uses_descriptive_agen
     assert batch.errors["ustr"] == "StaleFeed"
     assert all(request.headers["user-agent"] == macro_geo.MACRO_USER_AGENT for request in requests)
     assert all("@" not in request.headers["user-agent"] for request in requests)
+
+
+def test_feed_refresh_distinguishes_non_feed_bodies_from_xml_parse_errors() -> None:
+    def fetch_with_pib_body(content: bytes) -> macro_geo.FeedBatch:
+        def respond(request: httpx.Request) -> httpx.Response:
+            if str(request.url) == macro_geo.PIB_FEED_URL:
+                return httpx.Response(200, content=content, request=request)
+            if str(request.url) == macro_geo.RBI_FEED_URL:
+                return httpx.Response(200, content=_fixture("rbi_feed.xml"), request=request)
+            if str(request.url) == macro_geo.USTR_FEED_URL:
+                return httpx.Response(200, content=_fixture("ustr_feed.xml"), request=request)
+            return httpx.Response(
+                200,
+                json=json.loads(_fixture("federal_register.json")),
+                request=request,
+            )
+
+        with httpx.Client(transport=httpx.MockTransport(respond)) as client:
+            return macro_geo.fetch_official_feeds(
+                date(2026, 10, 30), client=client, fetched_at=_FETCHED_AT
+            )
+
+    assert (
+        fetch_with_pib_body(b"<!doctype html><html><body>Unavailable</body></html>").errors["pib"]
+        == "NotAFeed"
+    )
+    assert fetch_with_pib_body(b"<rss><channel>").errors["pib"] == "ParseError"

@@ -111,6 +111,7 @@ class MarketdataRunFact:
     sources: tuple[str, ...]
     source_counts: Mapping[str, Mapping[str, int]]
     error_sources: tuple[str, ...] = ()
+    warning_sources: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -390,6 +391,7 @@ def _check_failed_runs(now: datetime, runs: Sequence[MarketdataRunFact]) -> list
     common_facts = {
         "failed_sources": sorted(failed_sources),
         "partial_sources": sorted(partial_sources),
+        "persistently_failing_feeds": list(_persistent_feed_warning_sources(now, runs)),
         "failed_runs": sum(1 for run in recent if run.status == "failed"),
         "partial_runs": sum(1 for run in recent if run.status == "partial"),
         "window_days": FAILED_RUN_MAX_AGE_DAYS,
@@ -401,6 +403,16 @@ def _check_failed_runs(now: datetime, runs: Sequence[MarketdataRunFact]) -> list
             verb = "failed" if level == "problem" else "were partial"
             message = f"Market data sources {verb}: {joined_sources}. Rerun {workflow}."
             checks.append(_check("failed_runs", level, message, common_facts))
+    for feed in common_facts["persistently_failing_feeds"]:
+        message = f"Market data source keeps failing: {feed}. Rerun Daily market data."
+        checks.append(
+            _check(
+                "failed_runs",
+                "problem",
+                message,
+                {**common_facts, "feed": feed, "consecutive_runs": 3},
+            )
+        )
     if not checks:
         checks.append(
             _check(
@@ -408,6 +420,26 @@ def _check_failed_runs(now: datetime, runs: Sequence[MarketdataRunFact]) -> list
             )
         )
     return checks
+
+
+def _persistent_feed_warning_sources(
+    now: datetime,
+    runs: Sequence[MarketdataRunFact],
+) -> tuple[str, ...]:
+    cutoff = now - timedelta(days=WEEKLY_DATA_MAX_AGE_DAYS)
+    latest_by_day: dict[date, MarketdataRunFact] = {}
+    for run in sorted(runs, key=lambda item: item.started_at):
+        if cutoff <= run.started_at <= now and "feeds" in run.sources:
+            latest_by_day[run.started_at.date()] = run
+    days = sorted(latest_by_day)[-3:]
+    if len(days) != 3 or any(
+        (later - earlier).days != 1 for earlier, later in zip(days, days[1:], strict=False)
+    ):
+        return ()
+    failing_in_all_runs = set(latest_by_day[days[0]].warning_sources)
+    for day in days[1:]:
+        failing_in_all_runs.intersection_update(latest_by_day[day].warning_sources)
+    return tuple(sorted(failing_in_all_runs))
 
 
 def _check_research_pack(now: datetime, facts: HealthFacts) -> dict[str, Any]:
@@ -699,6 +731,8 @@ def _run_fact(
 ) -> MarketdataRunFact:
     counts = raw_counts if isinstance(raw_counts, Mapping) else {}
     errors = raw_errors if isinstance(raw_errors, Mapping) else {}
+    raw_warnings = counts.get("warnings")
+    warnings = raw_warnings if isinstance(raw_warnings, Mapping) else {}
     source_names = {str(key) for key in counts if key in _ALL_MARKETDATA_SOURCES}
     error_sources = {
         source
@@ -722,6 +756,16 @@ def _run_fact(
         sources=tuple(sorted(source_names)),
         source_counts=nested_counts,
         error_sources=tuple(sorted(error_sources)),
+        warning_sources=tuple(
+            sorted(
+                {
+                    feed
+                    for warning_key in warnings
+                    if str(warning_key).startswith("feeds:")
+                    and (feed := str(warning_key).split(":", maxsplit=2)[1])
+                }
+            )
+        ),
     )
 
 
