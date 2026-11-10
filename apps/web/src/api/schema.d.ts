@@ -1,4 +1,4 @@
-// OpenAPI SHA256: d0c7a8fe1569df9c12973d7b54c45926c32caf6ec0bc75f9a663041284453afb
+// OpenAPI SHA256: 61a96304c1ada1b6afec90f7127943c06e6ca6771b9070362b4ef253a82ef9ff
 export interface paths {
     "/healthz": {
         parameters: {
@@ -1695,8 +1695,11 @@ export interface components {
              * Format: uuid
              */
             member_id: string;
-            /** Monthly Amount Inr */
-            monthly_amount_inr: number | string;
+            /**
+             * Monthly Amount Inr
+             * Format: decimal
+             */
+            monthly_amount_inr: string;
         };
         /** FxRateResponse */
         FxRateResponse: {
@@ -2379,6 +2382,10 @@ export interface components {
             broker: "nordnet" | "saxo" | "danske_bank" | "other";
             /** Existing Sips */
             existing_sips?: components["schemas"]["InvestingSip"][];
+            /** Fund Sip Overrides */
+            fund_sip_overrides?: {
+                [key: string]: string;
+            };
             /**
              * Has Danish Pension Account
              * @default false
@@ -2458,6 +2465,10 @@ export interface components {
             broker: "nordnet" | "saxo" | "danske_bank" | "other";
             /** Existing Sips */
             existing_sips?: components["schemas"]["InvestingSip"][];
+            /** Fund Sip Overrides */
+            fund_sip_overrides?: {
+                [key: string]: string;
+            };
             /**
              * Has Danish Pension Account
              * @default false

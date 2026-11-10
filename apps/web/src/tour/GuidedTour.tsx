@@ -157,12 +157,17 @@ export function GuidedTour({ userId }: { userId: string }) {
           aria-label="Tour progress"
         >
           {steps.map((item, index) => (
-            <li key={item.label}>
+            <li
+              key={item.label}
+              aria-current={index === stepIndex ? "step" : undefined}
+            >
               <span
-                aria-current={index === stepIndex ? "step" : undefined}
-                aria-label={`Step ${index + 1}${index === stepIndex ? ", current" : ""}`}
+                aria-hidden="true"
                 className={`block size-2.5 rounded-full ${index === stepIndex ? "bg-brand" : "bg-muted-foreground/40"}`}
               />
+              <span className="sr-only">
+                Step {index + 1} of {steps.length}
+              </span>
             </li>
           ))}
         </ol>

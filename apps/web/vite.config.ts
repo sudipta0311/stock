@@ -45,7 +45,10 @@ function contentSecurityPolicyPlugin(
   const directives = [
     ["default-src", ["'self'"]],
     ["script-src", ["'self'"]],
-    ["style-src", ["'self'"]],
+    [
+      "style-src",
+      ["'self'", "'sha256-nzTgYzXYDNe6BAHiiI7NNlfK8n/auuOAhh2t92YvuXo='"],
+    ],
     ["connect-src", connectSources],
     ["img-src", ["'self'", "data:"]],
     ["frame-src", ["'self'", authorityOrigin]],

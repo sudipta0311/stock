@@ -279,6 +279,10 @@ describe("Settings", () => {
     await openSection(user, englishCopy.settings.sections.app_title);
 
     expect(await screen.findByText("iPhone · This phone")).toBeInTheDocument();
+    expect(screen.getByText(/Added .* · Last used/)).toHaveClass(
+      "mt-1",
+      "text-foreground",
+    );
     expect(
       screen.getByText("You stay signed in on this phone for 30 days."),
     ).toBeInTheDocument();
@@ -326,6 +330,15 @@ describe("Settings", () => {
         level: 2,
       }),
     ).toBeVisible();
+    expect(
+      screen.getByLabelText(englishCopy.household.invite_email),
+    ).toBeVisible();
+    expect(
+      screen.queryByText(englishCopy.household.partner_help),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(englishCopy.household.view_only_help),
+    ).not.toBeInTheDocument();
     await openSection(user, englishCopy.settings.sections.plan_title);
     expect(
       screen.getByText(englishCopy.settings.family.fine_tune),
@@ -368,6 +381,147 @@ describe("Settings", () => {
     );
     expect(weeklyEmail.closest("details")).toHaveAttribute("open");
     await waitFor(() => expect(heading).toHaveFocus());
+  });
+
+  it.each([
+    englishCopy.settings.notifications.weekly_email,
+    englishCopy.settings.notifications.reminders,
+    englishCopy.settings.notifications.urgent,
+    englishCopy.settings.notifications.push,
+  ])("updates the %s checkbox before saving", async (label) => {
+    const user = userEvent.setup();
+    let releaseSave: (() => void) | undefined;
+    server.use(
+      http.put("*/v1/me/consents", async ({ request }) => {
+        const body = await request.json();
+        await new Promise<void>((resolve) => {
+          releaseSave = resolve;
+        });
+        return HttpResponse.json(body);
+      }),
+    );
+    renderSettings(["/settings?section=notifications"]);
+
+    const checkbox = await screen.findByRole("checkbox", { name: label });
+    await user.click(checkbox);
+    await waitFor(() => expect(checkbox).toBeChecked());
+    expect(checkbox).toBeDisabled();
+    await waitFor(() => expect(releaseSave).toBeDefined());
+    await act(async () => releaseSave?.());
+    await waitFor(() => expect(checkbox).not.toBeDisabled());
+    expect(checkbox).toBeChecked();
+  });
+
+  it("rolls a consent checkbox back and explains a failed save", async () => {
+    const user = userEvent.setup();
+    let releaseFailure: (() => void) | undefined;
+    server.use(
+      http.put("*/v1/me/consents", async () => {
+        await new Promise<void>((resolve) => {
+          releaseFailure = resolve;
+        });
+        return HttpResponse.json(
+          { detail: "synthetic save failure" },
+          { status: 500 },
+        );
+      }),
+    );
+    renderSettings(["/settings?section=notifications"]);
+
+    const checkbox = await screen.findByRole("checkbox", {
+      name: englishCopy.settings.notifications.weekly_email,
+    });
+    await user.click(checkbox);
+    await waitFor(() => expect(checkbox).toBeChecked());
+    expect(checkbox).toBeDisabled();
+    await waitFor(() => expect(releaseFailure).toBeDefined());
+    await act(async () => releaseFailure?.());
+    await waitFor(() => expect(checkbox).not.toBeChecked());
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      englishCopy.settings.notifications.save_error,
+    );
+  });
+
+  it("does not request owner-only sharing lists for a partner", async () => {
+    const user = userEvent.setup();
+    const ownerOnlyRequests: string[] = [];
+    server.use(
+      http.get("*/v1/me", () =>
+        HttpResponse.json({ ...settingsMe, role: "partner" }),
+      ),
+      http.get("*/v1/households", () =>
+        HttpResponse.json([
+          {
+            owner_id: householdOwnerId,
+            owner_name: "Test Household",
+            member_count: 2,
+            role: "partner",
+          },
+        ]),
+      ),
+      http.get("*/v1/households/invites", () => {
+        ownerOnlyRequests.push("invites");
+        return HttpResponse.json([]);
+      }),
+      http.get("*/v1/households/access", () => {
+        ownerOnlyRequests.push("access");
+        return HttpResponse.json([]);
+      }),
+    );
+    renderSettings();
+    await openSection(user, englishCopy.settings.sections.family_title);
+
+    expect(
+      await screen.findByText(englishCopy.household.partner_help),
+    ).toBeVisible();
+    expect(
+      screen.queryByText(englishCopy.household.view_only_help),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: englishCopy.household.leave }),
+    ).toBeVisible();
+    expect(ownerOnlyRequests).toEqual([]);
+  });
+
+  it("shows the view-only explanation and leave control to a viewer", async () => {
+    const user = userEvent.setup();
+    const ownerOnlyRequests: string[] = [];
+    server.use(
+      http.get("*/v1/me", () =>
+        HttpResponse.json({ ...settingsMe, role: "viewer" }),
+      ),
+      http.get("*/v1/households", () =>
+        HttpResponse.json([
+          {
+            owner_id: householdOwnerId,
+            owner_name: "Test Household",
+            member_count: 2,
+            role: "viewer",
+          },
+        ]),
+      ),
+      http.get("*/v1/households/invites", () => {
+        ownerOnlyRequests.push("invites");
+        return HttpResponse.json([]);
+      }),
+      http.get("*/v1/households/access", () => {
+        ownerOnlyRequests.push("access");
+        return HttpResponse.json([]);
+      }),
+    );
+    renderSettings();
+    await openSection(user, englishCopy.settings.sections.family_title);
+
+    expect(
+      await screen.findByText(englishCopy.household.view_only_help),
+    ).toBeVisible();
+    expect(
+      screen.queryByText(englishCopy.household.partner_help),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: englishCopy.household.leave }),
+    ).toBeVisible();
+    expect(ownerOnlyRequests).toEqual([]);
   });
 
   it.each([

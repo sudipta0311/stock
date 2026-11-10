@@ -814,6 +814,7 @@ export function ImportReviewPage() {
   const [itemError, setItemError] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingItems, setSavingItems] = useState<Set<string>>(() => new Set());
   const [discardOpen, setDiscardOpen] = useState(false);
   const [confirmedCount, setConfirmedCount] = useState<number | null>(null);
   const [recordedBuysMatched, setRecordedBuysMatched] = useState(0);
@@ -903,7 +904,10 @@ export function ImportReviewPage() {
 
   async function updateStatus(item: ImportItem, accepted: boolean) {
     if (!detail) return;
+    const previousSelection = selectedById[item.id] ?? initialSelection(item);
     setItemError("");
+    setSelectedById((current) => ({ ...current, [item.id]: accepted }));
+    setSavingItems((current) => new Set(current).add(item.id));
     try {
       const updated = await patchImportItem(detail.id, item.id, {
         status: accepted ? "accepted" : "rejected",
@@ -917,9 +921,18 @@ export function ImportReviewPage() {
             ),
           },
       );
-      setSelectedById((current) => ({ ...current, [item.id]: accepted }));
     } catch {
+      setSelectedById((current) => ({
+        ...current,
+        [item.id]: previousSelection,
+      }));
       setItemError("We couldn't update that holding. Please try again.");
+    } finally {
+      setSavingItems((current) => {
+        const next = new Set(current);
+        next.delete(item.id);
+        return next;
+      });
     }
   }
 
@@ -1318,7 +1331,7 @@ export function ImportReviewPage() {
                 type="button"
                 variant="ghost"
                 className="min-h-11 px-2"
-                disabled={saving}
+                disabled={saving || savingItems.size > 0}
                 onClick={() => void selectAllNew()}
               >
                 Select all new
@@ -1329,7 +1342,7 @@ export function ImportReviewPage() {
                 <ItemToggle
                   item={item}
                   checked={selectedById[item.id] ?? false}
-                  disabled={saving}
+                  disabled={saving || savingItems.has(item.id)}
                   onChange={(checked) => void updateStatus(item, checked)}
                 />
                 {maskAccountReference(item.account_ref) ? (
@@ -1370,7 +1383,7 @@ export function ImportReviewPage() {
                     </div>
                     <TradebookMismatchChoice
                       item={item}
-                      disabled={saving}
+                      disabled={saving || savingItems.has(item.id)}
                       onChange={(useTradebook) =>
                         void updateStatus(item, useTradebook)
                       }
@@ -1380,7 +1393,7 @@ export function ImportReviewPage() {
                   <ItemToggle
                     item={item}
                     checked={selectedById[item.id] ?? false}
-                    disabled={saving}
+                    disabled={saving || savingItems.has(item.id)}
                     onChange={(checked) => void updateStatus(item, checked)}
                   />
                 )}
@@ -1541,7 +1554,7 @@ export function ImportReviewPage() {
                   <Button
                     type="button"
                     variant="secondary"
-                    disabled={saving}
+                    disabled={saving || savingItems.has(item.id)}
                     onClick={() => void updateStatus(item, false)}
                   >
                     {englishCopy.imports.mapping_leave_out}
@@ -1550,7 +1563,7 @@ export function ImportReviewPage() {
                   <div className="grid grid-cols-2 gap-2">
                     <Button
                       type="button"
-                      disabled={saving}
+                      disabled={saving || savingItems.has(item.id)}
                       onClick={() => void acceptUnknown(item)}
                     >
                       Save decision
@@ -1558,7 +1571,7 @@ export function ImportReviewPage() {
                     <Button
                       type="button"
                       variant="secondary"
-                      disabled={saving}
+                      disabled={saving || savingItems.has(item.id)}
                       onClick={() => void updateStatus(item, false)}
                     >
                       Reject
@@ -1577,7 +1590,7 @@ export function ImportReviewPage() {
             type="button"
             variant="secondary"
             className="shrink-0"
-            disabled={saving}
+            disabled={saving || savingItems.size > 0}
             onClick={() => setDiscardOpen(true)}
           >
             Discard
@@ -1586,7 +1599,7 @@ export function ImportReviewPage() {
             type="button"
             data-primary="true"
             className="flex-1"
-            disabled={saving || !canConfirm}
+            disabled={saving || savingItems.size > 0 || !canConfirm}
             loading={saving}
             onClick={() => void confirm()}
           >

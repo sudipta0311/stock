@@ -36,6 +36,36 @@ export function appUrl(path = "/"): string {
   return new URL(path, base).toString();
 }
 
+export function localApiUrl(path: string): string {
+  const base = process.env.E2E_API_URL;
+  if (!base) throw new Error("The e2e API URL is not configured.");
+  const url = new URL(path, base);
+  if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) {
+    throw new Error("The e2e API must stay on localhost.");
+  }
+  return url.toString();
+}
+
+export function makeEmailUnsubscribeToken(
+  userId: string,
+  kind: "weekly_email" | "reminder_email" | "urgent_alerts",
+): string {
+  const secret = process.env.E2E_EMAIL_LINK_SECRET;
+  if (!secret)
+    throw new Error("The local email link signer is not configured.");
+  const payload = Buffer.from(
+    JSON.stringify({
+      exp: Math.floor(Date.now() / 1_000) + 60 * 60 * 24 * 60,
+      kind,
+      user_id: userId,
+    }),
+  ).toString("base64url");
+  const signature = createHmac("sha256", secret)
+    .update(payload)
+    .digest("base64url");
+  return `${payload}.${signature}`;
+}
+
 export function makeIdentity(label: string): TestIdentity {
   const safeLabel = label
     .toLowerCase()
@@ -141,7 +171,8 @@ export async function signIn(
 }
 
 export async function completeMinimalOnboarding(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "Get started" }).click();
+  const getStarted = page.getByRole("button", { name: "Get started" });
+  if (await getStarted.isVisible().catch(() => false)) await getStarted.click();
   await expect(
     page.getByRole("heading", { name: "Who are we planning for?" }),
   ).toBeVisible();

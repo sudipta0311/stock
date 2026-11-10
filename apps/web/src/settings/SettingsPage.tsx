@@ -222,7 +222,7 @@ export function SettingsPage() {
   const accessQuery = useQuery({
     queryKey: ["settings", "household-access"],
     queryFn: getSettingsHouseholdAccess,
-    enabled: accessSupported,
+    enabled: accessSupported && role === "owner",
   });
   const consentQuery = useQuery({
     queryKey: ["settings", "consents"],
@@ -360,6 +360,10 @@ export function SettingsPage() {
     enabled: boolean,
   ): Promise<void> {
     setNotificationMessage("");
+    const previous = consents;
+    const next = { ...previous, [key]: enabled };
+    setConsentSaving(true);
+    setConsents(next);
     if (key === "push" && enabled) {
       if (
         isIosDevice(navigator.userAgent, navigator.platform) &&
@@ -368,6 +372,8 @@ export function SettingsPage() {
         setNotificationMessage(
           englishCopy.settings.notifications.push_install_ios,
         );
+        setConsents(previous);
+        setConsentSaving(false);
         return;
       }
       try {
@@ -382,6 +388,8 @@ export function SettingsPage() {
                 : englishCopy.settings.notifications.vapid_missing
               : englishCopy.settings.notifications.push_error;
         setNotificationMessage(message);
+        setConsents(previous);
+        setConsentSaving(false);
         return;
       }
     }
@@ -390,11 +398,11 @@ export function SettingsPage() {
         await disablePush();
       } catch {
         setNotificationMessage(englishCopy.settings.notifications.push_error);
+        setConsents(previous);
+        setConsentSaving(false);
         return;
       }
     }
-    const next = { ...consents, [key]: enabled };
-    setConsentSaving(true);
     try {
       if (consentsSupported) {
         await saveSettingsConsents(next);
@@ -404,7 +412,6 @@ export function SettingsPage() {
       } else {
         window.localStorage.setItem(LOCAL_CONSENTS_KEY, JSON.stringify(next));
       }
-      setConsents(next);
       setNotificationMessage(
         key === "push"
           ? enabled
@@ -413,6 +420,7 @@ export function SettingsPage() {
           : englishCopy.settings.notifications.saved,
       );
     } catch {
+      setConsents(previous);
       if (key === "push" && enabled) {
         try {
           await disablePush();
@@ -536,6 +544,10 @@ export function SettingsPage() {
       await queryClient.invalidateQueries({
         queryKey: ["settings", "members"],
       });
+      // The header filter and the sharing panel read the household's member list.
+      await queryClient.invalidateQueries({
+        queryKey: ["household-context", "members"],
+      });
       await queryClient.invalidateQueries({ queryKey: ["settings", "me"] });
       setNewMemberName("");
       setNewRelationship("other");
@@ -556,6 +568,9 @@ export function SettingsPage() {
       await removeSettingsMember(removingMember.id);
       await queryClient.invalidateQueries({
         queryKey: ["settings", "members"],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["household-context", "members"],
       });
       await queryClient.invalidateQueries({ queryKey: ["settings", "me"] });
       setRemovingMember(null);

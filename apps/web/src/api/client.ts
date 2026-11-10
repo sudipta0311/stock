@@ -38,6 +38,11 @@ const RETRYABLE_STATUS = new Set([502, 503, 504]);
 const MAX_RETRY_MS = 240_000;
 const MAX_BACKOFF_MS = 15_000;
 export const SELECTED_HOUSEHOLD_STORAGE_KEY = "wealth.household.selected";
+export const HOUSEHOLD_SELECTION_CHANGED_EVENT =
+  "wealth:household-selection-changed";
+
+let householdSelectionVersion = 0;
+const inFlightHouseholdRequests = new Map<string, Set<AbortController>>();
 
 export function getSelectedHouseholdId(): string | null {
   try {
@@ -48,12 +53,49 @@ export function getSelectedHouseholdId(): string | null {
 }
 
 export function persistSelectedHouseholdId(id: string | null): void {
+  const previousId = getSelectedHouseholdId();
   try {
     if (id) window.sessionStorage.setItem(SELECTED_HOUSEHOLD_STORAGE_KEY, id);
     else window.sessionStorage.removeItem(SELECTED_HOUSEHOLD_STORAGE_KEY);
   } catch {
-    // The API still defaults to the signed-in user's household.
+    // The selection event still updates the provider's in-memory state.
   }
+  if (previousId === id) return;
+  householdSelectionVersion += 1;
+  abortHouseholdRequests(previousId);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent(HOUSEHOLD_SELECTION_CHANGED_EVENT, {
+        detail: { previousHouseholdId: previousId, householdId: id },
+      }),
+    );
+  }
+}
+
+export function abortHouseholdRequests(householdId: string | null): void {
+  if (!householdId) return;
+  const controllers = inFlightHouseholdRequests.get(householdId);
+  if (!controllers) return;
+  inFlightHouseholdRequests.delete(householdId);
+  for (const controller of controllers) controller.abort();
+}
+
+function trackHouseholdRequest(
+  householdId: string,
+  controller: AbortController,
+): void {
+  const controllers = inFlightHouseholdRequests.get(householdId) ?? new Set();
+  controllers.add(controller);
+  inFlightHouseholdRequests.set(householdId, controllers);
+}
+
+function untrackHouseholdRequest(
+  householdId: string,
+  controller: AbortController,
+): void {
+  const controllers = inFlightHouseholdRequests.get(householdId);
+  controllers?.delete(controller);
+  if (controllers?.size === 0) inFlightHouseholdRequests.delete(householdId);
 }
 
 function emitWaking(waking: boolean): void {
@@ -67,6 +109,53 @@ function emitWaking(waking: boolean): void {
 function requestUrl(path: string): URL {
   const base = import.meta.env.VITE_API_URL || window.location.origin;
   return new URL(path, base);
+}
+
+async function fetchForHousehold(
+  url: URL,
+  init: RequestInit,
+  headers: Headers,
+  householdId: string | null,
+): Promise<Response> {
+  const controller = householdId ? new AbortController() : undefined;
+  if (controller && householdId) trackHouseholdRequest(householdId, controller);
+  // AbortSignal.any is missing before iOS Safari 17.4, so forward the caller's
+  // abort to this request's own controller instead of combining the signals.
+  const forwardAbort = () => controller?.abort();
+  if (controller && init.signal) {
+    if (init.signal.aborted) controller.abort();
+    else init.signal.addEventListener("abort", forwardAbort, { once: true });
+  }
+  const signal = controller ? controller.signal : init.signal;
+  try {
+    return await fetch(url, { ...init, headers, signal });
+  } catch (error) {
+    if (controller?.signal.aborted) {
+      throw new DOMException("The request was aborted.", "AbortError");
+    }
+    throw error;
+  } finally {
+    init.signal?.removeEventListener("abort", forwardAbort);
+    if (controller && householdId)
+      untrackHouseholdRequest(householdId, controller);
+  }
+}
+
+async function isMissingSelectedHousehold(
+  response: Response,
+): Promise<boolean> {
+  if (response.status !== 404) return false;
+  try {
+    const body: unknown = await response.clone().json();
+    return (
+      typeof body === "object" &&
+      body !== null &&
+      "detail" in body &&
+      body.detail === "The household was not found."
+    );
+  } catch {
+    return false;
+  }
 }
 
 async function asApiError(response: Response): Promise<ApiError> {
@@ -170,8 +259,13 @@ export async function apiFetch<T>(
   let householdFallback = false;
   let authRefreshAttempted = false;
   let snapshotUrl = url.href;
+  let expectedSelectionVersion = householdSelectionVersion;
 
   while (Date.now() - startedAt < MAX_RETRY_MS) {
+    if (householdSelectionVersion !== expectedSelectionVersion) {
+      if (waking) emitWaking(false);
+      throw new DOMException("The request was aborted.", "AbortError");
+    }
     try {
       const requestHeaders = new Headers(headers);
       const token = getAuthToken();
@@ -191,7 +285,16 @@ export async function apiFetch<T>(
       } else {
         requestHeaders.delete("X-Household");
       }
-      let response = await fetch(url, { ...init, headers: requestHeaders });
+      let response = await fetchForHousehold(
+        url,
+        init,
+        requestHeaders,
+        selectedHousehold,
+      );
+      if (householdSelectionVersion !== expectedSelectionVersion) {
+        if (waking) emitWaking(false);
+        throw new DOMException("The request was aborted.", "AbortError");
+      }
       if (response.status === 401 && token && !authRefreshAttempted) {
         authRefreshAttempted = true;
         let refreshed;
@@ -201,9 +304,29 @@ export async function apiFetch<T>(
           throw await asApiError(response);
         }
         if (refreshed) {
+          if (householdSelectionVersion !== expectedSelectionVersion) {
+            throw new DOMException("The request was aborted.", "AbortError");
+          }
+          const retryHousehold = householdFallback
+            ? null
+            : getSelectedHouseholdId();
           const retryHeaders = new Headers(requestHeaders);
           retryHeaders.set("Authorization", `Bearer ${refreshed.access_token}`);
-          response = await fetch(url, { ...init, headers: retryHeaders });
+          if (retryHousehold) {
+            retryHeaders.set("X-Household", retryHousehold);
+          } else {
+            retryHeaders.delete("X-Household");
+          }
+          response = await fetchForHousehold(
+            url,
+            init,
+            retryHeaders,
+            retryHousehold,
+          );
+          if (householdSelectionVersion !== expectedSelectionVersion) {
+            if (waking) emitWaking(false);
+            throw new DOMException("The request was aborted.", "AbortError");
+          }
           if (response.status === 401) {
             window.dispatchEvent(new Event("wealth:auth-expired"));
           }
@@ -211,11 +334,24 @@ export async function apiFetch<T>(
           window.dispatchEvent(new Event("wealth:auth-expired"));
         }
       }
-      if (response.status === 404 && selectedHousehold && !householdFallback) {
+      if (
+        selectedHousehold &&
+        !householdFallback &&
+        getSelectedHouseholdId() === selectedHousehold &&
+        (await isMissingSelectedHousehold(response))
+      ) {
         householdFallback = true;
         persistSelectedHouseholdId(null);
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(new Event("wealth:household-removed"));
+        expectedSelectionVersion = householdSelectionVersion;
+        if (
+          (init.method ?? "GET").toUpperCase() === "DELETE" &&
+          url.pathname === "/v1/households/leave"
+        ) {
+          if (waking) emitWaking(false);
+          return undefined as T;
+        }
+        if ((init.method ?? "GET").toUpperCase() !== "GET") {
+          throw await asApiError(response);
         }
         continue;
       }
@@ -240,7 +376,10 @@ export async function apiFetch<T>(
         if (waking) emitWaking(false);
         throw error;
       }
-      if (init.signal?.aborted) {
+      if (
+        init.signal?.aborted ||
+        (error instanceof DOMException && error.name === "AbortError")
+      ) {
         if (waking) emitWaking(false);
         throw error;
       }

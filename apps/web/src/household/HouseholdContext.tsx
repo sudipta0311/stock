@@ -7,13 +7,13 @@ import {
   useState,
 } from "react";
 import type { ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  HOUSEHOLD_SELECTION_CHANGED_EVENT,
   getSelectedHouseholdId,
   persistSelectedHouseholdId,
 } from "../api/client";
 import { apiPathAvailable } from "../api/feature-support";
-import { queryClient } from "../api/query-client";
 import * as englishCopy from "../copy/sections/index";
 import { getMe, listMembers } from "../money/api";
 import type { MeResponse, MemberResponse } from "../money/api";
@@ -83,6 +83,7 @@ function readPrimaryCurrency(): PrimaryCurrency {
 }
 
 export function HouseholdProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
   const [selectedHouseholdId, setSelectedHouseholdId] = useState<string | null>(
     () => getSelectedHouseholdId(),
   );
@@ -151,18 +152,29 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
   }, [members, selectedMemberId]);
 
   useEffect(() => {
-    function resetRemovedHousehold() {
-      setSelectedHouseholdId(null);
+    function resetHouseholdSelection(event: Event) {
+      const detail = (event as CustomEvent<{ householdId: string | null }>)
+        .detail;
+      setSelectedHouseholdId(detail.householdId);
       setSelectedMemberId("family");
-      void queryClient.invalidateQueries();
+      try {
+        window.sessionStorage.setItem(MEMBER_FILTER_STORAGE_KEY, "family");
+      } catch {
+        // The member filter is only a convenience.
+      }
+      void queryClient.cancelQueries();
+      queryClient.removeQueries();
     }
-    window.addEventListener("wealth:household-removed", resetRemovedHousehold);
+    window.addEventListener(
+      HOUSEHOLD_SELECTION_CHANGED_EVENT,
+      resetHouseholdSelection,
+    );
     return () =>
       window.removeEventListener(
-        "wealth:household-removed",
-        resetRemovedHousehold,
+        HOUSEHOLD_SELECTION_CHANGED_EVENT,
+        resetHouseholdSelection,
       );
-  }, []);
+  }, [queryClient]);
 
   const selectHousehold = useCallback((id: string | null) => {
     persistSelectedHouseholdId(id);
@@ -173,7 +185,6 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
     } catch {
       // Household switching continues for this session.
     }
-    void queryClient.invalidateQueries();
   }, []);
 
   const selectMember = useCallback((id: string) => {

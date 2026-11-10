@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -309,6 +310,47 @@ describe("statement upload screen", () => {
 });
 
 describe("statement import review", () => {
+  it("updates row inclusion immediately and rolls it back after a failed save", async () => {
+    const user = userEvent.setup();
+    let releaseSave: (() => void) | undefined;
+    server.use(
+      http.get(`/v1/imports/${jobId}`, () =>
+        HttpResponse.json(
+          reviewDetail({
+            items: [item()],
+            counts: { new: 1, changed: 0, duplicate: 0, unknown: 0 },
+          }),
+        ),
+      ),
+      http.patch(`/v1/imports/${jobId}/items/:itemId`, async () => {
+        await new Promise<void>((resolve) => {
+          releaseSave = resolve;
+        });
+        return HttpResponse.json(
+          { detail: "Synthetic save failure" },
+          { status: 500 },
+        );
+      }),
+    );
+    renderReview();
+
+    const row = await screen.findByRole("checkbox", {
+      name: /Example Equity Fund/,
+    });
+    expect(row).toBeChecked();
+    await user.click(row);
+    expect(row).not.toBeChecked();
+    expect(row).toBeDisabled();
+    await waitFor(() => expect(releaseSave).toBeDefined());
+    await act(async () => releaseSave?.());
+
+    await waitFor(() => expect(row).toBeEnabled());
+    expect(row).toBeChecked();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "We couldn't update that holding. Please try again.",
+    );
+  });
+
   it("calls broker equity rows Shares", async () => {
     server.use(
       http.get(`/v1/imports/${jobId}`, () =>

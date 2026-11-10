@@ -16,7 +16,7 @@ from wealth.policy.personalise import WeeklyPlan
 def save_weekly_plan(
     session: Session, user_id: UUID, plan: WeeklyPlan, *, replace_proposed_actions: bool = True
 ) -> None:
-    """Upsert a plan while retaining ids for unchanged proposed actions."""
+    """Upsert a plan while retaining ids and status for unchanged actions."""
     document = plan.model_dump(mode="json")
     statement = pg_insert(WeeklyPlanRow).values(
         user_id=user_id,
@@ -38,7 +38,6 @@ def save_weekly_plan(
             .where(
                 ActionRow.user_id == user_id,
                 ActionRow.week == plan.week,
-                ActionRow.status == "proposed",
             )
             .order_by(ActionRow.rank, ActionRow.id)
         )
@@ -80,7 +79,8 @@ def save_weekly_plan(
         matched.payload = action
 
     for row in existing:
-        session.delete(row)
+        if row.status == "proposed":
+            session.delete(row)
     session.flush()
 
 

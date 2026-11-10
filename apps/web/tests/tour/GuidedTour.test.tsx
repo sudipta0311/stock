@@ -1,7 +1,8 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Link, MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, expect, it } from "vitest";
+import { axe } from "vitest-axe";
 import { GuidedTour, tourSeenKey } from "../../src/tour/GuidedTour";
 
 function TourScreens() {
@@ -93,4 +94,25 @@ it("does not automatically show again after it was seen", async () => {
   await waitFor(() =>
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
   );
+});
+
+it("announces tour progress while hiding the decorative dots from assistive technology", async () => {
+  const user = userEvent.setup();
+  const { container } = render(
+    <MemoryRouter initialEntries={["/"]}>
+      <TourScreens />
+    </MemoryRouter>,
+  );
+
+  const dialog = await screen.findByRole("dialog");
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  await user.click(screen.getByRole("button", { name: "Next" }));
+  const progress = within(dialog).getByRole("list", { name: "Tour progress" });
+  expect(within(progress).getByText("Step 3 of 4")).toBeInTheDocument();
+  expect(progress.querySelectorAll('li[aria-current="step"]')).toHaveLength(1);
+  expect(progress.querySelectorAll('span[aria-hidden="true"]')).toHaveLength(4);
+  expect(
+    progress.querySelectorAll("span[aria-label], span[aria-current]"),
+  ).toHaveLength(0);
+  expect((await axe(container)).violations).toHaveLength(0);
 });

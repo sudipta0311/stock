@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useLocation } from "react-router";
 import * as englishCopy from "../copy/sections/index";
 import { getOfflineSnapshotTime } from "../pwa/offline-cache";
 import { listQueuedAssetWrites } from "../money/offline-queue";
@@ -9,6 +10,7 @@ function currentOnlineStatus(): boolean {
 }
 
 export function OfflineStatus() {
+  const location = useLocation();
   const [online, setOnline] = useState(currentOnlineStatus);
   const [pending, setPending] = useState(0);
   const [snapshotTime, setSnapshotTime] = useState<string | null>(null);
@@ -45,7 +47,7 @@ export function OfflineStatus() {
       window.removeEventListener("offline", updateNetwork);
       window.removeEventListener("wealth:pending-changes", updatePending);
     };
-  }, []);
+  }, [location.key]);
 
   useEffect(() => {
     if (online) {
@@ -62,6 +64,11 @@ export function OfflineStatus() {
   }, [online]);
 
   if (online && pending === 0) return null;
+  const pendingMessage = (
+    pending === 1
+      ? englishCopy.offline.pending
+      : englishCopy.offline.pending_many
+  ).replace("{count}", String(pending));
   return (
     <div
       className="mx-auto grid w-full max-w-3xl gap-2 px-4 pt-3 sm:px-6"
@@ -73,20 +80,18 @@ export function OfflineStatus() {
           className="rounded-xl border border-warning/40 bg-warning-soft px-3 py-2 text-sm text-warning-foreground"
         >
           {englishCopy.offline.banner}
+          {pending > 0 ? ` ${pendingMessage}.` : ""}
           {snapshotTime
             ? ` ${englishCopy.offline.snapshot_time.replace("{time}", snapshotTime)}`
             : ""}
         </p>
       ) : null}
-      {pending > 0 ? (
+      {online && pending > 0 ? (
         <p
           role="status"
           className="inline-flex w-fit min-h-8 items-center rounded-full bg-muted px-3 text-xs font-medium text-foreground"
         >
-          {(pending === 1
-            ? englishCopy.offline.pending
-            : englishCopy.offline.pending_many
-          ).replace("{count}", String(pending))}
+          {pendingMessage}
         </p>
       ) : null}
     </div>

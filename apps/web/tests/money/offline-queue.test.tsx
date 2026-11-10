@@ -19,6 +19,23 @@ afterEach(async () => {
 });
 
 describe("offline asset queue", () => {
+  it("notifies after a queued write is committed", async () => {
+    const reads: Promise<number>[] = [];
+    const onPendingChange = () => {
+      reads.push(listQueuedAssetWrites().then((writes) => writes.length));
+    };
+    window.addEventListener("wealth:pending-changes", onPendingChange);
+
+    await queueAssetWrite("draft-committed", null, {
+      asset_type: "savings",
+      bank: "Synthetic Bank",
+      balance: "700000.00",
+    });
+    window.removeEventListener("wealth:pending-changes", onPendingChange);
+
+    await expect(Promise.all(reads)).resolves.toEqual([1]);
+  });
+
   it("keeps the last write per draft and replays it on the online event", async () => {
     Object.defineProperty(navigator, "onLine", {
       configurable: true,

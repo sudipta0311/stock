@@ -22,7 +22,9 @@ test("Plan and Home show household values, closed details, and action status", a
   ).toBeVisible();
   await expect(page.getByText("You have", { exact: true })).toBeVisible();
   await expect(page.getByText("Target", { exact: true })).toBeVisible();
-  await expect(page.getByText("Current amount", { exact: true })).not.toBeVisible();
+  await expect(
+    page.getByText("Current amount", { exact: true }),
+  ).not.toBeVisible();
   await expectFitsScreen(page);
 
   await seedHomeAction(identity.email);
@@ -38,9 +40,15 @@ test("Plan and Home show household values, closed details, and action status", a
   await expectFitsScreen(page);
   await page.getByLabel("Monthly amount").fill("25000");
   await page.getByRole("button", { name: "Save", exact: true }).click();
-  await expect(
-    page.getByText("Nothing to buy this week", { exact: true }),
-  ).toBeVisible();
+  const newMonthlyStep = page.getByRole("article", {
+    name: /Change your monthly investments.*For you/,
+  });
+  await expect(newMonthlyStep).toBeVisible();
+  await expect(newMonthlyStep).toContainText("25,000");
+  await page.reload();
+  await expect(newMonthlyStep).toBeVisible();
+  await expect(newMonthlyStep).toContainText("25,000");
+  await expectFitsScreen(page);
 
   await gotoApp(page, "/money");
   await expect(page.getByRole("heading", { name: "Your money" })).toBeVisible();

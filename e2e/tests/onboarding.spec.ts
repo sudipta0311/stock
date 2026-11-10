@@ -23,12 +23,18 @@ test("short household setup reaches the first plan in five setup taps", async ({
   await expect(
     page.getByRole("heading", { name: "Who are we planning for?" }),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: /Another adult/ })).toBeVisible();
-  await expect(page.getByText("Your tax residence helps tailor the plan.")).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: /Another adult/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Your tax residence helps tailor the plan."),
+  ).toBeVisible();
   await expectFitsScreen(page);
   await page.getByRole("button", { name: /^Me and my spouse/ }).click();
   taps += 1;
-  await expect(page.getByText("Your spouse", { selector: "legend" })).toBeVisible();
+  await expect(
+    page.getByText("Your spouse", { selector: "legend" }),
+  ).toBeVisible();
   await expect(page.getByLabel("Relationship")).toHaveCount(0);
   await expect(
     page.getByText("Your tax residence helps tailor the plan."),
@@ -53,12 +59,8 @@ test("short household setup reaches the first plan in five setup taps", async ({
   await skipGuidedTour(page);
   await page.getByText("Make it more accurate", { exact: true }).click();
   await page.getByRole("link", { name: "Add a goal" }).click();
-  await expect(
-    page.getByRole("heading", { name: "Add a goal" }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("banner").getByText("Add a goal"),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Add a goal" })).toBeVisible();
+  await expect(page.getByRole("banner").getByText("Add a goal")).toBeVisible();
   await expect(
     page.getByText("Pick a goal, then add a rough target and year."),
   ).toBeVisible();
@@ -69,6 +71,13 @@ test("short household setup reaches the first plan in five setup taps", async ({
   await page.getByRole("button", { name: "Save goal" }).click();
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByText("Goal saved", { exact: true })).toBeVisible();
+  await page.reload();
+  await gotoApp(page, "/plan");
+  const savedGoal = page.getByText("Education abroad", { exact: true }).last();
+  await savedGoal.locator("xpath=ancestor::details[1]/summary").click();
+  await expect(savedGoal).toBeVisible();
+  await expectFitsScreen(page);
+  await gotoApp(page, "/");
   await page.getByText("Make it more accurate", { exact: true }).click();
   await page
     .getByRole("link", { name: "Choose your comfort with ups and downs" })
@@ -76,8 +85,12 @@ test("short household setup reaches the first plan in five setup taps", async ({
   await expect(
     page.getByRole("heading", { name: "Your comfort with risk" }),
   ).toBeVisible();
-  await expect(page.getByRole("progressbar", { name: "Onboarding progress" })).toHaveCount(0);
-  await expect(page.getByText("Choose the answer that feels closest.")).toBeVisible();
+  await expect(
+    page.getByRole("progressbar", { name: "Onboarding progress" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByText("Choose the answer that feels closest."),
+  ).toBeVisible();
   const firstNext = page.getByRole("button", { name: "Next" });
   const firstSkip = page.getByRole("button", { name: "Skip for now" });
   const firstNextBox = await firstNext.boundingBox();
@@ -103,10 +116,14 @@ test("short household setup reaches the first plan in five setup taps", async ({
     await expect(page.getByText(`Question ${index} of 6`)).toBeVisible();
     if (index > 1) {
       await expect(question.locator("legend")).toBeFocused();
-      const backBox = await page.getByRole("button", { name: "Back" }).boundingBox();
-      const nextBox = await page.getByRole("button", {
-        name: index === 6 ? "Save answers" : "Next",
-      }).boundingBox();
+      const backBox = await page
+        .getByRole("button", { name: "Back" })
+        .boundingBox();
+      const nextBox = await page
+        .getByRole("button", {
+          name: index === 6 ? "Save answers" : "Next",
+        })
+        .boundingBox();
       expect(backBox).not.toBeNull();
       expect(nextBox).not.toBeNull();
       expect(Math.abs(backBox!.y - nextBox!.y)).toBeLessThan(2);
@@ -137,14 +154,18 @@ test("short household setup reaches the first plan in five setup taps", async ({
   });
 });
 
-test("setup risk skip continues to consent without saving", async ({ page }) => {
+test("setup risk skip continues to consent without saving", async ({
+  page,
+}) => {
   const identity = makeIdentity("risk-skip");
   await page.setViewportSize({ width: 360, height: 740 });
   await signIn(page, identity);
   await gotoApp(page, "/onboarding/risk");
 
   await expect(page.getByText("Question 1 of 6")).toBeVisible();
-  await expect(page.getByRole("progressbar", { name: "Onboarding progress" })).toBeVisible();
+  await expect(
+    page.getByRole("progressbar", { name: "Onboarding progress" }),
+  ).toBeVisible();
   await expectFitsScreen(page);
   await page.getByRole("button", { name: "Skip for now" }).click();
 

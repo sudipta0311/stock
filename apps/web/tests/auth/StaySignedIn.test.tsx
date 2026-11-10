@@ -48,6 +48,7 @@ beforeEach(() => {
 afterEach(() => {
   cancelProactiveRefresh();
   clearAuthToken();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -169,4 +170,37 @@ it("uses the newer token another tab saved when a refresh was just renewed", asy
   expect(presented).toEqual(["synthetic-stale", "synthetic-fresh"]);
   expect(result?.access_token).toBe("synthetic-access");
   expect(getRefreshToken()).toBe("synthetic-next");
+});
+
+it("honours Retry-After for a rate-limited refresh, capped by the backoff limit", async () => {
+  vi.useFakeTimers();
+  window.localStorage.setItem(REFRESH_TOKEN_STORAGE_KEY, "synthetic-refresh");
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(
+      new Response(null, {
+        status: 429,
+        headers: { "Retry-After": "60" },
+      }),
+    )
+    .mockResolvedValueOnce(
+      response({
+        access_token: "synthetic-restored-access",
+        refresh_token: "synthetic-rotated-refresh",
+        expires_in: 1_800,
+        session_expires_at: "2030-01-01T00:00:00Z",
+      }),
+    );
+  vi.stubGlobal("fetch", fetcher);
+  const { refreshAuthSession } = await import("../../src/auth/session");
+
+  const pending = refreshAuthSession();
+  await vi.advanceTimersByTimeAsync(14_999);
+  expect(fetcher).toHaveBeenCalledOnce();
+  await vi.advanceTimersByTimeAsync(1);
+
+  await expect(pending).resolves.toMatchObject({
+    access_token: "synthetic-restored-access",
+  });
+  expect(fetcher).toHaveBeenCalledTimes(2);
 });

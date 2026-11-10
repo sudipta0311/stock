@@ -10,6 +10,7 @@ import {
 } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 import { OnboardingPage } from "../../src/onboarding/OnboardingPage";
+import { ONBOARDING_STORAGE_KEY } from "../../src/money/config";
 import { server } from "../msw";
 import { axe } from "vitest-axe";
 import { bannedTermsIncludingDisclosuresAndFields } from "../plain-language";
@@ -35,7 +36,7 @@ vi.mock("../../src/auth/AuthContext", () => ({
 }));
 
 describe("Money Map onboarding", () => {
-  it.each(["welcome", "household", "goals", "risk", "consent", "done"])(
+  it.each(["welcome", "household", "goals", "risk", "consent"])(
     "shows one primary action on the %s step",
     async (step) => {
       server.use(
@@ -80,7 +81,69 @@ describe("Money Map onboarding", () => {
     },
   );
 
+  it("returns to profile setup when a completed draft has no saved profile", async () => {
+    const user = userEvent.setup();
+    localStorage.clear();
+    localStorage.setItem(
+      ONBOARDING_STORAGE_KEY,
+      JSON.stringify({ step: "done" }),
+    );
+    let profileSaves = 0;
+    server.use(
+      http.get(/\/v1\/me$/, () =>
+        HttpResponse.json({
+          id: "user-test",
+          email: "user@example.test",
+          display_name: "Synthetic user",
+          created_at: "2026-10-28T00:00:00Z",
+          profile: null,
+          members: [],
+          me_member_id: null,
+        }),
+      ),
+      http.get(/\/v1\/goals$/, () => HttpResponse.json([])),
+      http.get(/\/v1\/members$/, () => HttpResponse.json([])),
+      http.post("/v1/members", async ({ request }) =>
+        HttpResponse.json(
+          { id: "member-self", ...((await request.json()) as object) },
+          { status: 201 },
+        ),
+      ),
+      http.put("/v1/me/profile", async ({ request }) => {
+        profileSaves += 1;
+        return HttpResponse.json({
+          ...((await request.json()) as Record<string, unknown>),
+          tax_slab_pct: null,
+          language: "en",
+          financial_context: null,
+          risk_answers: null,
+          risk_profile: null,
+        });
+      }),
+    );
+    render(
+      <MemoryRouter initialEntries={["/onboarding"]}>
+        <Routes>
+          <Route path="/onboarding/*" element={<OnboardingPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Who are we planning for?" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("heading", { name: "You're ready to start" }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(
+      await screen.findByRole("heading", { name: "You're ready to start" }),
+    ).toBeVisible();
+    expect(profileSaves).toBe(1);
+  });
+
   it("asks for the household basics and keeps extra questions closed", async () => {
+    localStorage.clear();
     server.use(
       http.get(/\/v1\/me$/, () =>
         HttpResponse.json({
@@ -341,6 +404,7 @@ describe("Money Map onboarding", () => {
     const memberBodies: Record<string, unknown>[] = [];
     let goalRequests = 0;
     let riskRequests = 0;
+    let profileSaved = false;
     server.use(
       http.get(/\/v1\/me$/, () =>
         HttpResponse.json({
@@ -348,7 +412,7 @@ describe("Money Map onboarding", () => {
           email: "user@example.test",
           display_name: null,
           created_at: "2026-10-28T00:00:00Z",
-          profile: null,
+          profile: profileSaved ? {} : null,
           members: [],
           me_member_id: null,
         }),
@@ -363,16 +427,17 @@ describe("Money Map onboarding", () => {
           { status: 201 },
         );
       }),
-      http.put(/\/v1\/me\/profile$/, async ({ request }) =>
-        HttpResponse.json({
+      http.put(/\/v1\/me\/profile$/, async ({ request }) => {
+        profileSaved = true;
+        return HttpResponse.json({
           ...((await request.json()) as Record<string, unknown>),
           tax_slab_pct: null,
           language: "en",
           financial_context: null,
           risk_answers: null,
           risk_profile: null,
-        }),
-      ),
+        });
+      }),
       http.post(/\/v1\/goals$/, () => {
         goalRequests += 1;
         return HttpResponse.json({ id: "goal-test" }, { status: 201 });

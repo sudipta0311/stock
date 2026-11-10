@@ -9,6 +9,7 @@ import {
   useAuth,
 } from "../auth/AuthContext";
 import { nudgeApi } from "../auth/warmup";
+import * as englishCopy from "../copy/sections/index";
 
 function consumeReturnPath(fallback: string): string {
   try {
@@ -43,6 +44,7 @@ export function LoginPage() {
     loginWithDevToken,
     loginWithOidc,
     serverUnreachable,
+    refreshRateLimited,
   } = useAuth();
   const [token, setToken] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -152,8 +154,22 @@ export function LoginPage() {
                 </Button>
               </>
             ) : null}
+            {refreshRateLimited ? (
+              <>
+                <p role="alert" className="text-sm text-muted-foreground">
+                  {englishCopy.auth_ui.refresh_rate_limited}
+                </p>
+                <Button onClick={() => window.location.reload()}>
+                  Try again
+                </Button>
+              </>
+            ) : null}
             <Button
-              variant={serverUnreachable ? "secondary" : undefined}
+              variant={
+                serverUnreachable || refreshRateLimited
+                  ? "secondary"
+                  : undefined
+              }
               onClick={() =>
                 void loginWithOidc().catch((reason: unknown) =>
                   setError(

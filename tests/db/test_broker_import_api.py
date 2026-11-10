@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from collections import defaultdict
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
@@ -700,6 +701,36 @@ def test_valid_isins_use_safe_symbols_on_confirm_and_reimport(
     assert {
         item["isin"]: item["match"]["security_id"] for item in reimport["items"]
     } == security_ids
+
+
+def test_random_us_symbols_stage_as_new_broker_holdings(
+    broker_api_client: tuple[TestClient, str],
+) -> None:
+    client, secret = broker_api_client
+    headers, _claims = _identity(secret, "random-us-symbols")
+    generator = random.Random(58)
+    symbols: set[str] = set()
+    while len(symbols) < 320:
+        symbols.add(f"SYNTH{generator.getrandbits(24):06X}")
+
+    rows = [
+        f"{symbol},Synthetic US share {index},3,90.00,40.00"
+        for index, symbol in enumerate(sorted(symbols))
+    ]
+    statement = (
+        "Symbol,Name,Quantity,Invested Value,Current Market Price\n" + "\n".join(rows) + "\n"
+    ).encode("ascii")
+    uploaded = _upload(
+        client, headers, "synthetic-random-us-shares.csv", statement, broker="indmoney"
+    )
+    assert uploaded.status_code == 201, uploaded.text
+
+    detail = client.get(f"/v1/imports/{uploaded.json()['job_id']}", headers=headers).json()
+    assert detail["auto_mapped"] is True
+    assert len(detail["items"]) == len(symbols)
+    assert {item["symbol"] for item in detail["items"]} == symbols
+    assert all(item["market"] == "US" and item["currency"] == "USD" for item in detail["items"])
+    assert all(item["status"] == "new" for item in detail["items"])
 
 
 def test_ibkr_generic_headers_use_the_selected_us_defaults(

@@ -7,6 +7,7 @@ import secrets
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from typing import NoReturn
 from urllib.parse import parse_qs, urlparse
 from uuid import UUID, uuid4
 
@@ -44,6 +45,7 @@ from wealth.db.models import (
     Security,
     StockCheck,
 )
+from wealth.db.repo import HouseholdMemberLookupError
 from wealth.db.session import system_session, user_session
 
 pytestmark = pytest.mark.db
@@ -363,6 +365,10 @@ def test_shared_household_grant_uses_linked_member_and_enforces_viewer_rls(
         for action in viewer_plan.json()["actions"]
     )
     assert client.get("/v1/assets", headers=_household(viewer_headers, owner_id)).status_code == 200
+    # Money reads net worth; a viewer must get it without the read-only snapshot write failing.
+    viewer_networth = client.get("/v1/networth", headers=_household(viewer_headers, owner_id))
+    assert viewer_networth.status_code == 200
+    assert "net_worth" in viewer_networth.json()
     blocked_write = client.post(
         "/v1/assets",
         headers=_household(viewer_headers, owner_id),
@@ -805,6 +811,7 @@ def test_partner_and_viewer_can_leave_and_access_ends_immediately(
 
 def test_member_with_active_login_requires_access_revocation_before_deletion(
     api_client: tuple[TestClient, str, MigratedDatabase],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client, secret, database = api_client
     owner_headers, _owner_subject, _owner_email, owner_id = _login(client, secret, "delete-owner")
@@ -853,11 +860,27 @@ def test_member_with_active_login_requires_access_revocation_before_deletion(
     )
     assert _problem_code(partner_refused)[:2] == (409, "member_linked_to_login")
 
+    def missing_household_member(*_args: object, **_kwargs: object) -> NoReturn:
+        raise HouseholdMemberLookupError("The household member link is not active")
+
+    stale_headers = _household(partner_headers, owner_id)
+    with monkeypatch.context() as patch:
+        patch.setattr("wealth.db.repo.acting_household_member", missing_household_member)
+        for path in ("/v1/me/investing", "/v1/plan", "/v1/networth"):
+            response = client.get(path, headers=stale_headers)
+            assert response.status_code == 404
+            assert response.json()["detail"] == "The household was not found."
+
     revoked = client.delete(f"/v1/households/access/{partner_id}", headers=owner_headers)
     assert revoked.status_code == 204
     with system_session(database.owner_engine) as session:
         access = session.get(HouseholdAccess, (owner_id, partner_id))
         assert access is not None and access.revoked_at is not None
+
+    for path in ("/v1/me/investing", "/v1/plan", "/v1/networth"):
+        response = client.get(path, headers=stale_headers)
+        assert response.status_code == 404
+        assert response.json()["detail"] == "The household was not found."
 
     deleted = client.delete(f"/v1/members/{member_id}", headers=owner_headers)
     assert deleted.status_code == 204

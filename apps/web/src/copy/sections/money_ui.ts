@@ -9,6 +9,7 @@ const section = {
   "save_continue": "Save and continue",
   "save_return": "Save and return",
   "saved_offline": "Saved on this device · waiting for connection",
+  "rate_needed": "We don't have the official rate for that date. Enter the rate printed on your certificate.",
   "edit_details": "Edit details",
   "edit_history": "Edit history",
   "mark_closed": "Mark as closed",

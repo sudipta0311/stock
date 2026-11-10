@@ -24,6 +24,7 @@ import {
   beginAuthBootstrap,
   cancelProactiveRefresh,
   completeAuthBootstrap,
+  RefreshRateLimitedError,
   refreshAuthSession,
   scheduleProactiveRefresh,
 } from "./session";
@@ -41,6 +42,7 @@ interface AuthContextValue {
   configurationError: string | null;
   /** A saved sign-in exists, but the server didn't answer in time. */
   serverUnreachable: boolean;
+  refreshRateLimited: boolean;
   refreshProfile(): Promise<void>;
   loginWithDevToken(token: string): void;
   loginWithOidc(): Promise<void>;
@@ -148,6 +150,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     null,
   );
   const [serverUnreachable, setServerUnreachable] = useState(false);
+  const [refreshRateLimited, setRefreshRateLimited] = useState(false);
 
   const verifyProfile = useCallback(async () => {
     try {
@@ -217,9 +220,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           try {
             if (!(await waitForApi())) throw new Error("API unreachable");
             token = (await refreshAuthSession())?.access_token ?? null;
-          } catch {
+          } catch (error) {
             // Keep the refresh token for the next attempt when the API is unavailable.
-            if (active && getRefreshToken()) setServerUnreachable(true);
+            if (active && getRefreshToken()) {
+              if (error instanceof RefreshRateLimitedError) {
+                setRefreshRateLimited(true);
+              } else {
+                setServerUnreachable(true);
+              }
+            }
           }
         }
         if (
@@ -284,6 +293,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (refreshed) {
             await claimDeviceFor(refreshed.access_token);
             setServerUnreachable(false);
+            setRefreshRateLimited(false);
             setAuthToken(refreshed.access_token);
             scheduleProactiveRefresh();
             const cachedProfile = readCachedProfileStatus();
@@ -295,8 +305,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
           setServerUnreachable(false);
           return;
-        } catch {
+        } catch (error) {
           // Keep the saved sign-in and retry quietly after a short pause.
+          if (active && error instanceof RefreshRateLimitedError) {
+            setServerUnreachable(false);
+            setRefreshRateLimited(true);
+          }
         }
       }
       if (active) timeout = window.setTimeout(() => void retry(), 20_000);
@@ -360,6 +374,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const loginWithOidc = useCallback(async () => {
+    setRefreshRateLimited(false);
     // Start waking the API now, so it is ready when Google sends the person back.
     nudgeApi();
     const { getOidcUserManager } = await import("./oidc");
@@ -391,6 +406,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     await manager.removeUser();
     setServerUnreachable(false);
+    setRefreshRateLimited(false);
     setState("authenticated");
     setHasProfile(null);
     await verifyProfile();
@@ -468,6 +484,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       hasProfile,
       configurationError,
       serverUnreachable,
+      refreshRateLimited,
       refreshProfile: verifyProfile,
       loginWithDevToken,
       loginWithOidc,
@@ -480,6 +497,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       hasProfile,
       configurationError,
       serverUnreachable,
+      refreshRateLimited,
       verifyProfile,
       loginWithDevToken,
       loginWithOidc,

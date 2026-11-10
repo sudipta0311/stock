@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, openSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -50,13 +51,20 @@ function removeE2eEnvironment(environment) {
     "E2E_SETUP_FILE_HANDOFF",
     "E2E_SETUP_OUTPUT_FILE",
     "E2E_SETUP_RELEASE_FILE",
+    "E2E_EMAIL_LINK_SECRET",
+    "STATEMENT_PASSWORD_KEY",
   ]) {
     delete environment[name];
   }
   return environment;
 }
 
-function apiEnvironment(database, webOrigin) {
+function apiEnvironment(
+  database,
+  webOrigin,
+  emailLinkSecret,
+  statementPasswordKey,
+) {
   const environment = removeE2eEnvironment(
     removeDatabaseEnvironment(cleanEnvironment()),
   );
@@ -66,6 +74,8 @@ function apiEnvironment(database, webOrigin) {
     ENV: "test",
     AUTH_MODE: "dev",
     DEV_AUTH_SECRET: database.api_secret,
+    EMAIL_LINK_SECRET: emailLinkSecret,
+    STATEMENT_PASSWORD_KEY: statementPasswordKey,
     DATABASE_URL: database.api_database_url,
     ALLOWED_ORIGINS: webOrigin,
   };
@@ -118,7 +128,8 @@ async function waitForSetupFile(child, outputPath, timeoutMs = 90_000) {
         return value;
       }
     } catch (error) {
-      if (error?.code !== "ENOENT" && !(error instanceof SyntaxError)) throw error;
+      if (error?.code !== "ENOENT" && !(error instanceof SyntaxError))
+        throw error;
     }
     await new Promise((resolveDelay) => setTimeout(resolveDelay, 100));
   }
@@ -196,7 +207,9 @@ async function stopStack() {
   }
   if (databaseProcess && databaseProcess.exitCode === null) {
     if (databaseSetupHandoff) {
-      await writeFile(databaseSetupHandoff.releasePath, "release\n", { flag: "w" });
+      await writeFile(databaseSetupHandoff.releasePath, "release\n", {
+        flag: "w",
+      });
     } else {
       databaseProcess.stdin.end();
     }
@@ -254,7 +267,8 @@ export default async function globalSetup() {
       releasePath: join(reportDir, `database-release-${runId}.signal`),
     };
     databaseEnvironment.E2E_SETUP_OUTPUT_FILE = databaseSetupHandoff.outputPath;
-    databaseEnvironment.E2E_SETUP_RELEASE_FILE = databaseSetupHandoff.releasePath;
+    databaseEnvironment.E2E_SETUP_RELEASE_FILE =
+      databaseSetupHandoff.releasePath;
   }
   databaseProcess = spawnQuiet(
     pythonExecutable(),
@@ -276,7 +290,14 @@ export default async function globalSetup() {
     const webPort = await freePort();
     const apiOrigin = `http://127.0.0.1:${apiPort}`;
     const webOrigin = `http://127.0.0.1:${webPort}`;
-    const apiEnv = apiEnvironment(database, webOrigin);
+    const emailLinkSecret = randomBytes(32).toString("base64url");
+    const statementPasswordKey = randomBytes(32).toString("base64");
+    const apiEnv = apiEnvironment(
+      database,
+      webOrigin,
+      emailLinkSecret,
+      statementPasswordKey,
+    );
 
     process.env.E2E_BASE_URL = webOrigin;
     process.env.E2E_API_URL = apiOrigin;
@@ -284,6 +305,7 @@ export default async function globalSetup() {
     process.env.E2E_CAS_PATH = database.cas_path;
     process.env.E2E_CAS_PASSWORD = database.cas_password;
     process.env.E2E_SCHEMA_NAME = database.schema_name;
+    process.env.E2E_EMAIL_LINK_SECRET = emailLinkSecret;
 
     const api = spawnQuiet(
       pythonExecutable(),
@@ -297,7 +319,20 @@ export default async function globalSetup() {
         String(apiPort),
         "--no-access-log",
       ],
-      { cwd: repositoryRoot, env: apiEnv },
+      {
+        cwd: repositoryRoot,
+        env: apiEnv,
+        ...(process.env.E2E_API_LOG
+          ? {
+              // Capture the local API output when the reviewer is diagnosing a failure.
+              stdio: [
+                "ignore",
+                openSync(process.env.E2E_API_LOG, "a"),
+                openSync(process.env.E2E_API_LOG, "a"),
+              ],
+            }
+          : {}),
+      },
     );
     await waitForHttp(`${apiOrigin}/healthz`, api);
 

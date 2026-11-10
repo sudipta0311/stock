@@ -222,6 +222,75 @@ describe("Home this week", () => {
     ).toBeVisible();
   });
 
+  it("shows rebuilt plan actions as soon as the monthly amount is saved", async () => {
+    const user = userEvent.setup();
+    const seededAction = action({
+      id: "seeded-emergency-fund",
+      kind: "BUILD_EMERGENCY_FUND",
+      payload: {
+        kind: "BUILD_EMERGENCY_FUND",
+        amount: "5000.00",
+        member_id: "member-test-1",
+      },
+    });
+    const rebuiltAction = action({
+      id: "rebuilt-monthly-investments",
+      kind: "REBALANCE_SIPS",
+      payload: {
+        kind: "REBALANCE_SIPS",
+        amount: "25000.00",
+        member_id: "member-test-1",
+        instrument_category: "monthly_investment",
+      },
+    });
+    let amountSaved = false;
+    let actionReads = 0;
+    let planReads = 0;
+    server.use(...baseHomeHandlers([seededAction]));
+    server.use(
+      http.get(/\/v1\/actions$/, () => {
+        actionReads += 1;
+        return HttpResponse.json(
+          amountSaved ? [rebuiltAction] : [seededAction],
+        );
+      }),
+      http.patch(/\/v1\/actions\/seeded-emergency-fund$/, () =>
+        HttpResponse.json({ ...seededAction, status: "done" }),
+      ),
+      http.get(/\/v1\/plan$/, () => {
+        planReads += 1;
+        return HttpResponse.json(weeklyPlan());
+      }),
+      http.put(/\/v1\/me\/investing$/, async ({ request }) => {
+        amountSaved = true;
+        return HttpResponse.json(await request.json());
+      }),
+    );
+    renderHome();
+
+    await screen.findByRole("article", { name: /Build your emergency fund/ });
+    await user.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("article", { name: /Build your emergency fund/ }),
+      ).not.toBeInTheDocument(),
+    );
+    await user.type(
+      screen.getByRole("spinbutton", {
+        name: new RegExp(englishCopy.home.monthly_amount),
+      }),
+      "25000",
+    );
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    const rebuiltCard = await screen.findByRole("article", {
+      name: /Change your monthly investments/,
+    });
+    expect(rebuiltCard).toHaveTextContent("25,000");
+    expect(actionReads).toBeGreaterThan(1);
+    expect(planReads).toBeGreaterThan(1);
+  });
+
   it("converts a monthly DKK amount to rupees before saving", async () => {
     const user = userEvent.setup();
     let saved: Record<string, unknown> | null = null;

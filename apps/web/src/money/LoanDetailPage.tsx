@@ -47,6 +47,25 @@ function monthLabel(
   }).format(new Date(year, month - 1, 1));
 }
 
+function displayDate(value: string): string {
+  const date = new Date(`${value.slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  }).format(date);
+}
+
+function displayRate(value: string | null | undefined): string | null {
+  if (value === null || value === undefined) return null;
+  const rate = Number(value);
+  if (!Number.isFinite(rate)) return `${value}%`;
+  return `${new Intl.NumberFormat("en-IN", {
+    maximumFractionDigits: 2,
+  }).format(rate)}%`;
+}
+
 function chartPath(points: { outstanding: string }[]): string {
   if (points.length < 2) return "";
   const values = points.map((point) => Number(point.outstanding));
@@ -278,11 +297,13 @@ export function LoanDetailPage() {
               <div>
                 <p className="text-sm font-medium">{eventLabel(event.kind)}</p>
                 <p className="text-xs text-muted-foreground">
-                  {event.on_date}
+                  {displayDate(event.on_date)}
                   {event.amount
                     ? ` · ${money(event.amount, item.currency)}`
                     : ""}
-                  {event.rate_pct ? ` · ${event.rate_pct}%` : ""}
+                  {displayRate(event.rate_pct)
+                    ? ` · ${displayRate(event.rate_pct)}`
+                    : ""}
                 </p>
                 {event.note ? (
                   <p className="mt-1 text-sm text-muted-foreground">
@@ -316,7 +337,7 @@ export function LoanDetailPage() {
         </summary>
         <div className="grid gap-3 pt-4 text-sm">
           <p>
-            Interest rate: <strong>{item.rate_pct}%</strong>
+            Interest rate: <strong>{displayRate(item.rate_pct)}</strong>
           </p>
           <p>
             <Term
@@ -358,7 +379,7 @@ export function LoanDetailPage() {
                   key={payment.on_date}
                   className="flex justify-between border-t border-line py-2 text-xs"
                 >
-                  <span>{payment.on_date}</span>
+                  <span>{displayDate(payment.on_date)}</span>
                   <span>{money(payment.amount, item.currency)}</span>
                 </div>
               ))

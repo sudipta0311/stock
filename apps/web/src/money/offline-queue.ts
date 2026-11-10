@@ -45,16 +45,38 @@ async function withStore<T>(
   return new Promise((resolve, reject) => {
     const transaction = database.transaction(STORE, mode);
     const request = operation(transaction.objectStore(STORE));
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () =>
-      reject(request.error ?? new Error("Offline queue operation failed."));
-    transaction.oncomplete = () => database.close();
-    transaction.onerror = () => {
+    let result: T | undefined;
+    let hasResult = false;
+    let settled = false;
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
       database.close();
-      reject(
-        transaction.error ?? new Error("Offline queue transaction failed."),
-      );
+      reject(error);
     };
+    request.onsuccess = () => {
+      result = request.result;
+      hasResult = true;
+    };
+    request.onerror = () =>
+      fail(request.error ?? new Error("Offline queue operation failed."));
+    transaction.oncomplete = () => {
+      if (settled) return;
+      settled = true;
+      database.close();
+      if (hasResult) resolve(result as T);
+      else
+        reject(
+          new Error("Offline queue transaction completed without a result."),
+        );
+    };
+    transaction.onerror = () => {
+      fail(transaction.error ?? new Error("Offline queue transaction failed."));
+    };
+    transaction.onabort = () =>
+      fail(
+        transaction.error ?? new Error("Offline queue transaction aborted."),
+      );
   });
 }
 

@@ -224,6 +224,8 @@ def _validation_issues(error: RequestValidationError) -> list[dict[str, str]]:
 
 def create_app(settings: "Settings | None" = None) -> FastAPI:
     """Build the API and its request-scoped dependencies from validated settings."""
+    from wealth.db.repo import HouseholdMemberLookupError
+
     configured = settings
 
     @asynccontextmanager
@@ -348,6 +350,17 @@ def create_app(settings: "Settings | None" = None) -> FastAPI:
             detail,
             exc.headers,
             extensions=extensions,
+        )
+
+    @application.exception_handler(HouseholdMemberLookupError)
+    async def household_member_not_found_handler(
+        request: Request, _exc: HouseholdMemberLookupError
+    ) -> JSONResponse:
+        return _problem(
+            request,
+            404,
+            "Not Found",
+            "The household was not found.",
         )
 
     @application.exception_handler(RequestValidationError)

@@ -307,6 +307,7 @@ export function OnboardingPage() {
   const { refreshProfile } = useAuth();
   const [draft, setDraft] = useState<OnboardingDraft>(readDraft);
   const [profileLoaded, setProfileLoaded] = useState(false);
+  const [profileExists, setProfileExists] = useState<boolean | null>(null);
   const [questions, setQuestions] = useState<RiskQuestion[]>([]);
   const [questionIndex, setQuestionIndex] = useState(0);
   const riskQuestionHeadingRef = useRef<HTMLLegendElement>(null);
@@ -326,7 +327,10 @@ export function OnboardingPage() {
   const [saving, setSaving] = useState(false);
 
   const pathStep = stepFromPath(location.pathname);
-  const step = pathStep ?? draft.step;
+  const savedStep = pathStep ?? draft.step;
+  const mustRestartProfileSetup =
+    profileExists === false && savedStep === "done";
+  const step = mustRestartProfileSetup ? "household" : savedStep;
   const goalSavedNotice =
     (location.state as { goalSaved?: unknown } | null)?.goalSaved === true;
   const answersComplete =
@@ -346,13 +350,20 @@ export function OnboardingPage() {
   }, [draft, step]);
 
   useEffect(() => {
+    if (!profileLoaded) return;
+    if (mustRestartProfileSetup) {
+      setDraft((current) => ({ ...current, step: "household" }));
+      if (pathStep !== "household")
+        navigate("/onboarding/household", { replace: true });
+      return;
+    }
     if (pathStep) {
       if (pathStep !== draft.step)
         setDraft((current) => ({ ...current, step: pathStep }));
       return;
     }
     navigate(`/onboarding/${draft.step}`, { replace: true });
-  }, [draft.step, navigate, pathStep]);
+  }, [draft.step, mustRestartProfileSetup, navigate, pathStep, profileLoaded]);
 
   useEffect(() => {
     let active = true;
@@ -389,6 +400,7 @@ export function OnboardingPage() {
           (member) => member.id === me.me_member_id,
         );
         const profile = me.profile;
+        setProfileExists(profile !== null);
         const context = profile?.financial_context;
         setDraft((current) => ({
           ...current,
@@ -612,6 +624,7 @@ export function OnboardingPage() {
       }
       if (!savedMembers.length) throw new Error("No adult details to save.");
       await updateProfile(profilePayload());
+      setProfileExists(true);
       await refreshProfile();
       moveTo("done");
     } catch (error) {

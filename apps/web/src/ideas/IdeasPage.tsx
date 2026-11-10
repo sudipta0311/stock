@@ -86,7 +86,7 @@ function DenmarkBuyCard({ plan }: { plan?: WeeklyPlan }) {
     <Card className="grid gap-3">
       <div>
         <h2 className="text-card-title font-semibold">{copy.buy_title}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">{copy.buy_intro}</p>
+        <p className="mt-1 text-sm text-foreground">{copy.buy_intro}</p>
       </div>
       {lines.length ? (
         <ul className="grid gap-3">
@@ -134,7 +134,7 @@ function DenmarkBuyCard({ plan }: { plan?: WeeklyPlan }) {
                   </span>
                 </div>
                 {members.length > 1 && textValue(member?.name) ? (
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xs text-foreground">
                     {copy.buy_for_member.replace(
                       "{name}",
                       textValue(member?.name),
@@ -146,7 +146,7 @@ function DenmarkBuyCard({ plan }: { plan?: WeeklyPlan }) {
                     <summary className="min-h-11 cursor-pointer py-2 text-sm font-semibold text-brand">
                       {copy.find_it_at_broker}
                     </summary>
-                    <div className="mt-2 grid gap-1 text-sm text-muted-foreground">
+                    <div className="mt-2 grid gap-1 text-sm text-foreground">
                       {listedName ? <p>{listedName}</p> : null}
                       {searchCode ? (
                         <p>
@@ -159,14 +159,14 @@ function DenmarkBuyCard({ plan }: { plan?: WeeklyPlan }) {
                     </div>
                   </details>
                 ) : null}
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-foreground">
                   {textValue(line.account) === "ask"
                     ? copy.account_ask
                     : textValue(line.account) === "pension"
                       ? copy.account_pension
                       : copy.account_ordinary}
                 </p>
-                <div className="flex flex-wrap justify-between gap-x-3 text-xs text-muted-foreground">
+                <div className="flex flex-wrap justify-between gap-x-3 text-xs text-foreground">
                   <span>
                     {copy.broker}:{" "}
                     {textValue(asRecord(copy.brokers)[broker], broker)}
@@ -184,13 +184,13 @@ function DenmarkBuyCard({ plan }: { plan?: WeeklyPlan }) {
                   </ol>
                 </details>
                 <details>
-                  <summary className="min-h-11 cursor-pointer py-2 text-sm text-muted-foreground">
+                  <summary className="min-h-11 cursor-pointer py-2 text-sm text-foreground">
                     {copy.why}
                   </summary>
                   <div className="mt-2 grid gap-2 text-base">
                     <p>{copy.why_ranked}</p>
                     {details.ask_unverified ? (
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-xs text-foreground">
                         {copy.ask_unverified_note}
                       </p>
                     ) : null}
@@ -226,7 +226,7 @@ function DenmarkBuyCard({ plan }: { plan?: WeeklyPlan }) {
                         </p>
                         <p>{copy.us_comparison_advantage_one}</p>
                         <p>{copy.us_comparison_advantage_two}</p>
-                        <p className="text-xs text-muted-foreground">
+                        <p className="text-xs text-foreground">
                           {copy.sources}
                         </p>
                         <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
@@ -316,7 +316,7 @@ function DenmarkBuyCard({ plan }: { plan?: WeeklyPlan }) {
                           </p>
                         )}
                         <p>{copy.us_stock_estate_treaty}</p>
-                        <p className="text-xs text-muted-foreground">
+                        <p className="text-xs text-foreground">
                           {copy.sources}
                         </p>
                         <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
@@ -483,7 +483,7 @@ function SelectorFunds({ research }: { research?: ResearchIdeasResponse }) {
             <h3 className="text-sm font-medium">
               {textValue(picks[0]?.category_label, category)}
             </h3>
-            <ul className="grid gap-1 text-sm text-muted-foreground">
+            <ul className="grid gap-1 text-sm text-foreground">
               {picks.map((pick, index) => (
                 <li key={`${category}-${index}`}>
                   <SelectorFundName
@@ -626,19 +626,19 @@ function ResearchIdea({
           {displayName}
         </h3>
         {name ? (
-          <p className="mt-1 text-xs text-muted-foreground" data-security>
+          <p className="mt-1 text-xs text-foreground" data-security>
             {symbol}
           </p>
         ) : null}
       </header>
       {ownershipLine ? (
-        <p className="min-w-0 break-words text-sm text-muted-foreground [overflow-wrap:anywhere]">
+        <p className="min-w-0 break-words text-sm text-foreground [overflow-wrap:anywhere]">
           {ownershipLine}
         </p>
       ) : null}
       {hintLine ? <p className="text-sm font-medium">{hintLine}</p> : null}
       {idea.price ? (
-        <p className="text-xs text-muted-foreground tabular-nums">
+        <p className="text-xs text-foreground tabular-nums">
           Reference price{" "}
           {textValue(idea.market) === "US"
             ? formatUsd(textValue(idea.price), 0)
@@ -653,24 +653,24 @@ function ResearchIdea({
       sector ||
       valuation ? (
         <details>
-          <summary className="min-h-11 cursor-pointer py-2 text-sm text-muted-foreground">
+          <summary className="min-h-11 cursor-pointer py-2 text-sm text-foreground">
             {englishCopy.ideas.why_this_idea}
           </summary>
-          <div className="grid gap-2 pb-2 text-sm text-muted-foreground">
+          <div className="grid gap-2 pb-2 text-sm text-foreground">
             {confidence || sector || valuation ? (
               <div className="flex flex-wrap gap-2">
                 {confidence ? (
-                  <span className="rounded-full bg-muted px-2 py-1 text-xs">
+                  <span className="rounded-full bg-muted px-2 py-1 text-xs text-foreground">
                     {confidence}
                   </span>
                 ) : null}
                 {sector ? (
-                  <span className="rounded-full bg-muted px-2 py-1 text-xs">
+                  <span className="rounded-full bg-muted px-2 py-1 text-xs text-foreground">
                     {sector}
                   </span>
                 ) : null}
                 {valuation ? (
-                  <span className="rounded-full bg-muted px-2 py-1 text-xs">
+                  <span className="rounded-full bg-muted px-2 py-1 text-xs text-foreground">
                     {valuation}
                   </span>
                 ) : null}
@@ -750,7 +750,7 @@ function IdeaGroups({
     <div className="grid gap-3">
       {[...groups].map(([market, ideas]) => (
         <div key={market}>
-          <h3 className="mb-2 text-xs font-semibold text-muted-foreground">
+          <h3 className="mb-2 text-xs font-semibold text-foreground/80">
             {ideaMarketLabel(market)}
           </h3>
           <div className="grid gap-3">
@@ -784,10 +784,10 @@ function ResearchCard({
         {englishCopy.ideas.weekly_title}
       </h2>
       <details className="border-b border-line pb-2">
-        <summary className="min-h-11 cursor-pointer py-1 text-sm font-medium text-muted-foreground">
+        <summary className="min-h-11 cursor-pointer py-1 text-sm font-medium text-foreground">
           {englishCopy.ideas.term_prompt}
         </summary>
-        <p className="pb-1 text-sm text-muted-foreground">
+        <p className="pb-1 text-sm text-foreground">
           {englishCopy.ideas.confidence_help}
         </p>
       </details>
@@ -813,7 +813,7 @@ function ResearchCard({
                 )}
               </summary>
               <div className="grid gap-3 pt-2">
-                <p className="text-sm text-muted-foreground">
+                <p className="text-sm text-foreground">
                   {englishCopy.ideas.already_enough_intro}
                 </p>
                 <IdeaGroups
@@ -892,21 +892,21 @@ function IndexFundsCard({
             {textValue(rowLabels[exposure], copy.index_world_fund)}
           </h3>
           {textValue(fund.role) === "plan_main" ? (
-            <span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
+            <span className="rounded-full bg-muted px-2 py-1 text-xs text-foreground">
               {copy.index_plan_main}
             </span>
           ) : null}
         </div>
         <p className="mt-1 text-sm">{textValue(instrument.name)}</p>
         {secondLine ? (
-          <p className="mt-1 text-xs text-muted-foreground">{secondLine}</p>
+          <p className="mt-1 text-xs text-foreground">{secondLine}</p>
         ) : null}
         {listedName || searchCode ? (
           <details>
-            <summary className="min-h-11 cursor-pointer py-2 text-sm text-muted-foreground">
+            <summary className="min-h-11 cursor-pointer py-2 text-sm text-foreground">
               {copy.index_find_it_at_broker}
             </summary>
-            <div className="grid gap-1 pb-1 text-sm text-muted-foreground">
+            <div className="grid gap-1 pb-1 text-sm text-foreground">
               {listedName ? <p>{listedName}</p> : null}
               {searchCode ? (
                 <p>
@@ -942,7 +942,7 @@ function IndexFundsCard({
       </ul>
       {otherFunds.length ? (
         <details>
-          <summary className="min-h-11 cursor-pointer py-2 text-sm text-muted-foreground">
+          <summary className="min-h-11 cursor-pointer py-2 text-sm text-foreground">
             {copy.index_other_funds}
           </summary>
           <ul className="grid gap-3 pb-1">
@@ -951,10 +951,10 @@ function IndexFundsCard({
         </details>
       ) : null}
       <details>
-        <summary className="min-h-11 cursor-pointer py-2 text-sm text-muted-foreground">
+        <summary className="min-h-11 cursor-pointer py-2 text-sm text-foreground">
           {copy.index_why}
         </summary>
-        <div className="grid gap-2 pb-1 text-sm text-muted-foreground">
+        <div className="grid gap-2 pb-1 text-sm text-foreground">
           <p>{copy.index_world_reason_one}</p>
           <p>{copy.index_world_reason_two}</p>
           <p>{copy.index_us_reason_one}</p>

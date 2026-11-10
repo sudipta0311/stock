@@ -625,6 +625,8 @@ def refresh_networth_snapshot(
     user_id: UUID,
     today: date,
     member_id: UUID | None = None,
+    *,
+    store_snapshot: bool = True,
 ) -> dict[str, Any]:
     """Calculate and persist today's net worth, including imported market holdings."""
     from wealth.core.money import round_paise
@@ -1081,6 +1083,8 @@ def refresh_networth_snapshot(
         ),
         "holdings": [*_merge_lots(holding_values), *recorded_holding_values],
     }
+    if not store_snapshot:
+        return totals
     insert = pg_insert(NetworthSnapshot).values(
         id=uuid4(), user_id=user_id, on_date=today, totals=totals
     )
@@ -1229,6 +1233,7 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                 .outerjoin(Account, Account.id == ManualAsset.account_id)
                 .where(
                     ManualAsset.user_id == user.household_owner_id,
+                    ManualAsset.status == "active",
                     or_(ManualAsset.member_id == member_id, Account.member_id == member_id),
                 )
             )
@@ -1279,6 +1284,29 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                 status_code=409,
                 detail=f"This member still has {linked_rows} linked records.",
             )
+
+        self_member_id = user.session.scalar(
+            select(HouseholdMember.id).where(
+                HouseholdMember.user_id == user.household_owner_id,
+                HouseholdMember.is_self.is_(True),
+            )
+        )
+        if self_member_id is None:
+            raise HTTPException(status_code=409, detail="The household owner record is missing.")
+        closed_assets = list(
+            user.session.scalars(
+                select(ManualAsset).where(
+                    ManualAsset.user_id == user.household_owner_id,
+                    ManualAsset.member_id == member_id,
+                    ManualAsset.status == "closed",
+                )
+            )
+        )
+        for asset in closed_assets:
+            asset.member_id = self_member_id
+        if closed_assets:
+            user.session.flush()
+
         user.session.delete(member)
         try:
             user.session.flush()
@@ -1641,8 +1669,18 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
         today: Today,
         member_id: Annotated[UUID | None, Query()] = None,
     ) -> Any:
+        from wealth.db.repo import acting_household_member
+
+        acting_household_member(user.session, user.user_id, user.household_owner_id)
         if member_id is not None:
             _require_member(user.session, user.household_owner_id, member_id)
-        return refresh_networth_snapshot(user.session, user.household_owner_id, today, member_id)
+        # Viewers have read-only access; household RLS rejects their snapshot write.
+        return refresh_networth_snapshot(
+            user.session,
+            user.household_owner_id,
+            today,
+            member_id,
+            store_snapshot=user.role != "viewer",
+        )
 
     return router

@@ -49,6 +49,19 @@ function fdForm() {
   );
 }
 
+function poSchemeForm() {
+  server.use(http.get(/\/v1\/plan$/, () => HttpResponse.json({ members: [] })));
+  return renderWithQueries(
+    <MemoryRouter initialEntries={["/money/add/po_scheme"]}>
+      <main>
+        <Routes>
+          <Route path="/money/add/:type" element={<AddAssetPage />} />
+        </Routes>
+      </main>
+    </MemoryRouter>,
+  );
+}
+
 async function fillFdForm(user: ReturnType<typeof userEvent.setup>) {
   await user.type(screen.getByLabelText(/Bank or post office/), "Demo Bank");
   await user.type(screen.getByLabelText(/Amount deposited/), "5L");
@@ -212,9 +225,47 @@ describe("asset forms and autosave", () => {
     await fillFdForm(user);
     expect(
       await screen.findByText(
-        "Enter the interest rate printed on your certificate",
+        "We don't have the official rate for that date. Enter the rate printed on your certificate.",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("reveals and focuses a hidden field returned by the server", async () => {
+    const user = userEvent.setup();
+    server.use(
+      memberList(),
+      http.post(/\/v1\/assets$/, () =>
+        HttpResponse.json(
+          { code: "rate_needed", title: "Rate needed", errors: [] },
+          { status: 422 },
+        ),
+      ),
+    );
+    poSchemeForm();
+    await user.selectOptions(
+      screen.getByLabelText(/Post Office scheme/),
+      "nsc",
+    );
+    await user.type(screen.getByLabelText(/Amount invested/), "30000");
+    fireEvent.change(screen.getByLabelText(/Purchased \(month and year\)/), {
+      target: { value: "2024-01" },
+    });
+    const summary = screen.getByText("More details (for a closer estimate)");
+    const details = summary.closest("details");
+    expect(details).not.toHaveAttribute("open");
+
+    await user.click(screen.getByRole("button", { name: "Save and return" }));
+
+    const rate = await screen.findByLabelText(/Interest rate \(%\)/);
+    expect(rate).toBeVisible();
+    expect(rate).toHaveAttribute("aria-invalid", "true");
+    expect(details).toHaveAttribute("open");
+    expect(rate).toHaveFocus();
+    expect(
+      await screen.findByText(
+        "We don't have the official rate for that date. Enter the rate printed on your certificate.",
+      ),
+    ).toBeVisible();
   });
 
   it("maps a 422 field error to the matching field", async () => {

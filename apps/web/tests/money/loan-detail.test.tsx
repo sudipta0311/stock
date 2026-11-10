@@ -71,7 +71,10 @@ function loanDetail(
   };
 }
 
-function handlers(role: "owner" | "viewer" = "owner") {
+function handlers(
+  role: "owner" | "viewer" = "owner",
+  details: LoanDetailResponse = loanDetail(),
+) {
   return [
     http.get(/\/v1\/me$/, () =>
       HttpResponse.json({
@@ -95,7 +98,7 @@ function handlers(role: "owner" | "viewer" = "owner") {
     http.get(/\/v1\/members$/, () => HttpResponse.json([])),
     http.get(/\/v1\/households$/, () => HttpResponse.json([])),
     http.get(new RegExp(`/v1/loans/${loanId}$`), () =>
-      HttpResponse.json(loanDetail()),
+      HttpResponse.json(details),
     ),
   ];
 }
@@ -113,6 +116,32 @@ function renderLoan() {
 }
 
 describe("Loan detail", () => {
+  it("formats recorded update dates and rates as plain values", async () => {
+    const user = userEvent.setup();
+    const details = loanDetail({
+      events: [
+        ...loanDetail().events,
+        {
+          id: "event-rate-test",
+          kind: "rate_change",
+          on_date: "2026-11-02",
+          amount: null,
+          rate_pct: "4.8000",
+          emi: null,
+          note: null,
+        },
+      ],
+    });
+    server.use(...handlers("owner", details));
+    renderLoan();
+
+    expect(await screen.findByText("2 Nov 2026 · 4.8%")).toBeVisible();
+    expect(screen.queryByText("2026-11-02 · 4.8000%")).not.toBeInTheDocument();
+    await user.click(screen.getByText("Loan details", { exact: true }));
+    expect(screen.getByText("8.5%")).toBeVisible();
+    expect(screen.getByText("10 Nov 2026")).toBeVisible();
+  });
+
   it("shows a repayment chart, one main action, and sourced tax review details", async () => {
     server.use(...handlers());
     const { container } = renderLoan();

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiError } from "../api/client";
+import { abortHouseholdRequests, ApiError } from "../api/client";
 import { apiPathAvailable } from "../api/feature-support";
 import { useHousehold } from "../household/HouseholdContext";
 import {
@@ -23,7 +23,6 @@ export function HouseholdSharingPanel() {
     selectedHouseholdId,
     members,
     role: currentRole,
-    isViewer,
     selectHousehold,
   } = useHousehold();
   const [email, setEmail] = useState("");
@@ -37,15 +36,22 @@ export function HouseholdSharingPanel() {
   const [leaving, setLeaving] = useState(false);
 
   const enabled = apiPathAvailable("/v1/households/invites");
+  const canManage = currentRole === "owner";
+  const accessHelp =
+    currentRole === "partner"
+      ? englishCopy.household.partner_help
+      : currentRole === "viewer"
+        ? englishCopy.household.view_only_help
+        : null;
   const invitesQuery = useQuery({
     queryKey: ["settings", "household-invites", selectedHouseholdId],
     queryFn: listHouseholdInvites,
-    enabled,
+    enabled: enabled && canManage,
   });
   const accessQuery = useQuery({
     queryKey: ["settings", "household-access-panel", selectedHouseholdId],
     queryFn: listHouseholdAccess,
-    enabled: apiPathAvailable("/v1/households/access"),
+    enabled: canManage && apiPathAvailable("/v1/households/access"),
   });
   const activeAccess = useMemo(
     () =>
@@ -59,7 +65,6 @@ export function HouseholdSharingPanel() {
       ),
     [invitesQuery.data],
   );
-  const canManage = !isViewer;
 
   async function refreshSharing(): Promise<void> {
     await Promise.all([
@@ -176,12 +181,14 @@ export function HouseholdSharingPanel() {
     setLeaving(true);
     setMessage("");
     try {
+      abortHouseholdRequests(selectedHouseholdId);
+      await queryClient.cancelQueries();
       await leaveHousehold();
       selectHousehold(null);
-      await queryClient.invalidateQueries();
       setMessage(englishCopy.household.leave_success);
     } catch {
       setMessage(englishCopy.household.leave_error);
+      void queryClient.invalidateQueries();
     } finally {
       setLeaving(false);
     }
@@ -199,11 +206,9 @@ export function HouseholdSharingPanel() {
           {englishCopy.household.settings.share_explanation}
         </p>
       </div>
-      {isViewer ? (
-        <p className="text-sm text-muted-foreground">
-          {englishCopy.household.view_only_help}
-        </p>
-      ) : (
+      {!canManage && accessHelp ? (
+        <p className="text-sm text-muted-foreground">{accessHelp}</p>
+      ) : canManage ? (
         <form
           onSubmit={(event) => void createInvite(event)}
           className="grid gap-5"
@@ -256,7 +261,7 @@ export function HouseholdSharingPanel() {
             {englishCopy.household.invite_create}
           </Button>
         </form>
-      )}
+      ) : null}
       {createdInvite ? (
         <div className="grid gap-2 rounded-xl border border-line p-3">
           <label

@@ -72,6 +72,9 @@ class InvestingSip(BaseModel):
     monthly_amount: Rupees
 
 
+PositiveRupees = Annotated[Rupees, Field(gt=Decimal("0"))]
+
+
 class InvestingPrefs(BaseModel):
     """User-controlled investing constraints used by the deterministic policy engine."""
 
@@ -79,6 +82,7 @@ class InvestingPrefs(BaseModel):
 
     monthly_sip_capacity: Rupees = Decimal("0")
     existing_sips: list[InvestingSip] = Field(default_factory=list)
+    fund_sip_overrides: dict[UUID, PositiveRupees] = Field(default_factory=dict)
     new_money_this_week: Rupees = Decimal("0")
     has_lrs_broker: bool = False
     prefers_no_paperwork: bool = False

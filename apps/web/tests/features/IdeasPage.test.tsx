@@ -196,7 +196,7 @@ describe("Ideas page", () => {
     });
     expect(ideaHeading.parentElement).toHaveTextContent("DEMO");
     const marketHeading = screen.getByText("India", { exact: true });
-    expect(marketHeading).toHaveClass("text-xs", "text-muted-foreground");
+    expect(marketHeading).toHaveClass("text-xs", "text-foreground/80");
     expect(marketHeading).not.toHaveClass("text-sm", "text-base");
     expect(screen.getByText("Energy")).not.toBeVisible();
     expect(screen.getByText("Fairly priced")).not.toBeVisible();
@@ -300,7 +300,7 @@ describe("Ideas page", () => {
         HttpResponse.json(indexFundResearch()),
       ),
     );
-    renderWithQueries(
+    const { container } = renderWithQueries(
       <MemoryRouter>
         <IdeasPage />
       </MemoryRouter>,
@@ -313,7 +313,9 @@ describe("Ideas page", () => {
     if (!(card instanceof HTMLElement))
       throw new Error("Expected the index fund card");
     expect(screen.getByRole("heading", { name: "World fund" })).toBeVisible();
-    expect(screen.getByText(englishCopy.ideas.index_plan_main)).toBeVisible();
+    const planMain = screen.getByText(englishCopy.ideas.index_plan_main);
+    expect(planMain).toBeVisible();
+    expect(planMain).toHaveClass("text-foreground");
     const otherFunds = screen.getByText(englishCopy.ideas.index_other_funds);
     expect(otherFunds.closest("details")).not.toHaveAttribute("open");
     expect(
@@ -354,6 +356,7 @@ describe("Ideas page", () => {
     expect(
       within(sp500Row).getByText("It reinvests dividends for you."),
     ).not.toBeVisible();
+    expect((await axe(container)).violations).toEqual([]);
   });
   it.each([
     [

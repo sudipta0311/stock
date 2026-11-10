@@ -218,6 +218,44 @@ def test_member_account_asset_goal_and_quick_add_endpoints(
     assert not_understood.json()["code"] == "not_understood"
 
 
+def test_closed_assets_survive_removing_their_member(
+    api_client: tuple[TestClient, str, object],
+) -> None:
+    client, secret, _application = api_client
+    headers = _headers(secret, "closed-member-asset")
+    self_member = client.get("/v1/members", headers=headers).json()[0]
+    member = client.post(
+        "/v1/members",
+        headers=headers,
+        json={"display_name": "Synthetic Relative", "relationship": "other"},
+    )
+    assert member.status_code == 201
+    member_id = member.json()["id"]
+    asset = client.post(
+        "/v1/assets",
+        headers=headers,
+        json={
+            "asset_type": "savings",
+            "bank": "Synthetic Bank",
+            "balance": "125000",
+            "member_id": member_id,
+        },
+    )
+    assert asset.status_code == 201
+    asset_id = asset.json()["id"]
+
+    assert client.delete(f"/v1/members/{member_id}", headers=headers).status_code == 409
+    assert client.delete(f"/v1/assets/{asset_id}", headers=headers).status_code == 204
+
+    removed = client.delete(f"/v1/members/{member_id}", headers=headers)
+    assert removed.status_code == 204
+    closed_assets = client.get("/v1/assets?status=closed", headers=headers).json()
+    saved_asset = next(item for item in closed_assets if item["id"] == asset_id)
+    assert saved_asset["status"] == "closed"
+    assert saved_asset["member_id"] == self_member["id"]
+    assert saved_asset["details"]["bank"] == "Synthetic Bank"
+
+
 def test_member_residency_changes_plan_and_remains_tenant_scoped(
     api_client: tuple[TestClient, str, object],
 ) -> None:

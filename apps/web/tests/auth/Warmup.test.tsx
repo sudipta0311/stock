@@ -183,6 +183,35 @@ it("quietly restores the saved sign-in after the API starts answering", async ()
   expect(getRefreshToken()).toBe("synthetic-rotated-refresh");
 });
 
+it("does not report a rate-limited refresh as an unreachable server", async () => {
+  vi.useFakeTimers();
+  window.localStorage.setItem(REFRESH_TOKEN_STORAGE_KEY, "synthetic-refresh");
+  const fetcher = vi.fn<typeof fetch>(
+    async () =>
+      new Response(null, { status: 429, headers: { "Retry-After": "60" } }),
+  );
+  vi.stubGlobal("fetch", fetcher);
+
+  render(
+    <MemoryRouter initialEntries={["/login"]}>
+      <AuthProvider>
+        <LoginPage />
+      </AuthProvider>
+    </MemoryRouter>,
+  );
+
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(240_000);
+  });
+
+  expect(
+    screen.getByText("Sign-in is temporarily busy. Try again shortly."),
+  ).toBeVisible();
+  expect(screen.queryByText(/We couldn't reach the server/)).toBeNull();
+  expect(screen.getByRole("button", { name: "Try again" })).toBeVisible();
+  expect(fetcher).toHaveBeenCalledTimes(16);
+});
+
 it("doesn't spend the one-time Google code while the server is asleep", async () => {
   warmup.reachable = false;
 

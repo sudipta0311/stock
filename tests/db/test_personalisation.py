@@ -584,6 +584,114 @@ def test_investing_preferences_validate_and_round_trip(
     assert invalid.status_code == 422
 
 
+def test_fund_sip_override_remains_valid_across_household_reads(
+    api_client: tuple[TestClient, str, object],
+    migrated_database: MigratedDatabase,
+) -> None:
+    client, secret, _application = api_client
+    headers, _subject = _auth(secret, "fund-sip-override")
+    members_response = client.get("/v1/members", headers=headers)
+    assert members_response.status_code == 200
+    self_member = next(member for member in members_response.json() if member["is_self"])
+    security = Security(
+        market="IN",
+        symbol="SYNTH-SIP-710001",
+        name="Synthetic Monthly Fund",
+        security_type="mf",
+        currency="INR",
+        sleeve="equity_india",
+        category="mf:equity_india",
+        sub_category="Large Cap",
+        plan_type="direct",
+        option="growth",
+    )
+    with Session(migrated_database.owner_engine) as session, session.begin():
+        session.add(security)
+        session.flush()
+        security_id = security.id
+
+    saved = client.put(
+        f"/v1/fund-check/sips/{security_id}",
+        headers=headers,
+        json={"member_id": self_member["id"], "monthly_amount_inr": "4250.00"},
+    )
+    assert saved.status_code == 200
+    for path in ("/v1/me", "/v1/members", "/v1/plan"):
+        assert client.get(path, headers=headers).status_code == 200
+
+    fund_check = client.get("/v1/fund-check", headers=headers)
+    assert fund_check.status_code == 200
+    assert {
+        "member_id": self_member["id"],
+        "security_id": str(security_id),
+        "monthly_amount_inr": "4250.00",
+    } in fund_check.json()["details"]["sips"]
+    invalid = client.put(
+        f"/v1/fund-check/sips/{security_id}",
+        headers=headers,
+        json={"member_id": self_member["id"], "monthly_amount_inr": "0"},
+    )
+    assert invalid.status_code == 422
+
+
+def test_done_action_is_not_reopened_when_the_same_plan_is_saved_again(
+    api_client: tuple[TestClient, str, object],
+    migrated_database: MigratedDatabase,
+) -> None:
+    client, secret, _application = api_client
+    headers, subject = _auth(secret, "done-action-rebuild")
+    response = client.get("/v1/plan", headers=headers)
+    assert response.status_code == 200
+    user_id = _user_id(migrated_database, subject)
+    plan = WeeklyPlan.model_validate(
+        {
+            field: value
+            for field, value in response.json().items()
+            if field in WeeklyPlan.model_fields
+        }
+    ).model_copy(
+        update={
+            "actions": [
+                {
+                    "rank": 1,
+                    "kind": "synthetic_monthly_review",
+                    "member_id": "synthetic_member_1",
+                    "amount": "25000.00",
+                }
+            ]
+        }
+    )
+
+    with user_session(migrated_database.api_engine, user_id) as session:
+        save_weekly_plan(session, user_id, plan)
+        action = session.scalar(
+            select(Action).where(
+                Action.user_id == user_id,
+                Action.week == plan.week,
+                Action.kind == "synthetic_monthly_review",
+            )
+        )
+        assert action is not None
+        action_id = action.id
+        action.status = "done"
+        session.flush()
+
+        save_weekly_plan(session, user_id, plan)
+        rows = list(
+            session.execute(
+                select(Action.id, Action.status).where(
+                    Action.user_id == user_id,
+                    Action.week == plan.week,
+                    Action.kind == "synthetic_monthly_review",
+                )
+            )
+        )
+
+    assert len(rows) == 1
+    assert rows[0].id == action_id
+    assert rows[0].status == "done"
+
+
 def test_plan_is_computed_on_demand_and_reused_when_inputs_match(
     api_client: tuple[TestClient, str, object],
 ) -> None:

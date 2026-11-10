@@ -6,7 +6,14 @@ import { HttpResponse, http } from "msw";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { beforeEach, describe, expect, it } from "vitest";
 import { axe } from "vitest-axe";
-import { HouseholdProvider } from "../../src/household/HouseholdContext";
+import {
+  HouseholdProvider,
+  useHousehold,
+} from "../../src/household/HouseholdContext";
+import {
+  persistSelectedHouseholdId,
+  SELECTED_HOUSEHOLD_STORAGE_KEY,
+} from "../../src/api/client";
 import { HouseholdControls } from "../../src/household/HouseholdControls";
 import { HouseholdJoinPage } from "../../src/household/HouseholdJoinPage";
 import { HomePage } from "../../src/home/HomePage";
@@ -248,12 +255,50 @@ function renderHouseholdPage(page: ReactNode, initial = "/") {
   );
 }
 
+function HouseholdSelectionProbe() {
+  const { selectedHouseholdId, selectedMemberId } = useHousehold();
+  return (
+    <p data-testid="household-selection">
+      {selectedHouseholdId ?? "personal"}::{selectedMemberId}
+    </p>
+  );
+}
+
 beforeEach(() => {
   window.localStorage.clear();
   window.sessionStorage.clear();
 });
 
 describe("family plan screens", () => {
+  it("clears household query data and the member filter after switching home", async () => {
+    window.sessionStorage.setItem(
+      SELECTED_HOUSEHOLD_STORAGE_KEY,
+      ownerHouseholdId,
+    );
+    window.sessionStorage.setItem(memberFilterKey, partnerId);
+    server.use(...householdHandlers([]));
+    const { queryClient } = renderWithQueries(
+      <HouseholdProvider>
+        <HouseholdSelectionProbe />
+      </HouseholdProvider>,
+    );
+    const oldHouseholdQuery = ["household-data", ownerHouseholdId];
+    queryClient.setQueryData(oldHouseholdQuery, { stale: true });
+
+    expect(await screen.findByTestId("household-selection")).toHaveTextContent(
+      `${ownerHouseholdId}::${partnerId}`,
+    );
+    persistSelectedHouseholdId(null);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("household-selection")).toHaveTextContent(
+        "personal::family",
+      );
+    });
+    expect(window.sessionStorage.getItem(memberFilterKey)).toBe("family");
+    expect(queryClient.getQueryData(oldHouseholdQuery)).toBeUndefined();
+  });
+
   it("labels the owner relative to a partner viewer and filters Home by the selected person", async () => {
     const user = userEvent.setup();
     window.localStorage.setItem(primaryCurrencyKey, "DKK");

@@ -13,6 +13,7 @@ const section = {
   "access_removed": "Access to this family plan was removed. Your own plan is showing.",
   "read_only": "View only",
   "view_only_help": "You can view this family plan, but you cannot make changes.",
+  "partner_help": "Only the plan owner can invite people or change access.",
   "fx_line": "1 DKK = ₹{rate} on {date}",
   "dkk_unavailable": "DKK amounts will show when an exchange rate is available.",
   "primary_currency": "Main display currency",

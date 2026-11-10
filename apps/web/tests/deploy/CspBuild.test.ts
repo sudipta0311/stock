@@ -15,7 +15,10 @@ describe("built content security policy", () => {
     expect(policy).toBeDefined();
     expect(policy).toContain("default-src 'self'");
     expect(policy).toContain("script-src 'self'");
-    expect(policy).toContain("style-src 'self'");
+    expect(policy).toContain(
+      "style-src 'self' 'sha256-nzTgYzXYDNe6BAHiiI7NNlfK8n/auuOAhh2t92YvuXo=';",
+    );
+    expect(policy).not.toContain("'unsafe-inline'");
     expect(policy).toContain("connect-src 'self'");
     expect(policy).toContain("https://accounts.google.com");
     expect(policy).toContain("img-src 'self' data:");

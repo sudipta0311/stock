@@ -40,7 +40,12 @@ from wealth.policy.fund_check import (
     check_funds,
 )
 from wealth.policy.tax import Lot, TaxContext
-from wealth.schemas.profile import MemberTax, residency_from_stored
+from wealth.schemas.profile import (
+    InvestingPrefs,
+    MemberTax,
+    PositiveRupees,
+    residency_from_stored,
+)
 
 
 class FundCheckResponse(BaseModel):
@@ -57,7 +62,7 @@ class FundSipOverride(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     member_id: UUID
-    monthly_amount_inr: Decimal = Field(ge=0, max_digits=14, decimal_places=2)
+    monthly_amount_inr: PositiveRupees
 
 
 def _month_end(value: date) -> date:
@@ -202,16 +207,10 @@ def _member_rows(
             ),
             None,
         )
-        overrides = (row.investing or {}).get("fund_sip_overrides", {})
-        sip_overrides: dict[str, Decimal] = {}
-        if isinstance(overrides, dict):
-            for security_id, amount in overrides.items():
-                try:
-                    value = Decimal(str(amount))
-                except InvalidOperation:
-                    continue
-                if value.is_finite() and value >= 0:
-                    sip_overrides[str(security_id)] = value
+        investing = InvestingPrefs.model_validate(row.investing or {})
+        sip_overrides = {
+            str(security_id): amount for security_id, amount in investing.fund_sip_overrides.items()
+        }
         member_tax = TaxContext(
             slab_pct=tax.tax_slab_pct or Decimal("30"),
             surcharge_pct=tax.surcharge_pct,
@@ -613,11 +612,12 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             raise HTTPException(
                 status_code=404, detail="The fund or household member was not found."
             )
-        investing = dict(member.investing or {})
-        overrides = dict(investing.get("fund_sip_overrides", {}))
-        overrides[str(security_id)] = format(payload.monthly_amount_inr, "f")
-        investing["fund_sip_overrides"] = overrides
-        member.investing = investing
+        investing = InvestingPrefs.model_validate(member.investing or {})
+        overrides = dict(investing.fund_sip_overrides)
+        overrides[security_id] = payload.monthly_amount_inr
+        member.investing = investing.model_copy(
+            update={"fund_sip_overrides": overrides}
+        ).model_dump(mode="json")
         return {
             "security_id": str(security_id),
             "monthly_amount_inr": format(payload.monthly_amount_inr, "f"),

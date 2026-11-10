@@ -1,5 +1,12 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { ApiError, apiFetch } from "../../src/api/client";
+import {
+  ApiError,
+  apiFetch,
+  getSelectedHouseholdId,
+  HOUSEHOLD_SELECTION_CHANGED_EVENT,
+  persistSelectedHouseholdId,
+  SELECTED_HOUSEHOLD_STORAGE_KEY,
+} from "../../src/api/client";
 import { cancelProactiveRefresh } from "../../src/auth/session";
 import { clearAuthToken, setAuthSession } from "../../src/auth/token";
 
@@ -8,6 +15,126 @@ afterEach(() => {
   vi.unstubAllGlobals();
   cancelProactiveRefresh();
   clearAuthToken();
+  window.sessionStorage.clear();
+});
+
+it("drops a selected household when the API says it is no longer available", async () => {
+  const oldHouseholdId = "household-synthetic-old";
+  persistSelectedHouseholdId(oldHouseholdId);
+  const changed = vi.fn();
+  window.addEventListener(HOUSEHOLD_SELECTION_CHANGED_EVENT, changed);
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ detail: "The household was not found." }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      }),
+    )
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ ready: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+  vi.stubGlobal("fetch", fetcher);
+
+  try {
+    await expect(
+      apiFetch<{ ready: boolean }>("/v1/me/investing"),
+    ).resolves.toEqual({ ready: true });
+
+    expect(
+      new Headers(fetcher.mock.calls[0]?.[1]?.headers).get("X-Household"),
+    ).toBe(oldHouseholdId);
+    expect(
+      new Headers(fetcher.mock.calls[1]?.[1]?.headers).get("X-Household"),
+    ).toBeNull();
+    expect(getSelectedHouseholdId()).toBeNull();
+    expect(
+      window.sessionStorage.getItem(SELECTED_HOUSEHOLD_STORAGE_KEY),
+    ).toBeNull();
+    expect(changed).toHaveBeenCalledOnce();
+  } finally {
+    window.removeEventListener(HOUSEHOLD_SELECTION_CHANGED_EVENT, changed);
+  }
+});
+
+it("aborts old-household requests and omits its header after selection changes", async () => {
+  persistSelectedHouseholdId("household-synthetic-old");
+  let started!: () => void;
+  let resolveOldResponse!: (response: Response) => void;
+  let oldRequestSignal: AbortSignal | null | undefined;
+  const requestStarted = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const fetcher = vi.fn<typeof fetch>(
+    (_input, init) =>
+      new Promise<Response>((resolve) => {
+        oldRequestSignal = init?.signal;
+        resolveOldResponse = resolve;
+        started();
+      }),
+  );
+  vi.stubGlobal("fetch", fetcher);
+
+  const pending = apiFetch("/v1/plan");
+  await requestStarted;
+  persistSelectedHouseholdId(null);
+  expect(oldRequestSignal?.aborted).toBe(true);
+  resolveOldResponse(
+    new Response(JSON.stringify({ stale: true }), { status: 200 }),
+  );
+  await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+
+  fetcher.mockResolvedValueOnce(
+    new Response(JSON.stringify({ ready: true }), { status: 200 }),
+  );
+  await expect(apiFetch<{ ready: boolean }>("/v1/me")).resolves.toEqual({
+    ready: true,
+  });
+  expect(
+    new Headers(fetcher.mock.calls[1]?.[1]?.headers).get("X-Household"),
+  ).toBeNull();
+});
+
+it("works without AbortSignal.any and still forwards the caller's abort", async () => {
+  // Older iOS Safari (before 17.4) has no AbortSignal.any.
+  const original = Object.getOwnPropertyDescriptor(AbortSignal, "any");
+  Reflect.deleteProperty(AbortSignal, "any");
+  persistSelectedHouseholdId("household-synthetic-shared");
+  let requestSignal: AbortSignal | null | undefined;
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(
+      new Response(JSON.stringify({ ready: true }), { status: 200 }),
+    )
+    .mockImplementationOnce(
+      (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          requestSignal = init?.signal;
+          init?.signal?.addEventListener("abort", () =>
+            reject(new DOMException("Aborted", "AbortError")),
+          );
+        }),
+    );
+  vi.stubGlobal("fetch", fetcher);
+
+  try {
+    const caller = new AbortController();
+    await expect(
+      apiFetch<{ ready: boolean }>("/v1/me", { signal: caller.signal }),
+    ).resolves.toEqual({ ready: true });
+
+    const cancelled = new AbortController();
+    const pending = apiFetch("/v1/plan", { signal: cancelled.signal });
+    await vi.waitFor(() => expect(requestSignal).toBeDefined());
+    cancelled.abort();
+    expect(requestSignal?.aborted).toBe(true);
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+  } finally {
+    if (original) Object.defineProperty(AbortSignal, "any", original);
+  }
 });
 
 it("parses RFC 7807 validation problems", async () => {

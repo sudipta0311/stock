@@ -66,12 +66,33 @@ function wait(milliseconds: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
+function retryAfterMs(response: Response): number | undefined {
+  const value = response.headers.get("Retry-After");
+  if (!value) return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1_000;
+  const date = Date.parse(value);
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : undefined;
+}
+
+function remainingRetryMs(startedAt: number): number {
+  return Math.max(0, MAX_REFRESH_RETRY_MS - (Date.now() - startedAt));
+}
+
+export class RefreshRateLimitedError extends Error {
+  constructor() {
+    super("Sign-in is temporarily busy. Try again shortly.");
+    this.name = "RefreshRateLimitedError";
+  }
+}
+
 async function requestRefresh(
   initialRefreshToken: string,
 ): Promise<AuthSessionResponse | null> {
   let refreshToken = initialRefreshToken;
   const startedAt = Date.now();
   let delay = 1_000;
+  let lastRetryWasRateLimited = false;
   while (Date.now() - startedAt < MAX_REFRESH_RETRY_MS) {
     let response: Response;
     try {
@@ -82,13 +103,24 @@ async function requestRefresh(
         cache: "no-store",
       });
     } catch (error) {
+      lastRetryWasRateLimited = false;
       if (Date.now() - startedAt >= MAX_REFRESH_RETRY_MS) throw error;
-      await wait(Math.min(delay, MAX_BACKOFF_MS));
+      await wait(Math.min(delay, MAX_BACKOFF_MS, remainingRetryMs(startedAt)));
+      delay = Math.min(delay * 2, MAX_BACKOFF_MS);
+      continue;
+    }
+    if (response.status === 429) {
+      lastRetryWasRateLimited = true;
+      const retryDelay = retryAfterMs(response) ?? delay;
+      const remaining = remainingRetryMs(startedAt);
+      if (remaining > 0)
+        await wait(Math.min(retryDelay, MAX_BACKOFF_MS, remaining));
       delay = Math.min(delay * 2, MAX_BACKOFF_MS);
       continue;
     }
     if (RETRYABLE_STATUS.has(response.status)) {
-      await wait(Math.min(delay, MAX_BACKOFF_MS));
+      lastRetryWasRateLimited = false;
+      await wait(Math.min(delay, MAX_BACKOFF_MS, remainingRetryMs(startedAt)));
       delay = Math.min(delay * 2, MAX_BACKOFF_MS);
       continue;
     }
@@ -118,6 +150,7 @@ async function requestRefresh(
     scheduleProactiveRefresh();
     return value;
   }
+  if (lastRetryWasRateLimited) throw new RefreshRateLimitedError();
   throw new Error("Unable to reach the sign-in service.");
 }
 

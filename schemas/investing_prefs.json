@@ -94,6 +94,19 @@
       "title": "Existing Sips",
       "type": "array"
     },
+    "fund_sip_overrides": {
+      "additionalProperties": {
+        "format": "decimal",
+        "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,2})?$",
+        "type": "string",
+        "x-unit": "INR"
+      },
+      "propertyNames": {
+        "format": "uuid"
+      },
+      "title": "Fund Sip Overrides",
+      "type": "object"
+    },
     "has_danish_pension_account": {
       "default": false,
       "title": "Has Danish Pension Account",

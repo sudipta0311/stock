@@ -432,12 +432,25 @@ function AssetForm({
     () => applyFieldRules(assetType, baseFormFields, watched),
     [assetType, baseFormFields, watched],
   );
+  const members = household.members;
+  const requiredFields = formFields.filter(
+    (field) => field.required && field.kind !== "hidden",
+  );
+  const memberField = formFields.find((field) => field.name === "member_id");
+  const multipleAdults =
+    members.filter((member) => member.relationship !== "child").length > 1;
+  const showMemberField = assetType === "fd" && multipleAdults && memberField;
+  const optionalFields = formFields.filter(
+    (field) =>
+      !field.required &&
+      field.kind !== "hidden" &&
+      !(showMemberField && field.name === "member_id"),
+  );
   const assetIdRef = useRef<string | null>(initialAsset?.id ?? null);
   const [savedAsset, setSavedAsset] = useState<AssetResponse | null>(
     initialAsset ?? null,
   );
   const savedAssetRef = useRef<AssetResponse | null>(initialAsset ?? null);
-  const members = household.members;
   const [fieldErrors, setFieldErrors] = useState<ApiFieldError[]>([]);
   const [clientErrors, setClientErrors] = useState<Record<string, string>>({});
   const [saveState, setSaveState] = useState<
@@ -454,6 +467,17 @@ function AssetForm({
   const queuedWrite = useRef(saveQueued);
   const lastSignature = useRef("");
   const localDraftKey = useRef(`${assetType}:${crypto.randomUUID()}`);
+
+  function revealAndFocusField(fieldName: string | undefined): void {
+    if (!fieldName) return;
+    if (
+      optionalFields.some((field) => field.name === fieldName) &&
+      moreDetailsRef.current
+    ) {
+      moreDetailsRef.current.open = true;
+    }
+    form.setFocus(fieldName as Path<AssetFormValues>);
+  }
 
   useEffect(() => {
     if (!initialAsset) return;
@@ -542,13 +566,13 @@ function AssetForm({
                 ? [
                     {
                       field: "rate_pct",
-                      message:
-                        "Enter the interest rate printed on your certificate",
+                      message: englishCopy.money_ui.rate_needed,
                       code: error.code,
                     },
                   ]
                 : error.errors;
             setFieldErrors(errors);
+            revealAndFocusField(errors[0]?.field);
             setSaveError(
               errors.length
                 ? "Please check the highlighted details."
@@ -621,11 +645,7 @@ function AssetForm({
     const errors = validateAssetValues(formFields, values);
     setClientErrors(errors);
     if (Object.keys(errors).length) {
-      if (
-        moreDetailsRef.current &&
-        optionalFields.some((field) => errors[field.name])
-      )
-        moreDetailsRef.current.open = true;
+      revealAndFocusField(Object.keys(errors)[0]);
       setSaveError("Please check the highlighted details.");
       setSaveState("error");
       return false;
@@ -932,19 +952,6 @@ function AssetForm({
     );
   }
 
-  const requiredFields = formFields.filter(
-    (field) => field.required && field.kind !== "hidden",
-  );
-  const memberField = formFields.find((field) => field.name === "member_id");
-  const multipleAdults =
-    members.filter((member) => member.relationship !== "child").length > 1;
-  const showMemberField = assetType === "fd" && multipleAdults && memberField;
-  const optionalFields = formFields.filter(
-    (field) =>
-      !field.required &&
-      field.kind !== "hidden" &&
-      !(showMemberField && field.name === "member_id"),
-  );
   const optionalFieldHasError = optionalFields.some(
     (field) =>
       clientErrors[field.name] ??

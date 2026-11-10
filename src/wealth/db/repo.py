@@ -93,6 +93,10 @@ def ensure_self_household_member(
     return member
 
 
+class HouseholdMemberLookupError(LookupError):
+    """The signed-in person no longer has a member in the selected household."""
+
+
 def acting_household_member(
     session: Session,
     actor_user_id: UUID,
@@ -106,10 +110,10 @@ def acting_household_member(
 
     access = session.get(HouseholdAccess, (household_owner_id, actor_user_id))
     if access is None or access.revoked_at is not None:
-        raise LookupError("The household member link is not active")
+        raise HouseholdMemberLookupError("The household member link is not active")
     member = session.get(HouseholdMember, access.member_id)
     if member is None or member.user_id != household_owner_id:
-        raise LookupError("The household member link is invalid")
+        raise HouseholdMemberLookupError("The household member link is invalid")
     return member
 
 

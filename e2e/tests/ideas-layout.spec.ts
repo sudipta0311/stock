@@ -36,15 +36,18 @@ test("Ideas keeps long names and the world fund rows on screen", async ({
     exact: true,
   });
   await expect(longName).toBeVisible();
-  const marketHeading = page.getByRole("heading", { name: "India", exact: true });
+  const marketHeading = page.getByRole("heading", {
+    name: "India",
+    exact: true,
+  });
   await expect(marketHeading).toHaveClass(/text-xs/);
-  await expect(marketHeading).toHaveClass(/text-muted-foreground/);
+  await expect(marketHeading).toHaveClass(/text-foreground\/80/);
   const ideaArticle = longName.locator("xpath=ancestor::article");
   const referencePrice = ideaArticle.getByText(/Reference price/);
   await expect(referencePrice).toBeVisible();
-  await expect(referencePrice.locator("xpath=preceding-sibling::*[1]")).toContainText(
-    "Buy in 3 parts",
-  );
+  await expect(
+    referencePrice.locator("xpath=preceding-sibling::*[1]"),
+  ).toContainText("Buy in 3 parts");
   await expect(
     page
       .getByRole("article")
@@ -61,15 +64,25 @@ test("Ideas keeps long names and the world fund rows on screen", async ({
   });
   await expect(fundsHeading).toBeVisible();
   await expect(fundsHeading.locator("..").getByRole("listitem")).toHaveCount(1);
-  await expect(page.getByRole("heading", { name: "World fund", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "World fund", exact: true }),
+  ).toBeVisible();
   const otherFunds = page.getByText("Other funds to compare", { exact: true });
   await expect(otherFunds).toBeVisible();
-  await expect(otherFunds.locator("xpath=ancestor::details")).not.toHaveAttribute("open");
-  await expect(page.getByRole("heading", { name: "S&P 500 fund", exact: true })).not.toBeVisible();
-  await expect(page.getByRole("heading", { name: "Nasdaq 100 fund", exact: true })).not.toBeVisible();
+  await expect(
+    otherFunds.locator("xpath=ancestor::details"),
+  ).not.toHaveAttribute("open");
+  await expect(
+    page.getByRole("heading", { name: "S&P 500 fund", exact: true }),
+  ).not.toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Nasdaq 100 fund", exact: true }),
+  ).not.toBeVisible();
   await otherFunds.click();
   for (const name of ["S&P 500 fund", "Nasdaq 100 fund"]) {
-    await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("heading", { name, exact: true }),
+    ).toBeVisible();
   }
   await expectFitsScreen(page);
   const alreadyOwned = page.getByText("You already own enough (1)");

@@ -72,7 +72,7 @@ export function SignedInDevicesPanel() {
                 {device.device_label}
                 {device.current ? " · This phone" : ""}
               </p>
-              <p className="mt-1 text-muted-foreground">
+              <p className="mt-1 text-foreground">
                 Added {formatDeviceDate(device.created_at)} · Last used{" "}
                 {formatDeviceDate(device.last_used_at)}
               </p>
