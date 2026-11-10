@@ -659,6 +659,25 @@ export const test = base.extend<{ live: LiveRuntime }>({
       });
 
       await warmApi(environment.apiUrl);
+      // A service worker installed while signing in keeps serving the build it
+      // cached; `serviceWorkers: "block"` only stops new registrations.
+      await page
+        .goto(new URL("/", environment.pwaUrl).toString(), {
+          waitUntil: "domcontentloaded",
+          timeout: 60_000,
+        })
+        .catch(() => undefined);
+      await page
+        .evaluate(async () => {
+          const registrations = navigator.serviceWorker
+            ? await navigator.serviceWorker.getRegistrations()
+            : [];
+          await Promise.all(registrations.map((item) => item.unregister()));
+          const names =
+            typeof caches === "undefined" ? [] : await caches.keys();
+          await Promise.all(names.map((name) => caches.delete(name)));
+        })
+        .catch(() => undefined);
       const runtime: LiveRuntime = {
         page,
         environment,
