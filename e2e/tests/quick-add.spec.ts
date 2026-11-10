@@ -29,8 +29,9 @@ test("quick add prefills EPF and explains an unreadable note", async ({
   await page.locator("summary").filter({ hasText: "Quick add" }).click();
   await expectFitsScreen(page);
   await page.getByLabel("Quick add").fill("random words");
+  // Chrome on Windows says "Unprocessable Content"; Chrome on Linux CI says "Entity".
   allowConsoleErrors(page, [
-    /^console: Failed to load resource: the server responded with a status of 422 \(Unprocessable Content\) @ http:\/\/127\.0\.0\.1:\d+\/v1\/assets\/quick-add$/,
+    /^console: Failed to load resource: the server responded with a status of 422 \(Unprocessable (?:Content|Entity)\) @ http:\/\/127\.0\.0\.1:\d+\/v1\/assets\/quick-add$/,
   ]);
   await page.getByRole("button", { name: "Add details" }).click();
   await expect(
