@@ -136,6 +136,7 @@ const section = {
   "about": {
     "title": "About",
     "version": "Version",
+    "app_version_line": "App version",
     "disclaimer": "For research and education. This is not personal investment advice.",
     "privacy": "Privacy information",
     "help": "Help and support",

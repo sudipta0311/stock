@@ -273,6 +273,17 @@ afterEach(() => {
 });
 
 describe("Settings", () => {
+  it("shows the build version and date at the bottom", async () => {
+    vi.stubGlobal("__APP_VERSION__", "c64abcd");
+    vi.stubGlobal("__APP_BUILD_DATE__", "11 Nov 2026");
+    renderSettings();
+
+    const versionLine = await screen.findByText(
+      "App version c64abcd · 11 Nov 2026",
+    );
+    expect(versionLine).toHaveClass("text-xs", "text-muted-foreground");
+  });
+
   it("lists signed-in devices and confirms sign-out everywhere", async () => {
     const user = userEvent.setup();
     renderSettings();

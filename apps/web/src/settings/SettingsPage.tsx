@@ -1695,6 +1695,11 @@ export function SettingsPage() {
           }}
         />
       </Sheet>
+
+      <p className="border-t border-line pt-3 text-center text-xs text-muted-foreground">
+        {englishCopy.settings.about.app_version_line} {__APP_VERSION__} ·{" "}
+        {__APP_BUILD_DATE__}
+      </p>
     </div>
   );
 }

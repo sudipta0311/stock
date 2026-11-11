@@ -1,4 +1,10 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../src/ui";
 
@@ -15,6 +21,11 @@ const register = vi.hoisted(() => ({
     | undefined,
 }));
 
+const offlineQueue = vi.hoisted(() => ({
+  writes: [] as unknown[],
+  listQueuedAssetWrites: vi.fn(async () => offlineQueue.writes),
+}));
+
 vi.mock("virtual:pwa-register/react", () => ({
   useRegisterSW: (options: typeof register.options) => {
     register.options = options;
@@ -28,31 +39,146 @@ vi.mock("virtual:pwa-register/react", () => ({
 vi.mock("../../src/pwa/offline-cache", () => ({
   syncOfflineCacheSetting: vi.fn(),
 }));
+vi.mock("../../src/money/offline-queue", () => ({
+  listQueuedAssetWrites: offlineQueue.listQueuedAssetWrites,
+}));
 
 const { PwaLifecycle } = await import("../../src/app/PwaLifecycle");
 
-function setVisibility(state: DocumentVisibilityState) {
+function setVisibility(state: DocumentVisibilityState): void {
   Object.defineProperty(document, "visibilityState", {
     configurable: true,
     get: () => state,
   });
 }
 
+function renderLifecycle() {
+  return render(
+    <ToastProvider>
+      <PwaLifecycle />
+    </ToastProvider>,
+  );
+}
+
+async function expectUpdateToast(): Promise<void> {
+  await screen.findByRole("button", { name: "Tap to refresh" });
+  expect(register.updateServiceWorker).not.toHaveBeenCalled();
+}
+
 afterEach(() => {
   register.needRefresh = false;
   register.options = undefined;
+  offlineQueue.writes = [];
+  register.updateServiceWorker.mockClear();
+  offlineQueue.listQueuedAssetWrites.mockClear();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
   Reflect.deleteProperty(document, "visibilityState");
 });
 
 describe("app updates", () => {
-  it("keeps the update notice open until the person taps refresh", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+  it("applies a waiting version after load without showing a toast", async () => {
     register.needRefresh = true;
-    render(
+    renderLifecycle();
+
+    await waitFor(() =>
+      expect(register.updateServiceWorker).toHaveBeenCalledWith(true),
+    );
+    expect(screen.queryByText("New version is ready")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Tap to refresh" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("applies a waiting version shortly after returning to the app", async () => {
+    const view = renderLifecycle();
+    setVisibility("hidden");
+    document.dispatchEvent(new Event("visibilitychange"));
+    setVisibility("visible");
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    register.needRefresh = true;
+    view.rerender(
       <ToastProvider>
         <PwaLifecycle />
       </ToastProvider>,
     );
+
+    await waitFor(() =>
+      expect(register.updateServiceWorker).toHaveBeenCalledWith(true),
+    );
+    expect(screen.queryByText("New version is ready")).not.toBeInTheDocument();
+  });
+
+  it("shows the toast when a field changes before the queue check completes", async () => {
+    let finishQueueCheck!: (writes: unknown[]) => void;
+    offlineQueue.listQueuedAssetWrites.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishQueueCheck = resolve;
+        }),
+    );
+    register.needRefresh = true;
+    const { container } = render(
+      <>
+        <input aria-label="Example field" />
+        <ToastProvider>
+          <PwaLifecycle />
+        </ToastProvider>
+      </>,
+    );
+
+    fireEvent.input(container.querySelector("input")!, {
+      target: { value: "changed" },
+    });
+    await act(async () => finishQueueCheck([]));
+    await expectUpdateToast();
+  });
+
+  it("shows the toast while a dialog is open", async () => {
+    register.needRefresh = true;
+    render(
+      <>
+        <div role="dialog" aria-modal="true">
+          Dialog content
+        </div>
+        <ToastProvider>
+          <PwaLifecycle />
+        </ToastProvider>
+      </>,
+    );
+
+    await expectUpdateToast();
+  });
+
+  it("shows the toast when an offline save is queued", async () => {
+    offlineQueue.writes = [{ key: "queued-save" }];
+    register.needRefresh = true;
+    renderLifecycle();
+
+    await expectUpdateToast();
+  });
+
+  it("shows the toast when the update arrives more than 15 seconds later", async () => {
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const view = renderLifecycle();
+    now += 15_001;
+    register.needRefresh = true;
+    view.rerender(
+      <ToastProvider>
+        <PwaLifecycle />
+      </ToastProvider>,
+    );
+
+    await expectUpdateToast();
+  });
+
+  it("keeps the toast until the person taps refresh", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    offlineQueue.writes = [{ key: "queued-save" }];
+    register.needRefresh = true;
+    renderLifecycle();
 
     const refresh = await screen.findByRole("button", {
       name: "Tap to refresh",
@@ -61,18 +187,13 @@ describe("app updates", () => {
       vi.advanceTimersByTime(60_000);
     });
     expect(screen.getByText("New version is ready")).toBeInTheDocument();
-    vi.useRealTimers();
 
     fireEvent.click(refresh);
     expect(register.updateServiceWorker).toHaveBeenCalledWith(true);
   });
 
   it("looks for a new version when the person comes back to the app", () => {
-    render(
-      <ToastProvider>
-        <PwaLifecycle />
-      </ToastProvider>,
-    );
+    renderLifecycle();
     const update = vi.fn(async () => undefined);
     register.options?.onRegisteredSW?.("/sw.js", {
       update,

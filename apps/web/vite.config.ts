@@ -80,8 +80,23 @@ export default defineConfig(({ mode }) => {
   const apiUrl = process.env.VITE_API_URL ?? env.VITE_API_URL;
   const oidcAuthority =
     process.env.VITE_OIDC_AUTHORITY ?? env.VITE_OIDC_AUTHORITY;
+  const appVersion = (
+    process.env.RENDER_GIT_COMMIT ||
+    process.env.GITHUB_SHA ||
+    "dev"
+  ).slice(0, 7);
+  const appBuildDate = new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date());
 
   return {
+    define: {
+      __APP_VERSION__: JSON.stringify(appVersion),
+      __APP_BUILD_DATE__: JSON.stringify(appBuildDate),
+    },
     resolve: { preserveSymlinks: true },
     plugins: [
       ...(sandboxBuild ? [typescriptPlugin()] : []),
