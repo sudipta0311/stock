@@ -58,6 +58,7 @@ export const API_PATHS = [
   "/v1/recorded-buys",
   "/v1/recorded-buys/{recorded_buy_id}",
   "/v1/research/ideas",
+  "/v1/securities/search",
   "/v1/statement-inbox/items",
   "/v1/statement-inbox/items/{item_id}",
   "/v1/statement-inbox/items/{item_id}/process",

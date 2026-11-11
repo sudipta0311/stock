@@ -236,6 +236,7 @@ def load_layouts(path: Path | None = None) -> tuple[Layout, ...]:
                 currency_default=str(
                     entry.get("currency_default", broker_defaults.get("currency", "INR"))
                 ),
+                wins_over_picker=bool(entry.get("wins_over_picker", False)),
             )
         )
     return tuple(result)
@@ -316,7 +317,7 @@ def _structurally_fits(kind: str, mapping: Mapping[str, str | None], matched: se
     required = _required_fields(kind)
     if not all(mapping.get(field) is not None for field in required):
         return False
-    identity_fields = ("isin", "symbol") if kind == "tradebook" else ("isin", "symbol", "name")
+    identity_fields = ("isin", "symbol", "name")
     return any(mapping.get(field) is not None for field in identity_fields)
 
 
@@ -376,7 +377,7 @@ def auto_map(
 ) -> tuple[Layout | None, str, dict[str, str | None]]:
     """Return an unambiguous layout when headers cover a safe set of required fields."""
     kind, mapping, ambiguous, matched = _guess_kind(headers, rows)
-    identity_fields = {"isin", "symbol"} if kind == "tradebook" else {"isin", "symbol", "name"}
+    identity_fields = {"isin", "symbol", "name"}
     required = _required_fields(kind)
     required_ambiguous = required & ambiguous
     identity_is_ambiguous = not any(mapping.get(field) for field in identity_fields) and bool(
@@ -685,7 +686,8 @@ def _column_header(row: Mapping[str, Any], layout: Layout, canonical: str) -> st
 
 def _column_value(row: Mapping[str, Any], layout: Layout, canonical: str) -> Any:
     header = _column_header(row, layout, canonical)
-    return row.get(header) if header is not None else None
+    value = row.get(header) if header is not None else None
+    return None if isinstance(value, str) and value.strip() == "-" else value
 
 
 def _decimal_value(value: Any, *, field: str) -> Decimal:
@@ -1081,7 +1083,8 @@ def parse_tradebook(
             continue
         isin = _text(_column_value(row, layout, "isin"))
         symbol, exchange_hint = _clean_broker_symbol(_text(_column_value(row, layout, "symbol")))
-        if isin is None and symbol is None:
+        name = _text(_column_value(row, layout, "name"))
+        if isin is None and symbol is None and name is None:
             continue
         exchange = _text(_column_value(row, layout, "exchange")) or exchange_hint
         result.append(
@@ -1092,6 +1095,7 @@ def parse_tradebook(
                 trade_type=trade_type,
                 quantity=quantity,
                 price=price,
+                name=name,
                 exchange=exchange,
                 order_id=_text(_column_value(row, layout, "order_id")),
                 trade_id=_text(_column_value(row, layout, "trade_id")),

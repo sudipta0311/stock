@@ -20,10 +20,11 @@ Each mutating API route is listed once. C58 tests run only in the narrow 360 × 
 | `PATCH /v1/households/access/{grantee_user_id}` | Settings → change an invited person's access | `save-household.spec.ts` |
 | `DELETE /v1/households/access/{grantee_user_id}` | Settings → remove a person's access | `save-household.spec.ts` |
 | `DELETE /v1/households/leave` | Settings → leave the family plan | `save-household.spec.ts` |
-| `POST /v1/imports` | Upload a synthetic CAS or broker file | `cas-import.spec.ts`, `broker-import.spec.ts`, `save-imports.spec.ts` |
+| `POST /v1/imports` | Upload a synthetic CAS or broker file | `cas-import.spec.ts`, `broker-import.spec.ts`, `save-imports.spec.ts`, `icici-portfolio-import.spec.ts` |
 | `POST /v1/imports/{job_id}/mapping` | Import review → Fix columns → Use these columns | `save-imports.spec.ts` |
-| `PATCH /v1/imports/{job_id}/items/{item_id}` | Import review → include or leave out a row | `save-imports.spec.ts` |
-| `POST /v1/imports/{job_id}/confirm` | Confirm selected rows from a statement | `cas-import.spec.ts`, `broker-import.spec.ts` |
+| `PATCH /v1/imports/{job_id}/items/{item_id}` | Import review → include a row, leave it out, or choose a share | `save-imports.spec.ts`, `icici-portfolio-import.spec.ts` |
+| `POST /v1/imports/{job_id}/confirm` | Confirm selected rows from a statement | `cas-import.spec.ts`, `broker-import.spec.ts`, `icici-portfolio-import.spec.ts` |
+| `GET /v1/securities/search` | Import review → find a share by name or symbol | `icici-portfolio-import.spec.ts` |
 | `DELETE /v1/imports/{job_id}` | Import review → discard the import | `save-imports.spec.ts` |
 | `POST /v1/loans/{loan_id}/events` | Loan details → record an extra payment or rate change | `save-loans.spec.ts` |
 | `DELETE /v1/loans/{loan_id}/events/{event_id}` | Loan details → delete a recorded update | `save-loans.spec.ts` |

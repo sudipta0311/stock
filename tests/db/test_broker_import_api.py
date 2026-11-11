@@ -32,6 +32,7 @@ from wealth.db.models import (
     FxRate,
     HoldingLot,
     HouseholdMember,
+    ImportItem,
     ImportJob,
     ImportTemplate,
     Profile,
@@ -59,7 +60,7 @@ def broker_api_client(
         env="test",
         auth_mode="dev",
         dev_auth_secret=secret,
-        database_url="postgresql://wealth_api@localhost/wealth_test",
+        database_url=migrated_database.api_database_url,
     )
     monkeypatch.setattr(db_session, "api_engine", lambda _url: migrated_database.api_engine)
     application = create_app(settings)
@@ -162,6 +163,241 @@ def test_0014_international_assets_migration_downgrades_and_upgrades(
             "WHERE table_schema = current_schema() AND table_name = 'securities'"
         ).scalars()
         assert {"domicile", "exchange"} <= set(columns)
+
+
+def test_icici_portfolio_matches_names_searches_and_accepts_owner_choice(
+    broker_api_client: tuple[TestClient, str], migrated_database: MigratedDatabase
+) -> None:
+    client, secret = broker_api_client
+    headers, claims = _identity(secret, "icici-portfolio")
+    user_id = _user_id(migrated_database, claims)
+    symbols = {
+        "Example Paints Limited": "SYNTH-ICICI-PAINT",
+        "Sample and Sons Limited": "SYNTH-ICICI-SONS",
+        "Nandi Wall's (India) Limited": "SYNTH-ICICI-NANDI",
+        "Alpha Nifty 50 ETF": "SYNTH-ICICI-NIFTY",
+        "Listed Synthetic Index Fund": "SYNTH-ICICI-PICK",
+    }
+    with system_session(migrated_database.owner_engine) as session:
+        member = ensure_self_household_member(session, user_id)
+        securities = [
+            Security(
+                market="IN",
+                symbol=symbol,
+                name=name,
+                security_type="etf" if "ETF" in name or "Fund" in name else "equity",
+                currency="INR",
+                sleeve="equity_india",
+                category="equity:india",
+            )
+            for name, symbol in symbols.items()
+        ]
+        foreign_security = Security(
+            market="US",
+            symbol="SYNTH-ICICI-US",
+            name="Synthetic US security",
+            security_type="equity",
+            currency="USD",
+            sleeve="equity_global",
+        )
+        session.add_all([*securities, foreign_security])
+        session.flush()
+        paint = next(
+            security for security in securities if security.name == "Example Paints Limited"
+        )
+        paint_id = paint.id
+        session.add(
+            HoldingLot(
+                user_id=user_id,
+                member_id=member.id,
+                security_id=paint.id,
+                quantity=Decimal("10"),
+                source="cas",
+            )
+        )
+        selected_etf_id = next(
+            security.id for security in securities if security.name == "Listed Synthetic Index Fund"
+        )
+        foreign_security_id = foreign_security.id
+        member_id = member.id
+
+    uploaded = _upload(
+        client,
+        headers,
+        "icici_direct_portfolio.csv",
+        _fixture("icici_direct_portfolio.csv"),
+        broker="nordnet",
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    job_id = uploaded.json()["job_id"]
+    detail = client.get(f"/v1/imports/{job_id}", headers=headers).json()
+    assert detail["broker"] == "icici_direct"
+    assert detail["market_default"] == "IN"
+    assert detail["currency_default"] == "INR"
+    assert detail["detected_broker"] == "icici_direct"
+    by_name = {item["name"]: item for item in detail["items"]}
+    assert by_name["Example Paints Ltd."]["status"] == "enrich"
+    assert by_name["Example Paints Ltd."]["matched_by"] == "name"
+    assert by_name["Sample & Sons Ltd"]["status"] == "new"
+    assert by_name["Nandi Walls (India) Limited"]["status"] == "new"
+    assert by_name["Alpha Nifty50 ETF"]["status"] == "new"
+    assert by_name["Mystery Basket ETF"]["status"] == "unknown"
+    assert by_name["Mystery Basket ETF"]["can_find_security"] is True
+    assert by_name["Alpha Nifty50 ETF"]["symbol"] == symbols["Alpha Nifty 50 ETF"]
+
+    zerodha_headers = b"Symbol,Qty,Average Price,Exchange\nSYNTH-C61-VESTED,3,25.00,NASDAQ\n"
+    zerodha_upload = _upload(
+        client,
+        headers,
+        "synthetic-vested-holdings.csv",
+        zerodha_headers,
+        broker="vested",
+    )
+    assert zerodha_upload.status_code == 201, zerodha_upload.text
+    zerodha_detail = client.get(
+        f"/v1/imports/{zerodha_upload.json()['job_id']}", headers=headers
+    ).json()
+    assert zerodha_detail["broker"] == "vested"
+    assert zerodha_detail["market_default"] == "US"
+    assert zerodha_detail["currency_default"] == "USD"
+    assert zerodha_detail["detected_broker"] is None
+
+    search = client.get(
+        "/v1/securities/search",
+        headers=headers,
+        params={"q": symbols["Listed Synthetic Index Fund"], "market": "IN"},
+    )
+    assert search.status_code == 200, search.text
+    assert search.json()[0] == {
+        "id": str(selected_etf_id),
+        "symbol": symbols["Listed Synthetic Index Fund"],
+        "name": "Listed Synthetic Index Fund",
+        "security_type": "etf",
+    }
+    short_search = client.get(
+        "/v1/securities/search", headers=headers, params={"q": " a ", "market": "IN"}
+    )
+    assert short_search.status_code == 422
+
+    unknown_item_id = by_name["Mystery Basket ETF"]["id"]
+    wrong_market = client.patch(
+        f"/v1/imports/{job_id}/items/{unknown_item_id}",
+        headers=headers,
+        json={"security_id": str(foreign_security_id)},
+    )
+    assert wrong_market.status_code == 422
+    selected = client.patch(
+        f"/v1/imports/{job_id}/items/{unknown_item_id}",
+        headers=headers,
+        json={"security_id": str(selected_etf_id)},
+    )
+    assert selected.status_code == 200, selected.text
+    assert selected.json()["status"] == "new"
+    assert selected.json()["symbol"] == symbols["Listed Synthetic Index Fund"]
+    assert selected.json()["matched_by"] == "owner"
+    assert selected.json()["match"]["security_id"] == str(selected_etf_id)
+    assert selected.json()["can_find_security"] is False
+
+    with system_session(migrated_database.owner_engine) as session:
+        nonbroker_job = ImportJob(
+            user_id=user_id,
+            member_id=member_id,
+            doc_type="nsdl_cas",
+            status="ready",
+            source="nsdl",
+            statement_date=_TODAY,
+            counts={},
+            parse_report={},
+        )
+        session.add(nonbroker_job)
+        session.flush()
+        nonbroker_item = ImportItem(
+            user_id=user_id,
+            job_id=nonbroker_job.id,
+            item_kind="equity",
+            payload={"market": "IN", "quantity": "1", "reason": "symbol_not_found"},
+            status="unknown",
+        )
+        session.add(nonbroker_item)
+        session.flush()
+        nonbroker_job_id = nonbroker_job.id
+        nonbroker_item_id = nonbroker_item.id
+    nonbroker_patch = client.patch(
+        f"/v1/imports/{nonbroker_job_id}/items/{nonbroker_item_id}",
+        headers=headers,
+        json={"security_id": str(selected_etf_id)},
+    )
+    assert nonbroker_patch.status_code == 422
+
+    us_unknown_upload = _upload(
+        client,
+        headers,
+        "synthetic-vested-unknown.csv",
+        (b"Name,Quantity,Average Price,Last Price\nSynthetic Foreign Holding,2,10.00,12.00\n"),
+        broker="vested",
+    )
+    assert us_unknown_upload.status_code == 201, us_unknown_upload.text
+    us_unknown_detail = client.get(
+        f"/v1/imports/{us_unknown_upload.json()['job_id']}", headers=headers
+    ).json()
+    us_unknown = us_unknown_detail["items"][0]
+    assert us_unknown["status"] == "unknown"
+    assert us_unknown["market"] == "US"
+    assert us_unknown["reason"] == "symbol_not_found"
+    assert us_unknown["can_find_security"] is False
+    us_patch = client.patch(
+        f"/v1/imports/{us_unknown_upload.json()['job_id']}/items/{us_unknown['id']}",
+        headers=headers,
+        json={"security_id": str(foreign_security_id)},
+    )
+    assert us_patch.status_code == 422
+
+    confirmed = client.post(f"/v1/imports/{job_id}/confirm", headers=headers)
+    assert confirmed.status_code == 200, confirmed.text
+    with system_session(migrated_database.owner_engine) as session:
+        saved_lot = session.scalar(
+            select(HoldingLot).where(
+                HoldingLot.user_id == user_id,
+                HoldingLot.security_id == paint_id,
+                HoldingLot.source == "cas",
+            )
+        )
+        assert saved_lot is not None
+        assert saved_lot.cost_per_unit == Decimal("90.0000")
+
+    tradebook = (
+        b"Company Name,Trade Date,Trade Type,Quantity,Price,Trade ID\n"
+        b"Sample & Sons Ltd,2026-10-01,Buy,2,50.00,SYNTH-ICICI-TRADE\n"
+        b"Unlisted Synthetic Company,2026-10-02,Buy,1,20.00,SYNTH-ICICI-UNKNOWN\n"
+    )
+    tradebook_upload = _upload(
+        client,
+        headers,
+        "synthetic-icici-tradebook.csv",
+        tradebook,
+        broker="icici_direct",
+    )
+    assert tradebook_upload.status_code == 201, tradebook_upload.text
+    tradebook_detail = client.get(
+        f"/v1/imports/{tradebook_upload.json()['job_id']}", headers=headers
+    ).json()
+    trade_item = next(
+        item for item in tradebook_detail["items"] if item["name"] == "Sample & Sons Ltd"
+    )
+    assert trade_item["matched_by"] == "name"
+    assert trade_item["symbol"] == symbols["Sample and Sons Limited"]
+    unknown_trade = next(
+        item for item in tradebook_detail["items"] if item["name"] == "Unlisted Synthetic Company"
+    )
+    assert unknown_trade["status"] == "unknown"
+    assert unknown_trade["reason"] == "symbol_not_found"
+    assert unknown_trade["can_find_security"] is False
+    trade_patch = client.patch(
+        f"/v1/imports/{tradebook_upload.json()['job_id']}/items/{unknown_trade['id']}",
+        headers=headers,
+        json={"security_id": str(selected_etf_id)},
+    )
+    assert trade_patch.status_code == 422
 
 
 def test_saxo_upload_cleans_symbols_and_reuses_valid_isins(

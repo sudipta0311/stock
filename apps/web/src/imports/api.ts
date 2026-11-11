@@ -10,10 +10,12 @@ export type ImportItem = Schema<"ImportItemResponse">;
 export type ImportUpload = Schema<"ImportUploadResponse">;
 export type ImportConfirmation = Schema<"ImportConfirmationResponse">;
 export type ImportMappingRequest = Schema<"ImportMappingRequest">;
+export type SecuritySearchResult = Schema<"SecuritySearchResult">;
 
 export type ImportFormat = "nsdl_cas" | "cams_kfin_cas" | "broker_statement";
 export type ImportItemUpdate = {
   status?: "accepted" | "rejected";
+  security_id?: string;
   override?: {
     kind: "equity" | "etf" | "mf" | "bond" | "sgb";
     sleeve:
@@ -26,6 +28,15 @@ export type ImportItemUpdate = {
       | "protection";
   };
 };
+
+export function searchSecurities(
+  query: string,
+  market: "IN" = "IN",
+  signal?: AbortSignal,
+): Promise<SecuritySearchResult[]> {
+  const params = new URLSearchParams({ q: query, market });
+  return apiFetch(`/v1/securities/search?${params.toString()}`, { signal });
+}
 
 export function listImports(): Promise<ImportJob[]> {
   return apiFetch("/v1/imports");

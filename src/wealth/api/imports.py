@@ -13,10 +13,10 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from sqlalchemy import delete, select, text, update
+from sqlalchemy import case, delete, func, select, text, update
 from sqlalchemy.orm import Session
 from starlette.datastructures import FormData, UploadFile
 from starlette.formparsers import MultiPartException, MultiPartParser
@@ -63,6 +63,7 @@ class ImportOverride(ImportApiModel):
 class ImportItemPatch(ImportApiModel):
     status: Literal["accepted", "rejected"] | None = None
     override: ImportOverride | None = None
+    security_id: UUID | None = None
 
 
 class ImportItemResponse(ImportApiModel):
@@ -85,6 +86,15 @@ class ImportItemResponse(ImportApiModel):
     match: dict[str, UUID | None]
     reason: str | None = None
     action: str | None = None
+    matched_by: str | None = None
+    can_find_security: bool
+
+
+class SecuritySearchResult(ImportApiModel):
+    id: UUID
+    symbol: str
+    name: str
+    security_type: Literal["equity", "etf"]
 
 
 class ImportJobResponse(ImportApiModel):
@@ -114,6 +124,7 @@ class ImportDetailResponse(ImportJobResponse):
     needs_market_default: bool = False
     needs_currency_default: bool = False
     broker: str | None = None
+    detected_broker: str | None = None
     market_default: Literal["IN", "US", "DK", "EU", "GB"] = "US"
     currency_default: Literal["INR", "USD", "EUR", "DKK", "GBP", "SEK"] = "USD"
     tax_wrapper: Literal["ask", "ordinary", "pension"] | None = None
@@ -275,7 +286,19 @@ def _holding_payload(
     return payload
 
 
-def _get_item_response(item: Any) -> dict[str, Any]:
+def _can_find_security(job: Any | None, item: Any) -> bool:
+    payload = item.payload
+    return (
+        job is not None
+        and job.source == "broker"
+        and item.status == "unknown"
+        and payload.get("reason") == "symbol_not_found"
+        and payload.get("broker_kind") == "holdings"
+        and str(payload.get("market") or "").upper() == "IN"
+    )
+
+
+def _get_item_response(item: Any, job: Any | None = None) -> dict[str, Any]:
     payload = item.payload
     override = item.user_override or {}
     statement_value = payload.get("statement_value")
@@ -314,6 +337,8 @@ def _get_item_response(item: Any) -> dict[str, Any]:
         "match": {"lot_id": item.match_lot_id, "security_id": item.match_security_id},
         "reason": payload.get("reason"),
         "action": payload.get("merge_status"),
+        "matched_by": payload.get("matched_by"),
+        "can_find_security": _can_find_security(job, item),
     }
 
 
@@ -427,11 +452,49 @@ def _make_job_items(
 def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
     """Create tenant-scoped CAS upload, review, and confirmation routes."""
     from wealth.api.money_map import get_today
-    from wealth.db.models import AuditLog, ImportItem, ImportJob
+    from wealth.db.models import AuditLog, ImportItem, ImportJob, Security
 
     router = APIRouter()
     auth_dependency = Depends(authenticated_user)
     today_dependency = Depends(get_today)
+
+    @router.get("/v1/securities/search", response_model=list[SecuritySearchResult])
+    def search_securities(
+        request: Request,
+        q: str = Query(..., min_length=1, max_length=80),
+        market: Literal["IN", "US", "DK", "EU", "GB"] = Query(...),
+        user: Any = auth_dependency,
+    ) -> Any:
+        query = q.strip().casefold()
+        if len(query) < 2:
+            return _problem(request, 422, "invalid_search", "Enter at least two characters.")
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        rows = user.session.scalars(
+            select(Security)
+            .where(
+                Security.market == market,
+                Security.symbol.is_not(None),
+                Security.security_type.in_(("equity", "etf")),
+                (
+                    func.lower(Security.symbol).like(f"{escaped}%", escape="\\")
+                    | func.lower(Security.name).like(f"%{escaped}%", escape="\\")
+                ),
+            )
+            .order_by(
+                case((func.lower(Security.symbol) == query, 0), else_=1),
+                func.lower(Security.name),
+            )
+            .limit(8)
+        )
+        return [
+            {
+                "id": security.id,
+                "symbol": security.symbol,
+                "name": security.name,
+                "security_type": security.security_type,
+            }
+            for security in rows
+        ]
 
     @router.post(
         "/v1/imports",
@@ -640,6 +703,12 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             market_default, currency_default = broker_defaults(broker_name)
             templates = available_templates(user.session, user.household_owner_id)
             layout = find_layout(headers, templates, broker_name) if activity is None else None
+            detected_broker = None
+            if layout is not None and layout.wins_over_picker:
+                if layout.broker.casefold() != broker_name.casefold():
+                    detected_broker = layout.broker
+                broker_name = layout.broker
+                market_default, currency_default = broker_defaults(broker_name)
             auto_mapped = False
             mapping_kind: str | None = None
             mapping: dict[str, str | None] = {}
@@ -679,6 +748,7 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
                 parse_report={
                     "warnings": list(activity.warnings) if activity is not None else [],
                     "broker": broker_name,
+                    **({"detected_broker": detected_broker} if detected_broker else {}),
                     "market_default": market_default,
                     "currency_default": currency_default,
                     "auto_mapped": auto_mapped,
@@ -836,7 +906,7 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
         report = job.parse_report or {}
         return {
             **_job_response(job),
-            "items": [_get_item_response(item) for item in items],
+            "items": [_get_item_response(item, job) for item in items],
             "headers": report.get("headers"),
             "samples": report.get("samples", []),
             "suggested_mapping": report.get("suggested_mapping", {}),
@@ -848,6 +918,7 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             "needs_market_default": report.get("needs_market_default", False),
             "needs_currency_default": report.get("needs_currency_default", False),
             "broker": report.get("broker"),
+            "detected_broker": report.get("detected_broker"),
             "market_default": report.get("market_default", "US"),
             "currency_default": report.get("currency_default", "USD"),
             "tax_wrapper": report.get("tax_wrapper"),
@@ -1029,7 +1100,7 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
         )
         return {
             **_job_response(job),
-            "items": [_get_item_response(item) for item in items],
+            "items": [_get_item_response(item, job) for item in items],
             "headers": (job.parse_report or {}).get("headers"),
             "samples": (job.parse_report or {}).get("samples", []),
             "suggested_mapping": (job.parse_report or {}).get("suggested_mapping", {}),
@@ -1041,6 +1112,7 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
             "needs_market_default": (job.parse_report or {}).get("needs_market_default", False),
             "needs_currency_default": (job.parse_report or {}).get("needs_currency_default", False),
             "broker": (job.parse_report or {}).get("broker"),
+            "detected_broker": (job.parse_report or {}).get("detected_broker"),
             "market_default": (job.parse_report or {}).get("market_default", "US"),
             "currency_default": (job.parse_report or {}).get("currency_default", "USD"),
             "tax_wrapper": (job.parse_report or {}).get("tax_wrapper"),
@@ -1076,10 +1148,67 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
         try:
             raw = await request.json()
             patch = ImportItemPatch.model_validate(raw)
-            if patch.status is None and patch.override is None:
+            if patch.status is None and patch.override is None and patch.security_id is None:
                 raise ValueError("An item status or override is required.")
         except (ValueError, ValidationError):
             return _problem(request, 422, "invalid_item_update", "The item update is invalid.")
+
+        if patch.security_id is not None:
+            if patch.status is not None or patch.override is not None:
+                return _problem(
+                    request,
+                    422,
+                    "invalid_security_match",
+                    "Choose a security for an unmatched broker row.",
+                )
+            if not _can_find_security(job, item):
+                return _problem(
+                    request,
+                    422,
+                    "invalid_security_match",
+                    "Choose a security for an unmatched broker row.",
+                )
+            security = user.session.scalar(select(Security).where(Security.id == patch.security_id))
+            row_market = str(item.payload.get("market") or "").upper()
+            if security is None or security.market != row_market:
+                return _problem(
+                    request,
+                    422,
+                    "invalid_security_match",
+                    "Choose a security from the same market as this row.",
+                )
+            from wealth.api.broker_imports import _holding_match_status
+
+            report = job.parse_report or {}
+            source_broker = str(report.get("detected_broker") or report.get("broker") or "other")
+            status, diff, match_lot_id, reason = _holding_match_status(
+                user.session,
+                user.household_owner_id,
+                job,
+                item.payload,
+                security,
+                source_broker,
+            )
+            payload = dict(item.payload)
+            payload.update(
+                {
+                    "symbol": security.symbol,
+                    "isin": security.isin,
+                    "matched_by": "owner",
+                    "merge_status": status,
+                }
+            )
+            if status == "unknown":
+                payload["reason"] = reason
+            else:
+                payload.pop("reason", None)
+            item.payload = payload
+            item.status = status
+            item.match_security_id = security.id
+            item.match_lot_id = match_lot_id
+            item.diff = diff
+            user.session.flush()
+            return _get_item_response(item, job)
 
         if patch.override is not None:
             if job.source == "broker":
@@ -1105,7 +1234,7 @@ def build_router(authenticated_user: Callable[..., Any]) -> APIRouter:
         if patch.status is not None:
             item.status = patch.status
         user.session.flush()
-        return _get_item_response(item)
+        return _get_item_response(item, job)
 
     @router.post("/v1/imports/{job_id}/confirm", response_model=ImportConfirmationResponse)
     def confirm_import(

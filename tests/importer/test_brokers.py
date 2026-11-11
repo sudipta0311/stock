@@ -7,6 +7,7 @@ import zipfile
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -22,6 +23,7 @@ from wealth.api.broker_imports import (
 )
 from wealth.api.imports import _looks_like_text_csv
 from wealth.core.ids import isin_check_digit_ok
+from wealth.importer import match_security_name, normalize_security_name
 from wealth.importer.brokers import (
     Layout,
     Trade,
@@ -217,6 +219,59 @@ def test_mapping_defaults_are_asked_only_without_a_row_market_or_currency() -> N
         [{"Market": "EU", "Quantity": "2"}],
         {"market": "Market", "quantity": "Quantity"},
     ) == (False, True)
+
+
+def test_icici_direct_portfolio_layout_reads_total_quantity_and_average_cost() -> None:
+    filename = "icici_direct_portfolio.csv"
+    headers, rows = read_table(_fixture(filename), filename)
+    layout = detect_layout(headers, load_layouts())
+
+    assert layout is not None
+    assert (layout.broker, layout.kind, layout.verified) == (
+        "icici_direct",
+        "holdings",
+        True,
+    )
+    assert layout.wins_over_picker is True
+    assert {candidate.broker for candidate in load_layouts() if candidate.wins_over_picker} == {
+        "icici_direct"
+    }
+    assert layout.columns["quantity"] == ("Qty",)
+    assert layout.columns["avg_price"] == ("Average Cost Value",)
+    assert "symbol" not in layout.columns
+    holdings = parse_holdings(rows, layout)
+    assert len(headers) == 23
+    assert len(holdings) == 5
+    assert holdings[0].quantity == Decimal("10")
+    assert holdings[0].avg_price == Decimal("90")
+    assert holdings[0].symbol is None
+    assert holdings[1].quantity == Decimal("4")
+    assert holdings[1].last_price is None
+    assert holdings[1].market_value is None
+
+
+def test_security_name_matching_is_normalized_unique_and_has_a_compact_pass() -> None:
+    assert normalize_security_name("Example Paints Ltd.") == normalize_security_name(
+        "EXAMPLE PAINTS LIMITED"
+    )
+    assert normalize_security_name("Sample & Sons Ltd") == normalize_security_name(
+        "Sample and Sons Limited"
+    )
+    assert normalize_security_name("Nandi Wall's (India) Limited") == normalize_security_name(
+        "NANDI WALLS (INDIA) LIMITED"
+    )
+    listed_etf = SimpleNamespace(name="Alpha Nifty 50 ETF")
+    assert match_security_name("Alpha Nifty50 ETF", [listed_etf]) is listed_etf
+    assert (
+        match_security_name(
+            "Example Paints Ltd.",
+            [
+                SimpleNamespace(name="Example Paints Limited"),
+                SimpleNamespace(name="EXAMPLE PAINTS LTD."),
+            ],
+        )
+        is None
+    )
 
 
 def test_saved_template_is_selected_for_the_same_normalized_headers() -> None:

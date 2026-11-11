@@ -208,6 +208,19 @@ layouts:
       exchange: [exchange]
     verified: true
     source_note: "Legacy broker parser security-name, quantity, buy-price, and current-price aliases."
+  - broker: icici_direct
+    kind: holdings
+    fingerprint: [stock name, company name, cmp, average cost value, qty]
+    columns:
+      name: [Company Name]
+      quantity: [Qty]
+      avg_price: [Average Cost Value]
+      cost_value: [Invested Value]
+      last_price: [CMP]
+      market_value: [Current Value]
+    verified: true
+    wins_over_picker: true
+    source_note: "ICICI Direct portfolio download headers."
   - broker: angel_one
     kind: holdings
     fingerprint: [trading symbol, quantity, average price, exchange]

@@ -2724,6 +2724,17 @@
             "title": "Currency Mismatch Values",
             "type": "integer"
           },
+          "detected_broker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detected Broker"
+          },
           "doc_type": {
             "title": "Doc Type",
             "type": "string"
@@ -2963,6 +2974,10 @@
             ],
             "title": "Amount"
           },
+          "can_find_security": {
+            "title": "Can Find Security",
+            "type": "boolean"
+          },
           "currency": {
             "anyOf": [
               {
@@ -3035,6 +3050,17 @@
             },
             "title": "Match",
             "type": "object"
+          },
+          "matched_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Matched By"
           },
           "name": {
             "title": "Name",
@@ -3115,7 +3141,8 @@
           "sleeve",
           "status",
           "diff",
-          "match"
+          "match",
+          "can_find_security"
         ],
         "title": "ImportItemResponse",
         "type": "object"
@@ -7526,6 +7553,40 @@
           "balance"
         ],
         "title": "SavingsAsset",
+        "type": "object"
+      },
+      "SecuritySearchResult": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "security_type": {
+            "enum": [
+              "equity",
+              "etf"
+            ],
+            "title": "Security Type",
+            "type": "string"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "symbol",
+          "name",
+          "security_type"
+        ],
+        "title": "SecuritySearchResult",
         "type": "object"
       },
       "SignedInSession": {
@@ -13512,6 +13573,88 @@
           }
         ],
         "summary": "Get Research Ideas"
+      }
+    },
+    "/v1/securities/search": {
+      "get": {
+        "operationId": "search_securities_v1_securities_search_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": true,
+            "schema": {
+              "maxLength": 80,
+              "minLength": 1,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "market",
+            "required": true,
+            "schema": {
+              "enum": [
+                "IN",
+                "US",
+                "DK",
+                "EU",
+                "GB"
+              ],
+              "title": "Market",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Household",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Household"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SecuritySearchResult"
+                  },
+                  "title": "Response Search Securities V1 Securities Search Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Search Securities"
       }
     },
     "/v1/statement-inbox/items": {

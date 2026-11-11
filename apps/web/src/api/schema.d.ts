@@ -1,4 +1,4 @@
-// OpenAPI SHA256: 61a96304c1ada1b6afec90f7127943c06e6ca6771b9070362b4ef253a82ef9ff
+// OpenAPI SHA256: ee4284c57c2fa1e539ebe05359c1aa883c4de340c86f6bcdc6cf717fc24d0855
 export interface paths {
     "/healthz": {
         parameters: {
@@ -999,6 +999,23 @@ export interface paths {
         };
         /** Get Research Ideas */
         get: operations["get_research_ideas_v1_research_ideas_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/securities/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Search Securities */
+        get: operations["search_securities_v1_securities_search_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2132,6 +2149,8 @@ export interface components {
              * @default 0
              */
             currency_mismatch_values: number;
+            /** Detected Broker */
+            detected_broker?: string | null;
             /** Doc Type */
             doc_type: string;
             /** Error Code */
@@ -2205,6 +2224,8 @@ export interface components {
             action?: string | null;
             /** Amount */
             amount?: string | null;
+            /** Can Find Security */
+            can_find_security: boolean;
             /** Currency */
             currency?: string | null;
             /** Diff */
@@ -2228,6 +2249,8 @@ export interface components {
             match: {
                 [key: string]: string | null;
             };
+            /** Matched By */
+            matched_by?: string | null;
             /** Name */
             name: string;
             /** Quantity */
@@ -3826,6 +3849,23 @@ export interface components {
             member_id?: string | null;
             /** Notes */
             notes?: string | null;
+        };
+        /** SecuritySearchResult */
+        SecuritySearchResult: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /**
+             * Security Type
+             * @enum {string}
+             */
+            security_type: "equity" | "etf";
+            /** Symbol */
+            symbol: string;
         };
         /** SignedInSession */
         SignedInSession: {
@@ -6943,6 +6983,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResearchIdeasResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_securities_v1_securities_search_get: {
+        parameters: {
+            query: {
+                q: string;
+                market: "IN" | "US" | "DK" | "EU" | "GB";
+            };
+            header?: {
+                "X-Household"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecuritySearchResult"][];
                 };
             };
             /** @description Validation Error */

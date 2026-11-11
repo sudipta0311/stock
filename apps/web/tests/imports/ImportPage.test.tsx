@@ -65,6 +65,7 @@ function item(overrides: Partial<ImportItem> = {}): ImportItem {
     status: "new",
     diff: null,
     match: {},
+    can_find_security: false,
     ...overrides,
   };
 }
@@ -872,5 +873,131 @@ describe("statement import review", () => {
 
     expect(await screen.findByText("Money screen")).toBeInTheDocument();
     expect(deleteRequest).toHaveBeenCalledOnce();
+  });
+
+  it("finds a share for an unmatched broker row and moves it into the new group", async () => {
+    const user = userEvent.setup();
+    const patchBody = vi.fn();
+    server.use(
+      http.get(`/v1/imports/${jobId}`, () =>
+        HttpResponse.json(
+          reviewDetail({
+            source: "broker",
+            detected_broker: "icici_direct",
+            items: [
+              item({
+                id: "item-existing-new",
+                name: "Synthetic matched share",
+              }),
+              item({
+                id: "item-unknown",
+                status: "unknown",
+                kind: "unknown",
+                sleeve: null,
+                reason: "symbol_not_found",
+                name: "Mystery Basket ETF",
+                can_find_security: true,
+              }),
+            ],
+            counts: { new: 1, changed: 0, duplicate: 0, unknown: 1 },
+          }),
+        ),
+      ),
+      http.get("/v1/securities/search", ({ request }) => {
+        const url = new URL(request.url);
+        expect(url.searchParams.get("q")).toBe("SYNTH-ICICI-PICK");
+        expect(url.searchParams.get("market")).toBe("IN");
+        return HttpResponse.json([
+          {
+            id: "security-picked",
+            symbol: "SYNTH-ICICI-PICK",
+            name: "Listed Synthetic Index Fund",
+            security_type: "etf",
+          },
+        ]);
+      }),
+      http.patch(
+        `/v1/imports/${jobId}/items/item-unknown`,
+        async ({ request }) => {
+          patchBody(await request.json());
+          return HttpResponse.json(
+            item({
+              id: "item-unknown",
+              status: "new",
+              kind: "etf",
+              sleeve: "equity_india",
+              reason: null,
+              action: "new",
+              name: "Mystery Basket ETF",
+              symbol: "SYNTH-ICICI-PICK",
+              match: { lot_id: null, security_id: "security-picked" },
+              matched_by: "owner",
+            }),
+          );
+        },
+      ),
+    );
+    renderReview();
+
+    expect(
+      await screen.findByText("We read this as a file from ICICI Direct."),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("checkbox", { name: /Mystery Basket ETF/ }),
+    ).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Find this share" }));
+    const search = screen.getByLabelText("Share name or NSE symbol");
+    expect(search).toBeVisible();
+    await user.type(search, "SYNTH-ICICI-PICK");
+    const result = await screen.findByRole("button", {
+      name: "SYNTH-ICICI-PICK · Listed Synthetic Index Fund",
+    });
+    await user.click(result);
+
+    const row = await screen.findByRole("checkbox", {
+      name: /Mystery Basket ETF/,
+    });
+    expect(row).toBeChecked();
+    expect(
+      screen.queryByRole("heading", { name: "Need review" }),
+    ).not.toBeInTheDocument();
+    expect(patchBody).toHaveBeenCalledWith({ security_id: "security-picked" });
+  });
+
+  it("hides share search when the server says this row cannot be searched", async () => {
+    server.use(
+      http.get(`/v1/imports/${jobId}`, () =>
+        HttpResponse.json(
+          reviewDetail({
+            source: "broker",
+            items: [
+              item({
+                id: "item-existing-new",
+                name: "Synthetic matched holding",
+              }),
+              item({
+                id: "item-us-unknown",
+                status: "unknown",
+                kind: "unknown",
+                sleeve: null,
+                reason: "symbol_not_found",
+                name: "Synthetic foreign holding",
+                market: "US",
+                can_find_security: false,
+              }),
+            ],
+            counts: { new: 1, changed: 0, duplicate: 0, unknown: 1 },
+          }),
+        ),
+      ),
+    );
+    renderReview();
+
+    expect(
+      await screen.findByRole("heading", { name: "Need review" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Find this share" }),
+    ).not.toBeInTheDocument();
   });
 });

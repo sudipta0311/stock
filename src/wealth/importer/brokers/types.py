@@ -7,6 +7,8 @@ from datetime import date
 from decimal import Decimal
 from typing import Literal
 
+from wealth.importer.security_names import normalize_security_name
+
 
 @dataclass(frozen=True)
 class Layout:
@@ -19,6 +21,7 @@ class Layout:
     header_fingerprint: str | None = None
     market_default: str = "IN"
     currency_default: str = "INR"
+    wins_over_picker: bool = False
 
 
 @dataclass(frozen=True)
@@ -44,6 +47,7 @@ class Trade:
     trade_type: Literal["buy", "sell"]
     quantity: Decimal
     price: Decimal
+    name: str | None = None
     exchange: str | None = None
     order_id: str | None = None
     trade_id: str | None = None
@@ -56,6 +60,8 @@ class Trade:
     @property
     def security_key(self) -> str:
         identity = self.isin or f"{self.exchange or ''}:{self.symbol or ''}"
+        if self.isin is None and self.symbol is None and self.name:
+            identity = f"name:{normalize_security_name(self.name)}"
         return f"{self.market}:{self.currency}:{identity}".casefold()
 
 

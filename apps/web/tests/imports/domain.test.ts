@@ -23,6 +23,7 @@ function item(overrides: Partial<ImportItem> = {}): ImportItem {
     status: "new",
     diff: null,
     match: {},
+    can_find_security: false,
     ...overrides,
   };
 }

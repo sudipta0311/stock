@@ -15,6 +15,7 @@ import {
   getImport,
   mapImportColumns,
   patchImportItem,
+  searchSecurities,
   uploadImport,
 } from "./api";
 import type {
@@ -22,6 +23,7 @@ import type {
   ImportFormat,
   ImportItem,
   ImportMappingRequest,
+  SecuritySearchResult,
 } from "./api";
 import { importFeatureSupport } from "./features";
 import {
@@ -974,6 +976,45 @@ export function ImportReviewPage() {
     }
   }
 
+  async function chooseSecurity(
+    item: ImportItem,
+    security: SecuritySearchResult,
+  ) {
+    if (!detail) return;
+    setItemError("");
+    setSavingItems((current) => new Set(current).add(item.id));
+    try {
+      const updated = await patchImportItem(detail.id, item.id, {
+        security_id: security.id,
+      });
+      setDetail(
+        (current) =>
+          current && {
+            ...current,
+            items: current.items.map((currentItem) =>
+              currentItem.id === updated.id ? updated : currentItem,
+            ),
+          },
+      );
+      setCategoryById((current) => ({
+        ...current,
+        [item.id]: categoryForItem(updated),
+      }));
+      setSelectedById((current) => ({
+        ...current,
+        [item.id]: initialSelection(updated),
+      }));
+    } catch {
+      setItemError(englishCopy.imports.security_match_error);
+    } finally {
+      setSavingItems((current) => {
+        const next = new Set(current);
+        next.delete(item.id);
+        return next;
+      });
+    }
+  }
+
   async function selectAllNew() {
     if (!detail) return;
     const newItems = grouped.new;
@@ -1183,6 +1224,14 @@ export function ImportReviewPage() {
               {sourceLabel(detail.source)} ·{" "}
               {displayDate(detail.statement_date)}
             </p>
+            {detail.detected_broker ? (
+              <p className="mt-1 text-sm text-muted-foreground">
+                {englishCopy.imports.detected_broker.replace(
+                  "{broker}",
+                  brokerDisplayName(detail.detected_broker),
+                )}
+              </p>
+            ) : null}
           </div>
           <p className="text-sm text-muted-foreground">
             {allAlreadySaved
@@ -1237,6 +1286,14 @@ export function ImportReviewPage() {
           <p className="mt-1 text-sm text-muted-foreground">
             {sourceLabel(detail.source)} · {displayDate(detail.statement_date)}
           </p>
+          {detail.detected_broker ? (
+            <p className="mt-1 text-sm text-muted-foreground">
+              {englishCopy.imports.detected_broker.replace(
+                "{broker}",
+                brokerDisplayName(detail.detected_broker),
+              )}
+            </p>
+          ) : null}
         </div>
         {countSummary ? (
           <p className="text-sm font-medium" aria-label="Import item counts">
@@ -1495,9 +1552,28 @@ export function ImportReviewPage() {
                   </p>
                 </div>
                 {detail.source === "broker" ? (
-                  <p className="text-sm text-muted-foreground">
-                    {englishCopy.imports.mapping_unknown_heading}
-                  </p>
+                  <div className="grid gap-2">
+                    <p className="text-sm text-muted-foreground">
+                      {englishCopy.imports.mapping_unknown_heading}
+                    </p>
+                    {item.can_find_security ? (
+                      <FindSecurity
+                        item={item}
+                        disabled={saving || savingItems.has(item.id)}
+                        onSelect={(security) =>
+                          void chooseSecurity(item, security)
+                        }
+                      />
+                    ) : null}
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={saving || savingItems.has(item.id)}
+                      onClick={() => void updateStatus(item, false)}
+                    >
+                      {englishCopy.imports.mapping_leave_out}
+                    </Button>
+                  </div>
                 ) : (
                   <div className="grid grid-cols-2 gap-2">
                     <label
@@ -1550,16 +1626,7 @@ export function ImportReviewPage() {
                     </label>
                   </div>
                 )}
-                {detail.source === "broker" ? (
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    disabled={saving || savingItems.has(item.id)}
-                    onClick={() => void updateStatus(item, false)}
-                  >
-                    {englishCopy.imports.mapping_leave_out}
-                  </Button>
-                ) : (
+                {detail.source === "broker" ? null : (
                   <div className="grid grid-cols-2 gap-2">
                     <Button
                       type="button"
@@ -1621,6 +1688,104 @@ export function ImportReviewPage() {
         saving={saving}
         onDiscard={() => void discard()}
       />
+    </div>
+  );
+}
+
+function FindSecurity({
+  item,
+  disabled,
+  onSelect,
+}: {
+  item: ImportItem;
+  disabled: boolean;
+  onSelect(security: SecuritySearchResult): void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<SecuritySearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const trimmedQuery = query.trim();
+
+  useEffect(() => {
+    if (trimmedQuery.length < 2) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      setSearching(true);
+      void searchSecurities(trimmedQuery, "IN", controller.signal)
+        .then((matches) => {
+          if (!controller.signal.aborted) setResults(matches);
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) setResults([]);
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setSearching(false);
+        });
+    }, 250);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [trimmedQuery]);
+
+  return (
+    <div className="grid gap-2">
+      <Button
+        type="button"
+        variant="ghost"
+        className="min-h-11 justify-start px-2"
+        disabled={disabled}
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        {englishCopy.imports.find_security}
+      </Button>
+      {open ? (
+        <div className="grid gap-2">
+          <label
+            className="grid gap-1 text-sm font-medium"
+            htmlFor={`security-search-${item.id}`}
+          >
+            {englishCopy.imports.security_search_label}
+            <input
+              id={`security-search-${item.id}`}
+              value={query}
+              maxLength={80}
+              onChange={(event) => {
+                setQuery(event.currentTarget.value);
+                setResults([]);
+                setSearching(false);
+              }}
+              className="min-h-11 rounded-xl border border-line bg-surface px-3 text-base font-normal"
+            />
+          </label>
+          {results.length > 0 ? (
+            <ul
+              className="grid gap-1"
+              aria-label={englishCopy.imports.security_search_results}
+            >
+              {results.map((security) => (
+                <li key={security.id}>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="min-h-11 w-full justify-start whitespace-normal text-left"
+                    disabled={disabled}
+                    onClick={() => onSelect(security)}
+                  >
+                    {security.symbol} {" · "} {security.name}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          ) : trimmedQuery.length >= 2 && !searching ? (
+            <p className="text-sm text-muted-foreground">
+              {englishCopy.imports.security_search_empty}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

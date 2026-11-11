@@ -255,6 +255,43 @@ def _seed_broker_import_account(email: str) -> int:
         engine.dispose()
 
 
+def _seed_icici_portfolio_securities(email: str) -> int:
+    engine, _schema_name = _owner_engine()
+    securities = (
+        ("SYNTH-ICICI-PAINT", "Example Paints Limited", "equity"),
+        ("SYNTH-ICICI-SONS", "Sample and Sons Limited", "equity"),
+        ("SYNTH-ICICI-NANDI", "Nandi Wall's (India) Limited", "equity"),
+        ("SYNTH-ICICI-NIFTY", "Alpha Nifty 50 ETF", "etf"),
+        ("SYNTH-ICICI-PICK", "Listed Synthetic Index Fund", "etf"),
+    )
+    try:
+        with Session(engine) as session, session.begin():
+            user = session.scalar(select(User).where(User.email == email.casefold()))
+            if user is None:
+                raise RuntimeError("The synthetic e2e user was not found")
+            for symbol, name, security_type in securities:
+                security = session.scalar(
+                    select(Security).where(Security.market == "IN", Security.symbol == symbol)
+                )
+                if security is None:
+                    security = Security(
+                        market="IN",
+                        symbol=symbol,
+                        name=name,
+                        security_type=security_type,
+                        currency="INR",
+                        sleeve="equity_india",
+                        category="equity:india",
+                    )
+                    session.add(security)
+                else:
+                    security.name = name
+                    security.security_type = security_type
+        return 0
+    finally:
+        engine.dispose()
+
+
 def _seed_holding_reviews(email: str) -> int:
     engine, _schema_name = _owner_engine()
     today = date.today()
@@ -703,6 +740,8 @@ def main(argv: list[str] | None = None) -> int:
         return _seed_action(args[1])
     if len(args) == 2 and args[0] == "seed-broker-import-account":
         return _seed_broker_import_account(args[1])
+    if len(args) == 2 and args[0] == "seed-icici-portfolio-securities":
+        return _seed_icici_portfolio_securities(args[1])
     if len(args) == 2 and args[0] == "seed-holding-reviews":
         return _seed_holding_reviews(args[1])
     if len(args) == 2 and args[0] == "seed-denmark-buy":
