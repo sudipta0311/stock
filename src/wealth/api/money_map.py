@@ -20,7 +20,7 @@ from wealth.importer.quick_add import QuickAddNotUnderstood, parse_quick_add
 from wealth.policy.snapshot import WealthSnapshot
 from wealth.rates.reference import RateUnavailable
 from wealth.schemas.assets import AnyAsset, GoldAsset, LoanAsset, SavingsAsset, parse_asset
-from wealth.schemas.common import LiquidityClass, Rupees, Sleeve, ValuationMethod
+from wealth.schemas.common import LiquidityClass, Rupees, SignedRupees, Sleeve, ValuationMethod
 from wealth.schemas.profile import Goal as GoalInput
 from wealth.schemas.profile import (
     InvestingPrefs,
@@ -266,6 +266,9 @@ class HoldingValuationResponse(MoneyMapModel):
     quantity: str
     value: Rupees | None
     value_usd: str | None
+    cost_inr: Rupees | None = None
+    avg_cost_inr: Rupees | None = None
+    profit_loss_inr: SignedRupees | None = None
     currency: str
     price_as_of: date | None
     fx_as_of: date | None
@@ -357,9 +360,34 @@ def _merge_lots(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         for key in ("value", "value_usd"):
             known = [Decimal(item) for item in (current[key], row[key]) if item is not None]
             current[key] = format(sum(known, Decimal(0)), ".2f") if known else None
+        current_cost = current.get("cost_inr")
+        row_cost = row.get("cost_inr")
+        current["cost_inr"] = (
+            format(Decimal(current_cost) + Decimal(row_cost), "f")
+            if current_cost is not None and row_cost is not None
+            else None
+        )
         current["fx_missing"] = current["fx_missing"] or row["fx_missing"]
         current["status"] = max(current["status"], row["status"], key=_HOLDING_STATUS_ORDER.index)
     return list(merged.values())
+
+
+def _holding_cost_response(row: dict[str, Any]) -> dict[str, Any]:
+    from wealth.core.money import round_paise
+
+    cost_text = row.get("cost_inr")
+    if cost_text is None:
+        return {**row, "cost_inr": None, "avg_cost_inr": None, "profit_loss_inr": None}
+
+    cost = Decimal(cost_text)
+    quantity = Decimal(row["quantity"])
+    value = Decimal(row["value"]) if row["value"] is not None else None
+    return {
+        **row,
+        "cost_inr": _money(round_paise(cost)),
+        "avg_cost_inr": _money(round_paise(cost / quantity)) if quantity > 0 else None,
+        "profit_loss_inr": (_money(round_paise(value - cost)) if value is not None else None),
+    }
 
 
 def _valuation_json(valuation: Valuation) -> dict[str, Any]:
@@ -846,6 +874,10 @@ def refresh_networth_snapshot(
             if security.currency == "USD" and native_value is not None
             else None
         )
+        cost_per_unit_inr = lot.cost_per_unit if lot.currency == "INR" else lot.cost_per_unit_inr
+        cost_inr = (
+            format(cost_per_unit_inr * lot.quantity, "f") if cost_per_unit_inr is not None else None
+        )
         holding_values.append(
             {
                 "security_id": str(security.id),
@@ -855,6 +887,7 @@ def refresh_networth_snapshot(
                 "quantity": format(lot.quantity, ".6f"),
                 "value": _money(value),
                 "value_usd": value_usd,
+                "cost_inr": cost_inr,
                 "currency": security.currency,
                 "price_as_of": price_as_of.isoformat() if price_as_of else None,
                 "fx_as_of": fx_as_of.isoformat() if fx_as_of else None,
@@ -1081,7 +1114,10 @@ def refresh_networth_snapshot(
             if prices.market_data_as_of(today) is not None
             else None
         ),
-        "holdings": [*_merge_lots(holding_values), *recorded_holding_values],
+        "holdings": [
+            *(_holding_cost_response(row) for row in _merge_lots(holding_values)),
+            *recorded_holding_values,
+        ],
     }
     if not store_snapshot:
         return totals

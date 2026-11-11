@@ -3,6 +3,7 @@ import {
   expectFitsScreen,
   gotoApp,
   openFixedDepositForm,
+  seedMoneyListHoldings,
   startReadyAccount,
 } from "../support/app";
 import { allowConsoleErrors, expect, test } from "../support/save-test";
@@ -230,4 +231,24 @@ test("asset edits, offline replay, deletion, and checklist survive reload", asyn
     page.getByRole("button", { name: "PPF", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
   await expectFitsScreen(page);
+});
+
+test("show all opens only the selected holding list", async ({ page }) => {
+  const identity = await startReadyAccount(page, "money-holding-lists");
+  await seedMoneyListHoldings(identity.email);
+  await gotoApp(page, "/money");
+
+  const funds = page.getByRole("region", { name: "Funds" });
+  const shares = page.getByRole("region", { name: "Shares" });
+  const fundToggle = funds.getByRole("button", { name: "Show all 9" });
+  await expect(fundToggle).toBeVisible();
+  await expect(shares.getByRole("button", { name: "Show all 9" })).toBeVisible();
+  await expect(funds.getByText("Synthetic fund 1", { exact: true })).toHaveCount(0);
+  await expect(shares.getByText("Synthetic share 1", { exact: true })).toHaveCount(0);
+
+  await shares.getByRole("button", { name: "Show all 9" }).click();
+
+  await expect(shares.getByText("Synthetic share 1", { exact: true })).toBeVisible();
+  await expect(funds.getByText("Synthetic fund 1", { exact: true })).toHaveCount(0);
+  await expect(fundToggle).toBeVisible();
 });

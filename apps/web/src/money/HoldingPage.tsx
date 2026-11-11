@@ -54,6 +54,19 @@ function plainPercent(value: string): string {
   return value.replace(/^-/, "").replace(/(?:\.0+|(\.\d*?)0+)$/, "$1");
 }
 
+function minorUnits(value: string): bigint {
+  const [whole = "0", fraction = ""] = value.replace(/^-/, "").split(".");
+  return BigInt(whole) * 100n + BigInt((fraction + "00").slice(0, 2));
+}
+
+function profitPercent(profit: string, cost: string): string | null {
+  const costMinor = minorUnits(cost);
+  if (costMinor <= 0n) return null;
+  const profitMinor = minorUnits(profit);
+  const rounded = (profitMinor * 100n + costMinor / 2n) / costMinor;
+  return `${profit.startsWith("-") ? "-" : "+"}${rounded}%`;
+}
+
 function reasonText(raw: unknown): string {
   const reason = asRecord(raw);
   const code = textValue(reason.code, "default");
@@ -263,8 +276,19 @@ export function HoldingPage() {
       </Card>
     );
   const extra = asRecord(holding);
-  const costKnown = textValue(extra.cost_basis ?? extra.cost_value);
-  const pnl = textValue(extra.profit_loss ?? extra.pnl);
+  const costInr =
+    typeof holding.cost_inr === "string" ? holding.cost_inr : null;
+  const avgCostInr =
+    typeof holding.avg_cost_inr === "string" ? holding.avg_cost_inr : null;
+  const profitLoss =
+    typeof holding.profit_loss_inr === "string"
+      ? holding.profit_loss_inr
+      : null;
+  const costKnown = costInr !== null;
+  const profitPercentText =
+    profitLoss !== null && costInr !== null
+      ? profitPercent(profitLoss, costInr)
+      : null;
   const review = reviewFor(planData, holding.security_id);
   const copy = englishCopy.holding_review;
   return (
@@ -295,10 +319,19 @@ export function HoldingPage() {
         <div>
           <p className="text-sm text-muted-foreground">Profit or loss</p>
           <p
-            className={`mt-1 ${pnl && costKnown ? "font-semibold tabular-nums" : "text-sm font-normal text-muted-foreground"}`}
+            className={`mt-1 ${profitLoss !== null ? "font-semibold tabular-nums" : "text-sm font-normal text-muted-foreground"}`}
           >
-            {pnl && costKnown ? (
-              <MoneyValue amountInr={pnl} />
+            {profitLoss !== null ? (
+              <>
+                {profitLoss.startsWith("-") ? "-" : "+"}
+                <MoneyValue
+                  amountInr={profitLoss.replace(/^-/, "")}
+                  showSecondary={false}
+                />
+                {profitPercentText ? ` · ${profitPercentText}` : null}
+              </>
+            ) : costKnown ? (
+              "Not available"
             ) : (
               copy.buying_price_not_recorded
             )}
@@ -324,6 +357,26 @@ export function HoldingPage() {
           </p>
         ) : null}
         <dl className="grid gap-2 border-t border-line py-3 text-sm">
+          {costInr !== null ? (
+            <>
+              <div className="flex justify-between gap-3">
+                <dt className="text-muted-foreground">Bought for</dt>
+                <dd className="text-right tabular-nums">
+                  <MoneyValue amountInr={costInr} />
+                </dd>
+              </div>
+              {avgCostInr !== null ? (
+                <div className="flex justify-between gap-3">
+                  <dt className="text-muted-foreground">
+                    Average buying price
+                  </dt>
+                  <dd className="text-right tabular-nums">
+                    {formatInr(avgCostInr, "full")}
+                  </dd>
+                </div>
+              ) : null}
+            </>
+          ) : null}
           <div className="flex justify-between gap-3">
             <dt className="text-muted-foreground">Code</dt>
             <dd className="text-right">{holding.symbol}</dd>

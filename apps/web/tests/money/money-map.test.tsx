@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { HttpResponse, http } from "msw";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { useState } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { axe } from "vitest-axe";
 import englishCopy from "../../src/copy/en.json";
 import { AddAssetPage } from "../../src/money/AssetFormPage";
@@ -739,6 +739,92 @@ describe("Money Map", () => {
       expect(within(group).queryByText(/^TEST\d+$/)).toBeNull();
     }
     expect(screen.getByText("6 items")).toBeVisible();
+  });
+
+  it("opens only the selected holding group", async () => {
+    const user = userEvent.setup();
+    const makeHolding = (securityType: "equity" | "mf", index: number) => ({
+      added_by_you: false,
+      currency: "INR",
+      fx_as_of: null,
+      fx_missing: false,
+      name: `Synthetic ${securityType === "equity" ? "share" : "fund"} ${index + 1}`,
+      price_as_of: null,
+      price_source: "test",
+      quantity: "1",
+      security_id: `00000000-0000-4000-8000-${String(index + (securityType === "equity" ? 20 : 40)).padStart(12, "0")}`,
+      security_type: securityType,
+      status: "priced" as const,
+      units_entered: false,
+      symbol: `SYNTH-${securityType}-${index + 1}`,
+      value: `${index + 1}.00`,
+      value_usd: null,
+    });
+    const holdings = [
+      ...Array.from({ length: 9 }, (_, index) => makeHolding("mf", index)),
+      ...Array.from({ length: 9 }, (_, index) => makeHolding("equity", index)),
+    ];
+    server.use(...baseHandlers(networth({ holdings })));
+    renderMap();
+
+    const funds = await screen.findByRole("region", { name: "Funds" });
+    const shares = await screen.findByRole("region", { name: "Shares" });
+    expect(within(funds).queryByText("Synthetic fund 1")).toBeNull();
+    expect(within(shares).queryByText("Synthetic share 1")).toBeNull();
+
+    await user.click(
+      within(shares).getByRole("button", { name: "Show all 9" }),
+    );
+
+    expect(within(shares).getByText("Synthetic share 1")).toBeVisible();
+    expect(within(funds).queryByText("Synthetic fund 1")).toBeNull();
+    expect(
+      within(funds).getByRole("button", { name: "Show all 9" }),
+    ).toBeVisible();
+  });
+
+  it("scrolls an expanded group heading into view when showing fewer", async () => {
+    const user = userEvent.setup();
+    const holdings = Array.from({ length: 9 }, (_, index) => ({
+      added_by_you: false,
+      currency: "INR",
+      fx_as_of: null,
+      fx_missing: false,
+      name: `Synthetic share ${index + 1}`,
+      price_as_of: null,
+      price_source: "test",
+      quantity: "1",
+      security_id: `00000000-0000-4000-8000-${String(index + 60).padStart(12, "0")}`,
+      security_type: "equity",
+      status: "priced" as const,
+      units_entered: false,
+      symbol: `SYNTH-SHARE-${index + 1}`,
+      value: `${index + 1}.00`,
+      value_usd: null,
+    }));
+    server.use(...baseHandlers(networth({ holdings })));
+    renderMap();
+
+    const shares = await screen.findByRole("region", { name: "Shares" });
+    await user.click(
+      within(shares).getByRole("button", { name: "Show all 9" }),
+    );
+    const heading = within(shares).getByRole("heading", { name: "Shares" });
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(heading, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({ top: -10 }),
+    });
+    Object.defineProperty(heading, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+
+    await user.click(
+      within(shares).getByRole("button", { name: "Show fewer" }),
+    );
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "start" });
   });
 
   it("shows a recorded purchase, its value, and its edit and removal details", async () => {

@@ -9,6 +9,7 @@ import {
   PRIMARY_CURRENCY_STORAGE_KEY,
 } from "../../src/household/HouseholdContext";
 import { HoldingPage } from "../../src/money/HoldingPage";
+import type { NetworthResponse } from "../../src/money/api";
 import { networth, weeklyPlan } from "./fixtures";
 import { renderWithQueries } from "./render";
 import { server } from "../msw";
@@ -23,6 +24,9 @@ const holding = {
   quantity: "0.423700",
   value: "20000.00",
   value_usd: null,
+  cost_inr: null,
+  avg_cost_inr: null,
+  profit_loss_inr: null,
   currency: "INR",
   fx_as_of: null,
   fx_missing: false,
@@ -55,10 +59,14 @@ function reviewPlan() {
   });
 }
 
-function pageHandlers(withDanishMember = false, fxRate?: string) {
+function pageHandlers(
+  withDanishMember = false,
+  fxRate?: string,
+  currentHolding: NetworthResponse["holdings"][number] = holding,
+) {
   return [
     http.get(/\/v1\/networth$/, () =>
-      HttpResponse.json(networth({ holdings: [holding] })),
+      HttpResponse.json(networth({ holdings: [currentHolding] })),
     ),
     http.get(/\/v1\/plan$/, () => HttpResponse.json(reviewPlan())),
     ...(withDanishMember
@@ -113,6 +121,32 @@ function renderHolding(withHousehold = false) {
 }
 
 describe("holding review", () => {
+  it("shows a holding's buying cost and profit percentage", async () => {
+    const boughtHolding = {
+      ...holding,
+      value: "422000.00",
+      cost_inr: "132000.00",
+      avg_cost_inr: "1000.00",
+      profit_loss_inr: "290000.00",
+    } as const;
+    const user = userEvent.setup();
+    server.use(...pageHandlers(false, undefined, boughtHolding));
+    renderHolding();
+
+    expect(
+      await screen.findByRole("heading", { name: "Demo Company" }),
+    ).toBeVisible();
+    expect(screen.getByText("Profit or loss").parentElement).toHaveTextContent(
+      "+₹2.9 L · +220%",
+    );
+
+    await user.click(screen.getByText("Holding details"));
+    expect(screen.getByText("Bought for")).toBeVisible();
+    expect(screen.getByText("₹1.32 L")).toBeVisible();
+    expect(screen.getByText("Average buying price")).toBeVisible();
+    expect(screen.getByText("₹1,000.00")).toBeVisible();
+  });
+
   it("shows the value and leading reason before closed supporting sections", async () => {
     const user = userEvent.setup();
     const networthQueries: string[] = [];

@@ -18,6 +18,12 @@ _RUPEES_JSON_SCHEMA = {
     "format": "decimal",
     "x-unit": "INR",
 }
+_SIGNED_RUPEES_JSON_SCHEMA = {
+    "type": "string",
+    "pattern": r"^-?(0|[1-9][0-9]*)(\.[0-9]{1,2})?$",
+    "format": "decimal",
+    "x-unit": "INR",
+}
 _DANISH_KRONER_JSON_SCHEMA = {
     "type": "string",
     "pattern": r"^(0|[1-9][0-9]*)(\.[0-9]{1,2})?$",
@@ -189,6 +195,14 @@ Rupees = Annotated[
     PlainSerializer(_format_rupees, return_type=str, when_used="json"),
     WithJsonSchema(_RUPEES_JSON_SCHEMA, mode="validation"),
     WithJsonSchema(_RUPEES_JSON_SCHEMA, mode="serialization"),
+]
+SignedRupees = Annotated[
+    Decimal,
+    BeforeValidator(_strict_decimal),
+    AfterValidator(_at_most_two_places),
+    PlainSerializer(_format_rupees, return_type=str, when_used="json"),
+    WithJsonSchema(_SIGNED_RUPEES_JSON_SCHEMA, mode="validation"),
+    WithJsonSchema(_SIGNED_RUPEES_JSON_SCHEMA, mode="serialization"),
 ]
 CurrencyAmount = Annotated[
     Decimal,

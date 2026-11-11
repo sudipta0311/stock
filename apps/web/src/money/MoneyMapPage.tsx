@@ -423,8 +423,6 @@ function GroupAmount({
 function HoldingsGroup({
   title,
   holdings,
-  showAll,
-  onToggleShowAll,
   primaryCurrency,
   fxQuote,
   showSecondary,
@@ -433,20 +431,33 @@ function HoldingsGroup({
 }: {
   title: string;
   holdings: NetworthResponse["holdings"];
-  showAll: boolean;
-  onToggleShowAll(): void;
   primaryCurrency: "INR" | "DKK";
   fxQuote: DkkInrRate | undefined;
   showSecondary: boolean;
   onSelectRecordedBuy(holding: NetworthResponse["holdings"][number]): void;
   holdingReviews?: unknown;
 }) {
+  const [showAll, setShowAll] = useState(false);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const scrollHeadingOnCollapse = useRef(false);
+
+  useEffect(() => {
+    if (!scrollHeadingOnCollapse.current) return;
+    scrollHeadingOnCollapse.current = false;
+    const heading = headingRef.current;
+    if (heading && heading.getBoundingClientRect().top < 0) {
+      heading.scrollIntoView({ block: "start" });
+    }
+  }, [showAll]);
+
   if (!holdings.length) return null;
   return (
     <section className="grid gap-2" aria-label={title}>
       <Card className="grid gap-2">
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-card-title font-semibold">{title}</h2>
+          <h2 ref={headingRef} className="text-card-title font-semibold">
+            {title}
+          </h2>
           <GroupAmount
             amount={sumKnownValues(holdings.map((holding) => holding.value))}
             primaryCurrency={primaryCurrency}
@@ -543,7 +554,10 @@ function HoldingsGroup({
           <Button
             variant="secondary"
             aria-expanded={showAll}
-            onClick={onToggleShowAll}
+            onClick={() => {
+              if (showAll) scrollHeadingOnCollapse.current = true;
+              setShowAll((shown) => !shown);
+            }}
           >
             {showAll ? "Show fewer" : `Show all ${holdings.length}`}
           </Button>
@@ -992,7 +1006,6 @@ export function MoneyMapPage() {
     isViewer,
     fxRate,
   } = useHousehold();
-  const [showAllHoldings, setShowAllHoldings] = useState(false);
   const [checklist, setChecklist] = useState<string[]>(readChecklist);
   const [checklistError, setChecklistError] = useState("");
   const [showFundCheck, setShowFundCheck] = useState(false);
@@ -1372,8 +1385,6 @@ export function MoneyMapPage() {
         <HoldingsGroup
           title={englishCopy.money_ui.funds}
           holdings={fundHoldings}
-          showAll={showAllHoldings}
-          onToggleShowAll={() => setShowAllHoldings((shown) => !shown)}
           primaryCurrency={primaryCurrency}
           fxQuote={fxQuote}
           showSecondary={hasDanishMember}
@@ -1399,8 +1410,6 @@ export function MoneyMapPage() {
           title={englishCopy.money_ui.shares}
           holdings={shareHoldings}
           holdingReviews={plan?.holding_reviews}
-          showAll={showAllHoldings}
-          onToggleShowAll={() => setShowAllHoldings((shown) => !shown)}
           primaryCurrency={primaryCurrency}
           fxQuote={fxQuote}
           showSecondary={hasDanishMember}
@@ -1413,8 +1422,6 @@ export function MoneyMapPage() {
         <HoldingsGroup
           title={englishCopy.money_ui.bonds_and_gold_bonds}
           holdings={bondsAndGoldBonds}
-          showAll={showAllHoldings}
-          onToggleShowAll={() => setShowAllHoldings((shown) => !shown)}
           primaryCurrency={primaryCurrency}
           fxQuote={fxQuote}
           showSecondary={hasDanishMember}
@@ -1427,8 +1434,6 @@ export function MoneyMapPage() {
         <HoldingsGroup
           title={englishCopy.money_ui.other}
           holdings={otherHoldings}
-          showAll={showAllHoldings}
-          onToggleShowAll={() => setShowAllHoldings((shown) => !shown)}
           primaryCurrency={primaryCurrency}
           fxQuote={fxQuote}
           showSecondary={hasDanishMember}

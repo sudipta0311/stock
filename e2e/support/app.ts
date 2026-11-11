@@ -336,6 +336,10 @@ export function seedIciciPortfolioSecurities(email: string): Promise<void> {
   return runDatabaseCommand(["seed-icici-portfolio-securities", email]);
 }
 
+export function seedMoneyListHoldings(email: string): Promise<void> {
+  return runDatabaseCommand(["seed-money-list-holdings", email]);
+}
+
 export function seedHoldingReviews(email: string): Promise<void> {
   return runDatabaseCommand(["seed-holding-reviews", email]);
 }

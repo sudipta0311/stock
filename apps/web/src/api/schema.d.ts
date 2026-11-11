@@ -1,4 +1,4 @@
-// OpenAPI SHA256: ee4284c57c2fa1e539ebe05359c1aa883c4de340c86f6bcdc6cf717fc24d0855
+// OpenAPI SHA256: 862cc2e0584a9c6c758b0e7c6d4e9ae4de08863c90573da4656cd3a32392fea6
 export interface paths {
     "/healthz": {
         parameters: {
@@ -1941,8 +1941,12 @@ export interface components {
             amount?: string | null;
             /** Amount Currency */
             amount_currency?: string | null;
+            /** Avg Cost Inr */
+            avg_cost_inr?: string | null;
             /** Bought On */
             bought_on?: string | null;
+            /** Cost Inr */
+            cost_inr?: string | null;
             /** Currency */
             currency: string;
             /** Fx As Of */
@@ -1955,6 +1959,8 @@ export interface components {
             price_as_of: string | null;
             /** Price Source */
             price_source: string | null;
+            /** Profit Loss Inr */
+            profit_loss_inr?: string | null;
             /** Quantity */
             quantity: string;
             /** Recorded Buy Id */

@@ -292,6 +292,72 @@ def _seed_icici_portfolio_securities(email: str) -> int:
         engine.dispose()
 
 
+def _seed_money_list_holdings(email: str) -> int:
+    engine, _schema_name = _owner_engine()
+    try:
+        with Session(engine) as session, session.begin():
+            user = session.scalar(select(User).where(User.email == email.casefold()))
+            if user is None:
+                raise RuntimeError("The synthetic Money list user was not found")
+            member = session.scalar(
+                select(HouseholdMember).where(
+                    HouseholdMember.user_id == user.id,
+                    HouseholdMember.is_self.is_(True),
+                )
+            )
+            if member is None:
+                raise RuntimeError("The synthetic Money list household has no owner member")
+
+            groups = (
+                ("fund", "mf", "mf:equity"),
+                ("share", "equity", "equity:india"),
+            )
+            for label, security_type, category in groups:
+                for index in range(1, 10):
+                    symbol = f"C63-E2E-{label.upper()}-{index}"
+                    security = session.scalar(
+                        select(Security).where(
+                            Security.market == "IN", Security.symbol == symbol
+                        )
+                    )
+                    if security is None:
+                        security = Security(
+                            market="IN",
+                            symbol=symbol,
+                            name=f"Synthetic {label} {index}",
+                            security_type=security_type,
+                            currency="INR",
+                            sleeve="equity_india",
+                            category=category,
+                        )
+                        session.add(security)
+                        session.flush()
+
+                    lot = session.scalar(
+                        select(HoldingLot).where(
+                            HoldingLot.user_id == user.id,
+                            HoldingLot.security_id == security.id,
+                        )
+                    )
+                    if lot is None:
+                        session.add(
+                            HoldingLot(
+                                user_id=user.id,
+                                member_id=member.id,
+                                security_id=security.id,
+                                quantity=Decimal("1"),
+                                cost_per_unit=Decimal(index * 10),
+                                currency="INR",
+                                source="manual",
+                                statement_value=Decimal(1000 + index),
+                                statement_date=date.today(),
+                            )
+                        )
+        return 0
+    finally:
+        engine.dispose()
+
+
 def _seed_holding_reviews(email: str) -> int:
     engine, _schema_name = _owner_engine()
     today = date.today()
@@ -742,6 +808,8 @@ def main(argv: list[str] | None = None) -> int:
         return _seed_broker_import_account(args[1])
     if len(args) == 2 and args[0] == "seed-icici-portfolio-securities":
         return _seed_icici_portfolio_securities(args[1])
+    if len(args) == 2 and args[0] == "seed-money-list-holdings":
+        return _seed_money_list_holdings(args[1])
     if len(args) == 2 and args[0] == "seed-holding-reviews":
         return _seed_holding_reviews(args[1])
     if len(args) == 2 and args[0] == "seed-denmark-buy":
@@ -751,7 +819,8 @@ def main(argv: list[str] | None = None) -> int:
     if len(args) == 2 and args[0] == "verify-deleted":
         return _verify_deleted(args[1])
     print(
-        "Use setup, seed-action <synthetic-email>, seed-holding-reviews, seed-research-pack, "
+        "Use setup, seed-action <synthetic-email>, seed-holding-reviews, "
+        "seed-money-list-holdings <synthetic-email>, seed-research-pack, "
         "or verify-deleted <synthetic-email>."
     )
     return 2

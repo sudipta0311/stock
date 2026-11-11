@@ -6,7 +6,7 @@ import secrets
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import jwt
 import pytest
@@ -54,6 +54,227 @@ def _headers(secret: str, label: str) -> dict[str, str]:
         algorithm="HS256",
     )
     return {"Authorization": f"Bearer {token}"}
+
+
+def _seed_market_holding(
+    client: TestClient,
+    secret: str,
+    database: MigratedDatabase,
+    *,
+    label: str,
+    currency: str,
+    as_of: date,
+    lots: list[tuple[str, str | None, str | None, str | None]],
+) -> tuple[dict[str, str], UUID]:
+    headers = _headers(secret, label)
+    me = client.get("/v1/me", headers=headers).json()
+    member_id = UUID(me["me_member_id"])
+    token = headers["Authorization"].split(" ", 1)[1]
+    auth_subject = jwt.decode(token, secret, algorithms=["HS256"])["sub"]
+    with database.owner_engine.connect() as connection:
+        user_id = connection.scalar(select(User.id).where(User.auth_subject == auth_subject))
+    assert user_id is not None
+
+    symbol = f"SYNTH-{uuid4().hex[:8].upper()}"
+    isin = f"IN{uuid4().int % 10_000_000_000:010d}"
+    sleeve = "equity_global" if currency != "INR" else "equity_india"
+    category = "equity:global" if currency != "INR" else "equity:india"
+    with database.api_engine.begin() as connection:
+        security_id = connection.scalar(
+            text(
+                "SELECT app_upsert_security(:market, :isin, :symbol, :name, :kind, "
+                ":currency, :sleeve, :category)"
+            ),
+            {
+                "market": "IN",
+                "isin": isin,
+                "symbol": symbol,
+                "name": "Synthetic Cost Holding",
+                "kind": "equity",
+                "currency": currency,
+                "sleeve": sleeve,
+                "category": category,
+            },
+        )
+    assert security_id is not None
+
+    with system_session(database.owner_engine) as session:
+        if currency != "INR":
+            session.add(
+                FxRate(
+                    pair=f"{currency}/INR",
+                    as_of=as_of,
+                    rate=Decimal("80.00"),
+                    source="synthetic-test",
+                    source_url="https://example.test/fx",
+                )
+            )
+        for quantity, cost_per_unit, cost_per_unit_inr, statement_value in lots:
+            session.add(
+                HoldingLot(
+                    user_id=user_id,
+                    member_id=member_id,
+                    security_id=security_id,
+                    quantity=Decimal(quantity),
+                    cost_per_unit=(Decimal(cost_per_unit) if cost_per_unit is not None else None),
+                    cost_per_unit_inr=(
+                        Decimal(cost_per_unit_inr) if cost_per_unit_inr is not None else None
+                    ),
+                    currency=currency,
+                    source="broker",
+                    statement_value=(
+                        Decimal(statement_value) if statement_value is not None else None
+                    ),
+                    statement_date=as_of if statement_value is not None else None,
+                )
+            )
+    return headers, UUID(str(security_id))
+
+
+def _holding_from_networth(
+    client: TestClient, headers: dict[str, str], security_id: UUID
+) -> dict[str, object]:
+    response = client.get("/v1/networth", headers=headers)
+    assert response.status_code == 200, response.text
+    return next(
+        item for item in response.json()["holdings"] if item["security_id"] == str(security_id)
+    )
+
+
+def test_networth_reports_buying_cost_and_profit_across_all_lots(
+    api_client: tuple[TestClient, str, object],
+    migrated_database: MigratedDatabase,
+) -> None:
+    client, secret, application = api_client
+    as_of = date(2035, 2, 1)
+    application.dependency_overrides[get_today] = lambda: as_of + timedelta(days=1)
+    headers, security_id = _seed_market_holding(
+        client,
+        secret,
+        migrated_database,
+        label="cost-two-lots",
+        currency="INR",
+        as_of=as_of,
+        lots=[
+            ("2", "10", None, "40"),
+            ("3", "12", None, "90"),
+        ],
+    )
+
+    holding = _holding_from_networth(client, headers, security_id)
+
+    assert holding["quantity"] == "5.000000"
+    assert holding["value"] == "130.00"
+    assert holding["cost_inr"] == "56.00"
+    assert holding["avg_cost_inr"] == "11.20"
+    assert holding["profit_loss_inr"] == "74.00"
+
+
+def test_networth_hides_cost_when_any_lot_has_no_cost(
+    api_client: tuple[TestClient, str, object],
+    migrated_database: MigratedDatabase,
+) -> None:
+    client, secret, application = api_client
+    as_of = date(2035, 3, 1)
+    application.dependency_overrides[get_today] = lambda: as_of + timedelta(days=1)
+    headers, security_id = _seed_market_holding(
+        client,
+        secret,
+        migrated_database,
+        label="cost-missing-lot",
+        currency="INR",
+        as_of=as_of,
+        lots=[("2", "10", None, "40"), ("3", None, None, "90")],
+    )
+
+    holding = _holding_from_networth(client, headers, security_id)
+
+    assert holding["cost_inr"] is None
+    assert holding["avg_cost_inr"] is None
+    assert holding["profit_loss_inr"] is None
+
+
+@pytest.mark.parametrize(
+    ("cost_per_unit_inr", "expected_cost", "expected_average"),
+    [("50.25", "100.50", "50.25"), (None, None, None)],
+    ids=["inr-cost-available", "inr-cost-missing"],
+)
+def test_usd_lot_cost_uses_its_recorded_inr_unit_cost(
+    cost_per_unit_inr: str | None,
+    expected_cost: str | None,
+    expected_average: str | None,
+    api_client: tuple[TestClient, str, object],
+    migrated_database: MigratedDatabase,
+) -> None:
+    client, secret, application = api_client
+    as_of = date(2090, 1, 1) + timedelta(days=uuid4().int % 3000)
+    application.dependency_overrides[get_today] = lambda: as_of + timedelta(days=1)
+    headers, security_id = _seed_market_holding(
+        client,
+        secret,
+        migrated_database,
+        label=f"usd-cost-{uuid4().hex[:8]}",
+        currency="USD",
+        as_of=as_of,
+        lots=[("2", "10", cost_per_unit_inr, "2")],
+    )
+
+    holding = _holding_from_networth(client, headers, security_id)
+
+    assert holding["cost_inr"] == expected_cost
+    assert holding["avg_cost_inr"] == expected_average
+    if expected_cost is None:
+        assert holding["profit_loss_inr"] is None
+    else:
+        assert holding["profit_loss_inr"] == "59.50"
+
+
+def test_networth_keeps_cost_when_market_value_is_unknown(
+    api_client: tuple[TestClient, str, object],
+    migrated_database: MigratedDatabase,
+) -> None:
+    client, secret, application = api_client
+    as_of = date(2035, 4, 1)
+    application.dependency_overrides[get_today] = lambda: as_of + timedelta(days=1)
+    headers, security_id = _seed_market_holding(
+        client,
+        secret,
+        migrated_database,
+        label="cost-no-price",
+        currency="INR",
+        as_of=as_of,
+        lots=[("3", "12.34", None, None)],
+    )
+
+    holding = _holding_from_networth(client, headers, security_id)
+
+    assert holding["value"] is None
+    assert holding["cost_inr"] == "37.02"
+    assert holding["avg_cost_inr"] == "12.34"
+    assert holding["profit_loss_inr"] is None
+
+
+def test_networth_reports_a_negative_profit_loss(
+    api_client: tuple[TestClient, str, object],
+    migrated_database: MigratedDatabase,
+) -> None:
+    client, secret, application = api_client
+    as_of = date(2035, 5, 1)
+    application.dependency_overrides[get_today] = lambda: as_of + timedelta(days=1)
+    headers, security_id = _seed_market_holding(
+        client,
+        secret,
+        migrated_database,
+        label="cost-loss",
+        currency="INR",
+        as_of=as_of,
+        lots=[("2", "10", None, "12")],
+    )
+
+    holding = _holding_from_networth(client, headers, security_id)
+
+    assert holding["cost_inr"] == "20.00"
+    assert holding["profit_loss_inr"] == "-8.00"
 
 
 def test_member_account_asset_goal_and_quick_add_endpoints(

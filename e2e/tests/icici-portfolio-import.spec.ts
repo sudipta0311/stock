@@ -95,8 +95,13 @@ test("ICICI portfolio import recognizes names and lets me find one share", async
   ).toBeVisible();
   await page.getByRole("link", { name: "Go to Money" }).click();
   // The chosen share is saved under its listed name, not the broker's row name.
-  await expect(
-    page.getByRole("link", { name: /^Listed Synthetic Index Fund 5 units/ }),
-  ).toBeVisible();
+  const importedHolding = page.getByRole("link", {
+    name: /^Listed Synthetic Index Fund 5 units/,
+  });
+  await expect(importedHolding).toBeVisible();
   await expectFitsScreen(page);
+  await importedHolding.click();
+  const profitLoss = page.getByText("Profit or loss", { exact: true }).locator("..");
+  await expect(profitLoss).not.toContainText("Buying price not recorded");
+  await expect(profitLoss).toContainText(/\+.*· \+\d+%/);
 });
