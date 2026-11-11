@@ -81,6 +81,7 @@ Status: ⬜ not started · 🟦 in progress · ✅ accepted · 🔁 rework · �
 | C59 | The daily NSE share list survives ISIN changes: a symbol whose old ISIN left the list keeps its id and history; swaps are staged; rows are written in batches, and a conflicting row is skipped and named instead of failing the whole list | 5 | ✅ |
 | C60 | One news feed hiccup does not fail the daily data job: a single feed failure is a warning (exit 0, no GitHub failure email), all feeds failing is still an error, data health names a feed that fails three runs in a row, and a non-feed body reads `NotAFeed` | 3 | ✅ |
 | C61 | An ICICI Direct portfolio file imports: its layout is recognised whatever the broker picker says (only this flagged layout wins over the picker), Indian rows without ISIN or symbol match a listed share by a unique normalised company name, and a row that still does not match gets "Find this share" (`GET /v1/securities/search`, `PATCH` with `security_id`, Indian holdings only) | 4 | ✅ |
+| C62 | The fund price check skips market holidays: "fewer than half the usual rows" compares Indian fund prices only on dates with stored NSE share prices (the share rows are the trading calendar), so a holiday's few NAVs no longer fail data health; staleness is unchanged | 1 | ✅ |
 
 ## Follow-ups and review outcomes
 

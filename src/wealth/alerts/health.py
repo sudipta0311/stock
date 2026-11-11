@@ -26,6 +26,8 @@ from wealth.policy.residency import load_residency_rules
 PRICE_STALE_TRADING_DAYS = 2
 # Volume is compared with the ten earlier stored dates to spot empty refreshes.
 PRICE_HISTORY_DATES = 10
+# Fund NAV history includes weekends and holidays, so load extra dates to find trading days.
+FUND_PRICE_HISTORY_DATES = 40
 # A newest-day row count below half its normal median signals a partial price load.
 PRICE_MINIMUM_MEDIAN_RATIO = 0.5
 # FX sources publish daily, with weekends and short publication delays included.
@@ -220,10 +222,18 @@ def _check_price(
     workflow: str,
     stored_days: Sequence[DayRowCount],
     expected_date: date,
+    *,
+    volume_days: Sequence[DayRowCount] | None = None,
 ) -> dict[str, Any]:
     ordered = sorted(stored_days, key=lambda item: item.on, reverse=True)
     latest = ordered[0] if ordered else None
-    previous = ordered[1 : PRICE_HISTORY_DATES + 1]
+    ordered_volume_days = (
+        ordered
+        if volume_days is None
+        else sorted(volume_days, key=lambda item: item.on, reverse=True)
+    )
+    volume_latest = ordered_volume_days[0] if ordered_volume_days else None
+    previous = ordered_volume_days[1 : PRICE_HISTORY_DATES + 1]
     median_rows = (
         statistics.median([item.rows for item in previous])
         if len(previous) == PRICE_HISTORY_DATES
@@ -232,17 +242,19 @@ def _check_price(
     old_by = weekday_sessions_oldest_first(latest.on, expected_date) if latest is not None else None
     stale = old_by is None or old_by > PRICE_STALE_TRADING_DAYS
     low_volume = (
-        latest is not None
+        volume_latest is not None
         and median_rows is not None
-        and latest.rows < median_rows * PRICE_MINIMUM_MEDIAN_RATIO
+        and volume_latest.rows < median_rows * PRICE_MINIMUM_MEDIAN_RATIO
     )
     facts: dict[str, Any] = {
         "expected_date": expected_date.isoformat(),
         "latest_date": latest.on.isoformat() if latest is not None else None,
         "trading_days_old": old_by,
-        "latest_rows": latest.rows if latest is not None else 0,
+        "latest_rows": volume_latest.rows if volume_latest is not None else 0,
         "previous_dates": len(previous),
     }
+    if volume_days is not None:
+        facts["volume_date"] = volume_latest.on.isoformat() if volume_latest is not None else None
     if median_rows is not None:
         facts["previous_median_rows"] = median_rows
 
@@ -646,6 +658,7 @@ def evaluate_health(facts: HealthFacts, now: datetime) -> dict[str, Any]:
     current = now.astimezone(UTC)
     india_expected = _last_completed_weekday(current, DAILY_DATA_READY_UTC)
     abroad_expected = _last_completed_weekday(current, ABROAD_DATA_READY_UTC)
+    india_trading_dates = {item.on for item in facts.india_prices}
     checks: list[dict[str, Any]] = [
         _check_price(
             "india_prices",
@@ -660,6 +673,9 @@ def evaluate_health(facts: HealthFacts, now: datetime) -> dict[str, Any]:
             "Daily market data",
             facts.india_fund_prices,
             india_expected,
+            volume_days=tuple(
+                item for item in facts.india_fund_prices if item.on in india_trading_dates
+            ),
         ),
         _check_price(
             "abroad_prices",
@@ -699,6 +715,7 @@ def _date_row_counts(
     table: str,
     market_clause: str,
     parameters: Mapping[str, Any],
+    limit: int = PRICE_HISTORY_DATES + 1,
 ) -> tuple[DayRowCount, ...]:
     statement = text(
         f"""
@@ -711,7 +728,7 @@ def _date_row_counts(
         LIMIT :limit
         """
     )
-    rows = connection.execute(statement, {**parameters, "limit": PRICE_HISTORY_DATES + 1}).all()
+    rows = connection.execute(statement, {**parameters, "limit": limit}).all()
     return tuple(DayRowCount(on=row.as_of, rows=int(row.rows)) for row in rows)
 
 
@@ -939,6 +956,7 @@ def load_health_facts(
             table="nav_daily",
             market_clause="security.market = 'IN' AND security.security_type = 'mf'",
             parameters={"as_of": current.date()},
+            limit=FUND_PRICE_HISTORY_DATES,
         )
         abroad_prices = _date_row_counts(
             connection,

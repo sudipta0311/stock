@@ -46,6 +46,7 @@ from wealth.db.models import (
 from wealth.policy.lookthrough import load_lookthrough_rules
 
 _NOW = datetime(2026, 11, 2, 9, 0, tzinfo=UTC)
+_HOLIDAY_NOW = datetime(2026, 11, 11, 19, 0, tzinfo=UTC)
 _SATURDAY = datetime(2026, 10, 31, 19, 0, tzinfo=UTC)
 _SUNDAY_BEFORE = datetime(2026, 10, 31, 23, 59, tzinfo=UTC)
 _SUNDAY_START = datetime(2026, 11, 1, 0, 0, tzinfo=UTC)
@@ -99,6 +100,16 @@ def _healthy_facts() -> HealthFacts:
             for basket_id in load_lookthrough_rules()["baskets"]
         ),
     )
+
+
+def _recent_weekdays(latest: date, count: int) -> tuple[date, ...]:
+    days: list[date] = []
+    candidate = latest
+    while len(days) < count:
+        if candidate.weekday() < 5:
+            days.append(candidate)
+        candidate -= timedelta(days=1)
+    return tuple(days)
 
 
 def test_sentinel_run_is_grouped_as_safety_work_and_skips_weekly_checks() -> None:
@@ -286,6 +297,88 @@ def test_newest_price_date_with_less_than_half_median_rows_is_a_problem() -> Non
     assert check["level"] == "problem"
     assert check["facts"]["previous_dates"] == PRICE_HISTORY_LENGTH
     assert "fewer than half" in check["message"]
+
+
+def test_fund_price_volume_skips_holiday_nav_dates() -> None:
+    trading_dates = _recent_weekdays(date(2026, 11, 9), PRICE_HISTORY_LENGTH + 1)
+    facts = replace(
+        _healthy_facts(),
+        india_prices=tuple(DayRowCount(day, 260) for day in trading_dates),
+        india_fund_prices=(
+            DayRowCount(date(2026, 11, 10), 121),
+            *(DayRowCount(day, 260) for day in trading_dates),
+        ),
+    )
+
+    check = _checks(evaluate_health(facts, _HOLIDAY_NOW), "india_fund_prices")[0]
+
+    assert check["level"] == "ok"
+    assert check["facts"]["latest_date"] == "2026-11-10"
+    assert check["facts"]["volume_date"] == "2026-11-09"
+    assert check["facts"]["latest_rows"] == 260
+    assert check["facts"]["previous_median_rows"] == 260
+
+
+def test_fund_price_shortfall_on_a_trading_day_still_fails() -> None:
+    trading_dates = _recent_weekdays(date(2026, 11, 9), PRICE_HISTORY_LENGTH + 1)
+    facts = replace(
+        _healthy_facts(),
+        india_prices=tuple(DayRowCount(day, 260) for day in trading_dates),
+        india_fund_prices=(
+            DayRowCount(trading_dates[0], 120),
+            *(DayRowCount(day, 260) for day in trading_dates[1:]),
+        ),
+    )
+
+    check = _checks(evaluate_health(facts, _HOLIDAY_NOW), "india_fund_prices")[0]
+
+    assert check["level"] == "problem"
+    assert check["message"] == (
+        "Indian fund prices stored fewer than half the usual rows. Rerun Daily market data."
+    )
+    assert check["facts"]["volume_date"] == "2026-11-09"
+
+
+def test_fund_price_volume_skips_weekend_nav_dates() -> None:
+    trading_dates = _recent_weekdays(date(2026, 11, 6), PRICE_HISTORY_LENGTH + 1)
+    facts = replace(
+        _healthy_facts(),
+        india_prices=tuple(DayRowCount(day, 260) for day in trading_dates),
+        india_fund_prices=(
+            DayRowCount(date(2026, 11, 7), 1),
+            DayRowCount(date(2026, 11, 8), 1),
+            *(DayRowCount(day, 260) for day in trading_dates),
+        ),
+    )
+    monday = datetime(2026, 11, 9, 19, 0, tzinfo=UTC)
+
+    check = _checks(evaluate_health(facts, monday), "india_fund_prices")[0]
+
+    assert check["level"] == "ok"
+    assert check["facts"]["latest_date"] == "2026-11-08"
+    assert check["facts"]["volume_date"] == "2026-11-06"
+    assert check["facts"]["previous_median_rows"] == 260
+
+
+def test_fund_price_staleness_uses_the_newest_nav_date() -> None:
+    trading_dates = _recent_weekdays(date(2026, 11, 9), PRICE_HISTORY_LENGTH + 1)
+    facts = replace(
+        _healthy_facts(),
+        india_prices=tuple(DayRowCount(day, 260) for day in trading_dates),
+        india_fund_prices=(
+            DayRowCount(date(2026, 11, 10), 1),
+            *(DayRowCount(day, 260) for day in trading_dates),
+        ),
+    )
+    monday = datetime(2026, 11, 16, 19, 0, tzinfo=UTC)
+
+    check = _checks(evaluate_health(facts, monday), "india_fund_prices")[0]
+
+    assert check["level"] == "problem"
+    assert check["facts"]["latest_date"] == "2026-11-10"
+    assert check["facts"]["volume_date"] == "2026-11-09"
+    assert check["facts"]["trading_days_old"] == 4
+    assert "4 trading days old" in check["message"]
 
 
 PRICE_HISTORY_LENGTH = 10
