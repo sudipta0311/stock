@@ -84,6 +84,7 @@ Status: ⬜ not started · 🟦 in progress · ✅ accepted · 🔁 rework · �
 | C62 | The fund price check skips market holidays: "fewer than half the usual rows" compares Indian fund prices only on dates with stored NSE share prices (the share rows are the trading calendar), so a holiday's few NAVs no longer fail data health; staleness is unchanged | 1 | ✅ |
 | C63 | Buying prices show: `/v1/networth` holdings carry `cost_inr`, `avg_cost_inr` and `profit_loss_inr` (known only when every lot has a cost), and the holding page shows profit or loss with a percentage, "Bought for" and "Average buying price" (it read field names the API never sent, so it always said "Buying price not recorded"); each Money list has its own "Show all", and "Show fewer" scrolls its heading back into view | 4 | ✅ |
 | C64 | A new version applies itself at a safe moment: within 15 seconds of the app opening or returning to the screen, with nothing typed, no dialog open and no queued offline save; otherwise the "New version is ready" toast stays. Settings shows "App version <commit> · <build date>" (Render's commit, else GitHub's) | 1 | ✅ |
+| C65 | A new version waits for sign-in renewal before it reloads: `waitForSignInRenewal()` waits for start-up sign-in and any renewal in flight; the automatic update then re-checks the 15-second safe moment (else the toast), and "Tap to refresh" waits too, so a reload never drops a freshly rotated refresh token | 1 | ✅ |
 
 ## Follow-ups and review outcomes
 

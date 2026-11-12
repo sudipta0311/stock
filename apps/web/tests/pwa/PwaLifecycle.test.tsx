@@ -26,6 +26,10 @@ const offlineQueue = vi.hoisted(() => ({
   listQueuedAssetWrites: vi.fn(async () => offlineQueue.writes),
 }));
 
+const authSession = vi.hoisted(() => ({
+  waitForSignInRenewal: vi.fn<() => Promise<void>>(async () => undefined),
+}));
+
 vi.mock("virtual:pwa-register/react", () => ({
   useRegisterSW: (options: typeof register.options) => {
     register.options = options;
@@ -41,6 +45,9 @@ vi.mock("../../src/pwa/offline-cache", () => ({
 }));
 vi.mock("../../src/money/offline-queue", () => ({
   listQueuedAssetWrites: offlineQueue.listQueuedAssetWrites,
+}));
+vi.mock("../../src/auth/session", () => ({
+  waitForSignInRenewal: authSession.waitForSignInRenewal,
 }));
 
 const { PwaLifecycle } = await import("../../src/app/PwaLifecycle");
@@ -71,6 +78,7 @@ afterEach(() => {
   offlineQueue.writes = [];
   register.updateServiceWorker.mockClear();
   offlineQueue.listQueuedAssetWrites.mockClear();
+  authSession.waitForSignInRenewal.mockReset().mockResolvedValue(undefined);
   vi.useRealTimers();
   vi.restoreAllMocks();
   Reflect.deleteProperty(document, "visibilityState");
@@ -110,6 +118,80 @@ describe("app updates", () => {
     expect(screen.queryByText("New version is ready")).not.toBeInTheDocument();
   });
 
+  it("waits for sign-in renewal before applying a waiting version", async () => {
+    let finishRenewal!: () => void;
+    authSession.waitForSignInRenewal.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishRenewal = resolve;
+        }),
+    );
+    register.needRefresh = true;
+    renderLifecycle();
+
+    await waitFor(() =>
+      expect(authSession.waitForSignInRenewal).toHaveBeenCalledOnce(),
+    );
+    expect(offlineQueue.listQueuedAssetWrites).not.toHaveBeenCalled();
+    expect(register.updateServiceWorker).not.toHaveBeenCalled();
+
+    await act(async () => finishRenewal());
+    await waitFor(() =>
+      expect(register.updateServiceWorker).toHaveBeenCalledWith(true),
+    );
+    expect(screen.queryByText("New version is ready")).not.toBeInTheDocument();
+  });
+
+  it("shows the toast when sign-in renewal finishes outside the safe window", async () => {
+    let now = Date.now();
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    let finishRenewal!: () => void;
+    authSession.waitForSignInRenewal.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishRenewal = resolve;
+        }),
+    );
+    register.needRefresh = true;
+    renderLifecycle();
+
+    await waitFor(() =>
+      expect(authSession.waitForSignInRenewal).toHaveBeenCalledOnce(),
+    );
+    now += 15_001;
+    await act(async () => finishRenewal());
+    await expectUpdateToast();
+  });
+
+  it("waits for sign-in renewal after the person taps refresh", async () => {
+    offlineQueue.writes = [{ key: "queued-save" }];
+    let finishRenewal!: () => void;
+    authSession.waitForSignInRenewal
+      .mockResolvedValueOnce(undefined)
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            finishRenewal = resolve;
+          }),
+      );
+    register.needRefresh = true;
+    renderLifecycle();
+
+    const refresh = await screen.findByRole("button", {
+      name: "Tap to refresh",
+    });
+    fireEvent.click(refresh);
+    await waitFor(() =>
+      expect(authSession.waitForSignInRenewal).toHaveBeenCalledTimes(2),
+    );
+    expect(register.updateServiceWorker).not.toHaveBeenCalled();
+
+    await act(async () => finishRenewal());
+    await waitFor(() =>
+      expect(register.updateServiceWorker).toHaveBeenCalledWith(true),
+    );
+  });
+
   it("shows the toast when a field changes before the queue check completes", async () => {
     let finishQueueCheck!: (writes: unknown[]) => void;
     offlineQueue.listQueuedAssetWrites.mockImplementationOnce(
@@ -131,6 +213,9 @@ describe("app updates", () => {
     fireEvent.input(container.querySelector("input")!, {
       target: { value: "changed" },
     });
+    await waitFor(() =>
+      expect(offlineQueue.listQueuedAssetWrites).toHaveBeenCalledOnce(),
+    );
     await act(async () => finishQueueCheck([]));
     await expectUpdateToast();
   });
@@ -189,7 +274,9 @@ describe("app updates", () => {
     expect(screen.getByText("New version is ready")).toBeInTheDocument();
 
     fireEvent.click(refresh);
-    expect(register.updateServiceWorker).toHaveBeenCalledWith(true);
+    await waitFor(() =>
+      expect(register.updateServiceWorker).toHaveBeenCalledWith(true),
+    );
   });
 
   it("looks for a new version when the person comes back to the app", () => {

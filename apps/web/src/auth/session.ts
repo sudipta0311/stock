@@ -40,6 +40,18 @@ export function waitForAuthBootstrap(): Promise<void> {
   return authBootstrapComplete ?? Promise.resolve();
 }
 
+export async function waitForSignInRenewal(): Promise<void> {
+  while (true) {
+    await waitForAuthBootstrap().catch(() => undefined);
+    const renewal = refreshInFlight;
+    if (!renewal) return;
+    await renewal.then(
+      () => undefined,
+      () => undefined,
+    );
+  }
+}
+
 function refreshUrl(): URL {
   const base = import.meta.env.VITE_API_URL || window.location.origin;
   return new URL("/v1/auth/refresh", base);

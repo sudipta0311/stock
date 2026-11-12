@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useRegisterSW } from "virtual:pwa-register/react";
+import { waitForSignInRenewal } from "../auth/session";
 import { listQueuedAssetWrites } from "../money/offline-queue";
 import { syncOfflineCacheSetting } from "../pwa/offline-cache";
 import { useToast } from "../ui";
@@ -87,13 +88,19 @@ export function PwaLifecycle() {
         action: {
           label: "Tap to refresh",
           altText: "Refresh to install the new version",
-          onClick: () => void updateServiceWorker(true),
+          onClick: () =>
+            void waitForSignInRenewal().then(() => updateServiceWorker(true)),
         },
       });
     };
 
-    void listQueuedAssetWrites()
+    void waitForSignInRenewal()
+      .then(() => {
+        if (!active) return null;
+        return listQueuedAssetWrites();
+      })
       .then((writes) => {
+        if (!writes) return;
         if (!active) return;
         const state = pageState.current;
         const safe =
