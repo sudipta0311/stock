@@ -667,6 +667,17 @@ export const test = base.extend<{ live: LiveRuntime }>({
           timeout: 60_000,
         })
         .catch(() => undefined);
+      // Every load renews the sign-in. Navigating away mid-renewal loses the new token,
+      // and the next load is then signed out, so let the app settle first.
+      await page
+        .waitForFunction(
+          () =>
+            window.location.pathname === "/login" ||
+            document.querySelector('nav[aria-label="Primary"]') !== null,
+          undefined,
+          { timeout: 90_000 },
+        )
+        .catch(() => undefined);
       await page
         .evaluate(async () => {
           const registrations = navigator.serviceWorker
