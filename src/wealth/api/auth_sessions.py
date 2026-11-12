@@ -23,8 +23,8 @@ from wealth.db.session import resolve_user, user_session
 ACCESS_TOKEN_TTL_SECONDS = 30 * 60
 SLIDING_SESSION_DAYS = 30
 ABSOLUTE_SESSION_DAYS = 90
-# Another tab, or a refresh whose response was lost, can present the token rotated a
-# moment ago. Inside this window that is not treated as theft.
+# A lost refresh response can be retried briefly. Recovery does not move last_used_at,
+# so repeated retries cannot extend the window measured from the original rotation.
 REUSE_GRACE = timedelta(seconds=30)
 _REFRESH_TOKEN_BYTES = 32
 
@@ -235,7 +235,27 @@ def build_router(authenticated_user: Any) -> APIRouter:
                     and record.revoked_at is None
                     and now - record.last_used_at <= REUSE_GRACE
                 ):
-                    rejection_status = 409
+                    if record.expires_at <= now or record.absolute_expires_at <= now:
+                        rejection_status = 401
+                    elif not _is_email_allowed(settings, user.email):
+                        record.revoked_at = now
+                        rejection_status = 403
+                    else:
+                        new_refresh_token = _new_refresh_token()
+                        record.token_hash = refresh_token_hash(new_refresh_token)
+                        session.flush()
+                        result = AuthSessionPair(
+                            access_token=_access_token(
+                                settings=settings,
+                                subject=user.auth_subject,
+                                email=user.email,
+                                session_id=record.id,
+                                now=now,
+                            ),
+                            refresh_token=new_refresh_token,
+                            expires_in=ACCESS_TOKEN_TTL_SECONDS,
+                            session_expires_at=record.absolute_expires_at,
+                        )
                 elif record.previous_hash == presented_hash:
                     if record.revoked_at is None:
                         record.revoked_at = now

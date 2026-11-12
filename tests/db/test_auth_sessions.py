@@ -146,7 +146,40 @@ def test_exchange_access_and_refresh_rotation(
         assert record.device_label == "iPhone"
 
 
-def test_reusing_rotated_refresh_token_revokes_and_audits_session(
+def test_lost_refresh_response_can_be_recovered_without_signing_out(
+    api_client: tuple[TestClient, str, MigratedDatabase, dict[str, tuple[str, str]]],
+) -> None:
+    client, secret, database, _accounts = api_client
+    first = _login(client, "owner")
+    rotated_response = _refresh(client, first["refresh_token"])
+    assert rotated_response.status_code == 200
+    rotated = rotated_response.json()
+    recovered_response = _refresh(client, first["refresh_token"])
+    assert recovered_response.status_code == 200
+    assert recovered_response.headers["Cache-Control"] == "no-store"
+    recovered = recovered_response.json()
+    assert recovered["refresh_token"] not in {
+        first["refresh_token"],
+        rotated["refresh_token"],
+    }
+
+    next_response = _refresh(client, recovered["refresh_token"])
+    assert next_response.status_code == 200
+    next_pair = next_response.json()
+    assert client.get("/v1/me", headers=_bearer(recovered["access_token"])).status_code == 200
+
+    # The response lost after the first renewal is no longer current or recoverable.
+    assert _refresh(client, rotated["refresh_token"]).status_code == 401
+    assert client.get("/v1/me", headers=_bearer(next_pair["access_token"])).status_code == 200
+    assert _refresh(client, next_pair["refresh_token"]).status_code == 200
+    session_id = _session_id(first["access_token"], secret)
+
+    with system_session(database.owner_engine) as session:
+        record = session.get(AuthSession, session_id)
+        assert record is not None and record.revoked_at is None
+
+
+def test_recovery_does_not_extend_grace_window_and_reuse_revokes_once(
     api_client: tuple[TestClient, str, MigratedDatabase, dict[str, tuple[str, str]]],
 ) -> None:
     client, secret, database, _accounts = api_client
@@ -154,20 +187,45 @@ def test_reusing_rotated_refresh_token_revokes_and_audits_session(
     rotated = _refresh(client, first["refresh_token"]).json()
     session_id = _session_id(first["access_token"], secret)
 
-    # Inside the grace window (another tab, or a lost response) the old token is refused
-    # without revoking the session.
-    assert _refresh(client, first["refresh_token"]).status_code == 409
-    assert client.get("/v1/me", headers=_bearer(rotated["access_token"])).status_code == 200
+    with system_session(database.owner_engine) as session:
+        record = session.get(AuthSession, session_id)
+        assert record is not None
+        original_last_used_at = record.last_used_at
+        original_expires_at = record.expires_at
+
+    recovered = _refresh(client, first["refresh_token"])
+    assert recovered.status_code == 200
+    recovered_pair = recovered.json()
+    recovered_again = _refresh(client, first["refresh_token"])
+    assert recovered_again.status_code == 200
+    recovered_again_pair = recovered_again.json()
+    assert recovered_again_pair["refresh_token"] != recovered_pair["refresh_token"]
 
     with system_session(database.owner_engine) as session:
         record = session.get(AuthSession, session_id)
         assert record is not None
+        assert record.last_used_at == original_last_used_at
+        assert record.expires_at == original_expires_at
         record.last_used_at = datetime.now(UTC) - timedelta(minutes=5)
 
     reuse = _refresh(client, first["refresh_token"])
     assert reuse.status_code == 401
-    assert client.get("/v1/me", headers=_bearer(rotated["access_token"])).status_code == 401
-    assert _refresh(client, rotated["refresh_token"]).status_code == 401
+    access_tokens = [
+        first["access_token"],
+        rotated["access_token"],
+        recovered_pair["access_token"],
+        recovered_again_pair["access_token"],
+    ]
+    refresh_tokens = [
+        first["refresh_token"],
+        rotated["refresh_token"],
+        recovered_pair["refresh_token"],
+        recovered_again_pair["refresh_token"],
+    ]
+    assert all(
+        client.get("/v1/me", headers=_bearer(token)).status_code == 401 for token in access_tokens
+    )
+    assert all(_refresh(client, token).status_code == 401 for token in refresh_tokens)
 
     with system_session(database.owner_engine) as session:
         record = session.get(AuthSession, session_id)
@@ -223,6 +281,48 @@ def test_expired_session_and_removed_email_are_rejected_on_refresh(
     second = _login(client, "owner")
     client.app.state.settings.allowed_emails = accounts["other"][1]
     assert _refresh(client, second["refresh_token"]).status_code == 403
+
+
+def test_reissuing_previous_refresh_token_revokes_when_email_is_removed(
+    api_client: tuple[TestClient, str, MigratedDatabase, dict[str, tuple[str, str]]],
+) -> None:
+    client, secret, database, accounts = api_client
+    first = _login(client, "owner")
+    rotated = _refresh(client, first["refresh_token"]).json()
+    session_id = _session_id(first["access_token"], secret)
+    allowed_emails = client.app.state.settings.allowed_emails
+    client.app.state.settings.allowed_emails = accounts["other"][1]
+
+    reissue = _refresh(client, first["refresh_token"])
+    assert reissue.status_code == 403
+    with system_session(database.owner_engine) as session:
+        record = session.get(AuthSession, session_id)
+        assert record is not None and record.revoked_at is not None
+
+    client.app.state.settings.allowed_emails = allowed_emails
+    assert client.get("/v1/me", headers=_bearer(first["access_token"])).status_code == 401
+    assert client.get("/v1/me", headers=_bearer(rotated["access_token"])).status_code == 401
+    assert _refresh(client, first["refresh_token"]).status_code == 401
+    assert _refresh(client, rotated["refresh_token"]).status_code == 401
+
+
+def test_reissuing_previous_refresh_token_checks_absolute_expiry(
+    api_client: tuple[TestClient, str, MigratedDatabase, dict[str, tuple[str, str]]],
+) -> None:
+    client, secret, database, _accounts = api_client
+    first = _login(client, "owner")
+    _refresh(client, first["refresh_token"])
+    session_id = _session_id(first["access_token"], secret)
+    with system_session(database.owner_engine) as session:
+        record = session.get(AuthSession, session_id)
+        assert record is not None
+        record.absolute_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+
+    reissue = _refresh(client, first["refresh_token"])
+    assert reissue.status_code == 401
+    with system_session(database.owner_engine) as session:
+        record = session.get(AuthSession, session_id)
+        assert record is not None and record.revoked_at is None
 
 
 def test_logout_and_logout_all_only_affect_this_login(
