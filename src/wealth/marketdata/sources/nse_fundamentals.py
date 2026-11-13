@@ -30,11 +30,13 @@ _PERIOD_METRICS: dict[str, tuple[str, ...]] = {
         "RevenueFromOperations",
         "Revenue",
         "RevenueFromOperationsFromContinuingOperations",
+        "Income",
     ),
     "net_income": (
         "ProfitLossForPeriod",
         "ProfitLossForPeriodFromContinuingOperations",
         "ProfitLoss",
+        "ProfitLossForThePeriod",
     ),
     "operating_income": (
         "ProfitBeforeInterestAndTax",
@@ -45,6 +47,7 @@ _PERIOD_METRICS: dict[str, tuple[str, ...]] = {
         "DilutedEarningsLossPerShareFromContinuingAndDiscontinuedOperations",
         "DilutedEarningsLossPerShareFromContinuingOperations",
         "DilutedEarningsPerShare",
+        "DilutedEarningsPerShareAfterExtraordinaryItems",
     ),
 }
 _INSTANT_METRICS: dict[str, tuple[str, ...]] = {
@@ -301,6 +304,19 @@ def _value(
     return None
 
 
+def _revenue(
+    context_facts: Mapping[str, list[tuple[str, Decimal]]],
+) -> tuple[str, Decimal] | None:
+    direct = _value(context_facts, _PERIOD_METRICS["revenue"])
+    if direct is not None:
+        return direct
+    interest_earned = _value(context_facts, ("InterestEarned",))
+    other_income = _value(context_facts, ("OtherIncome",))
+    if interest_earned is None or other_income is None or interest_earned[0] != other_income[0]:
+        return None
+    return interest_earned[0], interest_earned[1] + other_income[1]
+
+
 def _operating_income(
     context_facts: Mapping[str, list[tuple[str, Decimal]]],
 ) -> tuple[str, Decimal] | None:
@@ -391,7 +407,12 @@ def parse_xbrl_filing(
             if period_type is None:
                 continue
             for metric in ("revenue", "net_income", "eps_diluted"):
-                add(metric, period_type, _value(context_facts, _PERIOD_METRICS[metric]))
+                value = (
+                    _revenue(context_facts)
+                    if metric == "revenue"
+                    else _value(context_facts, _PERIOD_METRICS[metric])
+                )
+                add(metric, period_type, value)
             add("operating_income", period_type, _operating_income(context_facts))
         if instant == filing.period_end:
             for metric, tags in _INSTANT_METRICS.items():

@@ -86,6 +86,7 @@ Status: ⬜ not started · 🟦 in progress · ✅ accepted · 🔁 rework · �
 | C64 | A new version applies itself at a safe moment: within 15 seconds of the app opening or returning to the screen, with nothing typed, no dialog open and no queued offline save; otherwise the "New version is ready" toast stays. Settings shows "App version <commit> · <build date>" (Render's commit, else GitHub's) | 1 | ✅ |
 | C65 | A new version waits for sign-in renewal before it reloads: `waitForSignInRenewal()` waits for start-up sign-in and any renewal in flight; the automatic update then re-checks the 15-second safe moment (else the toast), and "Tap to refresh" waits too, so a reload never drops a freshly rotated refresh token | 1 | ✅ |
 | C66 | A lost sign-in renewal does not sign you out: inside the 30-second grace window the previous refresh token gets a fresh pair instead of 409 (same expiry and allowed-email checks; `last_used_at`, `expires_at` and `previous_hash` unchanged, so the window cannot be stretched); after it, reuse still revokes and audits | 1 | ✅ |
+| C67 | Bank results are read: NSE banking-format filings give `revenue` (total `Income`, else interest earned + other income in one unit), `net_income` and `eps_diluted`; a share whose stored NSE facts have no revenue inside the fundamentals window re-reads the whole window once (upsert is idempotent), so held banks get company-results and price-level checks without waiting a year | 2 | ✅ |
 
 ## Follow-ups and review outcomes
 

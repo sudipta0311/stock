@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xbrli:xbrl xmlns:xbrli="http://www.xbrl.org/2003/instance" xmlns:bank="https://example.invalid/in-capmkt/banking" xmlns:iso4217="http://www.xbrl.org/2003/iso4217">
+  <xbrli:context id="Quarter">
+    <xbrli:entity><xbrli:identifier scheme="https://example.invalid/security">DEMO-BANK-001</xbrli:identifier></xbrli:entity>
+    <xbrli:period><xbrli:startDate>2026-04-01</xbrli:startDate><xbrli:endDate>2026-06-30</xbrli:endDate></xbrli:period>
+  </xbrli:context>
+  <xbrli:unit id="INR"><xbrli:measure>iso4217:INR</xbrli:measure></xbrli:unit>
+  <xbrli:unit id="OtherCurrency"><xbrli:measure>iso4217:USD</xbrli:measure></xbrli:unit>
+  <xbrli:unit id="INRPerShare"><xbrli:measure>iso4217:INR</xbrli:measure><xbrli:measure>xbrli:shares</xbrli:measure></xbrli:unit>
+  <bank:NameOfBank contextRef="Quarter">Example Bank Ltd</bank:NameOfBank>
+  <bank:InterestEarned contextRef="Quarter" unitRef="INR" decimals="0">1200</bank:InterestEarned>
+  <bank:OtherIncome contextRef="Quarter" unitRef="INR" decimals="0">300</bank:OtherIncome>
+  <bank:Income contextRef="Quarter" unitRef="INR" decimals="0">1500</bank:Income>
+  <bank:ProfitLossForThePeriod contextRef="Quarter" unitRef="INR" decimals="0">130</bank:ProfitLossForThePeriod>
+  <bank:DilutedEarningsPerShareAfterExtraordinaryItems contextRef="Quarter" unitRef="INRPerShare" decimals="2">6.50</bank:DilutedEarningsPerShareAfterExtraordinaryItems>
+</xbrli:xbrl>

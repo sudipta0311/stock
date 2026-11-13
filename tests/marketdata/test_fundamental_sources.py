@@ -137,6 +137,78 @@ def test_nse_xbrl_parser_extracts_quarterly_and_instant_facts() -> None:
     assert all(row.source_url == filing.xbrl_url for row in observations)
 
 
+def test_nse_banking_xbrl_parser_extracts_results_facts() -> None:
+    filing = NseFiling(
+        symbol="DEMO",
+        period_end=date(2026, 6, 30),
+        filed_at=datetime(2026, 7, 30, 12, tzinfo=UTC),
+        xbrl_url="https://nsearchives.nseindia.com/corporate/xbrl/synthetic-bank.xml",
+        consolidated=True,
+        submission_type="Original",
+    )
+
+    observations = nse_fundamentals.parse_xbrl_filing(
+        (FIXTURES / "nse_banking_xbrl_excerpt.xml").read_bytes(),
+        filing,
+        as_of=date(2026, 8, 1),
+    )
+    by_metric = {row.metric: row for row in observations}
+
+    assert by_metric["revenue"].value == Decimal("1500")
+    assert by_metric["net_income"].value == Decimal("130")
+    assert by_metric["eps_diluted"].value == Decimal("6.50")
+    assert "operating_income" not in by_metric
+
+
+def test_nse_banking_revenue_falls_back_to_income_components_in_same_unit() -> None:
+    filing = NseFiling(
+        symbol="DEMO",
+        period_end=date(2026, 6, 30),
+        filed_at=datetime(2026, 7, 30, 12, tzinfo=UTC),
+        xbrl_url="https://nsearchives.nseindia.com/corporate/xbrl/synthetic-bank.xml",
+        consolidated=True,
+        submission_type="Original",
+    )
+    xml_data = (FIXTURES / "nse_banking_xbrl_excerpt.xml").read_bytes()
+    xml_without_total = xml_data.replace(
+        b'  <bank:Income contextRef="Quarter" unitRef="INR" decimals="0">1500</bank:Income>\n',
+        b"",
+    )
+
+    observations = nse_fundamentals.parse_xbrl_filing(
+        xml_without_total, filing, as_of=date(2026, 8, 1)
+    )
+
+    revenue = next(row for row in observations if row.metric == "revenue")
+    assert revenue.value == Decimal("1500")
+    assert revenue.unit == "INR"
+
+
+def test_nse_banking_revenue_is_missing_when_fallback_units_differ() -> None:
+    filing = NseFiling(
+        symbol="DEMO",
+        period_end=date(2026, 6, 30),
+        filed_at=datetime(2026, 7, 30, 12, tzinfo=UTC),
+        xbrl_url="https://nsearchives.nseindia.com/corporate/xbrl/synthetic-bank.xml",
+        consolidated=True,
+        submission_type="Original",
+    )
+    xml_data = (FIXTURES / "nse_banking_xbrl_excerpt.xml").read_bytes()
+    xml_without_total = xml_data.replace(
+        b'  <bank:Income contextRef="Quarter" unitRef="INR" decimals="0">1500</bank:Income>\n',
+        b"",
+    ).replace(
+        b'<bank:OtherIncome contextRef="Quarter" unitRef="INR"',
+        b'<bank:OtherIncome contextRef="Quarter" unitRef="OtherCurrency"',
+    )
+
+    observations = nse_fundamentals.parse_xbrl_filing(
+        xml_without_total, filing, as_of=date(2026, 8, 1)
+    )
+
+    assert all(row.metric != "revenue" for row in observations)
+
+
 def test_nse_skips_missing_xbrl_and_keeps_readable_filings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

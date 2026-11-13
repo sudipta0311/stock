@@ -506,6 +506,28 @@ def _fetch_edgar(
     return _fetch_edgar_for_symbols(on, _universe_and_held_symbols(session, "US", "sp500", symbols))
 
 
+def _nse_fundamental_after(session: Session, security_id: Any, as_of: date) -> datetime | None:
+    after = store.latest_fundamental_filed_at(session, security_id, nse_fundamentals.NSE_SOURCE)
+    if after is None:
+        return None
+    cutoff = nse_fundamentals._fundamentals_cutoff(as_of)
+    has_current_revenue = (
+        session.scalar(
+            select(FundamentalPIT.metric)
+            .where(
+                FundamentalPIT.security_id == security_id,
+                FundamentalPIT.source == nse_fundamentals.NSE_SOURCE,
+                FundamentalPIT.metric == "revenue",
+                FundamentalPIT.period_end >= cutoff,
+                FundamentalPIT.period_end <= as_of,
+            )
+            .limit(1)
+        )
+        is not None
+    )
+    return after if has_current_revenue else None
+
+
 def _fetch_edgar_for_symbols(on: date, target_symbols: list[str]) -> FundamentalsBatch:
     client = edgar.SecEdgarClient()
     companies = edgar.fetch_company_tickers(client)
@@ -560,7 +582,7 @@ def _fetch_nse_fundamentals(
         NseFundamentalTarget(
             symbol=symbol,
             security_id=security.id,
-            after=store.latest_fundamental_filed_at(session, security.id, "NSE_XBRL"),
+            after=_nse_fundamental_after(session, security.id, on),
         )
         for symbol in target_symbols
         if (security := securities.get(symbol.upper())) is not None
@@ -1292,9 +1314,7 @@ def _prepare_engine_fetchers(
                         NseFundamentalTarget(
                             symbol=symbol,
                             security_id=security.id,
-                            after=store.latest_fundamental_filed_at(
-                                session, security.id, "NSE_XBRL"
-                            ),
+                            after=_nse_fundamental_after(session, security.id, on),
                         )
                         for symbol in target_symbols
                         if (security := securities.get(symbol.upper())) is not None

@@ -15,9 +15,10 @@ from wealth.db.models import (
     UniverseMember,
     User,
 )
-from wealth.marketdata import refresh
+from wealth.marketdata import refresh, store
 from wealth.marketdata.refresh import FundamentalsBatch
 from wealth.marketdata.sources.alpha_vantage import DailyClose
+from wealth.marketdata.sources.fundamentals import FundamentalObservation
 
 pytestmark = pytest.mark.db
 
@@ -110,6 +111,120 @@ def test_fundamentals_targets_include_held_equities_once(
     assert len(nse_target_symbols) == 2
     assert set(edgar_target_symbols) == {"SYNTH-US-MEMBER", "SYNTH-US-OUTSIDE"}
     assert len(edgar_target_symbols) == 2
+
+
+def test_nse_fundamentals_recheck_when_window_has_no_revenue(
+    migrated_database: MigratedDatabase,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    as_of = date(2026, 11, 6)
+    old_period_end = date(2024, 3, 31)
+    revenue_period_end = date(2026, 6, 30)
+    old_filed_at = datetime(2024, 4, 30, tzinfo=UTC)
+    revenue_filed_at = datetime(2026, 7, 30, tzinfo=UTC)
+
+    def observation(
+        metric: str, period_end: date, filed_at: datetime, value: str
+    ) -> FundamentalObservation:
+        return FundamentalObservation(
+            metric=metric,
+            period_end=period_end,
+            period_type="Q",
+            value=Decimal(value),
+            unit="INR",
+            filed_at=filed_at,
+            known_at=filed_at,
+            source="NSE_XBRL",
+            source_url="https://example.test/synthetic-nse.xml",
+        )
+
+    old_balance_fact = observation("total_assets", old_period_end, old_filed_at, "100")
+    revenue_fact = observation("revenue", revenue_period_end, revenue_filed_at, "120")
+    captured_targets: list[refresh.NseFundamentalTarget] = []
+
+    def capture_targets(
+        _on: date,
+        targets: list[refresh.NseFundamentalTarget],
+        _missing: list[str] | None = None,
+    ) -> FundamentalsBatch:
+        captured_targets.extend(targets)
+        return FundamentalsBatch({}, {})
+
+    with Session(migrated_database.owner_engine) as session, session.begin():
+        incomplete_security = Security(
+            market="IN",
+            symbol="SYNTH-IN-INCOMPLETE",
+            nse_symbol="SYNTH-IN-INCOMPLETE",
+            name="Synthetic bank with partial facts",
+            security_type="equity",
+            currency="INR",
+            sleeve="equity_india",
+            sector="Synthetic sector",
+            industry="Synthetic industry",
+        )
+        complete_security = Security(
+            market="IN",
+            symbol="SYNTH-IN-COMPLETE",
+            nse_symbol="SYNTH-IN-COMPLETE",
+            name="Synthetic bank with revenue",
+            security_type="equity",
+            currency="INR",
+            sleeve="equity_india",
+            sector="Synthetic sector",
+            industry="Synthetic industry",
+        )
+        session.add_all([incomplete_security, complete_security])
+        session.flush()
+        session.add_all(
+            [
+                UniverseMember(
+                    universe="nifty500",
+                    security_id=incomplete_security.id,
+                    added_on=date(2020, 1, 1),
+                    source="synthetic_fixture",
+                    source_url="https://example.test/synthetic-universe",
+                    survivorship_label="synthetic fixture",
+                ),
+                UniverseMember(
+                    universe="nifty500",
+                    security_id=complete_security.id,
+                    added_on=date(2020, 1, 1),
+                    source="synthetic_fixture",
+                    source_url="https://example.test/synthetic-universe",
+                    survivorship_label="synthetic fixture",
+                ),
+            ]
+        )
+        assert (
+            store.upsert_fundamentals(
+                session, incomplete_security.id, [old_balance_fact], as_of=as_of
+            )
+            == 1
+        )
+        assert (
+            store.upsert_fundamentals(
+                session, incomplete_security.id, [old_balance_fact], as_of=as_of
+            )
+            == 0
+        )
+        assert (
+            store.upsert_fundamentals(session, complete_security.id, [revenue_fact], as_of=as_of)
+            == 1
+        )
+        previous_after = store.latest_fundamental_filed_at(
+            session, complete_security.id, "NSE_XBRL"
+        )
+        assert previous_after == revenue_filed_at
+
+        monkeypatch.setattr(refresh, "_fetch_nse_fundamental_targets", capture_targets)
+        refresh._fetch_nse_fundamentals(session, as_of, None)
+
+        incomplete_security_id = incomplete_security.id
+        complete_security_id = complete_security.id
+
+    targets_by_security = {target.security_id: target for target in captured_targets}
+    assert targets_by_security[incomplete_security_id].after is None
+    assert targets_by_security[complete_security_id].after == previous_after
 
 
 def test_us_stock_refresh_only_rewrites_the_newest_close_on_repeat(
