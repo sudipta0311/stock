@@ -565,7 +565,7 @@ def _compute_if_stale(user: Any, today: date) -> WeeklyPlanResponse:
     me_member_id = acting_household_member(user.session, user.user_id, household_owner_id).id
     if stored is not None and stored.week == week:
         saved = WeeklyPlan.model_validate(stored.plan)
-        if saved.inputs_digest == computed.inputs_digest and saved.actions == computed.actions:
+        if saved.model_dump(mode="json") == computed.model_dump(mode="json"):
             return WeeklyPlanResponse(
                 **saved.model_dump(mode="python"), fresh=False, me_member_id=me_member_id
             )

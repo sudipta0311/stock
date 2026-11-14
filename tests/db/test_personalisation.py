@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import secrets
 from collections.abc import Iterator
+from copy import deepcopy
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID, uuid4
@@ -29,8 +30,10 @@ from wealth.db.models import (
     HighlightDismissal,
     HoldingLot,
     HouseholdMember,
+    PriceEod,
     ResearchPackRecord,
     Security,
+    StockCheck,
     User,
 )
 from wealth.db.models import WeeklyPlan as WeeklyPlanRow
@@ -694,20 +697,44 @@ def test_done_action_is_not_reopened_when_the_same_plan_is_saved_again(
 
 def test_plan_is_computed_on_demand_and_reused_when_inputs_match(
     api_client: tuple[TestClient, str, object],
+    migrated_database: MigratedDatabase,
 ) -> None:
     client, secret, _application = api_client
-    headers, _subject = _auth(secret, "plan-on-demand")
+    headers, subject = _auth(secret, "plan-on-demand")
 
     first = client.get("/v1/plan", headers=headers)
     assert first.status_code == 200
     assert first.json()["week"] == _WEEK
     assert first.json()["fresh"] is True
     assert len(first.json()["inputs_digest"]) == 64
+    first_plan = WeeklyPlan.model_validate(
+        {field: first.json()[field] for field in WeeklyPlan.model_fields}
+    )
+    user_id = _user_id(migrated_database, subject)
+    with migrated_database.owner_engine.connect() as connection:
+        created_at_before_second_read = connection.scalar(
+            select(WeeklyPlanRow.created_at).where(
+                WeeklyPlanRow.user_id == user_id,
+                WeeklyPlanRow.week == _WEEK,
+            )
+        )
 
     second = client.get("/v1/plan", headers=headers)
     assert second.status_code == 200
     assert second.json()["fresh"] is False
     assert second.json()["inputs_digest"] == first.json()["inputs_digest"]
+    second_plan = WeeklyPlan.model_validate(
+        {field: second.json()[field] for field in WeeklyPlan.model_fields}
+    )
+    assert second_plan.model_dump(mode="json") == first_plan.model_dump(mode="json")
+    with migrated_database.owner_engine.connect() as connection:
+        created_at_after_second_read = connection.scalar(
+            select(WeeklyPlanRow.created_at).where(
+                WeeklyPlanRow.user_id == user_id,
+                WeeklyPlanRow.week == _WEEK,
+            )
+        )
+    assert created_at_after_second_read == created_at_before_second_read
 
     changed = client.put(
         "/v1/me/investing",
@@ -726,6 +753,184 @@ def test_plan_is_computed_on_demand_and_reused_when_inputs_match(
     ideas = client.get("/v1/research/ideas", headers=headers)
     assert ideas.status_code == 200
     assert ideas.json()["ideas"] == []
+
+
+def test_plan_refreshes_changed_reasons_and_preserves_action_state(
+    api_client: tuple[TestClient, str, object],
+    migrated_database: MigratedDatabase,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from typing import Any
+
+    from wealth.api import personalisation
+
+    client, secret, _application = api_client
+    headers, subject = _auth(secret, "plan-reason-refresh")
+    me = client.get("/v1/me", headers=headers)
+    assert me.status_code == 200
+    member_id = UUID(me.json()["me_member_id"])
+    user_id = _user_id(migrated_database, subject)
+
+    review_security = Security(
+        market="IN",
+        symbol="SYNTH-REVIEW",
+        name="Synthetic reviewed share",
+        security_type="equity",
+        currency="INR",
+        sleeve="equity_india",
+        sector="Synthetic sector",
+        industry="Synthetic industry",
+    )
+    anchor_security = Security(
+        market="IN",
+        symbol="SYNTH-ANCHOR",
+        name="Synthetic broad fund",
+        security_type="mf",
+        currency="INR",
+        sleeve="equity_global",
+        category="equity:global",
+    )
+    with Session(migrated_database.owner_engine) as session, session.begin():
+        session.add_all((review_security, anchor_security))
+        session.flush()
+        review_security_id = str(review_security.id)
+        session.add_all(
+            (
+                HoldingLot(
+                    user_id=user_id,
+                    member_id=member_id,
+                    security_id=review_security.id,
+                    quantity=Decimal("1"),
+                    cost_per_unit=None,
+                    acquired_on=None,
+                    source="manual",
+                    currency="INR",
+                ),
+                HoldingLot(
+                    user_id=user_id,
+                    member_id=member_id,
+                    security_id=anchor_security.id,
+                    quantity=Decimal("1"),
+                    statement_value=Decimal("1000000"),
+                    statement_date=_TODAY,
+                    source="manual",
+                    currency="INR",
+                ),
+                PriceEod(
+                    security_id=review_security.id,
+                    as_of=_TODAY,
+                    close=Decimal("100"),
+                    source="synthetic_test",
+                    source_url="https://example.test/synthetic-price",
+                ),
+                StockCheck(
+                    security_id=review_security.id,
+                    week=_WEEK,
+                    as_of=_TODAY,
+                    quant_decile=7,
+                    factor_coverage="medium",
+                    pe_percentile=Decimal("50"),
+                    pe_vs_sector=Decimal("1"),
+                    revenue_yoy_pct=[],
+                    price=Decimal("100"),
+                    sources={"fixture": "synthetic"},
+                ),
+            )
+        )
+
+    first = client.get("/v1/plan", headers=headers)
+    assert first.status_code == 200
+    expected_review = next(
+        item
+        for item in first.json()["holding_reviews"]
+        if item["security_id"] == review_security_id
+    )
+    expected_reasons = expected_review["reasons"]
+
+    action = {
+        "rank": 999,
+        "kind": "synthetic_refresh_check",
+        "member_id": str(member_id),
+        "amount": "1.00",
+    }
+    original_personalise = personalisation.personalise
+
+    def personalise_with_stable_action(*args: Any, **kwargs: Any) -> WeeklyPlan:
+        plan = original_personalise(*args, **kwargs)
+        return plan.model_copy(update={"actions": [*plan.actions, action]})
+
+    monkeypatch.setattr(personalisation, "personalise", personalise_with_stable_action)
+    with_action = client.get("/v1/plan", headers=headers)
+    assert with_action.status_code == 200
+    assert with_action.json()["fresh"] is True
+
+    with Session(migrated_database.owner_engine) as session, session.begin():
+        stored = session.get(WeeklyPlanRow, (user_id, _WEEK))
+        assert stored is not None
+        stored_plan = deepcopy(stored.plan)
+        stored_digest = stored_plan["inputs_digest"]
+        stored_actions = stored_plan["actions"]
+        stored_review = next(
+            item
+            for item in stored_plan["holding_reviews"]
+            if item["security_id"] == review_security_id
+        )
+        assert stored_review["reasons"] == expected_reasons
+        stored_review["reasons"] = ["outdated_synthetic_reason"]
+        stored.plan = stored_plan
+
+        done_action = session.scalar(
+            select(Action).where(
+                Action.user_id == user_id,
+                Action.week == _WEEK,
+                Action.kind == action["kind"],
+            )
+        )
+        assert done_action is not None
+        action_id = done_action.id
+        done_action.status = "done"
+
+    with migrated_database.owner_engine.connect() as connection:
+        action_state_before = list(
+            connection.execute(
+                select(Action.id, Action.status)
+                .where(Action.user_id == user_id, Action.week == _WEEK)
+                .order_by(Action.id)
+            )
+        )
+
+    refreshed = client.get("/v1/plan", headers=headers)
+    assert refreshed.status_code == 200
+    assert refreshed.json()["fresh"] is True
+    refreshed_review = next(
+        item
+        for item in refreshed.json()["holding_reviews"]
+        if item["security_id"] == review_security_id
+    )
+    assert refreshed_review["reasons"] == expected_reasons
+
+    with Session(migrated_database.owner_engine) as session:
+        saved = session.get(WeeklyPlanRow, (user_id, _WEEK))
+        assert saved is not None
+        assert saved.plan["inputs_digest"] == stored_digest
+        assert saved.plan["actions"] == stored_actions
+        saved_review = next(
+            item
+            for item in saved.plan["holding_reviews"]
+            if item["security_id"] == review_security_id
+        )
+        assert saved_review["reasons"] == expected_reasons
+
+    with migrated_database.owner_engine.connect() as connection:
+        action_state_after = list(
+            connection.execute(
+                select(Action.id, Action.status)
+                .where(Action.user_id == user_id, Action.week == _WEEK)
+                .order_by(Action.id)
+            )
+        )
+    assert action_state_after == action_state_before
+    assert (action_id, "done") in action_state_after
 
 
 def test_highlight_dismissal_is_persisted_per_login_and_household(

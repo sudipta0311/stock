@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 from collections.abc import Iterator
+from copy import deepcopy
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import NoReturn
@@ -45,6 +46,7 @@ from wealth.db.models import (
     Security,
     StockCheck,
 )
+from wealth.db.models import WeeklyPlan as WeeklyPlanRow
 from wealth.db.repo import HouseholdMemberLookupError
 from wealth.db.session import system_session, user_session
 
@@ -354,12 +356,43 @@ def test_shared_household_grant_uses_linked_member_and_enforces_viewer_rls(
         json={"token": viewer_token, "bring_my_data": False},
     )
     assert viewer_join.status_code == 200
+
+    with Session(database.owner_engine) as session, session.begin():
+        stored_plan = session.get(WeeklyPlanRow, (owner_id, "2026-W44"))
+        assert stored_plan is not None
+        stored_document = deepcopy(stored_plan.plan)
+        stored_review = next(
+            item
+            for item in stored_document["holding_reviews"]
+            if item["security_id"] == review_security_id
+        )
+        stored_review["reasons"] = ["outdated_synthetic_reason"]
+        stored_plan.plan = stored_document
+        created_at_before_viewer_read = stored_plan.created_at
+
     viewer_plan = client.get("/v1/plan", headers=_household(viewer_headers, owner_id))
     assert viewer_plan.status_code == 200
+    assert viewer_plan.json()["fresh"] is False
+    viewer_review = next(
+        item
+        for item in viewer_plan.json()["holding_reviews"]
+        if item["security_id"] == review_security_id
+    )
+    assert viewer_review["reasons"] == owner_review["reasons"]
     assert any(
         item["security_id"] == review_security_id and item["verdict"] == "keep"
         for item in viewer_plan.json()["holding_reviews"]
     )
+    with Session(database.owner_engine) as session:
+        after_viewer_read = session.get(WeeklyPlanRow, (owner_id, "2026-W44"))
+        assert after_viewer_read is not None
+        assert after_viewer_read.created_at == created_at_before_viewer_read
+        stored_after_viewer_read = next(
+            item
+            for item in after_viewer_read.plan["holding_reviews"]
+            if item["security_id"] == review_security_id
+        )
+        assert stored_after_viewer_read["reasons"] == ["outdated_synthetic_reason"]
     assert not any(
         action["kind"] in {"SELL_EXIT", "SELL_TRIM", "REVIEW_EXIT", "SWAP"}
         for action in viewer_plan.json()["actions"]
