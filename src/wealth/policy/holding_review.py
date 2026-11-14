@@ -86,7 +86,6 @@ def holding_review_decision(
     minimum_buy: Decimal,
     current_india_shares: Decimal | None = None,
     target_india_shares: Decimal | None = None,
-    stock_sector_room_available: bool = False,
     position_size_known: bool = False,
 ) -> HoldingReviewDecision:
     """Choose the plain verdict and bounded reason/check rows from deterministic facts."""
@@ -147,7 +146,6 @@ def holding_review_decision(
         minimum_buy=minimum_buy,
         current_india_shares=current_india_shares,
         target_india_shares=target_india_shares,
-        stock_sector_room_available=stock_sector_room_available,
     )
     checks = tuple(
         {"key": key, "status": card.triggers[trigger].status}
@@ -193,7 +191,6 @@ def _reason_rows(
     minimum_buy: Decimal,
     current_india_shares: Decimal | None,
     target_india_shares: Decimal | None,
-    stock_sector_room_available: bool,
 ) -> tuple[dict[str, Any], ...]:
     if verdict == "add_more":
         return ({"code": "add_more", "params": {}},)
@@ -209,7 +206,6 @@ def _reason_rows(
         and current_india_shares is not None
         and target_india_shares is not None
         and current_india_shares >= target_india_shares
-        and stock_sector_room_available
     )
     if not selected and verdict == "keep" and not weak_company and not india_shares_enough:
         return ()

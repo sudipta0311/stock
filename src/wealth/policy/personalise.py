@@ -1292,7 +1292,7 @@ def _exit_cards(
         weight_pct = (
             value * Decimal(100) / equity_total if value is not None and equity_total else None
         )
-        room, minimum_buy, stock_sector_room_available = _add_more_room(
+        room, minimum_buy = _add_more_room(
             holding,
             owner,
             holdings,
@@ -1365,7 +1365,6 @@ def _exit_cards(
             minimum_buy=minimum_buy,
             current_india_shares=allocation.current_rupees["equity_india"],
             target_india_shares=allocation.target_rupees["equity_india"],
-            stock_sector_room_available=stock_sector_room_available,
             position_size_known=weight_pct is not None,
         )
         tax = _holding_review_tax(holding, owner, card)
@@ -1398,7 +1397,7 @@ def _add_more_room(
     *,
     satellite_pct: Decimal,
     min_action_inr: Decimal,
-) -> tuple[Decimal | None, Decimal, bool]:
+) -> tuple[Decimal | None, Decimal]:
     if holding.market == "IN":
         rules = load_buying_rules()["satellite"]
         total_equity_target = (
@@ -1432,7 +1431,7 @@ def _add_more_room(
         check = market.stock_checks.get(holding.security_id)
         price = holding.price or (check.price if check is not None else None)
         if price is None or price <= 0:
-            return Decimal(0), min_action_inr, False
+            return Decimal(0), min_action_inr
         through_funds_value = through_fund_inr.get(holding.security_id, Decimal(0))
         sector_room = max_sector - sector_value
         room = india_stock_room(
@@ -1444,26 +1443,17 @@ def _add_more_room(
             price=price,
             min_action=min_action_inr,
         )
-        stock_sector_room = india_stock_room(
-            max_stock=max_stock,
-            direct_value=direct_value,
-            through_funds_value=through_funds_value,
-            sector_room=sector_room,
-            satellite_gap=max_stock,
-            price=price,
-            min_action=min_action_inr,
-        )
-        return room, min_action_inr, stock_sector_room >= min_action_inr
+        return room, min_action_inr
 
     if (
         holding.market != "US"
         or owner.residency.country != "DK"
         or not owner.member.investing.us_stock_picks_opt_in
     ):
-        return None, min_action_inr, False
+        return None, min_action_inr
     inr_per_dkk = market.fx_rates.get("DKK/INR")
     if inr_per_dkk is None or inr_per_dkk <= 0:
-        return None, min_action_inr, False
+        return None, min_action_inr
     stock_rules = load_eu_etfs().get("selection", {}).get("stock_picks", {})
     minimum_buy_dkk = Decimal(str(stock_rules.get("minimum_buy_dkk", "2000")))
     investable_dkk = dkk_from_inr(max(Decimal(0), owner.snapshot.investable_total), inr_per_dkk)
@@ -1489,7 +1479,7 @@ def _add_more_room(
         available_dkk=per_stock_cap,
         minimum_buy_dkk=minimum_buy_dkk,
     )
-    return room_dkk * inr_per_dkk, minimum_buy_dkk * inr_per_dkk, False
+    return room_dkk * inr_per_dkk, minimum_buy_dkk * inr_per_dkk
 
 
 def _holding_review_tax(

@@ -427,7 +427,12 @@ def test_india_add_more_plan_uses_neutral_percentile_without_own_history(
     )
 
 
-def test_over_target_india_holdings_explain_why_no_add_more_is_suggested() -> None:
+@pytest.mark.parametrize("one_sector", [False, True])
+def test_over_target_india_holdings_explain_why_no_add_more_is_suggested(
+    one_sector: bool,
+) -> None:
+    # Stock and sector caps come from the small India target, so they are also
+    # short when India is over target; the reason must still show (C70 review).
     base = synthetic_user_data()
     shares = tuple(
         HoldingInput(
@@ -449,7 +454,7 @@ def test_over_target_india_holdings_explain_why_no_add_more_is_suggested() -> No
                 ),
             ),
             price_as_of=_AS_OF,
-            sector=f"sector-{index}",
+            sector="sector-shared" if one_sector else f"sector-{index}",
         )
         for index in range(100)
     )

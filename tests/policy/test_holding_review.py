@@ -63,7 +63,6 @@ def _decision(
     market: str = "IN",
     current_india_shares: Decimal | None = None,
     target_india_shares: Decimal | None = None,
-    stock_sector_room_available: bool = False,
 ):
     card = build_exit_card(facts, _TODAY, TaxContext())
     result = holding_review_decision(
@@ -76,7 +75,6 @@ def _decision(
         minimum_buy=minimum,
         current_india_shares=current_india_shares,
         target_india_shares=target_india_shares,
-        stock_sector_room_available=stock_sector_room_available,
         position_size_known=facts.weight_pct_of_equity is not None,
     )
     return card, result
@@ -157,7 +155,6 @@ def test_india_shares_enough_is_last_and_stays_within_three_reasons() -> None:
         room=Decimal(0),
         current_india_shares=Decimal("100"),
         target_india_shares=Decimal("100"),
-        stock_sector_room_available=True,
     )
 
     assert result.verdict == "keep"
@@ -165,7 +162,7 @@ def test_india_shares_enough_is_last_and_stays_within_three_reasons() -> None:
     assert len(result.reasons) == 3
 
 
-def test_india_shares_enough_is_omitted_for_other_room_limits_markets_and_verdicts() -> None:
+def test_india_shares_enough_is_omitted_under_target_with_room_for_us_or_selling() -> None:
     _, under_target = _decision(
         _facts(),
         _check(),
@@ -179,14 +176,6 @@ def test_india_shares_enough_is_omitted_for_other_room_limits_markets_and_verdic
         room=Decimal("1000"),
         current_india_shares=Decimal("100"),
         target_india_shares=Decimal("100"),
-    )
-    _, stock_capped = _decision(
-        _facts(),
-        _check(),
-        room=Decimal(0),
-        current_india_shares=Decimal("100"),
-        target_india_shares=Decimal("100"),
-        stock_sector_room_available=False,
     )
     _, us_share = _decision(
         _facts(),
@@ -204,7 +193,7 @@ def test_india_shares_enough_is_omitted_for_other_room_limits_markets_and_verdic
         target_india_shares=Decimal("100"),
     )
 
-    for result in (under_target, room_available, stock_capped, us_share, selling):
+    for result in (under_target, room_available, us_share, selling):
         assert "india_shares_enough" not in {row["code"] for row in result.reasons}
 
 
