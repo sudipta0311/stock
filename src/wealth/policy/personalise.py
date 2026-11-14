@@ -329,7 +329,11 @@ def _jsonable(value: Any) -> Any:
     if isinstance(value, Enum):
         return value.value
     if is_dataclass(value) and not isinstance(value, type):
-        return {item.name: _jsonable(getattr(value, item.name)) for item in fields(value)}
+        return {
+            item.name: _jsonable(getattr(value, item.name))
+            for item in fields(value)
+            if item.metadata.get("serialize", True)
+        }
     if isinstance(value, Mapping):
         return {
             str(key): _jsonable(child)
@@ -410,14 +414,24 @@ _BUY_ACTION_KINDS = {"BUY_LUMPSUM", "BUY_STP", "BUY_STOCK_TRANCHE"}
 def _exit_action(card: ExitCard) -> Action | None:
     """Project an actionable, policy-sized exit card into the weekly action schema."""
     kind = _EXIT_ACTION_KINDS.get(card.action)
-    if kind is None or card.quantity <= 0 or not card.lots_to_sell:
+    if kind is None or card.quantity <= 0:
+        return None
+    permits_missing_lots = card.action in {"EXIT", "REVIEW_THEN_EXIT"}
+    if not card.lots_to_sell and not permits_missing_lots:
         return None
     triggered = any(trigger.status == "triggered" for trigger in card.triggers.values())
     if card.action == "EXIT":
-        if card.urgency not in {"CRITICAL", "HIGH"}:
+        if card.urgency not in {"CRITICAL", "HIGH"} and not (
+            card.urgency == "MEDIUM" and "no_reason_to_hold" in card.reason_codes
+        ):
             return None
     elif card.action != "SWAP" and not triggered:
         return None
+    amount = (
+        card.tax_estimate.gross_proceeds
+        if card.lots_to_sell
+        else round_paise(card.quantity * card._sale_price)
+    )
     return Action(
         rank=1,
         kind=kind,
@@ -425,7 +439,7 @@ def _exit_action(card: ExitCard) -> Action | None:
         instrument_category="equity_holding",
         security_id=card.security_id,
         quantity=card.quantity,
-        amount=card.tax_estimate.gross_proceeds,
+        amount=amount,
         reason_code=card.reason_codes[0] if card.reason_codes else "target_gap",
         params=_jsonable(card.params),
         symbol=card.symbol,
@@ -449,7 +463,7 @@ def _weekly_action_key(action: Action, position: int) -> tuple[int, int, int, in
         return (1, 0, 0, position)
     if action.kind == "REBALANCE_SIPS":
         return (2, 0, 0, position)
-    other_exit_order = {"SELL_TRIM": 0, "REVIEW_EXIT": 1, "SWAP": 2}
+    other_exit_order = {"SELL_EXIT": 0, "SELL_TRIM": 1, "REVIEW_EXIT": 2, "SWAP": 3}
     if action.kind in other_exit_order:
         return (3, other_exit_order[action.kind], 0, position)
     return (4, 0, -int(action.amount * 100), position)
@@ -461,10 +475,12 @@ def _merge_weekly_actions(
     """Order buys and actionable exit cards together, cap the week, and carry omitted buys."""
     sell_actions = [action for card in exit_cards if (action := _exit_action(card)) is not None]
     urgency_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
+    sell_kind_order = {"SELL_EXIT": 0}
     sell_actions = sorted(
         sell_actions,
         key=lambda action: (
             urgency_order.get(action.urgency or "LOW", 4),
+            sell_kind_order.get(action.kind, 4),
             -action.amount,
             action.security_id or "",
         ),
@@ -1327,6 +1343,8 @@ def _exit_cards(
                 pe_own_band_percentile=check.pe_percentile,
                 pe_vs_sector_multiple=check.pe_vs_sector,
                 below_200dma=check.below_dma200,
+                quant_decile=check.quant_decile,
+                quantity_held=holding.quantity,
                 thesis_status=thesis_status_from_revenue(check.revenue_yoy_pct),
             )
             tax_context = owner.tax_context

@@ -1044,6 +1044,36 @@ describe("Home this week", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows quantity and a clear tax note when buy dates are missing", async () => {
+    const user = userEvent.setup();
+    const sell = action({
+      kind: "SELL_EXIT",
+      payload: {
+        kind: "SELL_EXIT",
+        security_id: "security-undated-sell",
+        quantity: "3.000000",
+        amount: "30.00",
+        reason_code: "no_reason_to_hold",
+        lots_to_sell: [],
+        tax_estimate: { total_tax: "0.00", lines: [] },
+      },
+    });
+    server.use(...baseHomeHandlers([sell]));
+    renderHome();
+
+    await user.click(await screen.findByRole("button", { name: "Show steps" }));
+    const dialog = screen.getByRole("dialog", {
+      name: "How to take this step",
+    });
+    expect(
+      within(dialog).getByText("Quantity: 3 shares", { exact: true }),
+    ).toBeVisible();
+    expect(
+      within(dialog).getByText("We can't estimate tax without your buy dates."),
+    ).toBeVisible();
+    expect(within(dialog).queryByText(/Estimated tax/)).toBeNull();
+  });
+
   it.each([
     ["SELL_EXIT", "Sell", "I sold it", englishCopy.home.sell_steps],
     ["SELL_TRIM", "Sell some", "I sold it", englishCopy.home.sell_steps],

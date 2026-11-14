@@ -122,6 +122,8 @@ def holding_review_decision(
 
     if card.action == "EXIT":
         verdict: HoldingVerdict = "sell"
+    elif card.action == "WAIT_FOR_LONG_TERM" and "no_reason_to_hold" in card.reason_codes:
+        verdict = "sell"
     elif card.action == "REVIEW_THEN_EXIT":
         verdict = "review"
     elif (
@@ -158,7 +160,9 @@ def holding_review_decision(
         )
     )
     research_status = (
-        "unknown"
+        "triggered"
+        if card.triggers["no_reason_to_hold"].status == "triggered"
+        else "unknown"
         if check.quant_decile is None
         else "ok"
         if check.quant_decile >= minimum_decile or check.quant_decile > weak_decile_max
@@ -195,9 +199,17 @@ def _reason_rows(
     if verdict == "add_more":
         return ({"code": "add_more", "params": {}},)
     weak_decile_max = int(load_exit_rules()["accumulate"]["weak_quant_decile_max"])
+    exit_rules = load_exit_rules()["satellite"]["no_reason_to_hold"]
     statuses = {key: card.triggers[key].status for key in _REASON_ORDER}
     selected = [key for key in _REASON_ORDER if statuses[key] in {"triggered", "watch"}]
     weak_company = check.quant_decile is not None and check.quant_decile <= weak_decile_max
+    india_shares_over_target = (
+        market == "IN"
+        and verdict in {"sell", "review", "sell_some"}
+        and current_india_shares is not None
+        and target_india_shares is not None
+        and current_india_shares >= target_india_shares
+    )
     india_shares_enough = (
         market == "IN"
         and verdict == "keep"
@@ -207,6 +219,39 @@ def _reason_rows(
         and target_india_shares is not None
         and current_india_shares >= target_india_shares
     )
+    if "no_reason_to_hold" in card.reason_codes:
+        rows = [{"code": "company_strength_weak", "params": {}}]
+        own_limit = Decimal(str(exit_rules["own_band_percentile"]))
+        sector_limit = Decimal(str(exit_rules["sector_multiple"]))
+        if check.pe_percentile is not None and check.pe_percentile > own_limit:
+            params: dict[str, str | int | bool] = {
+                "pe_percentile": format(check.pe_percentile, "f")
+            }
+            if check.pe_vs_sector is not None:
+                params["pe_vs_sector"] = format(check.pe_vs_sector, "f")
+            rows.append({"code": "valuation_stretch", "params": params})
+        elif check.pe_vs_sector is not None and check.pe_vs_sector > sector_limit:
+            rows.append(
+                {
+                    "code": "valuation_vs_sector",
+                    "params": {"pe_vs_sector": format(check.pe_vs_sector, "f")},
+                }
+            )
+        drawdown = _drawdown_pct(facts)
+        loss_limit = Decimal(str(exit_rules["loss_from_cost_pct"]))
+        if facts.below_200dma is True and drawdown is not None and drawdown <= -loss_limit:
+            rows.append(
+                {
+                    "code": "risk_stop",
+                    "params": {
+                        "drawdown_pct": _plain_percent(drawdown),
+                        "below_dma200": True,
+                    },
+                }
+            )
+        if india_shares_over_target and len(rows) < 3:
+            rows.append({"code": "india_shares_over_target", "params": {}})
+        return tuple(rows[:3])
     if not selected and verdict == "keep" and not weak_company and not india_shares_enough:
         return ()
     rows: list[dict[str, Any]] = []
@@ -260,6 +305,8 @@ def _reason_rows(
         rows.append({"code": card.reason_codes[0], "params": {}})
     if india_shares_enough and len(rows) < 3:
         rows.append({"code": "india_shares_enough", "params": {}})
+    if india_shares_over_target and len(rows) < 3:
+        rows.append({"code": "india_shares_over_target", "params": {}})
     return tuple(rows[:3])
 
 

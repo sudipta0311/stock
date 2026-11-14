@@ -80,6 +80,7 @@ const section = {
     "thesis_break": "Business results weakening",
     "governance_break": "Governance red flag",
     "geopolitical_break": "Hit by a geopolitical event",
+    "no_reason_to_hold": "Weak and expensive, or falling",
     "risk_stop": "Large fall below cost",
     "goal_approach": "Goal is near",
     "swap": "Better alternative available",

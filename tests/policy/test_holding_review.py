@@ -143,6 +143,101 @@ def test_weak_company_strength_adds_a_reason() -> None:
     assert result.reasons == ({"code": "company_strength_weak", "params": {}},)
 
 
+def test_weak_and_expensive_sell_shows_reasons_in_order() -> None:
+    _card, result = _decision(
+        _facts(quant_decile=2, pe_vs_sector_multiple=Decimal("1.6")),
+        _check(quant_decile=2, pe_percentile=None, pe_vs_sector=Decimal("1.6")),
+        room=Decimal(0),
+    )
+
+    assert result.verdict == "sell"
+    assert result.reasons == (
+        {"code": "company_strength_weak", "params": {}},
+        {"code": "valuation_vs_sector", "params": {"pe_vs_sector": "1.6"}},
+    )
+    assert next(row["status"] for row in result.checks if row["key"] == "company_strength") == (
+        "triggered"
+    )
+
+
+def test_weak_and_falling_sell_shows_cost_reason() -> None:
+    _card, result = _decision(
+        _facts(
+            quant_decile=3,
+            lots=[],
+            average_cost=Decimal("1000"),
+            price=Decimal("780"),
+            below_200dma=True,
+        ),
+        _check(quant_decile=3, price=Decimal("780"), below_dma200=True),
+        room=Decimal(0),
+    )
+
+    assert result.verdict == "sell"
+    assert result.reasons == (
+        {"code": "company_strength_weak", "params": {}},
+        {
+            "code": "risk_stop",
+            "params": {"drawdown_pct": "-22.0", "below_dma200": True},
+        },
+    )
+
+
+def test_weak_sell_keeps_only_three_reasons_when_india_is_over_target() -> None:
+    _card, result = _decision(
+        _facts(
+            quant_decile=2,
+            lots=[_lot(quantity="10", cost="1000")],
+            price=Decimal("780"),
+            below_200dma=True,
+            pe_own_band_percentile=Decimal("95"),
+            pe_vs_sector_multiple=Decimal("1.6"),
+        ),
+        _check(
+            quant_decile=2,
+            price=Decimal("780"),
+            below_dma200=True,
+            pe_percentile=Decimal("95"),
+            pe_vs_sector=Decimal("1.6"),
+        ),
+        room=Decimal(0),
+        current_india_shares=Decimal("110"),
+        target_india_shares=Decimal("100"),
+    )
+
+    assert result.verdict == "sell"
+    assert [row["code"] for row in result.reasons] == [
+        "company_strength_weak",
+        "valuation_stretch",
+        "risk_stop",
+    ]
+    assert len(result.reasons) == 3
+
+
+def test_waiting_weak_share_exit_is_a_sell_and_shows_india_over_target_last() -> None:
+    facts = _facts(
+        lots=[_lot(quantity="10", cost="1000", acquired=date(2025, 1, 29))],
+        quant_decile=2,
+        pe_vs_sector_multiple=Decimal("1.6"),
+        price=Decimal("1200"),
+    )
+    card, result = _decision(
+        facts,
+        _check(quant_decile=2, pe_percentile=None, pe_vs_sector=Decimal("1.6")),
+        room=Decimal(0),
+        current_india_shares=Decimal("110"),
+        target_india_shares=Decimal("100"),
+    )
+
+    assert card.action == "WAIT_FOR_LONG_TERM"
+    assert result.verdict == "sell"
+    assert [row["code"] for row in result.reasons] == [
+        "company_strength_weak",
+        "valuation_vs_sector",
+        "india_shares_over_target",
+    ]
+
+
 def test_india_shares_enough_is_last_and_stays_within_three_reasons() -> None:
     _card, result = _decision(
         _facts(
@@ -195,6 +290,58 @@ def test_india_shares_enough_is_omitted_under_target_with_room_for_us_or_selling
 
     for result in (under_target, room_available, us_share, selling):
         assert "india_shares_enough" not in {row["code"] for row in result.reasons}
+
+
+def test_india_shares_over_target_is_added_to_indian_sells_and_reviews_only() -> None:
+    _, sell = _decision(
+        _facts(governance_events=["AUDITOR_RESIGNATION"]),
+        _check(),
+        current_india_shares=Decimal("100"),
+        target_india_shares=Decimal("100"),
+    )
+    _, review = _decision(
+        _facts(
+            lots=[_lot(quantity="10", cost="1000")],
+            price=Decimal("700"),
+            below_200dma=True,
+        ),
+        _check(price=Decimal("700"), below_dma200=True),
+        current_india_shares=Decimal("100"),
+        target_india_shares=Decimal("100"),
+    )
+    _, sell_some = _decision(
+        _facts(
+            lots=[_lot(quantity="140")],
+            weight_pct_of_equity=Decimal("7"),
+            target_weight_pct=Decimal("5"),
+            pe_own_band_percentile=Decimal("95"),
+            pe_vs_sector_multiple=Decimal("1.6"),
+        ),
+        _check(pe_percentile=Decimal("95"), pe_vs_sector=Decimal("1.6")),
+        current_india_shares=Decimal("100"),
+        target_india_shares=Decimal("100"),
+    )
+    _, us_sell = _decision(
+        _facts(governance_events=["AUDITOR_RESIGNATION"]),
+        _check(market="US"),
+        market="US",
+        current_india_shares=Decimal("100"),
+        target_india_shares=Decimal("100"),
+    )
+    _, below_target_sell = _decision(
+        _facts(governance_events=["AUDITOR_RESIGNATION"]),
+        _check(),
+        current_india_shares=Decimal("99"),
+        target_india_shares=Decimal("100"),
+    )
+
+    assert sell.verdict == "sell"
+    assert review.verdict == "review"
+    assert sell_some.verdict == "sell_some"
+    for result in (sell, review, sell_some):
+        assert result.reasons[-1] == {"code": "india_shares_over_target", "params": {}}
+    assert "india_shares_over_target" not in {row["code"] for row in us_sell.reasons}
+    assert "india_shares_over_target" not in {row["code"] for row in below_target_sell.reasons}
 
 
 def test_two_recent_revenue_drops_are_a_sell_verdict() -> None:

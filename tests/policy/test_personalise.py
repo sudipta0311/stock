@@ -526,6 +526,48 @@ def test_undated_buying_cost_triggers_price_review_without_changing_tax_estimate
     assert "holding_lot_tax_facts_missing:SYNTH" in plan.notes
 
 
+def test_undated_weak_share_gets_sell_action_with_quantity_and_inr_amount() -> None:
+    user_data = synthetic_user_data()
+    original = user_data.holdings[0]
+    holding = replace(
+        original,
+        quantity=Decimal("1234.567891"),
+        price=Decimal("1.234567"),
+        lots=(
+            replace(
+                original.lots[0],
+                quantity=Decimal("1234.567891"),
+                cost_per_unit=Decimal("1.5"),
+                acquired_on=None,
+            ),
+        ),
+    )
+    user_data = replace(user_data, holdings=(holding, *user_data.holdings[1:]))
+    market = synthetic_market()
+    check = replace(
+        market.stock_checks[holding.security_id],
+        quant_decile=2,
+        pe_percentile=None,
+        pe_vs_sector=Decimal("1.6"),
+        price=Decimal("1.234567"),
+    )
+    market = replace(market, stock_checks={holding.security_id: check})
+
+    plan = personalise(user_data, market, None, _WEEK, _AS_OF)
+    sells = [action for action in plan.actions if action["kind"] == "SELL_EXIT"]
+    review = next(row for row in plan.holding_reviews if row["security_id"] == holding.security_id)
+    exit_card = next(row for row in plan.exit_cards if row["security_id"] == holding.security_id)
+
+    assert len(sells) == 1
+    assert sells[0]["quantity"] == "1234.567891"
+    assert sells[0]["amount"] == "1524.16"
+    assert sells[0]["lots_to_sell"] == []
+    assert sells[0]["tax_estimate"] is not None
+    assert sells[0]["tax_estimate"]["lines"] == []
+    assert review["tax"] == {"note_code": "tax_not_estimated"}
+    assert "_sale_price" not in exit_card
+
+
 def test_undated_buying_price_without_cost_keeps_the_current_review() -> None:
     user_data = synthetic_user_data()
     original = user_data.holdings[0]
@@ -1124,6 +1166,113 @@ def test_review_and_swap_exit_cards_use_sell_side_action_kinds() -> None:
 
     assert [action.kind for action in merged] == ["SWAP", "BUY_LUMPSUM"]
     assert merged[0].security_id == "synthetic-swap"
+
+
+def test_medium_sell_follows_foundation_changes_and_beats_buys() -> None:
+    today = date(2026, 1, 10)
+    sell = build_exit_card(
+        HoldingFacts(
+            security_id="synthetic-medium-sell",
+            symbol="SYNTH-SELL",
+            sector="industrials",
+            is_core=False,
+            lots=[],
+            price=Decimal("10"),
+            weight_pct_of_equity=Decimal("4"),
+            target_weight_pct=Decimal("4"),
+            quant_decile=2,
+            quantity_held=Decimal("3"),
+            pe_vs_sector_multiple=Decimal("1.6"),
+        ),
+        today,
+        TaxContext(),
+    )
+    buy_list = ActionList(
+        week=_WEEK,
+        status="ACTIONS",
+        actions=[
+            Action(
+                rank=1,
+                kind="BUILD_EMERGENCY_FUND",
+                sleeve="debt",
+                instrument_category="sweep_fd",
+                amount=Decimal("100"),
+                reason_code="emergency_fund_gap",
+            ),
+            Action(
+                rank=2,
+                kind="REBALANCE_SIPS",
+                sleeve="multiple",
+                instrument_category="monthly_sip",
+                amount=Decimal("100"),
+                reason_code="sip_capacity_redirected",
+            ),
+            Action(
+                rank=3,
+                kind="BUY_LUMPSUM",
+                sleeve="equity_india",
+                instrument_category="in_core_index",
+                amount=Decimal("1000"),
+                reason_code="target_gap",
+            ),
+        ],
+        carry_forward=Decimal(0),
+    )
+
+    merged, _carry_forward = _merge_weekly_actions(buy_list, [sell])
+
+    assert [action.kind for action in merged] == [
+        "BUILD_EMERGENCY_FUND",
+        "REBALANCE_SIPS",
+        "SELL_EXIT",
+    ]
+    assert merged[-1].amount == Decimal("30.00")
+
+
+def test_same_urgency_exit_beats_larger_review_and_only_one_sell_survives() -> None:
+    today = date(2026, 1, 10)
+    exit_card = build_exit_card(
+        HoldingFacts(
+            security_id="synthetic-medium-sell",
+            symbol="SYNTH-SELL",
+            sector="industrials",
+            is_core=False,
+            lots=[],
+            price=Decimal("10"),
+            weight_pct_of_equity=Decimal("4"),
+            target_weight_pct=Decimal("4"),
+            quant_decile=2,
+            quantity_held=Decimal("2"),
+            pe_vs_sector_multiple=Decimal("1.6"),
+        ),
+        today,
+        TaxContext(),
+    )
+    review_card = build_exit_card(
+        HoldingFacts(
+            security_id="synthetic-medium-review",
+            symbol="SYNTH-REVIEW",
+            sector="industrials",
+            is_core=False,
+            lots=[],
+            price=Decimal("10"),
+            weight_pct_of_equity=Decimal("4"),
+            target_weight_pct=Decimal("4"),
+            average_cost=Decimal("14"),
+            quantity_held=Decimal("100"),
+            below_200dma=True,
+        ),
+        today,
+        TaxContext(),
+    )
+    buy_list = ActionList(week=_WEEK, status="NONE", actions=[], carry_forward=Decimal(0))
+
+    merged, _carry_forward = _merge_weekly_actions(buy_list, [review_card, exit_card])
+
+    assert exit_card.action == "EXIT"
+    assert review_card.action == "REVIEW_THEN_EXIT"
+    assert [action.kind for action in merged] == ["SELL_EXIT"]
+    assert merged[0].security_id == "synthetic-medium-sell"
 
 
 def test_plan_health_weights_allocation_gaps_and_open_foundation_items() -> None:

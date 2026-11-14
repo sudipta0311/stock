@@ -364,10 +364,11 @@ Every satellite buy creates an **Exit Card**, stored and shown with the holding:
 | **Thesis break** | 2 consecutive quarters of YoY revenue decline; ROCE < ~10% for 4 quarters; guidance cut > 15% | Exit |
 | **Governance break** | Auditor resignation; promoter pledge +10 pp or > 25%; regulator action; restatement | Exit (urgent alert) |
 | **Geopolitical break** | A new, cited, material event (tariff, sanction, ban) that cuts the stock's addressable revenue by > 20% per the Analyst's evidence | Review → Exit |
+| **No reason to hold** (satellite only) | Research decile ≤ 3 **and** one of: PE > 90th percentile of its own band; PE > 1.5× sector; ≥ 20% below cost **and** below the 200-DMA | Exit (not urgent; may wait for lower tax) |
 | **Valuation stretch** | PE > 90th percentile of the stock's own 10-year band **and** > 1.5× sector | Trim to target |
 | **Position drift** | > 5% of equity, or > 1.5× target | Trim to target |
 | **Opportunity cost** | Same-sector candidate > 1.0 z better for 4+ weeks **and** edge > tax + cost | Swap |
-| **Risk stop** (satellite only) | −25% from cost **and** below the 200-DMA **and** thesis "watch closely" | Review → Exit |
+| **Risk stop** (satellite only) | ≥ 25% below cost **and** below the 200-DMA (owner, 2026-11-14: no longer needs a thesis warning) | Review → Exit |
 | **Goal approach** | Goal within 3 years | Glide to debt |
 
 Rules that apply on top of the table:
@@ -1096,10 +1097,11 @@ satellite:
   thesis_break:      {revenue_yoy_negative_quarters: 2, roce_floor_pct: 10, roce_floor_quarters: 4, guidance_cut_pct: 15, action: EXIT, urgency: HIGH}
   governance_break:  {events: [AUDITOR_RESIGNATION, RESTATEMENT, REGULATOR_ENFORCEMENT], pledge_jump_pp: 10, pledge_abs_pct: 25, action: EXIT, urgency: CRITICAL}
   geopolitical_break: {addressable_revenue_hit_pct: 20, min_independent_sources: 2, action: REVIEW_THEN_EXIT}
+  no_reason_to_hold: {max_quant_decile: 3, own_band_percentile: 90, sector_multiple: 1.5, loss_from_cost_pct: 20, below_dma: 200, action: EXIT, urgency: MEDIUM}
   valuation_stretch: {own_band_percentile: 90, sector_multiple: 1.5, action: TRIM_TO_TARGET}
   drift:             {max_weight_of_equity_pct: 5, max_vs_target_ratio: 1.5, action: TRIM_TO_TARGET}
-  risk_stop:         {drawdown_from_cost_pct: 25, below_dma: 200, requires_thesis: WATCH, action: REVIEW_THEN_EXIT}
-  tax_wait:          {max_days_to_long_term: 30, applies_to: [valuation_stretch, drift, swap]}
+  risk_stop:         {drawdown_from_cost_pct: 25, below_dma: 200, action: REVIEW_THEN_EXIT}
+  tax_wait:          {max_days_to_long_term: 30, applies_to: [no_reason_to_hold, valuation_stretch, drift, swap]}
 core:
   stop_loss: false
   rebalance_bands: {absolute_pp: 5, relative_pct: 25}

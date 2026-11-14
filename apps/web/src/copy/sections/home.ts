@@ -1,6 +1,7 @@
 const section = {
   "sell_quantity": "Quantity: {quantity}",
   "estimated_tax": "Estimated tax {amount}",
+  "sell_tax_not_estimated": "We can't estimate tax without your buy dates.",
   "sell_steps": "Sell these shares in your investment account, then tap I sold it.",
   "review_steps": "Read the reasons, then decide whether to sell.",
   "generic_steps": "Check the details before taking this step.",

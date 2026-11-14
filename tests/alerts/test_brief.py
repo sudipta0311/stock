@@ -183,6 +183,31 @@ def test_sell_action_alone_makes_brief_status_actions() -> None:
     assert _brief(False).status == "NONE"
 
 
+def test_sell_without_lots_renders_symbol_quantity_and_reason() -> None:
+    plan = json.loads(_GOLDEN_PLAN.read_text(encoding="utf-8"))
+    action = dict(next(item for item in plan["actions"] if item["kind"] == "SELL_TRIM"))
+    action.update(
+        {
+            "kind": "SELL_EXIT",
+            "symbol": "SYNTH",
+            "quantity": "3",
+            "amount": "30.00",
+            "reason_code": "no_reason_to_hold",
+            "lots_to_sell": [],
+        }
+    )
+    plan["actions"] = [action]
+
+    brief = _brief_from_plan(plan)
+    rendered = render_text(brief)
+
+    assert "SYNTH" in brief.actions[0].title
+    assert "3 shares" in brief.actions[0].title
+    assert brief.actions[0].why == load_copy()["reasons"]["no_reason_to_hold"]
+    assert "SYNTH" in rendered
+    assert "3 shares" in rendered
+
+
 def test_loan_payment_action_uses_shared_email_copy() -> None:
     plan = json.loads(_GOLDEN_PLAN.read_text(encoding="utf-8"))
     action = dict(plan["actions"][0])

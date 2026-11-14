@@ -76,6 +76,8 @@ class HoldingFacts:
     goal_within_years: int | None = None
     events_watched: bool = False
     average_cost: Decimal | None = None
+    quant_decile: int | None = None
+    quantity_held: Decimal | None = None
 
     def __post_init__(self) -> None:
         for name in ("security_id", "symbol", "sector"):
@@ -90,6 +92,14 @@ class HoldingFacts:
         _decimal(self.price, "price", minimum=_ZERO)
         if self.average_cost is not None:
             _decimal(self.average_cost, "average_cost", minimum=_ZERO)
+        if self.quant_decile is not None and (
+            isinstance(self.quant_decile, bool)
+            or not isinstance(self.quant_decile, int)
+            or not 1 <= self.quant_decile <= 10
+        ):
+            raise ValueError("quant_decile must be an integer from 1 to 10 or None")
+        if self.quantity_held is not None:
+            _decimal(self.quantity_held, "quantity_held", minimum=_ZERO)
         for name in (
             "weight_pct_of_equity",
             "target_weight_pct",
@@ -158,6 +168,9 @@ class ExitCard:
     lots_to_sell: list[tuple[Lot, Decimal]]
     tax_estimate: TaxEstimate
     reason_codes: tuple[str, ...]
+    _sale_price: Decimal = field(
+        default=_ZERO, repr=False, compare=False, metadata={"serialize": False}
+    )
     params: dict[str, date | Decimal | str] = field(default_factory=dict)
     member_id: str = "self"
     member_name: str = "You"
@@ -392,6 +405,46 @@ def _valuation_trigger(facts: HoldingFacts, rules: dict[str, object]) -> Trigger
     return _trigger("valuation_stretch", state, value, threshold)
 
 
+def _no_reason_to_hold_trigger(facts: HoldingFacts, rules: dict[str, object]) -> TriggerStatus:
+    base = ("satellite", "no_reason_to_hold")
+    max_decile = _integer_rule(rules, (*base, "max_quant_decile"))
+    own_percentile_limit = _decimal_rule(rules, (*base, "own_band_percentile"))
+    sector_multiple_limit = _decimal_rule(rules, (*base, "sector_multiple"))
+    loss_limit = _decimal_rule(rules, (*base, "loss_from_cost_pct"))
+    dma_period = _integer_rule(rules, (*base, "below_dma"))
+    decile = facts.quant_decile
+    expensive = (
+        facts.pe_own_band_percentile is not None
+        and facts.pe_own_band_percentile > own_percentile_limit
+    ) or (
+        facts.pe_vs_sector_multiple is not None
+        and facts.pe_vs_sector_multiple > sector_multiple_limit
+    )
+    drawdown = _position_drawdown(facts)
+    falling_at_loss = (
+        facts.below_200dma is True and drawdown is not None and drawdown <= -loss_limit
+    )
+    if decile is None:
+        state: TriggerState = "unknown"
+    elif decile > max_decile:
+        state = "ok"
+    else:
+        state = "triggered" if expensive or falling_at_loss else "ok"
+    value_parts = [f"research decile {decile}" if decile is not None else "research decile unknown"]
+    if facts.pe_own_band_percentile is not None:
+        value_parts.append(f"own PE percentile {facts.pe_own_band_percentile}")
+    if facts.pe_vs_sector_multiple is not None:
+        value_parts.append(f"{facts.pe_vs_sector_multiple}x sector PE")
+    if drawdown is not None:
+        value_parts.append(f"{drawdown}% from cost")
+    threshold = (
+        f"research decile <= {max_decile} and own PE percentile > {own_percentile_limit} "
+        f"or sector multiple > {sector_multiple_limit}x or loss >= {loss_limit}% below "
+        f"{dma_period}-DMA"
+    )
+    return _trigger("no_reason_to_hold", state, "; ".join(value_parts), threshold)
+
+
 def _drift_trigger(facts: HoldingFacts, rules: dict[str, object]) -> TriggerStatus:
     base = ("satellite", "drift")
     weight_limit = _decimal_rule(rules, (*base, "max_weight_of_equity_pct"))
@@ -440,42 +493,26 @@ def _risk_trigger(facts: HoldingFacts, rules: dict[str, object]) -> TriggerStatu
     base = ("satellite", "risk_stop")
     drawdown_limit = _decimal_rule(rules, (*base, "drawdown_from_cost_pct"))
     dma_period = _integer_rule(rules, (*base, "below_dma"))
-    required_thesis = str(rules["satellite"]["risk_stop"]["requires_thesis"]).lower()  # type: ignore[index]
     drawdown = _position_drawdown(facts)
     watch_fraction = _decimal_rule(rules, ("watch_fraction",))
-    rules_out = (
-        (drawdown is not None and drawdown > -(drawdown_limit * watch_fraction))
-        or facts.below_200dma is False
-        or (facts.thesis_status != "unknown" and facts.thesis_status != required_thesis)
-    )
-    known = (
-        drawdown is not None and facts.below_200dma is not None and facts.thesis_status != "unknown"
-    )
+    known = drawdown is not None and facts.below_200dma is not None
     value = (
-        f"{drawdown}% from cost; below {dma_period}-DMA={facts.below_200dma}; "
-        f"thesis={facts.thesis_status}"
+        f"{drawdown}% from cost; below {dma_period}-DMA={facts.below_200dma}"
         if drawdown is not None
         else None
     )
-    threshold = (
-        f"drawdown <=-{drawdown_limit}% and below {dma_period}-DMA and thesis {required_thesis}"
-    )
+    threshold = f"drawdown <=-{drawdown_limit}% and below {dma_period}-DMA"
     state: TriggerState
-    if rules_out:
+    # Either known fact alone rules the stop out, even when the other one is missing.
+    if (
+        drawdown is not None and drawdown > -(drawdown_limit * watch_fraction)
+    ) or facts.below_200dma is False:
         state = "ok"
     elif not known:
-        state: TriggerState = "unknown"
-    elif (
-        drawdown <= -drawdown_limit
-        and facts.below_200dma
-        and facts.thesis_status == required_thesis
-    ):
+        state = "unknown"
+    elif drawdown <= -drawdown_limit and facts.below_200dma:
         state = "triggered"
-    elif (
-        drawdown <= -(drawdown_limit * watch_fraction)
-        and facts.below_200dma
-        and facts.thesis_status == required_thesis
-    ):
+    elif drawdown <= -(drawdown_limit * watch_fraction) and facts.below_200dma:
         state = "watch"
     else:
         state = "ok"
@@ -522,7 +559,9 @@ def _empty_tax_estimate(today: date, tax_ctx: TaxContext) -> TaxEstimate:
 
 def _sale_size(facts: HoldingFacts, action: ExitAction) -> Decimal:
     total_quantity = sum((lot.quantity for lot in facts.lots), _ZERO)
-    if action in {"EXIT", "REVIEW_THEN_EXIT", "SWAP"}:
+    if action in {"EXIT", "REVIEW_THEN_EXIT"}:
+        return total_quantity if facts.lots else facts.quantity_held or _ZERO
+    if action == "SWAP":
         return total_quantity
     if action != "TRIM_TO_TARGET":
         return _ZERO
@@ -614,6 +653,9 @@ def build_exit_card(
             "geopolitical_break": _trigger(
                 "geopolitical_break", "ok", None, "not applicable to core"
             ),
+            "no_reason_to_hold": _trigger(
+                "no_reason_to_hold", "ok", None, "not applicable to core"
+            ),
             "valuation_stretch": _trigger(
                 "valuation_stretch", "ok", None, "not applicable to core"
             ),
@@ -627,6 +669,7 @@ def build_exit_card(
             "thesis_break": _thesis_trigger(facts, selected_rules),
             "governance_break": _governance_trigger(facts, selected_rules),
             "geopolitical_break": _geopolitical_trigger(facts, selected_rules),
+            "no_reason_to_hold": _no_reason_to_hold_trigger(facts, selected_rules),
             "valuation_stretch": _valuation_trigger(facts, selected_rules),
             "drift": _drift_trigger(facts, selected_rules),
             "risk_stop": _risk_trigger(facts, selected_rules),
@@ -637,6 +680,7 @@ def build_exit_card(
     governance_fired = triggers["governance_break"].status == "triggered"
     thesis_fired = triggers["thesis_break"].status == "triggered"
     geopolitical_fired = triggers["geopolitical_break"].status == "triggered"
+    no_reason_fired = triggers["no_reason_to_hold"].status == "triggered"
     risk_fired = triggers["risk_stop"].status == "triggered"
     valuation_fired = triggers["valuation_stretch"].status == "triggered"
     drift_fired = triggers["drift"].status == "triggered"
@@ -653,6 +697,10 @@ def build_exit_card(
         action = "REVIEW_THEN_EXIT"
         urgency = "MEDIUM"
         reasons.append("geopolitical_break")
+    elif no_reason_fired:
+        action = "EXIT"
+        urgency = "MEDIUM"
+        reasons.append("no_reason_to_hold")
     elif risk_fired:
         action = "REVIEW_THEN_EXIT"
         urgency = "MEDIUM"
@@ -710,18 +758,29 @@ def build_exit_card(
 
     wait_rules = selected_rules["satellite"]["tax_wait"]  # type: ignore[index]
     wait_families = wait_rules["applies_to"]
+    can_wait_for_weak_share_exit = (
+        action == "EXIT"
+        and "no_reason_to_hold" in reasons
+        and isinstance(wait_families, list)
+        and "no_reason_to_hold" in wait_families
+    )
     can_wait = (
-        not facts.is_core
-        and action in {"TRIM_TO_TARGET", "SWAP"}
-        and any(
-            reason in {"valuation_stretch", "drift", "opportunity_cost_swap"} for reason in reasons
+        (
+            not facts.is_core
+            and action in {"TRIM_TO_TARGET", "SWAP"}
+            and any(
+                reason in {"valuation_stretch", "drift", "opportunity_cost_swap"}
+                for reason in reasons
+            )
+            and isinstance(wait_families, list)
         )
-        and isinstance(wait_families, list)
-    ) or (
-        facts.is_core
-        and action == "TRIM_TO_TARGET"
-        and drift_fired
-        and isinstance(wait_families, list)
+        or (not facts.is_core and can_wait_for_weak_share_exit)
+        or (
+            facts.is_core
+            and action == "TRIM_TO_TARGET"
+            and drift_fired
+            and isinstance(wait_families, list)
+        )
     )
     if can_wait:
         max_days = _integer_rule(selected_rules, ("satellite", "tax_wait", "max_days_to_long_term"))
@@ -751,5 +810,6 @@ def build_exit_card(
         lots_to_sell=lots_to_sell,
         tax_estimate=tax_estimate,
         reason_codes=tuple(reasons),
+        _sale_price=facts.price,
         params=params,
     )

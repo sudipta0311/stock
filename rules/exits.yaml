@@ -27,6 +27,15 @@ satellite:
     addressable_revenue_hit_pct: "20"
     min_independent_sources: 2
     action: REVIEW_THEN_EXIT
+  # Research ranks the company weak, and it also looks expensive or keeps falling at a loss.
+  no_reason_to_hold:
+    max_quant_decile: 3
+    own_band_percentile: "90"
+    sector_multiple: "1.5"
+    loss_from_cost_pct: "20"
+    below_dma: 200
+    action: EXIT
+    urgency: MEDIUM
   valuation_stretch:
     own_band_percentile: "90"
     sector_multiple: "1.5"
@@ -38,11 +47,10 @@ satellite:
   risk_stop:
     drawdown_from_cost_pct: "25"
     below_dma: 200
-    requires_thesis: WATCH
     action: REVIEW_THEN_EXIT
   tax_wait:
     max_days_to_long_term: 30
-    applies_to: [valuation_stretch, drift, swap]
+    applies_to: [no_reason_to_hold, valuation_stretch, drift, swap]
   goal_approach:
     within_years: 3
     action: GLIDE_TO_DEBT

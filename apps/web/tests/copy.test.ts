@@ -71,6 +71,15 @@ describe("generated copy", () => {
       "Your file and password are used for this upload only. They are not stored.",
     );
     expect(englishCopy.inbox.email_settings).toBe("Email settings");
+    expect(englishCopy.reasons.no_reason_to_hold).toBe(
+      "It ranks low in our research and looks expensive or keeps falling.",
+    );
+    expect(englishCopy.labels.trigger_keys.no_reason_to_hold).toBe(
+      "Weak and expensive, or falling",
+    );
+    expect(englishCopy.home.sell_tax_not_estimated).toBe(
+      "We can't estimate tax without your buy dates.",
+    );
   });
 
   it("keeps the PWA English copy in sync with the YAML source", () => {

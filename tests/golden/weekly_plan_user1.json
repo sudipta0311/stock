@@ -321,11 +321,17 @@
           "threshold": "event in AUDITOR_RESIGNATION, RESTATEMENT, REGULATOR_ENFORCEMENT; pledge increase >=10 pp or pledge >25%",
           "value": null
         },
+        "no_reason_to_hold": {
+          "key": "no_reason_to_hold",
+          "status": "ok",
+          "threshold": "research decile <= 3 and own PE percentile > 90 or sector multiple > 1.5x or loss >= 20% below 200-DMA",
+          "value": "research decile 6; own PE percentile 50; 1.0x sector PE; 28.57142857142857142857142857% from cost"
+        },
         "risk_stop": {
           "key": "risk_stop",
           "status": "ok",
-          "threshold": "drawdown <=-25% and below 200-DMA and thesis watch",
-          "value": "28.57142857142857142857142857% from cost; below 200-DMA=None; thesis=unknown"
+          "threshold": "drawdown <=-25% and below 200-DMA",
+          "value": "28.57142857142857142857142857% from cost; below 200-DMA=None"
         },
         "tax_wait": {
           "key": "tax_wait",

@@ -569,16 +569,25 @@ function BuyRecordSheet({
 function sellDetails(action: ActionResponse): {
   quantity: string;
   tax: string;
+  taxNotEstimated: boolean;
 } {
   const payload = payloadFor(action);
   const taxEstimate = asRecord(payload.tax_estimate);
-  const tax = textValue(
-    taxEstimate.estimated_tax ?? taxEstimate.tax_due ?? payload.estimated_tax,
+  const taxValue =
+    taxEstimate.estimated_tax ??
+    taxEstimate.tax_due ??
+    taxEstimate.total_tax ??
+    payload.estimated_tax;
+  const tax = textValue(taxValue);
+  const hasLots = asArray(payload.lots_to_sell).length > 0;
+  const isSell = ["SELL_EXIT", "SELL_TRIM", "REVIEW_EXIT"].includes(
+    textValue(payload.kind, action.kind),
   );
   const rawQuantity = textValue(payload.quantity ?? payload.quantity_to_sell);
   return {
     quantity: rawQuantity ? quantityLabel(rawQuantity, "equity") : "",
     tax: tax && isPositiveAmount(tax) ? tax : "",
+    taxNotEstimated: isSell && !hasLots && !isPositiveAmount(tax),
   };
 }
 
@@ -1576,6 +1585,11 @@ export function HomePage() {
                     <p className="text-sm">
                       {englishCopy.home.estimated_tax.replace("{amount}", "")}
                       <MoneyValue amountInr={sale.tax} />
+                    </p>
+                  ) : null}
+                  {sale.taxNotEstimated ? (
+                    <p className="text-sm">
+                      {englishCopy.home.sell_tax_not_estimated}
                     </p>
                   ) : null}
                   <details>

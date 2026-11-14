@@ -122,6 +122,51 @@ function renderHolding(withHousehold = false) {
 }
 
 describe("holding review", () => {
+  it("shows the sell verdict and all new weak-share reasons", async () => {
+    const user = userEvent.setup();
+    server.use(...pageHandlers());
+    server.use(
+      http.get(/\/v1\/plan$/, () =>
+        HttpResponse.json(
+          weeklyPlan({
+            holding_reviews: [
+              {
+                security_id: "security-test",
+                verdict: "sell",
+                reasons: [
+                  { code: "company_strength_weak", params: {} },
+                  {
+                    code: "valuation_vs_sector",
+                    params: { pe_vs_sector: "1.6" },
+                  },
+                  { code: "india_shares_over_target", params: {} },
+                ],
+                tax: { note_code: "tax_not_estimated" },
+                checked_on: "2026-10-28",
+                checks: [{ key: "company_strength", status: "triggered" }],
+              },
+            ],
+          }),
+        ),
+      ),
+    );
+    renderHolding();
+
+    expect(await screen.findByText("Sell", { exact: true })).toBeVisible();
+    expect(
+      screen.getByText("This company ranks low in our weekly research."),
+    ).toBeVisible();
+    await user.click(screen.getByText("Why this suggestion?"));
+    expect(
+      screen.getByText("The price looks high compared with similar companies."),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "Your plan already has more than enough in Indian shares.",
+      ),
+    ).toBeVisible();
+  });
+
   it("shows a holding's buying cost and profit percentage", async () => {
     const boughtHolding = {
       ...holding,
