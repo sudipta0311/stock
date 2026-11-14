@@ -1069,7 +1069,7 @@ describe("Home this week", () => {
       within(dialog).getByText("Quantity: 3 shares", { exact: true }),
     ).toBeVisible();
     expect(
-      within(dialog).getByText("We can't estimate tax without your buy dates."),
+      within(dialog).getByText("Tax is not estimated for this sale."),
     ).toBeVisible();
     expect(within(dialog).queryByText(/Estimated tax/)).toBeNull();
   });

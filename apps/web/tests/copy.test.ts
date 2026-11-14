@@ -78,7 +78,7 @@ describe("generated copy", () => {
       "Weak and expensive, or falling",
     );
     expect(englishCopy.home.sell_tax_not_estimated).toBe(
-      "We can't estimate tax without your buy dates.",
+      "Tax is not estimated for this sale.",
     );
   });
 
