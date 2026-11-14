@@ -6,11 +6,16 @@ from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 
+import pytest
+
+import wealth.policy.placement as placement_module
 from wealth.policy.actions import Action, ActionList, WeekInput
 from wealth.policy.allocation import AllocationPlan
 from wealth.policy.data import required_fx_currencies
+from wealth.policy.debt_picker import DebtPick
 from wealth.policy.foundation import FoundationItem, FoundationReport
 from wealth.policy.household import (
+    MemberContext,
     MemberProfile,
     build_household_snapshot,
     build_member_contexts,
@@ -109,6 +114,80 @@ def _household():
         fx_rates={"USD/INR": Decimal("83"), "DKK/INR": Decimal("12")},
     )
     return members, assets, household, contexts
+
+
+def _debt_sip_contexts(
+    ppf_annual_contribution: str | None = None,
+    *,
+    spouse_birth_year: int | None = None,
+) -> tuple[tuple[MemberProfile, ...], tuple[MemberContext, ...]]:
+    members = _members()
+    if spouse_birth_year is not None:
+        spouse = replace(
+            members[1],
+            tax=members[1].tax.model_copy(update={"birth_year": spouse_birth_year}),
+        )
+        members = (members[0], spouse)
+
+    assets = ()
+    if ppf_annual_contribution is not None:
+        ppf = PPFAsset.model_validate(
+            {
+                "asset_type": "ppf",
+                "member_id": members[1].id,
+                "balance": "300000",
+                "opened_fy_start_year": 2018,
+                "yearly_contribution": ppf_annual_contribution,
+            }
+        )
+        assets = ((ppf, _valuation("300000")),)
+
+    household = build_household_snapshot(assets, (), (), members, self_member_id=members[0].id)
+    contexts = build_member_contexts(
+        members,
+        household,
+        assets,
+        as_of_year=2026,
+        fx_rates={"USD/INR": Decimal("83"), "DKK/INR": Decimal("12")},
+    )
+    return members, contexts
+
+
+def _debt_sip_action(source: MemberProfile, amount: str) -> Action:
+    monthly_amount = Decimal(amount)
+    return Action(
+        rank=1,
+        kind="REBALANCE_SIPS",
+        sleeve="multiple",
+        instrument_category="monthly_sip",
+        amount=monthly_amount,
+        reason_code="sip_capacity_redirected",
+        member_id=source.id,
+        member_name=source.name,
+        member_relationship=source.relationship,
+        params={
+            "changes": [
+                {
+                    "sleeve": "debt",
+                    "from": "0.00",
+                    "to": format(monthly_amount, ".2f"),
+                }
+            ]
+        },
+    )
+
+
+def _debt_sip_changes(actions: tuple[Action, ...]) -> list[tuple[Action, dict[str, object]]]:
+    return [
+        (action, change)
+        for action in actions
+        for change in action.params.get("changes", [])
+        if isinstance(change, dict) and change.get("sleeve") == "debt"
+    ]
+
+
+def _debt_sip_change_amount(change: dict[str, object]) -> Decimal:
+    return Decimal(str(change["to"])) - Decimal(str(change["from"]))
 
 
 def test_member_contexts_keep_tax_and_annual_room_separate() -> None:
@@ -536,6 +615,122 @@ def test_sip_placement_routes_by_member_and_preserves_eligibility() -> None:
         [],
     )
     assert len(bounded) <= 3
+
+
+def test_sip_debt_redirection_caps_ppf_monthly_and_routes_remainder() -> None:
+    members, contexts = _debt_sip_contexts()
+    result = place_actions(
+        [_debt_sip_action(members[0], "66783")],
+        contexts,
+        debt_yields={"ppf": Decimal("9"), "bank_fd": Decimal("8")},
+        fx_rates={},
+        as_of_year=2026,
+    )
+
+    changes = _debt_sip_changes(result.actions)
+    ppf_change = next(
+        change for _action, change in changes if change["instrument_category"] == "ppf"
+    )
+    next_change = next(
+        change for _action, change in changes if change["instrument_category"] != "ppf"
+    )
+
+    assert _debt_sip_change_amount(ppf_change) == Decimal("12500.00")
+    assert _debt_sip_change_amount(next_change) == Decimal("54283.00")
+    assert sum(
+        (_debt_sip_change_amount(change) for _action, change in changes), Decimal(0)
+    ) == Decimal("66783.00")
+    assert any(action.clubbing_check is not None for action in result.actions)
+    assert "sip_increase_unplaced:debt" not in result.notes
+
+
+def test_sip_debt_redirection_uses_remaining_ppf_room_over_twelve() -> None:
+    members, contexts = _debt_sip_contexts(ppf_annual_contribution="100000")
+    result = place_actions(
+        [_debt_sip_action(members[0], "66783")],
+        contexts,
+        debt_yields={"ppf": Decimal("9"), "bank_fd": Decimal("8")},
+        fx_rates={},
+        as_of_year=2026,
+    )
+
+    ppf_change = next(
+        change
+        for _action, change in _debt_sip_changes(result.actions)
+        if change["instrument_category"] == "ppf"
+    )
+
+    assert _debt_sip_change_amount(ppf_change) == Decimal("4166.66")
+
+
+def test_sip_debt_redirection_skips_ppf_with_no_room() -> None:
+    members, contexts = _debt_sip_contexts(ppf_annual_contribution="150000")
+    result = place_actions(
+        [_debt_sip_action(members[0], "66783")],
+        contexts,
+        debt_yields={"ppf": Decimal("9"), "bank_fd": Decimal("8")},
+        fx_rates={},
+        as_of_year=2026,
+    )
+
+    changes = _debt_sip_changes(result.actions)
+
+    assert all(change["instrument_category"] != "ppf" for _action, change in changes)
+    assert sum(
+        (_debt_sip_change_amount(change) for _action, change in changes), Decimal(0)
+    ) == Decimal("66783.00")
+
+
+def test_sip_debt_redirection_notes_remainder_after_capped_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    members, contexts = _debt_sip_contexts(spouse_birth_year=1960)
+    spouse_context = next(context for context in contexts if context.member_id == members[1].id)
+    spouse_context = replace(
+        spouse_context,
+        limits_room={
+            **spouse_context.limits_room,
+            "scss_inr": Decimal("120000"),
+            "pomis_inr": Decimal("240000"),
+        },
+    )
+    contexts = tuple(
+        spouse_context if context.member_id == spouse_context.member_id else context
+        for context in contexts
+    )
+    assert spouse_context.eligibility_status["scss"] == "allowed"
+    assert spouse_context.eligibility_status["pomis"] == "allowed"
+
+    scss_pick = DebtPick("scss", Decimal("66783"), Decimal("8.00"), [])
+    pomis_pick = DebtPick("pomis", Decimal("66783"), Decimal("7.00"), [])
+    monkeypatch.setattr(
+        placement_module,
+        "_ranked_debt_candidates",
+        lambda *_args: [
+            (spouse_context, scss_pick),
+            (spouse_context, scss_pick),
+            (spouse_context, pomis_pick),
+        ],
+    )
+
+    result = place_actions(
+        [_debt_sip_action(members[0], "66783")],
+        contexts,
+        debt_yields={},
+        fx_rates={},
+        as_of_year=2026,
+    )
+    changes = _debt_sip_changes(result.actions)
+
+    assert [change["instrument_category"] for _action, change in changes] == ["scss", "pomis"]
+    assert [_debt_sip_change_amount(change) for _action, change in changes] == [
+        Decimal("10000.00"),
+        Decimal("20000.00"),
+    ]
+    assert sum(
+        (_debt_sip_change_amount(change) for _action, change in changes), Decimal(0)
+    ) == Decimal("30000.00")
+    assert "sip_increase_unplaced:debt" in result.notes
 
 
 def test_new_instrument_buy_placements_match_member_eligibility_status() -> None:

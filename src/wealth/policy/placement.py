@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_DOWN, Decimal, InvalidOperation
 
 from wealth.core.money import round_paise
 from wealth.policy.actions import Action
@@ -642,24 +642,44 @@ def _place_sip_redirection(
                     "instrument_category": "bank_fd",
                 }
             )
+            remaining = increase
+            used: set[tuple[str, str]] = set()
             for member, pick in _ranked_debt_candidates(
                 debt_action,
                 members,
                 debt_yields,
                 as_of_year,
             ):
-                if _instrument_eligibility(member, pick.instrument) in {
+                key = (member.member_id, pick.instrument)
+                if key in used:
+                    continue
+                used.add(key)
+                if _instrument_eligibility(member, pick.instrument) not in {
                     "allowed",
                     "conditional",
                 }:
-                    placements.append(
-                        (
-                            member,
-                            increase,
-                            {"instrument_category": pick.instrument},
-                        )
+                    continue
+                room = _debt_room(member, pick.instrument)
+                monthly_room = (
+                    (room / Decimal(12)).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+                    if room is not None
+                    else remaining
+                )
+                amount = min(remaining, monthly_room)
+                if amount <= 0:
+                    continue
+                placements.append(
+                    (
+                        member,
+                        amount,
+                        {"instrument_category": pick.instrument},
                     )
+                )
+                remaining = round_paise(remaining - amount)
+                if remaining <= 0:
                     break
+            if remaining > 0 and placements:
+                notes.append("sip_increase_unplaced:debt")
 
         if not placements:
             unchanged = dict(change)

@@ -88,6 +88,7 @@ Status: ⬜ not started · 🟦 in progress · ✅ accepted · 🔁 rework · �
 | C66 | A lost sign-in renewal does not sign you out: inside the 30-second grace window the previous refresh token gets a fresh pair instead of 409 (same expiry and allowed-email checks; `last_used_at`, `expires_at` and `previous_hash` unchanged, so the window cannot be stretched); after it, reuse still revokes and audits | 1 | ✅ |
 | C67 | Bank results are read: NSE banking-format filings give `revenue` (total `Income`, else interest earned + other income in one unit), `net_income` and `eps_diluted`; a share whose stored NSE facts have no revenue inside the fundamentals window re-reads the whole window once (upsert is idempotent), so held banks get company-results and price-level checks without waiting a year | 2 | ✅ |
 | C68 | Research survives share symbols with "&": dossier IDs encode other characters reversibly (`M&M` → `M_26M`) so they pass the Pydantic pattern and the 0016 database check without a migration, ideas still say `M&M`; one bad screener pick is skipped and counted instead of failing the week; failures print the `wealth` function and Pydantic field paths (never values); Indian broker imports keep `&` symbols | 1 | ✅ |
+| C69 | Monthly savings respect yearly limits: a monthly move into safe money gives PPF/SSY at most remaining yearly room ÷ 12 (SCSS/POMIS remaining cap ÷ 12), rounded down to paise, and passes the rest down the ranked options; anything no option can take is noted `sip_increase_unplaced:debt` | 1 | ✅ |
 
 ## Follow-ups and review outcomes
 
