@@ -30,7 +30,14 @@ from sqlalchemy.orm import Session
 
 from wealth.db.models import FundamentalPIT, PriceEod, Security, UniverseMember
 from wealth.db.session import make_engine, system_session
-from wealth.research.dossier import Claim, Dossier, DossierSecurity, Evidence, Stage
+from wealth.research.dossier import (
+    Claim,
+    Dossier,
+    DossierSecurity,
+    Evidence,
+    Stage,
+    dossier_id_for,
+)
 from wealth.research.factors import fundamental_factors, price_factors
 
 _ROOT = Path(__file__).resolve().parents[3]
@@ -474,7 +481,7 @@ def _save_pick(
         f"rank decile {pick.decile}."
     )
     dossier = Dossier(
-        dossier_id=f"{week}/{inputs.market}/{inputs.symbol}",
+        dossier_id=dossier_id_for(week, inputs.market, inputs.symbol),
         security=DossierSecurity(
             id=pick.security_id,
             market=inputs.market,
@@ -571,6 +578,8 @@ def run_screener(
 
     counts: dict[str, int] = {}
     saved_by_market: dict[str, list[str]] = {}
+    skipped_by_market: dict[str, int] = {}
+    skipped_errors: dict[str, dict[str, int]] = {}
     for market in ("IN", "US"):
         rows = rows_by_market[market]
         if not rows:
@@ -584,20 +593,29 @@ def run_screener(
         )
         by_id = {row.security_id: row for row in rows}
         for pick in result.shortlist:
-            _save_pick(
-                engine,
-                pick,
-                by_id[pick.security_id],
-                snapshots[pick.security_id],
-                week=week,
-                as_of=as_of,
-            )
+            try:
+                _save_pick(
+                    engine,
+                    pick,
+                    by_id[pick.security_id],
+                    snapshots[pick.security_id],
+                    week=week,
+                    as_of=as_of,
+                )
+            except Exception as error:
+                skipped_by_market[market] = skipped_by_market.get(market, 0) + 1
+                market_errors = skipped_errors.setdefault(market, {})
+                error_class = type(error).__name__
+                market_errors[error_class] = market_errors.get(error_class, 0) + 1
+                continue
             saved_by_market.setdefault(market, []).append(pick.security_id)
         counts[market] = len(result.shortlist)
     return {
         "week": week,
         "as_of": as_of.isoformat(),
         "shortlisted": counts,
+        "skipped": skipped_by_market,
+        "skipped_errors": skipped_errors,
         "security_ids": alternate_markets(saved_by_market),
     }
 

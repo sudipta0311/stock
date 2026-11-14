@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
@@ -10,6 +9,9 @@ from sqlalchemy.orm import Session
 from tests.db.conftest import MigratedDatabase
 
 from wealth.db.models import FundamentalPIT, PriceEod, Security, UniverseMember
+from wealth.research.dossier import Dossier, Stage, dossier_id_for
+from wealth.research.graph import build_week_pack_content
+from wealth.research.run import load_shortlist_candidates
 from wealth.research.screener import run_screener
 
 pytestmark = pytest.mark.db
@@ -22,7 +24,7 @@ def test_weekly_run_persists_a_cited_screened_dossier(
     as_of = date(2026, 10, 30)
     security = Security(
         market="IN",
-        symbol=f"SYNTH{uuid4().hex[:6].upper()}",
+        symbol="M&M",
         name="Synthetic Indian Equity",
         security_type="equity",
         currency="INR",
@@ -119,9 +121,36 @@ def test_weekly_run_persists_a_cited_screened_dossier(
         ).one()
 
     assert dossier.stage == "SCREENED"
+    assert dossier.id == dossier_id_for(week, "IN", "M&M")
     claim = dossier.json["claims"][0]
     assert claim["kind"] == "FACT"
     assert claim["evidence"][0]["tool_call_id"] == str(snapshot.tool_call_id)
     assert snapshot.result_json["raw_factors"]["roe"] is not None
     assert snapshot.result_json["peer_inputs"]["roe"]
     assert snapshot.result_json["source_urls"]
+
+    candidates = load_shortlist_candidates(
+        migrated_database.owner_engine,
+        week,
+        result["security_ids"],
+    )
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate["dossier_id"] == dossier_id_for(week, "IN", "M&M")
+    assert candidate["symbol"] == "M&M"
+    approved_dossier = Dossier.model_validate(
+        {
+            **candidate["dossier"],
+            "stage": Stage.APPROVED.value,
+            "status": "APPROVED",
+        }
+    )
+    pack = build_week_pack_content(
+        [approved_dossier],
+        {approved_dossier.dossier_id: candidate},
+        index_percentiles={"IN": None},
+        index_history={"IN": {"history_label": "unavailable"}},
+    )
+
+    assert pack["ideas"][0]["symbol"] == "M&M"
+    assert pack["idea_outcomes"][0]["symbol"] == "M&M"

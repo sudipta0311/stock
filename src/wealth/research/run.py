@@ -18,7 +18,8 @@ from sqlalchemy.engine import make_url
 
 from wealth.db.models import PriceEod, Security
 from wealth.db.session import make_engine, system_session
-from wealth.research.dossier import Dossier, Stage
+from wealth.research.diagnostics import failure_diagnostics
+from wealth.research.dossier import Dossier, Stage, dossier_id_for
 from wealth.research.graph import (
     DECIDED_DOSSIER_STAGES,
     build_research_graph,
@@ -113,7 +114,7 @@ def load_shortlist_candidates(
                 security = session.scalar(select(Security).where(Security.id == security_id))
                 if security is None or not security.symbol or security.market not in {"IN", "US"}:
                     continue
-                dossier_id = f"{week}/{security.market}/{security.symbol}"
+                dossier_id = dossier_id_for(week, security.market, security.symbol)
                 row = session.execute(
                     text(
                         "SELECT id, security_id, json FROM dossiers "
@@ -339,6 +340,8 @@ def _run_start(args: argparse.Namespace) -> int:
                 "stage": state["stage"],
                 "status": "waiting",
                 "shortlisted": len(shortlist),
+                "skipped": screened.get("skipped", {}),
+                "skipped_errors": screened.get("skipped_errors", {}),
             }
         )
         return 0
@@ -350,7 +353,14 @@ def _run_start(args: argparse.Namespace) -> int:
     except Exception as error:
         if engine is not None:
             update_run(engine, run_id, status="failed", finished=True)
-        _json_print({"run_id": str(run_id), "status": "failed", "error": type(error).__name__})
+        _json_print(
+            {
+                "run_id": str(run_id),
+                "status": "failed",
+                "error": type(error).__name__,
+                **failure_diagnostics(error),
+            }
+        )
         return 3
     finally:
         if engine is not None:
@@ -414,7 +424,14 @@ def _run_continue(args: argparse.Namespace) -> int:
         _json_print({"run_id": args.run_id, "status": "budget_exceeded"})
         return 2
     except Exception as error:
-        _json_print({"run_id": args.run_id, "status": "failed", "error": type(error).__name__})
+        _json_print(
+            {
+                "run_id": args.run_id,
+                "status": "failed",
+                "error": type(error).__name__,
+                **failure_diagnostics(error),
+            }
+        )
         return 3
     finally:
         engine.dispose()

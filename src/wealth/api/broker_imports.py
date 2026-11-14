@@ -824,7 +824,7 @@ def _security_for_confirmation(
     currency = str(payload.get("currency") or ("INR" if market == "IN" else "USD")).upper()
     symbol = str(payload.get("symbol") or isin).upper()
     valid_isin = _ISIN.fullmatch(isin) is not None and isin_check_digit_ok(isin)
-    if valid_isin and re.fullmatch(r"[A-Z0-9.\-]{1,15}", symbol) is None:
+    if valid_isin and re.fullmatch(r"[A-Z0-9.&\-]{1,15}", symbol) is None:
         symbol = isin
     name = str(payload.get("name") or symbol or "Imported security")[:160]
     override = item.user_override or {}

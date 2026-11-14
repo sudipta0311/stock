@@ -14,6 +14,47 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from wealth.research.errors import BudgetExceeded
 
+_DOSSIER_ID_PATTERN = r"^[0-9]{4}-W[0-9]{2}/(IN|US|DK|EU|GB)/[A-Za-z0-9._-]+$"
+_DOSSIER_SYMBOL_SAFE = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.-")
+
+
+def dossier_id_for(week: str, market: str, symbol: str) -> str:
+    """Build a database-safe dossier ID while preserving the original symbol reversibly."""
+    encoded_symbol = "".join(
+        character
+        if character in _DOSSIER_SYMBOL_SAFE
+        else "".join(f"_{byte:02X}" for byte in character.encode("utf-8"))
+        for character in symbol
+    )
+    dossier_id = f"{week}/{market}/{encoded_symbol}"
+    if re.fullmatch(_DOSSIER_ID_PATTERN, dossier_id) is None:
+        raise ValueError("week, market, or symbol cannot form a valid dossier ID")
+    return dossier_id
+
+
+def symbol_from_dossier_id(dossier_id: str) -> str:
+    """Decode the symbol segment from a dossier ID created by :func:`dossier_id_for`."""
+    if re.fullmatch(_DOSSIER_ID_PATTERN, dossier_id) is None:
+        raise ValueError("invalid dossier ID")
+    encoded_symbol = dossier_id.rsplit("/", 1)[-1]
+    symbol_bytes = bytearray()
+    index = 0
+    while index < len(encoded_symbol):
+        character = encoded_symbol[index]
+        if character == "_":
+            escape = encoded_symbol[index + 1 : index + 3]
+            if re.fullmatch(r"[0-9A-F]{2}", escape) is None:
+                raise ValueError("invalid dossier symbol encoding")
+            symbol_bytes.append(int(escape, 16))
+            index += 3
+        else:
+            symbol_bytes.append(ord(character))
+            index += 1
+    try:
+        return symbol_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        raise ValueError("invalid dossier symbol encoding") from None
+
 
 class Stage(StrEnum):
     QUEUED = "QUEUED"
@@ -118,7 +159,7 @@ class DossierBudget(BaseModel):
 class Dossier(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    dossier_id: str = Field(pattern=r"^\d{4}-W\d{2}/(?:IN|US|DK|EU|GB)/[A-Za-z0-9._-]+$")
+    dossier_id: str = Field(pattern=_DOSSIER_ID_PATTERN)
     schema_version: str = "1.0"
     security: DossierSecurity
     stage: Stage = Stage.QUEUED

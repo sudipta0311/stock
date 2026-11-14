@@ -1,3 +1,4 @@
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
@@ -7,6 +8,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
+from pydantic import BaseModel, ValidationError
 
 import wealth.research.stock_checks as stock_checks
 from wealth.db.models import FundamentalPIT
@@ -196,3 +198,41 @@ def test_stock_check_run_reports_valuation_checked_count(
     result = stock_checks.run_stock_checks(object(), "2026-W44")
 
     assert result["valuation_checked"] == 1
+
+
+def test_stock_check_failure_reports_location_and_safe_validation_fields(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class SyntheticPayload(BaseModel):
+        symbol: int
+
+    with pytest.raises(ValidationError) as captured:
+        SyntheticPayload.model_validate({"symbol": "SYNTHETIC_INPUT_MUST_NOT_PRINT"})
+    validation_error = captured.value
+
+    class FakeEngine:
+        def dispose(self) -> None:
+            return None
+
+    def fail_checks(_engine: object, _week: str) -> None:
+        raise validation_error
+
+    monkeypatch.delenv("OWNER_DATABASE_URL", raising=False)
+    monkeypatch.setenv("TEST_DATABASE_URL", "synthetic-test-url")
+    monkeypatch.setattr(
+        stock_checks,
+        "make_engine",
+        lambda url: FakeEngine() if url == "synthetic-test-url" else None,
+    )
+    monkeypatch.setattr(stock_checks, "run_stock_checks", fail_checks)
+
+    exit_code = stock_checks.main(["--week", "2026-W46"])
+    output = capsys.readouterr().out
+    result = json.loads(output)
+
+    assert exit_code == 1
+    assert result["reason"] == "ValidationError"
+    assert result["where"] == "wealth.research.stock_checks.main"
+    assert result["fields"] == ["symbol:int_parsing"]
+    assert "SYNTHETIC_INPUT_MUST_NOT_PRINT" not in output

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import pytest
 from pydantic import ValidationError
 
@@ -8,10 +10,14 @@ from wealth.research.dossier import (
     Dossier,
     Evidence,
     Stage,
+    dossier_id_for,
     hand_back_to_analysis,
+    symbol_from_dossier_id,
     transition_stage,
     validate_grounding,
 )
+
+_CK_DOSSIERS_ID_PATTERN = re.compile(r"^[0-9]{4}-W[0-9]{2}/(IN|US|DK|EU|GB)/[A-Za-z0-9._-]+$")
 
 
 def _dossier(*, stage: Stage = Stage.QUEUED, claims: list[Claim] | None = None) -> Dossier:
@@ -26,6 +32,23 @@ def _dossier(*, stage: Stage = Stage.QUEUED, claims: list[Claim] | None = None) 
 def test_fact_claim_requires_a_tool_call_reference() -> None:
     with pytest.raises(ValidationError, match="tool_call_id"):
         Claim(text="Revenue increased.", kind="FACT")
+
+
+def test_dossier_symbol_encoding_round_trips_and_matches_database_check() -> None:
+    symbols = ("M&M", "J&KBANK", "ARE&M", "BRK.B", "BF-B", "RELIANCE", "A_B", "SYN☃")
+
+    for symbol in symbols:
+        dossier_id = dossier_id_for("2026-W46", "IN", symbol)
+
+        assert _CK_DOSSIERS_ID_PATTERN.fullmatch(dossier_id)
+        assert symbol_from_dossier_id(dossier_id) == symbol
+
+    assert dossier_id_for("2026-W46", "IN", "M&M") == "2026-W46/IN/M_26M"
+    assert dossier_id_for("2026-W46", "IN", "A_B") == "2026-W46/IN/A_5FB"
+    assert dossier_id_for("2026-W46", "IN", "SYN☃") == "2026-W46/IN/SYN_E2_98_83"
+    assert dossier_id_for("2026-W46", "IN", "RELIANCE") == "2026-W46/IN/RELIANCE"
+    assert dossier_id_for("2026-W46", "US", "BRK.B") == "2026-W46/US/BRK.B"
+    assert dossier_id_for("2026-W46", "US", "BF-B") == "2026-W46/US/BF-B"
 
 
 def test_transition_rejects_skipped_stages() -> None:

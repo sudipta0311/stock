@@ -22,7 +22,11 @@ from wealth.research.agents import (
 )
 from wealth.research.dossier import Dossier, DossierBudget, DossierSecurity, Stage
 from wealth.research.errors import SchemaError
-from wealth.research.graph import build_research_graph, keep_market_statuses
+from wealth.research.graph import (
+    build_research_graph,
+    build_week_pack_content,
+    keep_market_statuses,
+)
 from wealth.research.router import FakeRouter, RunBudget, RunContext
 from wealth.research.rules import ResearchRules
 from wealth.research.tools import ToolRegistry
@@ -57,6 +61,27 @@ def _evidence_ids(messages: list[dict[str, Any]]) -> list[str]:
         for identifier in re.findall(r'<evidence id="([^"]+)"', str(message.get("content", "")))
     ]
     return list(dict.fromkeys(identifiers))
+
+
+def test_pack_symbol_fallback_decodes_dossier_id_but_hides_it_from_ideas() -> None:
+    dossier_id = "2026-W46/IN/M_26M"
+    dossier = Dossier(
+        dossier_id=dossier_id,
+        security={"id": "synthetic-security", "market": "IN", "type": "EQUITY"},
+        stage=Stage.VETOED,
+        status="VETOED",
+    )
+
+    pack = build_week_pack_content(
+        [dossier],
+        {},
+        index_percentiles={},
+        index_history={},
+    )
+
+    assert pack["ideas"] == []
+    assert pack["idea_outcomes"][0]["symbol"] == "M&M"
+    assert dossier_id not in json.dumps(pack["ideas"])
 
 
 def _analyst_output(symbol: str, evidence_id: str) -> dict[str, Any]:

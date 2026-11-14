@@ -18,6 +18,7 @@ from sqlalchemy.engine import Engine
 
 from wealth.db.models import FundamentalPIT, HoldingLot, RecordedBuy, Security, StockCheck
 from wealth.db.session import make_engine, system_session
+from wealth.research.diagnostics import failure_diagnostics
 from wealth.research.factors import _facts_as_of, _metric_rows
 from wealth.research.rules import ResearchRules
 from wealth.research.screener import (
@@ -397,7 +398,15 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = run_stock_checks(engine, arguments.week)
     except Exception as error:
-        print(json.dumps({"status": "unavailable", "reason": type(error).__name__}))
+        print(
+            json.dumps(
+                {
+                    "status": "unavailable",
+                    "reason": type(error).__name__,
+                    **failure_diagnostics(error),
+                }
+            )
+        )
         return 1
     finally:
         engine.dispose()

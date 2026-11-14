@@ -8,6 +8,7 @@ from uuid import UUID
 
 import pytest
 from langgraph.checkpoint.memory import MemorySaver
+from pydantic import BaseModel, ValidationError
 
 from wealth.research import run
 from wealth.research.errors import BudgetExceeded
@@ -94,3 +95,39 @@ def test_cli_returns_exit_code_two_when_the_run_budget_is_exceeded(
 
     assert exit_code == 2, result
     assert result["status"] == "budget_exceeded"
+
+
+def test_start_failure_reports_safe_location_and_validation_fields(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class SyntheticPayload(BaseModel):
+        symbol: int
+
+    with pytest.raises(ValidationError) as captured:
+        SyntheticPayload.model_validate({"symbol": "SYNTHETIC_INPUT_MUST_NOT_PRINT"})
+    validation_error = captured.value
+
+    class FakeEngine:
+        def dispose(self) -> None:
+            return None
+
+    def fail_screen(*_args: object, **_kwargs: object) -> None:
+        raise validation_error
+
+    monkeypatch.setattr(run, "_owner_url", lambda: "synthetic-test-url")
+    monkeypatch.setattr(run, "make_engine", lambda _url: FakeEngine())
+    monkeypatch.setattr(run, "get_open_run_for_week", lambda *_args: None)
+    monkeypatch.setattr(run, "create_run", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(run, "run_screener", fail_screen)
+    monkeypatch.setattr(run, "update_run", lambda *_args, **_kwargs: None)
+
+    exit_code = run._run_start(Namespace(week="2026-W46", mode="weekly", budget_usd="1"))
+    output = capsys.readouterr().out
+    result = json.loads(output)
+
+    assert exit_code == 3
+    assert result["status"] == "failed"
+    assert result["where"] == "wealth.research.run._run_start"
+    assert result["fields"] == ["symbol:int_parsing"]
+    assert "SYNTHETIC_INPUT_MUST_NOT_PRINT" not in output

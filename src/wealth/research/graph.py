@@ -23,6 +23,7 @@ from wealth.research.dossier import (
     DossierSecurity,
     Stage,
     hand_back_to_analysis,
+    symbol_from_dossier_id,
 )
 from wealth.research.errors import BudgetExceeded, SchemaError
 from wealth.research.etf_selector import select_core_picks
@@ -185,12 +186,15 @@ def build_week_pack_content(
     for dossier in decided:
         candidate = candidates.get(dossier.dossier_id, {})
         red_team = dossier.verdicts.red_team
+        symbol = candidate.get("symbol")
+        if symbol is None:
+            symbol = symbol_from_dossier_id(dossier.dossier_id)
         idea_outcomes.append(
             {
                 "dossier_id": dossier.dossier_id,
                 "security_id": dossier.security.id,
                 "market": dossier.security.market,
-                "symbol": str(candidate.get("symbol", dossier.dossier_id.rsplit("/", 1)[-1])),
+                "symbol": str(symbol),
                 "status": dossier.status,
                 "confidence": (
                     "HIGH"

@@ -2,10 +2,24 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from contextlib import nullcontext
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
-from wealth.research.screener import ScreenerInput, alternate_markets, screen_universe
+import pytest
+
+import wealth.research.screener as screener
+from wealth.research.screener import (
+    ScreenedSecurity,
+    ScreenerInput,
+    ScreenerRules,
+    alternate_markets,
+    run_screener,
+    screen_universe,
+)
 
 
 def _full_factors(value: str = "1") -> dict[str, Decimal]:
@@ -220,3 +234,70 @@ def test_a_capped_research_run_takes_both_markets_in_turn() -> None:
     assert ordered == ["in-1", "us-1", "in-2", "us-2", "in-3"]
     assert ordered[:4].count("us-1") + ordered[:4].count("us-2") == 2
     assert alternate_markets({"US": ["us-1"]}) == ["us-1"]
+
+
+def test_one_failed_pick_is_counted_and_does_not_stop_later_saves(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rows = [
+        ScreenerInput("synthetic-first", "M&M", "IN", "Services", _full_factors()),
+        ScreenerInput("synthetic-next", "RELIANCE", "IN", "Services", _full_factors()),
+    ]
+    snapshots: dict[str, dict[str, Any]] = {
+        row.security_id: {"as_of": "2026-11-13"} for row in rows
+    }
+    picks = tuple(
+        ScreenedSecurity(
+            security_id=row.security_id,
+            symbol=row.symbol,
+            sector="Services",
+            composite=Decimal("1"),
+            decile=10,
+            groups={},
+            factor_coverage="full",
+            reasons=(),
+            z_scores={},
+            peer_inputs={},
+        )
+        for row in rows
+    )
+    monkeypatch.setattr(screener, "system_session", lambda _engine: nullcontext(object()))
+    monkeypatch.setattr(
+        screener,
+        "_load_market_rows",
+        lambda _session, _as_of, _rules: ({"IN": rows, "US": []}, snapshots),
+    )
+    monkeypatch.setattr(
+        screener,
+        "screen_universe",
+        lambda _rows, **_kwargs: SimpleNamespace(shortlist=picks),
+    )
+    saved: list[str] = []
+
+    def save_pick(
+        _engine: object,
+        pick: ScreenedSecurity,
+        _inputs: ScreenerInput,
+        _snapshot: dict[str, Any],
+        *,
+        week: str,
+        as_of: date,
+    ) -> None:
+        assert week == "2026-W46"
+        assert as_of.isoformat() == "2026-11-13"
+        if pick.symbol == "M&M":
+            raise RuntimeError("synthetic save detail")
+        saved.append(pick.security_id)
+
+    monkeypatch.setattr(screener, "_save_pick", save_pick)
+    result = run_screener(
+        object(),
+        "2026-W46",
+        rules=ScreenerRules(max_per_market=2, liquidity_floor={}, price_only_markets=frozenset()),
+    )
+
+    assert result["shortlisted"] == {"IN": 2, "US": 0}
+    assert result["skipped"] == {"IN": 1}
+    assert result["skipped_errors"] == {"IN": {"RuntimeError": 1}}
+    assert result["security_ids"] == ["synthetic-next"]
+    assert result["security_ids"] == saved
