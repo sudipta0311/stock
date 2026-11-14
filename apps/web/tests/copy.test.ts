@@ -48,6 +48,13 @@ function generated(sourcePath: string, outputPath: string): void {
 }
 
 describe("generated copy", () => {
+  it("uses plain words for monthly changes", () => {
+    expect(englishCopy.reasons.sip_capacity_redirected).toBe(
+      "This moves your monthly investing toward parts of your plan that are below target.",
+    );
+    expect(JSON.stringify(englishCopy)).not.toMatch(/\bSIPs\b/);
+  });
+
   it("keeps the clear weekly-step and add-holdings labels", () => {
     expect(englishCopy.home.sell_steps).toBe(
       "Sell these shares in your investment account, then tap I sold it.",

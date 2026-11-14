@@ -16,7 +16,7 @@ This week's actions
 You: Build your emergency fund · Liquid fund · ₹1 L — This builds money you can reach quickly.
 Open: https://app.example/plan
 
-You: Change your monthly investments · Monthly investment · ₹20,000 — This points your monthly SIPs toward areas below target.
+You: Change your monthly investments · Monthly investment · ₹20,000 — This moves your monthly investing toward parts of your plan that are below target.
 Open: https://app.example/plan
 
 You: Sell some · SYNTH · 15 shares · ₹6,750 — The holding is above its planned share of your equity.

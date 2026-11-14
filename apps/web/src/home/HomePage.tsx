@@ -14,7 +14,9 @@ import { roundActionAmount } from "../lib/money";
 import {
   actionLabel,
   exitLabel,
+  INSTRUMENT_LABELS,
   labelForCode,
+  SLEEVE_LABELS,
   triggerKeyLabel,
 } from "../lib/labels";
 import {
@@ -22,6 +24,7 @@ import {
   asRecord,
   instrumentLabel,
   isPositiveAmount,
+  plainName,
   reasonCopy,
   routeHowTo,
   textValue,
@@ -49,7 +52,10 @@ import { Highlights } from "../features/Highlights";
 import * as englishCopy from "../copy/sections/index";
 import { useHousehold } from "../household/HouseholdContext";
 import { MoneyValue } from "../household/currency-view";
-import { formatHouseholdAmount } from "../household/currency";
+import {
+  formatHouseholdAmount,
+  formatSecondaryAmount,
+} from "../household/currency";
 import { dkkToInr, inrToDkk } from "../household/fx";
 import type { DkkInrRate } from "../household/fx";
 import { listAssets, listLoans } from "../money/api";
@@ -82,7 +88,159 @@ function actionTitle(action: ActionResponse): string {
   return actionLabel(kind);
 }
 
+type MonthlyChange = {
+  sleeve: string;
+  from: string;
+  to: string;
+  instrumentCategory: string;
+  accountType: string;
+  broker: string;
+  fromMinor: bigint;
+  toMinor: bigint;
+};
+
+function amountMinor(value: string): bigint | undefined {
+  const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(value.trim());
+  if (!match) return undefined;
+  return BigInt(`${match[1]}${(match[2] ?? "").padEnd(2, "0")}`);
+}
+
+function monthlyChanges(action: ActionResponse): MonthlyChange[] {
+  const params = asRecord(payloadFor(action).params);
+  return asArray(params.changes).flatMap((rawChange) => {
+    const change = asRecord(rawChange);
+    const from = textValue(change.from);
+    const to = textValue(change.to);
+    const fromMinor = amountMinor(from);
+    const toMinor = amountMinor(to);
+    if (fromMinor === undefined || toMinor === undefined) return [];
+    return [
+      {
+        sleeve: textValue(change.sleeve),
+        from,
+        to,
+        instrumentCategory: textValue(change.instrument_category),
+        accountType: textValue(change.account_type),
+        broker: textValue(change.broker),
+        fromMinor,
+        toMinor,
+      },
+    ];
+  });
+}
+
+function monthlySleeveLabel(sleeve: string): string {
+  const plainNames: Record<string, string> = {
+    cash: "Safe money",
+    debt: "Safe money",
+    equity_global: "Abroad",
+    equity_global_nri: "Abroad",
+    equity_india: "Indian shares",
+    gold: "Gold",
+  };
+  return (
+    plainNames[sleeve] ??
+    SLEEVE_LABELS[sleeve as keyof typeof SLEEVE_LABELS] ??
+    englishCopy.home.monthly_investment
+  );
+}
+
+function monthlyDestinationLabel(change: MonthlyChange): string {
+  const plainNames: Record<string, string> = {
+    ppf: "PPF",
+    ucits_global_etf: "World fund",
+  };
+  if (
+    !change.instrumentCategory ||
+    !Object.prototype.hasOwnProperty.call(
+      INSTRUMENT_LABELS,
+      change.instrumentCategory,
+    )
+  ) {
+    return monthlySleeveLabel(change.sleeve);
+  }
+  return (
+    plainNames[change.instrumentCategory] ??
+    instrumentLabel(change.instrumentCategory)
+  );
+}
+
+function monthlyWhere(change: MonthlyChange): string {
+  const destination = monthlyDestinationLabel(change);
+  const accountType = change.accountType.toUpperCase();
+  const accountLabel =
+    accountType === "ASK"
+      ? englishCopy.denmark.account_ask
+      : accountType === "ORDINARY"
+        ? englishCopy.denmark.account_ordinary
+        : accountType
+          ? "Investment account"
+          : "";
+  const account = accountLabel
+    ? `in your ${accountLabel.charAt(0).toLowerCase()}${accountLabel.slice(1)}`
+    : "";
+  const broker = change.broker ? `at ${plainName(change.broker)}` : "";
+  return [destination, account, broker].filter(Boolean).join(" ");
+}
+
+function monthlyCardCategory(action: ActionResponse): string {
+  const changes = monthlyChanges(action).filter(
+    (change) => change.toMinor !== change.fromMinor,
+  );
+  if (!changes.length) return "";
+  const increases = changes.filter(
+    (change) => change.toMinor > change.fromMinor,
+  );
+  const destinations = increases.length ? increases : changes;
+  const main = destinations.reduce((largest, change) =>
+    change.toMinor - change.fromMinor > largest.toMinor - largest.fromMinor
+      ? change
+      : largest,
+  );
+  const more = changes.length - 1;
+  return `${monthlyDestinationLabel(main)}${more ? ` ${englishCopy.home.monthly_change_more.replace("{count}", String(more))}` : ""}`;
+}
+
+function householdMonthlyAmount(
+  amount: string,
+  primaryCurrency: "INR" | "DKK",
+  fxRate: DkkInrRate | undefined,
+): string {
+  const rounded = roundActionAmount(amount);
+  const primary = formatHouseholdAmount(rounded, primaryCurrency, fxRate);
+  const secondary = formatSecondaryAmount(rounded, primaryCurrency, fxRate);
+  return secondary ? `${primary} (${secondary})` : primary;
+}
+
+function monthlyChangeSteps(
+  action: ActionResponse,
+  primaryCurrency: "INR" | "DKK",
+  fxRate: DkkInrRate | undefined,
+): string {
+  const lines = monthlyChanges(action).flatMap((change) => {
+    if (change.toMinor > change.fromMinor) {
+      const was =
+        change.fromMinor > 0n
+          ? ` (was ${householdMonthlyAmount(change.from, primaryCurrency, fxRate)})`
+          : "";
+      return [
+        `${monthlyWhere(change)}: ${householdMonthlyAmount(change.to, primaryCurrency, fxRate)} a month${was}.`,
+      ];
+    }
+    if (change.toMinor === 0n && change.fromMinor > 0n) {
+      return [
+        `Stop the monthly ${householdMonthlyAmount(change.from, primaryCurrency, fxRate)} into ${monthlyWhere(change)}.`,
+      ];
+    }
+    return [];
+  });
+  return [...lines, englishCopy.home.monthly_change_finish].join("\n");
+}
+
 function actionCategory(action: ActionResponse): string {
+  if (textValue(payloadFor(action).kind, action.kind) === "REBALANCE_SIPS") {
+    return monthlyCardCategory(action);
+  }
   const category = textValue(payloadFor(action).instrument_category);
   return category ? instrumentLabel(category) : "";
 }
@@ -468,6 +626,9 @@ function actionHowTo(
   const kind = textValue(payload.kind, action.kind);
   if (isSellAction(action)) return englishCopy.home.sell_steps;
   if (isReviewExitAction(action)) return englishCopy.home.review_steps;
+  if (kind === "REBALANCE_SIPS") {
+    return monthlyChangeSteps(action, primaryCurrency, fxRate);
+  }
   const member = person
     ? members.find((candidate) => candidate.id === person.id)
     : undefined;
@@ -702,7 +863,9 @@ function ActionCard({
               </p>
             ) : null}
             {actionCategory(action) ? (
-              <p className="mt-1 text-xs text-muted-foreground">
+              <p
+                className={`mt-1 text-xs text-muted-foreground ${textValue(payloadFor(action).kind, action.kind) === "REBALANCE_SIPS" ? "truncate" : ""}`}
+              >
                 {actionCategory(action)}
               </p>
             ) : null}
@@ -1384,7 +1547,14 @@ export function HomePage() {
                           )}
                     </p>
                   ) : null}
-                  <p className="text-base">
+                  <p
+                    className={
+                      textValue(payload.kind, sheetAction.kind) ===
+                      "REBALANCE_SIPS"
+                        ? "whitespace-pre-line text-base"
+                        : "text-base"
+                    }
+                  >
                     {actionHowTo(
                       sheetAction,
                       person,

@@ -97,6 +97,22 @@ function withRoute(route: string, id = `action-${route}`): ActionResponse {
   });
 }
 
+function monthlyAction(
+  changes: Array<Record<string, unknown>>,
+  payloadFields: Record<string, unknown> = {},
+): ActionResponse {
+  return action({
+    kind: "REBALANCE_SIPS",
+    payload: {
+      kind: "REBALANCE_SIPS",
+      amount: "53500.00",
+      reason_code: "sip_capacity_redirected",
+      params: { changes },
+      ...payloadFields,
+    },
+  });
+}
+
 describe("Home this week", () => {
   it("uses loan-specific plain wording for a pay-extra action", () => {
     const payLoan = action({
@@ -1185,6 +1201,152 @@ describe("Home this week", () => {
     expect(
       await screen.findByLabelText(englishCopy.home.monthly_amount),
     ).toBeVisible();
+  });
+
+  it("shows the world fund and account on the owner's monthly change", async () => {
+    const user = userEvent.setup();
+    const ownerAction = monthlyAction([
+      {
+        sleeve: "equity_global",
+        from: "0.00",
+        to: "53500.00",
+        instrument_category: "ucits_global_etf",
+        route: "LOCAL",
+        account_type: "ASK",
+        broker: "nordnet",
+      },
+    ]);
+    server.use(
+      ...baseHomeHandlers([ownerAction], {
+        monthly_sip_capacity: "53500.00",
+        new_money_this_week: "0.00",
+      }),
+    );
+    renderHome();
+
+    const article = await screen.findByRole("article", {
+      name: /Change your monthly investments/,
+    });
+    expect(within(article).getByText("World fund")).toBeVisible();
+    await user.click(
+      within(article).getByRole("button", { name: "Show steps" }),
+    );
+    const dialog = screen.getByRole("dialog", {
+      name: "How to take this step",
+    });
+    expect(dialog).toHaveTextContent(
+      "World fund in your share savings account at Nordnet: ₹53,500 a month.",
+    );
+    expect(dialog).toHaveTextContent(
+      "Change these at your bank or broker, then tap Done.",
+    );
+    expect(dialog).not.toHaveTextContent("(was");
+  });
+
+  it("shows PPF and gold changes with the spouse note", async () => {
+    const user = userEvent.setup();
+    const spouseAction = monthlyAction(
+      [
+        {
+          sleeve: "debt",
+          from: "0.00",
+          to: "50000.00",
+          instrument_category: "ppf",
+        },
+        {
+          sleeve: "gold",
+          from: "0.00",
+          to: "36800.00",
+          instrument_category: "gold_etf",
+        },
+      ],
+      {
+        member_id: "member-test-spouse",
+        member_name: "Test spouse",
+        member_relationship: "spouse",
+        clubbing_check: true,
+      },
+    );
+    server.use(
+      ...baseHomeHandlers([spouseAction], {
+        monthly_sip_capacity: "86800.00",
+        new_money_this_week: "0.00",
+      }),
+    );
+    renderHome();
+
+    const article = await screen.findByRole("article", {
+      name: /Change your monthly investments/,
+    });
+    expect(within(article).getByText("PPF +1 more")).toBeVisible();
+    await user.click(
+      within(article).getByRole("button", { name: "Show steps" }),
+    );
+    const dialog = screen.getByRole("dialog", {
+      name: "How to take this step",
+    });
+    expect(dialog).toHaveTextContent("PPF: ₹50,000 a month.");
+    expect(dialog).toHaveTextContent("Gold fund: ₹36,800 a month.");
+    await user.click(within(dialog).getByText("Why?"));
+    expect(dialog).toHaveTextContent(
+      "Income from money you give your spouse can be taxed as yours.",
+    );
+  });
+
+  it("shows stops and uses a plain sleeve name for unknown categories", async () => {
+    const user = userEvent.setup();
+    const changeAction = monthlyAction([
+      {
+        sleeve: "gold",
+        from: "5000.00",
+        to: "0.00",
+        instrument_category: "gold_etf",
+      },
+      {
+        sleeve: "equity_india",
+        from: "2000.00",
+        to: "3000.00",
+        instrument_category: "synthetic_unknown_category",
+      },
+      {
+        sleeve: "debt",
+        from: "1000.00",
+        to: "1000.00",
+        instrument_category: "ppf",
+      },
+    ]);
+    server.use(...baseHomeHandlers([changeAction]));
+    renderHome();
+    await user.click(await screen.findByRole("button", { name: "Show steps" }));
+    const dialog = screen.getByRole("dialog", {
+      name: "How to take this step",
+    });
+    expect(dialog).toHaveTextContent("Stop the monthly ₹5,000 into Gold fund.");
+    expect(dialog).toHaveTextContent(
+      "Indian shares: ₹3,000 a month (was ₹2,000).",
+    );
+    expect(dialog).not.toHaveTextContent("synthetic_unknown_category");
+    expect(within(dialog).queryByText("PPF", { exact: true })).toBeNull();
+  });
+
+  it("shows DKK first and rupees as the secondary monthly amount", () => {
+    const changeAction = monthlyAction([
+      {
+        sleeve: "equity_global",
+        from: "0.00",
+        to: "53500.00",
+        instrument_category: "ucits_global_etf",
+        account_type: "ASK",
+        broker: "nordnet",
+      },
+    ]);
+
+    expect(
+      actionHowTo(changeAction, undefined, [], undefined, "DKK", {
+        date: "2026-10-28",
+        rate: "10.00",
+      }),
+    ).toContain("DKK 5,350 (₹53,500) a month.");
   });
 
   it.each([

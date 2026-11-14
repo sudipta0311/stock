@@ -12,7 +12,7 @@ const section = {
   "ask_room_remaining": "The share savings account has room for the full buy.",
   "ordinary_after_ask": "The share savings account does not have room for the full buy.",
   "buy_abroad": "This follows your Denmark account and fund rules.",
-  "sip_capacity_redirected": "This points your monthly SIPs toward areas below target.",
+  "sip_capacity_redirected": "This moves your monthly investing toward parts of your plan that are below target.",
   "governance_break": "A company governance check has failed.",
   "thesis_break": "The original investment case no longer holds.",
   "geopolitical_break": "Geopolitical exposure may have changed the investment case.",

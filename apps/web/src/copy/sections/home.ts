@@ -8,6 +8,8 @@ const section = {
   "bought_it": "I bought it",
   "sold_it": "I sold it",
   "monthly_investment": "Monthly investment",
+  "monthly_change_more": "+{count} more",
+  "monthly_change_finish": "Change these at your bank or broker, then tap Done.",
   "no_holdings": "No holdings added yet",
   "loading_week": "Loading your week…",
   "loading_plan": "Loading your plan…",
