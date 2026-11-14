@@ -46,6 +46,7 @@ function reviewPlan() {
         reasons: [
           { code: "valuation_stretch", params: {} },
           { code: "revenue_down_quarters", params: { count: "2" } },
+          { code: "india_shares_enough", params: {} },
         ],
         tax: { estimated_tax: "250.00" },
         checked_on: "2026-10-28",
@@ -187,6 +188,11 @@ describe("holding review", () => {
     expect(
       screen.getByText("Company revenue fell for 2 quarters in a row."),
     ).not.toBeVisible();
+    expect(
+      screen.getByText(
+        "Your plan already has enough in Indian shares, so we don't suggest adding more.",
+      ),
+    ).not.toBeVisible();
     expect(screen.getByText(/Estimated tax if sold/)).toHaveTextContent("250");
     expect(screen.getByText("Checked on 28 Oct 2026")).toBeVisible();
 
@@ -197,6 +203,11 @@ describe("holding review", () => {
     await user.click(screen.getByText("Why this suggestion?"));
     expect(
       screen.getByText("Company revenue fell for 2 quarters in a row."),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "Your plan already has enough in Indian shares, so we don't suggest adding more.",
+      ),
     ).toBeVisible();
     expect(
       screen.getByRole("heading", { name: "How we check", level: 3 }),

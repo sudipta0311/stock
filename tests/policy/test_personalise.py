@@ -29,6 +29,7 @@ from wealth.policy.personalise import (
     UserData,
     WeeklySpendInput,
     _acquisition_fx_notes,
+    _average_cost_inr,
     _digest_inputs,
     _exit_action,
     _merge_weekly_actions,
@@ -424,6 +425,198 @@ def test_india_add_more_plan_uses_neutral_percentile_without_own_history(
         )
         == NEUTRAL_VALUATION_PERCENTILE
     )
+
+
+def test_over_target_india_holdings_explain_why_no_add_more_is_suggested() -> None:
+    base = synthetic_user_data()
+    shares = tuple(
+        HoldingInput(
+            security_id=f"synthetic-india-share-{index}",
+            symbol=f"SHR{index}",
+            market="IN",
+            currency="INR",
+            security_type="equity",
+            sleeve="equity_india",
+            category="equity:india",
+            quantity=Decimal("300"),
+            price=Decimal("100"),
+            lots=(
+                HoldingLotInput(
+                    lot_id=f"synthetic-india-lot-{index}",
+                    quantity=Decimal("300"),
+                    cost_per_unit=Decimal("100"),
+                    acquired_on=date(2024, 1, 1),
+                ),
+            ),
+            price_as_of=_AS_OF,
+            sector=f"sector-{index}",
+        )
+        for index in range(100)
+    )
+    user_data = replace(base, holdings=(*shares, base.holdings[1]))
+    stock_checks = {
+        holding.security_id: StockCheckFacts(
+            security_id=holding.security_id,
+            week=_WEEK,
+            as_of=_AS_OF,
+            market="IN",
+            quant_decile=9,
+            pe_percentile=Decimal("50"),
+            pe_vs_sector=Decimal("1.1"),
+            price=Decimal("100"),
+        )
+        for holding in shares
+    }
+    market = replace(synthetic_market(), stock_checks=stock_checks)
+
+    plan = personalise(user_data, market, None, _WEEK, _AS_OF)
+    plan_data = plan.model_dump(mode="json")
+    allocation = plan_data["allocation"]["equity_india"]
+    review = next(
+        row for row in plan.holding_reviews if row["security_id"] == shares[0].security_id
+    )
+
+    assert Decimal(allocation["current"]) >= Decimal(allocation["target"])
+    assert review["verdict"] == "keep"
+    assert review["add_more_room_inr"] == "0.00"
+    assert review["reasons"][-1] == {"code": "india_shares_enough", "params": {}}
+
+
+def test_undated_buying_cost_triggers_price_review_without_changing_tax_estimates() -> None:
+    user_data = synthetic_user_data()
+    original = user_data.holdings[0]
+    holding = replace(
+        original,
+        quantity=Decimal("1"),
+        price=Decimal("700"),
+        lots=(
+            replace(
+                original.lots[0],
+                quantity=Decimal("1"),
+                cost_per_unit=Decimal("1000"),
+                acquired_on=None,
+            ),
+        ),
+    )
+    user_data = replace(user_data, holdings=(holding, *user_data.holdings[1:]))
+    market = synthetic_market()
+    check = replace(
+        market.stock_checks[holding.security_id],
+        price=Decimal("700"),
+        below_dma200=True,
+        revenue_yoy_pct=(Decimal("-2"),),
+    )
+    market = replace(market, stock_checks={holding.security_id: check})
+
+    plan = personalise(user_data, market, None, _WEEK, _AS_OF)
+    review = next(row for row in plan.holding_reviews if row["security_id"] == holding.security_id)
+    risk_reason = next(row for row in review["reasons"] if row["code"] == "risk_stop")
+
+    assert review["verdict"] == "review"
+    assert risk_reason["params"]["drawdown_pct"] == "-30.0"
+    assert next(row for row in review["checks"] if row["key"] == "price_and_cost")["status"] == (
+        "triggered"
+    )
+    assert review["tax"] == {"note_code": "tax_not_estimated"}
+    assert "holding_lot_tax_facts_missing:SYNTH" in plan.notes
+
+
+def test_undated_buying_price_without_cost_keeps_the_current_review() -> None:
+    user_data = synthetic_user_data()
+    original = user_data.holdings[0]
+    holding = replace(
+        original,
+        quantity=Decimal("1"),
+        price=Decimal("700"),
+        lots=(
+            replace(
+                original.lots[0],
+                quantity=Decimal("1"),
+                cost_per_unit=None,
+                acquired_on=None,
+            ),
+        ),
+    )
+    user_data = replace(user_data, holdings=(holding, *user_data.holdings[1:]))
+    market = synthetic_market()
+    check = replace(
+        market.stock_checks[holding.security_id],
+        price=Decimal("700"),
+        below_dma200=True,
+        revenue_yoy_pct=(Decimal("-2"),),
+    )
+    market = replace(market, stock_checks={holding.security_id: check})
+
+    plan = personalise(user_data, market, None, _WEEK, _AS_OF)
+    review = next(row for row in plan.holding_reviews if row["security_id"] == holding.security_id)
+
+    assert review["verdict"] == "keep"
+    assert next(row for row in review["checks"] if row["key"] == "price_and_cost")["status"] == (
+        "unknown"
+    )
+    assert review["tax"] == {"note_code": "tax_not_estimated"}
+
+
+def test_average_cost_requires_costs_for_all_positive_lots_and_no_fx_gap() -> None:
+    holding = HoldingInput(
+        security_id="synthetic-cost-security",
+        symbol="COSTX",
+        market="IN",
+        currency="INR",
+        security_type="equity",
+        sleeve="equity_india",
+        category="equity:india",
+        quantity=Decimal("5"),
+        price=Decimal("100"),
+        lots=(
+            HoldingLotInput(
+                lot_id="first-cost-lot",
+                quantity=Decimal("2"),
+                cost_per_unit=Decimal("100"),
+                acquired_on=None,
+            ),
+            HoldingLotInput(
+                lot_id="second-cost-lot",
+                quantity=Decimal("3"),
+                cost_per_unit=Decimal("200"),
+                acquired_on=None,
+            ),
+            HoldingLotInput(
+                lot_id="zero-quantity-lot",
+                quantity=Decimal("0"),
+                cost_per_unit=None,
+                acquired_on=None,
+            ),
+        ),
+    )
+    incomplete = replace(
+        holding,
+        lots=(holding.lots[0], replace(holding.lots[1], cost_per_unit=None)),
+    )
+    foreign = replace(
+        holding,
+        currency="USD",
+        lots=(
+            HoldingLotInput(
+                lot_id="foreign-cost-lot",
+                quantity=Decimal("2"),
+                cost_per_unit=Decimal("10"),
+                acquired_on=None,
+                currency="USD",
+                cost_per_unit_inr=Decimal("900"),
+                fx_missing=True,
+            ),
+        ),
+    )
+    foreign_with_cost = replace(
+        foreign,
+        lots=(replace(foreign.lots[0], fx_missing=False),),
+    )
+
+    assert _average_cost_inr(holding) == Decimal("160")
+    assert _average_cost_inr(incomplete) is None
+    assert _average_cost_inr(foreign) is None
+    assert _average_cost_inr(foreign_with_cost) == Decimal("900")
 
 
 def test_denmark_add_more_rounds_held_us_share_before_new_idea(

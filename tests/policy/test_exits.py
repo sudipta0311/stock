@@ -166,6 +166,29 @@ def test_risk_stop_requires_drawdown_dma_and_watch_thesis() -> None:
     assert on_track_card.triggers["risk_stop"].status == "ok"
 
 
+def test_risk_stop_uses_average_cost_only_when_no_lots_are_available() -> None:
+    average_cost_only = _facts(
+        lots=[],
+        average_cost=Decimal("1000"),
+        price=Decimal("700"),
+        below_200dma=True,
+        thesis_status="watch",
+    )
+    lot_cost_takes_precedence = _facts(
+        lots=[_lot(quantity="10", cost="1000")],
+        average_cost=Decimal("500"),
+        price=Decimal("700"),
+        below_200dma=True,
+        thesis_status="watch",
+    )
+
+    average_cost_card = build_exit_card(average_cost_only, TODAY, TaxContext())
+    lot_cost_card = build_exit_card(lot_cost_takes_precedence, TODAY, TaxContext())
+
+    assert average_cost_card.triggers["risk_stop"].status == "triggered"
+    assert lot_cost_card.triggers["risk_stop"].status == "triggered"
+
+
 def test_known_risk_inputs_that_rule_out_a_watch_are_ok() -> None:
     cases = (
         _facts(price=Decimal("950")),

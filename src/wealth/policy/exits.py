@@ -75,6 +75,7 @@ class HoldingFacts:
     better_candidate: BetterCandidate | None = None
     goal_within_years: int | None = None
     events_watched: bool = False
+    average_cost: Decimal | None = None
 
     def __post_init__(self) -> None:
         for name in ("security_id", "symbol", "sector"):
@@ -87,6 +88,8 @@ class HoldingFacts:
         if not isinstance(self.lots, list) or any(not isinstance(lot, Lot) for lot in self.lots):
             raise ValueError("lots must be a list of Lot values")
         _decimal(self.price, "price", minimum=_ZERO)
+        if self.average_cost is not None:
+            _decimal(self.average_cost, "average_cost", minimum=_ZERO)
         for name in (
             "weight_pct_of_equity",
             "target_weight_pct",
@@ -420,11 +423,16 @@ def _drift_trigger(facts: HoldingFacts, rules: dict[str, object]) -> TriggerStat
 
 
 def _position_drawdown(facts: HoldingFacts) -> Decimal | None:
-    quantity = sum((lot.quantity for lot in facts.lots), _ZERO)
-    basis_total = sum((lot.quantity * lot.cost_per_unit for lot in facts.lots), _ZERO)
-    if quantity <= 0 or basis_total <= 0:
-        return None
-    average_cost = basis_total / quantity
+    if facts.lots:
+        quantity = sum((lot.quantity for lot in facts.lots), _ZERO)
+        basis_total = sum((lot.quantity * lot.cost_per_unit for lot in facts.lots), _ZERO)
+        if quantity <= 0 or basis_total <= 0:
+            return None
+        average_cost = basis_total / quantity
+    else:
+        average_cost = facts.average_cost
+        if average_cost is None or average_cost <= 0:
+            return None
     return (facts.price - average_cost) / average_cost * Decimal(100)
 
 

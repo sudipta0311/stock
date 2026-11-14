@@ -61,6 +61,9 @@ def _decision(
     room: Decimal | None = Decimal("5000"),
     minimum: Decimal = Decimal("1000"),
     market: str = "IN",
+    current_india_shares: Decimal | None = None,
+    target_india_shares: Decimal | None = None,
+    stock_sector_room_available: bool = False,
 ):
     card = build_exit_card(facts, _TODAY, TaxContext())
     result = holding_review_decision(
@@ -71,6 +74,9 @@ def _decision(
         facts=facts,
         add_more_room=room,
         minimum_buy=minimum,
+        current_india_shares=current_india_shares,
+        target_india_shares=target_india_shares,
+        stock_sector_room_available=stock_sector_room_available,
         position_size_known=facts.weight_pct_of_equity is not None,
     )
     return card, result
@@ -137,6 +143,69 @@ def test_weak_company_strength_adds_a_reason() -> None:
     )
 
     assert result.reasons == ({"code": "company_strength_weak", "params": {}},)
+
+
+def test_india_shares_enough_is_last_and_stays_within_three_reasons() -> None:
+    _card, result = _decision(
+        _facts(
+            weight_pct_of_equity=Decimal("2"),
+            target_weight_pct=Decimal("4"),
+            pe_own_band_percentile=Decimal("80"),
+            pe_vs_sector_multiple=Decimal("1.4"),
+        ),
+        _check(quant_decile=2),
+        room=Decimal(0),
+        current_india_shares=Decimal("100"),
+        target_india_shares=Decimal("100"),
+        stock_sector_room_available=True,
+    )
+
+    assert result.verdict == "keep"
+    assert result.reasons[-1] == {"code": "india_shares_enough", "params": {}}
+    assert len(result.reasons) == 3
+
+
+def test_india_shares_enough_is_omitted_for_other_room_limits_markets_and_verdicts() -> None:
+    _, under_target = _decision(
+        _facts(),
+        _check(),
+        room=Decimal(0),
+        current_india_shares=Decimal("99"),
+        target_india_shares=Decimal("100"),
+    )
+    _, room_available = _decision(
+        _facts(),
+        _check(),
+        room=Decimal("1000"),
+        current_india_shares=Decimal("100"),
+        target_india_shares=Decimal("100"),
+    )
+    _, stock_capped = _decision(
+        _facts(),
+        _check(),
+        room=Decimal(0),
+        current_india_shares=Decimal("100"),
+        target_india_shares=Decimal("100"),
+        stock_sector_room_available=False,
+    )
+    _, us_share = _decision(
+        _facts(),
+        _check(market="US"),
+        room=Decimal(0),
+        market="US",
+        current_india_shares=Decimal("100"),
+        target_india_shares=Decimal("100"),
+    )
+    _, selling = _decision(
+        _facts(governance_events=["AUDITOR_RESIGNATION"]),
+        _check(),
+        room=Decimal(0),
+        current_india_shares=Decimal("100"),
+        target_india_shares=Decimal("100"),
+    )
+
+    for result in (under_target, room_available, stock_capped, us_share, selling):
+        assert "india_shares_enough" not in {row["code"] for row in result.reasons}
 
 
 def test_two_recent_revenue_drops_are_a_sell_verdict() -> None:

@@ -46,6 +46,7 @@ const section = {
     "company_strength_weak": "This company ranks low in our weekly research.",
     "drift": "This share is {share_of_equity_pct}% of your stock investments.",
     "goal_approach": "A goal is coming up soon.",
+    "india_shares_enough": "Your plan already has enough in Indian shares, so we don't suggest adding more.",
     "default": "One of the latest checks needs a closer look."
   },
   "tax": {

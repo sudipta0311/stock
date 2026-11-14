@@ -84,6 +84,9 @@ def holding_review_decision(
     facts: HoldingFacts | None,
     add_more_room: Decimal | None,
     minimum_buy: Decimal,
+    current_india_shares: Decimal | None = None,
+    target_india_shares: Decimal | None = None,
+    stock_sector_room_available: bool = False,
     position_size_known: bool = False,
 ) -> HoldingReviewDecision:
     """Choose the plain verdict and bounded reason/check rows from deterministic facts."""
@@ -134,7 +137,18 @@ def holding_review_decision(
     else:
         verdict = "keep"
 
-    reasons = _reason_rows(verdict, card, facts, check)
+    reasons = _reason_rows(
+        verdict,
+        card,
+        facts,
+        check,
+        market=market,
+        add_more_room=add_more_room,
+        minimum_buy=minimum_buy,
+        current_india_shares=current_india_shares,
+        target_india_shares=target_india_shares,
+        stock_sector_room_available=stock_sector_room_available,
+    )
     checks = tuple(
         {"key": key, "status": card.triggers[trigger].status}
         for key, trigger in (
@@ -173,6 +187,13 @@ def _reason_rows(
     card: ExitCard,
     facts: HoldingFacts,
     check: StockCheckFacts,
+    *,
+    market: str,
+    add_more_room: Decimal | None,
+    minimum_buy: Decimal,
+    current_india_shares: Decimal | None,
+    target_india_shares: Decimal | None,
+    stock_sector_room_available: bool,
 ) -> tuple[dict[str, Any], ...]:
     if verdict == "add_more":
         return ({"code": "add_more", "params": {}},)
@@ -180,7 +201,17 @@ def _reason_rows(
     statuses = {key: card.triggers[key].status for key in _REASON_ORDER}
     selected = [key for key in _REASON_ORDER if statuses[key] in {"triggered", "watch"}]
     weak_company = check.quant_decile is not None and check.quant_decile <= weak_decile_max
-    if not selected and verdict == "keep" and not weak_company:
+    india_shares_enough = (
+        market == "IN"
+        and verdict == "keep"
+        and add_more_room is not None
+        and add_more_room < minimum_buy
+        and current_india_shares is not None
+        and target_india_shares is not None
+        and current_india_shares >= target_india_shares
+        and stock_sector_room_available
+    )
+    if not selected and verdict == "keep" and not weak_company and not india_shares_enough:
         return ()
     rows: list[dict[str, Any]] = []
     for trigger in selected:
@@ -231,15 +262,22 @@ def _reason_rows(
         )
     if not rows and card.reason_codes:
         rows.append({"code": card.reason_codes[0], "params": {}})
+    if india_shares_enough and len(rows) < 3:
+        rows.append({"code": "india_shares_enough", "params": {}})
     return tuple(rows[:3])
 
 
 def _drawdown_pct(facts: HoldingFacts) -> Decimal | None:
-    quantity = sum((lot.quantity for lot in facts.lots), _ZERO)
-    basis = sum((lot.quantity * lot.cost_per_unit for lot in facts.lots), _ZERO)
-    if quantity <= 0 or basis <= 0:
-        return None
-    average_cost = basis / quantity
+    if facts.lots:
+        quantity = sum((lot.quantity for lot in facts.lots), _ZERO)
+        basis = sum((lot.quantity * lot.cost_per_unit for lot in facts.lots), _ZERO)
+        if quantity <= 0 or basis <= 0:
+            return None
+        average_cost = basis / quantity
+    else:
+        average_cost = facts.average_cost
+        if average_cost is None or average_cost <= 0:
+            return None
     return (facts.price - average_cost) / average_cost * Decimal(100)
 
 

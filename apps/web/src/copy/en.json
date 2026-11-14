@@ -766,9 +766,9 @@
     "weekly_title": "This week's research ideas",
     "intro": "Ideas are research to review, not a reason to rush.",
     "index_funds_title": "US and world funds",
-    "index_market_cheap": "US shares look cheap compared with the last 3 years.",
-    "index_market_fair": "US shares look fairly priced compared with the last 3 years.",
-    "index_market_expensive": "US shares look expensive compared with the last 3 years.",
+    "index_market_cheap": "US shares look cheap compared with recent years.",
+    "index_market_fair": "US shares look fairly priced compared with recent years.",
+    "index_market_expensive": "US shares look expensive compared with recent years.",
     "index_market_unavailable": "No US market reading yet.",
     "index_extra_parts": "Extra money: buy in {parts} parts.",
     "index_monthly_buying": "Monthly buying: keep going.",
@@ -1127,6 +1127,7 @@
       "company_strength_weak": "This company ranks low in our weekly research.",
       "drift": "This share is {share_of_equity_pct}% of your stock investments.",
       "goal_approach": "A goal is coming up soon.",
+      "india_shares_enough": "Your plan already has enough in Indian shares, so we don't suggest adding more.",
       "default": "One of the latest checks needs a closer look."
     },
     "tax": {

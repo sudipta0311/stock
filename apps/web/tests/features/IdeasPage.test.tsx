@@ -359,22 +359,17 @@ describe("Ideas page", () => {
     expect((await axe(container)).violations).toEqual([]);
   });
   it.each([
-    [
-      "cheap",
-      "33.00",
-      "US shares look cheap compared with the last 3 years.",
-      3,
-    ],
+    ["cheap", "33.00", "US shares look cheap compared with recent years.", 3],
     [
       "fair",
       "50.00",
-      "US shares look fairly priced compared with the last 3 years.",
+      "US shares look fairly priced compared with recent years.",
       3,
     ],
     [
       "expensive",
       "80.00",
-      "US shares look expensive compared with the last 3 years.",
+      "US shares look expensive compared with recent years.",
       6,
     ],
   ])(
